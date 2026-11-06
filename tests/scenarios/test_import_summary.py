@@ -238,6 +238,7 @@ class TestLedgerEffect:
         assert "Net change in live logical transactions: -1" in section(out, "a.csv")
         assert "Source memberships changed: 1" in section(out, "a.csv")
         assert "Net change in live logical transactions: -1" in section(out, "Run summary")
+        assert "Source memberships changed: 1" in section(out, "Run summary")
 
 
 class TestReview:
@@ -265,6 +266,19 @@ class TestReview:
         out = run(db, capsys, "Card", card(tmp_path, "b.csv", CAFE))[1]
         assert "Source rows read: 1 (1 valid, 0 unresolved)" in out
         assert "Unresolved records, not included in totals: 1" in out
+
+    def test_final_state_covers_only_the_account_imported_into(self, db, tmp_path, capsys):
+        problem = checking(tmp_path, "a.csv", UNKNOWN, "too few cells")
+        run(db, capsys, "Checking", problem)
+        run(db, capsys, "Checking", checking(tmp_path, "b.csv", POSTED_ONE))
+        run(db, capsys, "Checking", checking(tmp_path, "c.csv", POSTED_TWO))
+
+        out = run(db, capsys, "Card", card(tmp_path, "d.csv", CAFE))[1]
+
+        assert section(out, "This account after the run") == [
+            "Open review groups: 0, covering 0 distinct affected transactions.",
+            "Unresolved records, not included in totals: 0",
+        ]
 
     def test_summaries_do_not_use_the_retired_vocabulary(self, db, tmp_path, capsys):
         files = [card(tmp_path, "a.csv", CAFE), card(tmp_path, "b.csv", CAFE, "too few cells")]
