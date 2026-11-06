@@ -1,7 +1,8 @@
-# Session Handoff: M1 Slice 3
+# Session Handoff: After M1 Slice 3
 
 For a fresh session. Written 2026-11-05. Slices 1 and 2 are provisionally accepted.
-**Slice 3 is in progress.** Its design decisions are D-026 to D-033.
+**Slice 3 is complete and awaiting the owner's review.** Do not start slice 4 or M2
+until the owner says so. Its design decisions are D-026 to D-034.
 
 ## Current state
 
@@ -9,7 +10,7 @@ For a fresh session. Written 2026-11-05. Slices 1 and 2 are provisionally accept
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m1-foundation`. Partly pushed: see below |
-| Latest code commit | `c5c0991`. Run `git log -1` for the latest commit, which may be this handoff |
+| Latest commit | Run `git log -1`. Slice 3 starts after `66fda56` |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -24,8 +25,8 @@ code and tests, with no CSV, PDF or database files.
 
 Read first: this file, [decisions.md](decisions.md), [plan.md](plan.md),
 [layouts.md](layouts.md), [status.md](status.md). Then the code in
-`src/personal_finance/ingest/pipeline.py`, `reconcile/same_document.py` and
-`db/migrations/`.
+`src/personal_finance/ingest/pipeline.py`, `reconcile/cross_document.py`,
+`reconcile/apply.py` and `db/migrations/`.
 
 ## Completed
 
@@ -45,26 +46,45 @@ error type, and `INSERT OR REPLACE` bypassed the immutability triggers (migratio
 explain themselves, with tests for a byte-identical file under another account, and
 for complete coverage not hiding unresolved rows.
 
+**Slice 3:** cross-document reconciliation. `derive()` is a pure function of an
+account's stored evidence, applied as a diff in the import's database transaction.
+Reliable-ID matching, ID-less exact pairing and candidate discovery are separate paths.
+Migration `0003` adds stored interpretation, record origins, append-only movement
+history and the reconciliation marker. Adds the `reconcile` command, and replaces the
+old overlap notice with accurate disclosure.
+
+**Found while building slice 3:** the CLI never applied migrations to an existing
+ledger, so `open_ledger` now does. The first A16 generator never produced a split and
+almost no exact pairs, so focused generators and an exhaustive split test were added.
+
 ## Tests actually executed
 
 | Check | Result |
 |---|---|
-| `.venv/bin/python -m pytest` at `c5c0991` | **411 passed** |
+| `.venv/bin/python -m pytest` at the end of slice 3 | **604 passed** |
+| Scenario tests repeated 5 times, slice 3 | 177 passed each time |
+| A16, one-off runs of 3,000 examples of each generator | All passed. Focused run reached 1,650 exact merges and 700 boundary-date reasons, but only 1 split, which the exhaustive test covers |
+| Deliberate breaks in a throwaway copy, slice 3 | 69 distinct breaks, all caught, after closing 8 test gaps and removing one rank term that could never decide anything |
+| Reconciliation measurements | See [status.md](status.md) |
+| `.venv/bin/python -m pytest` at `c5c0991` | 411 passed |
 | Scenario tests repeated 5 times, including concurrency | All passed (at 406 tests, before the last 5 were added) |
 | Deliberate breaks in a throwaway copy, slice 1 | 26 distinct breaks, all caught after fixing two test gaps |
 | Deliberate breaks in a throwaway copy, slice 2 | 50 distinct breaks, all caught after adding tests for three survivors |
-| README example, in zsh and `sh` | Totals correct. The final `trace` line was run separately, not in this script |
+| README example, re-run after slice 3 in zsh | Totals correct, with `trace` and `reconcile` also run |
 
 Not executed: a fresh install from `requirements-dev.txt`, because it needs network
 access. Deliberate-break checks are not part of the suite, so repeat them for new
-code.
+code. The slice 3 script and results are in `build/slice3-breaks/`, which is ignored and
+may not survive.
 
 ## Known limitations
 
-- **Overlapping files that are not byte-identical are counted twice** until slice 3.
 - Only two invented layouts exist. It must not be used with real financial data.
 - Coverage cannot be changed after import (M2).
-- Merges cannot be undone, and `transaction_source` has no history (M2).
+- Users cannot undo merges or resolve review items (M2).
+- Similarity has documented misses and false positives (D-032).
+- Reconciliation cost is quadratic in fully overlapping files and in distinct spellings
+  per block. See [status.md](status.md).
 - The original file is not kept (M5). The database is not encrypted (M5).
 - The full list is in [status.md](status.md).
 
@@ -89,78 +109,25 @@ code.
 | Candidate discovery | Needs evidence beyond amount and date: similar merchant or description, a validated identifier, or a documented source-specific relationship. Different descriptions alone are not evidence. The date window is a configurable heuristic. Candidates create review items and never authorize a merge | D-006 |
 | Unknown status | Does not conflict with `posted`, for status comparison only. Does not establish identity, and is never filled in as `posted` | D-006 |
 | Test-only layout | A synthetic layout with unreliable IDs is allowed in tests for A21. It is not a production layout | [layouts.md](layouts.md) |
-| Unresolved rows | Exact matches stay possible duplicates when an unresolved row could affect the count. Reliable ID matches are not affected | D-024 |
+| Unresolved rows | Exact matches stay possible duplicates when an unresolved row could plausibly affect the count. Reliable ID matches are not affected | D-024 |
+| Identifier guarantees | Stored per document, never reread from Python. The `synthetic_checking_v1` clarification is one-time and synthetic-only | D-026 |
+| Metadata coverage | A separate effective interval, with the claimed interval preserved | D-027 |
+| Single-day policy | ID-less matching only | D-028 |
+| Source movement | Machine-made merges can split. Every record preserved, history append-only, M2 decisions take precedence | D-029 |
+| Displayed values | One primary source, no field mixing | D-030 |
+| Candidate grouping | Connected groups, bounded by fixed calendar blocks, counted as distinct transactions | D-031 |
+| Similarity | Candidate evidence only, with known limits | D-032 |
+| Rule versions | Fingerprint of the effective configuration per account | D-033 |
+| Performance target | **Proposed, not approved** | D-034 |
 
-## Slice 3 scope
+## Awaiting the owner
 
-Implement cross-document transaction deduplication only.
+- Review of slice 3.
+- Approval or change of the A39 target proposed in D-034.
+- Whether any commit since `c75aee0` is pushed. Nothing has been pushed by a session.
 
-Required behavior:
-
-- Match only within the same account.
-- Use reliable identifiers and explicit coverage evidence (D-005 to D-008).
-- Preserve legitimate identical purchases.
-- Retain ambiguous candidates and disclose their effect on totals.
-- Preserve all source provenance.
-- Do not guess a single exact duplicate adjustment for ambiguous candidate groups.
-
-Out of scope: pending-to-posted reconciliation (M2), transfer classification (M3),
-resolving review items (M2), undoing merges (M2), real layouts, PDFs, the UI.
-
-When done, remove the cross-document notice from `import` and `totals`, and replace
-it with accurate disclosure.
-
-## Slice 3 acceptance criteria
-
-Full wording is in [plan.md](plan.md).
-
-| Required test | Plan IDs |
-|---|---|
-| Reordered exports with complete coverage | A2, A3 |
-| Complete versus partial or unknown coverage | A5a, A5b, A24 |
-| Inclusive end-date matching under explicit declarations | A32, with A33 and A22 as the contrast |
-| Single-day overlap versus a reliable ID | A22, A45 |
-| Two identical purchases versus three under justified coverage | A4, A5a |
-| Identical-looking purchases that remain ambiguous | A5b, A6, A22, A35 |
-| External IDs with compatible fields | A20, with A21 for unreliable IDs |
-| External IDs with conflicting amounts or other material fields | A7, A34 |
-| `unknown` versus `posted` status | A46 |
-| Different accounts never matching | A8 |
-| Repeated imports | A1, A38 |
-| Different import orders | A16 |
-| Provenance retained after merging | A36 |
-| Failures leaving no partial merge state | A37 |
-| Candidate discovery on a large synthetic dataset | A39 |
-| Only plausible candidates enter review | A27 |
-| No exact adjustment for ambiguous groups | A28 |
-| Unrelated same-date, same-amount purchases create no candidates | A42 |
-| Plausible merchant or description variations can create candidates | A43 |
-| Reliable-ID matching stays separate from heuristic discovery | A44 |
-
-Import-order tests compare financial outcomes, source associations and unresolved
-candidate relationships. They must not require identical generated IDs or display
-order.
-
-For A39, no time target exists yet (PRD §20). Propose one from a measurement, and
-report the row count, timing and how timing grows with size.
-
-## Design questions to settle first
-
-Propose these with a recommendation and wait for approval before coding:
-
-1. **Order independence.** Evidence accumulates as documents arrive, so a third
-   document can change what earlier ones mean. Decide between matching incrementally
-   and re-evaluating an account's candidates after each import, and how stable
-   transaction IDs survive either way.
-2. **Which values a merged transaction shows.** Sources can differ in description.
-   The choice must not depend on import order, and it must not change totals.
-3. **Review item lifecycle.** Decide how a group grows or is replaced when a new
-   document joins it, without duplicating items on re-import.
-4. **Disclosure wording.** Decide what summaries show about candidate groups,
-   without implying an exact adjustment.
-5. **Description similarity.** Define "sufficiently similar" as a deterministic,
-   offline rule with no new dependency, and decide where the configurable date
-   window lives. The window starts at 3 days.
+Next after review, if approved: slice 4 in [plan.md](plan.md). Pending-to-posted
+reconciliation and resolving review items remain M2, and transfers remain M3.
 
 ## Permission approvals to renew
 
@@ -188,16 +155,13 @@ You are the lead engineer on personal_finance. Work only inside this folder.
 Read docs/handoff.md first, then the files it lists. Confirm the branch is
 feature/m1-foundation and run the test suite before changing anything.
 
-Task: M1 slice 3, cross-document transaction deduplication only.
+Task: M1 slice 4 only: complete import summaries, log checks, a pf entry point and
+setup documentation. Propose a plan and wait for my approval before writing code.
 
-Start by proposing answers to the design questions in the handoff, with a
-recommendation each, and wait for my approval before writing code.
+Local commits on feature/m1-foundation are approved after I authorize implementation.
+Pushing needs my explicit approval each time. No network, no new dependencies, and no
+access outside this folder. Synthetic data only. The security proposal stays unapplied.
 
-Local commits on feature/m1-foundation are approved. Pushing needs my explicit
-approval each time. No network, no new dependencies, and no access outside this
-folder.
-Synthetic data only. The security proposal stays unapplied.
-
-Run tests and report actual results. Use deliberate breaks in a throwaway copy to
-check that new tests can fail. Stop for review when slice 3 is complete.
+Run tests and report actual results. Use deliberate breaks in a throwaway copy under
+build/ to check that new tests can fail. Stop for review when slice 4 is complete.
 ```

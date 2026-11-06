@@ -90,4 +90,5 @@ creates no transaction.
 
 `unreadable_file`, `invalid_encoding`, `malformed_csv`, `header_mismatch`,
 `invalid_coverage_metadata`, `coverage_basis_unavailable`, `coverage_conflict`,
-`account_mismatch`, `layout_mismatch`, `database_busy`, `internal_error`.
+`account_mismatch`, `layout_mismatch`, `layout_definition_changed`, `database_busy`,
+`internal_error`.

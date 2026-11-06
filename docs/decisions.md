@@ -499,6 +499,16 @@ BERKELEY`.
 - `reconcile` covers accounts with no new file, and `totals` discloses accounts that
   are not current.
 
+## D-034 Reconciliation performance — Default, proposed target awaiting approval
+
+Whole-account re-derivation after each import is accepted initially, subject to
+measurement. Measured figures and their limits are in [status.md](status.md).
+
+Proposed target for A39, from those measurements: at about 100,000 rows in one account,
+one import stays under 10 seconds, and 24 monthly imports stay under 2 minutes in
+total. No target is proposed for the stress shapes, because their cost does not follow
+row count alone.
+
 ## Not yet decided
 
 From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend details

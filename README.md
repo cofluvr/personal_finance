@@ -117,7 +117,7 @@ These features are not part of the initial release unless explicitly reprioritiz
 
 ## Project Status
 
-Early implementation of the Python backend. It imports two invented CSV layouts only, does not yet detect duplicates across files, and must not be used with real financial data. See [implementation status](docs/status.md).
+Early implementation of the Python backend. It imports two invented CSV layouts only, matches duplicates across overlapping files within an account, and must not be used with real financial data. See [implementation status](docs/status.md).
 
 ## Development Setup
 
@@ -158,4 +158,7 @@ pf review list --db "$DB"
 pf totals --db "$DB"
 pf transactions --db "$DB"
 pf trace --db "$DB" TRANSACTION_ID
+
+# Importing reconciles the account. This does the same without a new file.
+pf reconcile --db "$DB"
 ```
