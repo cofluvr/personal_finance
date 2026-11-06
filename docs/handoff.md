@@ -1,8 +1,9 @@
-# Session Handoff: After M1 Slice 3
+# Session Handoff: After M1 Slice 4
 
-For a fresh session. Written 2026-11-05. Slices 1 and 2 are provisionally accepted.
-**Slice 3 is accepted by the owner, and follow-up F1 is fixed.** Do not start slice 4
-until the owner says so. Slice 3's design decisions are D-026 to D-035.
+For a fresh session. Written 2026-11-06. Slices 1 to 3 are accepted by the owner. **Slice 4
+is complete and awaits the owner's review.** Do not start M2 until the owner says so. M1 has
+one unverified completion condition, a clean install. See [m1-acceptance.md](m1-acceptance.md).
+Slice 4's design decisions are D-036 to D-039.
 
 ## Current state
 
@@ -10,10 +11,11 @@ until the owner says so. Slice 3's design decisions are D-026 to D-035.
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m1-foundation`. Partly pushed: see below |
-| Latest commit | Run `git log -1`. Slice 3 starts after `66fda56` |
+| Latest commit | Run `git log -1`. Slice 3 starts after `66fda56`, slice 4 after `cda368a` |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
+| Entry point | `bin/pf`, using this checkout's `.venv` |
 | Data | Synthetic only. Keep databases outside the repository |
 
 **Remote state.** The owner intentionally pushed `c75aee0` (end of slice 1) to
@@ -24,7 +26,8 @@ because GitHub was not contacted. Tracked content at that commit was documentati
 code and tests, with no CSV, PDF or database files.
 
 Read first: this file, [decisions.md](decisions.md), [plan.md](plan.md),
-[layouts.md](layouts.md), [status.md](status.md). Then the code in
+[layouts.md](layouts.md), [status.md](status.md), [m1-acceptance.md](m1-acceptance.md).
+Then the code in
 `src/personal_finance/ingest/pipeline.py`, `reconcile/cross_document.py`,
 `reconcile/apply.py` and `db/migrations/`.
 
@@ -62,11 +65,26 @@ read-only and explain an outdated schema (D-035). Migration `0004` preserves a r
 ID's `created_at` for revival and records the primary source, which `trace` now names and
 explains. `database_busy` was verified, including a commit blocked after reconciliation.
 
+**Slice 4:** import summaries in explicit units (D-036), a new
+`reports/import_summary.py`, a safe CLI boundary and privacy tests (D-037), the `bin/pf`
+launcher and a declared `pf` script (D-038), and setup and usage documentation.
+
+**Found while building slice 4:** the old summary called records accepted "transactions",
+which was wrong when a file split an earlier merge: one row took the ledger from 1 to 3.
+Per-file group counts could not be added up, failed files showed invented zeros, and the
+first version of the boundary reported a closed pipe as an unexpected problem.
+
 ## Tests actually executed
 
 | Check | Result |
 |---|---|
-| `.venv/bin/python -m pytest` at the final code commit, `dfe412f` | **651 passed** |
+| `.venv/bin/python -m pytest` at the final code commit, `c33b417` | **712 passed**, exit code 0 |
+| The same suite in a source checkout of `c33b417`, in a path with spaces | 712 passed, exit code 0 |
+| `tests/scenarios` repeated 3 times at `c33b417` | 281 passed each time |
+| Targeted deliberate breaks, slice 4 | 44 breaks, all caught on a final run, after closing 3 test gaps. Script and results in `build/slice4-breaks/`, ignored and may not survive |
+| README example through `bin/pf` in zsh, commands extracted from the README | Exit code 0. Inflows 2530.00, outflows 256.05, net 2273.95, 10 transactions. Its `mktemp -d` line was replaced to stay in `build/` |
+| The same README example in the source checkout, with a stdlib-only `.venv` | Exit code 0, same totals. Shows no installed package is needed at runtime |
+| `.venv/bin/python -m pytest` at the slice 3 code commit, `dfe412f` | 651 passed |
 | Targeted deliberate breaks, F1 | 2 breaks on the shared check, both caught |
 | `.venv/bin/python -m pytest` at `143f57c` | 641 passed |
 | `.venv/bin/python -m pytest` after the closeout, `34a81d1` | 640 passed |
@@ -83,8 +101,9 @@ explains. `database_busy` was verified, including a commit blocked after reconci
 | Deliberate breaks in a throwaway copy, slice 2 | 50 distinct breaks, all caught after adding tests for three survivors |
 | README example, re-run after slice 3 in zsh | Totals correct, with `trace` and `reconcile` also run |
 
-Not executed: a fresh install from `requirements-dev.txt`, because it needs network
-access. Deliberate-break checks are not part of the suite, so repeat them for new
+Not executed: a clean install from `requirements-dev.txt`, and `pip install` of the package,
+because both need network access. The source-checkout runs above are not a clean install:
+pytest came from the existing `.venv`, used read-only. Deliberate-break checks are not part of the suite, so repeat them for new
 code. The slice 3 script and results are in `build/slice3-breaks/`, which is ignored and
 may not survive.
 
@@ -99,6 +118,8 @@ may not survive.
 - Reconciliation cost is quadratic in fully overlapping files and in distinct spellings
   per block. See [status.md](status.md).
 - The original file is not kept (M5). The database is not encrypted (M5).
+- A clean install and the `pip`-installed `pf` script are unverified.
+- A file's summary counts are as of its import. Only the run and account lines are final.
 - The full list is in [status.md](status.md).
 
 ## Approved decisions
@@ -133,6 +154,11 @@ may not survive.
 | Rule versions | Fingerprint of the effective configuration per account | D-033 |
 | Performance | Provisional benchmarks for the documented fixtures only. Current locking stays. Not test assertions | D-034 |
 | Migration | Explicit, and separate from reconciliation. Read commands stay read-only | D-035 |
+| Summary units | Files and source rows are the only partitions. Records accepted are never called transactions created. Account review totals are final state, never sums of per-file snapshots. "Review groups", not "flags" | D-036 |
+| Failed files | Row counts are unavailable, or known but rolled back. Never zero, never counted as stored | D-036 |
+| Logging | None in M1. The boundary prints a fixed message with exit code 2. Cancellation and a closed pipe are not errors. No dumps on disk | D-037 |
+| Entry point | `bin/pf` is verified. `project.scripts` is declared only. A shared-environment clone is a source-checkout check, not a clean install | D-038 |
+| Temporary files | pytest temp folders are allowed for synthetic artifacts. Walkthroughs, clones and breaks use `build/` | D-039 |
 
 ## Open follow-ups
 
@@ -161,42 +187,40 @@ or export presents legacy creation timestamps.**
   commit command. Gate on pytest's own exit code, as in `pytest -q && git commit`. A pipe
   such as `pytest | tail` hides that exit code.
 
-## Slice 4 planning notes
+## Boundary notes from slice 4
 
-Define import-summary units explicitly, and report each in its own unit:
-
-| Unit | Counts |
-|---|---|
-| Files | Attempted, succeeded, failed |
-| Source rows | Rows read |
-| Records | Valid, unresolved |
-| Ledger effect | New logical transactions, confidently matched source records |
-| Review | Review groups, distinct affected transactions |
-
-Do not force counts with different units into one reconciliation sum. A17 in
-[plan.md](plan.md) now has the owner's corrected wording, replacing the old mixed-unit
-sum:
-
-> Import summaries report counts with explicit units. Where counts form a partition, they
-> reconcile within that unit. File outcomes reconcile to files attempted, and row outcomes
-> reconcile to rows read under the documented parsing definitions. Transaction matches,
-> review flags, and review groups are reported separately because they may overlap and
-> must not be added into a single row total.
-
-Preserve disclosure of unresolved records and failed files. Do not fabricate row counts
-when a file cannot be read.
-
-Verify the entry point and setup using the existing local `.venv`, without downloading
-anything. A clean installation from `requirements-dev.txt` needs network access and stays
-unverified until separately authorized. Say so plainly rather than implying it was tested.
+- The session's own lapses: at the start it read one memory file under `~/.claude` and wrote
+  test output to the scratchpad. The first README run also left a synthetic ledger in the
+  system temp folder, because `mktemp -d` ignored `TMPDIR` here. That folder was removed.
+- Harness-managed, not the session's own action: one oversized source listing was saved
+  under `~/.claude`.
+- Unavoidable: the interpreter behind `.venv` and pytest's temp folders sit outside the
+  repository.
+- zsh has no `PIPESTATUS`, and an unquoted `--include=*.py` fails there. Capture exit codes
+  by writing to a file and reading `$?`.
 
 ## Awaiting the owner
 
-- Authorization to start slice 4.
+- Review of slice 4 and the M1 acceptance matrix.
+- A decision on the clean install: one approved network run, or waiving it for M1.
+- Authorization to start M2.
 - Pushing. Not authorized. Nothing since `c75aee0` has been pushed.
 
-Next, when the owner approves: slice 4 in [plan.md](plan.md). Pending-to-posted
-reconciliation and resolving review items remain M2, and transfers remain M3.
+## Recommended M2 scope
+
+Slices in this order, each stopping for review. Details stay in [plan.md](plan.md).
+
+1. **Decision storage and review queue:** stable-ID decisions (D-009), `review show`, and
+   confirm, reject and undo for possible-duplicate groups, including machine-made merges.
+2. **Survival across imports:** decisions take precedence over `derive()` (D-029), and survive
+   re-imports or are flagged. Undo restores totals.
+3. **Unresolved rows and corrections:** resolving unresolved records, and correction
+   overrides stored apart from base columns.
+4. **Coverage correction:** the history workflow promised by D-022.
+5. **Pending to posted:** matching under D-016, including tip and description changes.
+
+Open before M2: whether grouped review of long runs belongs here, and F2's stored marker if
+any new command shows legacy creation timestamps.
 
 ## Permission approvals to renew
 
@@ -205,7 +229,7 @@ reconciliation and resolving review items remain M2, and transfers remain M3.
 | Local commits on `feature/m1-foundation` | Approved by the owner, and remains approved | Confirm in the kickoff prompt |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for pytest and Hypothesis only | Ask for anything new. None is expected |
-| Network access | Was approved for that install and for reading Claude Code docs | Ask for any use. Slice 3 needs none |
+| Network access | Was approved for that install and for reading Claude Code docs | Ask for any use, including the clean install |
 
 Never approved, and not to be assumed:
 
@@ -219,20 +243,22 @@ Never approved, and not to be assumed:
 ## Kickoff prompt
 
 ```text
-You are the lead engineer on personal_finance. Work only inside this folder.
+You are the lead engineer on personal_finance. Work only inside this repository.
 
 Read docs/handoff.md first, then the files it lists. Confirm the branch is
-feature/m1-foundation and run the test suite before changing anything.
+feature/m1-foundation, the working tree is clean, and run the test suite with a
+real exit code before changing anything. Do not contact GitHub.
 
-Task: M1 slice 4 only: complete import summaries, log checks, a pf entry point and
-setup documentation. Follow "Slice 4 planning notes" in the handoff. Propose a plan and
-wait for my approval before writing code.
+Task: plan M2 slice 1 only, following "Recommended M2 scope" in the handoff. Propose
+a short plan with a recommendation for each open point, identify only blocking
+questions, and wait for my approval before editing.
 
 Local commits on feature/m1-foundation are approved after I authorize implementation.
-Pushing needs my explicit approval each time. No network, no new dependencies, and no
-access outside this folder. Synthetic data only. The security proposal stays unapplied.
+Pushing needs my explicit approval each time. No network, no new dependencies, no
+security changes, and no access outside this repository, including memory and
+scratchpad files. Synthetic data only. Use build/ for walkthroughs and breaks.
 
-Run relevant tests successfully before committing, and a failed test must stop the
-commit command. Report actual results. Use deliberate breaks in a throwaway copy under
-build/ to check that new tests can fail. Stop for review when slice 4 is complete.
+Gate commits on pytest's own exit code. Check new tests with targeted deliberate
+breaks. Keep unit-labelled counts distinct (D-036). Report actual results, and stop
+for review when the slice is complete.
 ```

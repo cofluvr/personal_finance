@@ -1,13 +1,13 @@
 # Implementation Status
 
-Last updated: 2026-11-05. Branch: `feature/m1-foundation`. The owner pushed `c75aee0` to `origin`, and later commits are local, including all of slice 3. Remote state and repository visibility are unverified (see [handoff.md](handoff.md)). Handoff: [handoff.md](handoff.md).
+Last updated: 2026-11-06. Branch: `feature/m1-foundation`. The owner pushed `c75aee0` to `origin`, and later commits are local, including all of slices 3 and 4. Remote state and repository visibility are unverified (see [handoff.md](handoff.md)). Handoff: [handoff.md](handoff.md).
 
 | Milestone | Status |
 |---|---|
 | M1 slice 1: scaffolding, money, schema, migrations | Accepted |
 | M1 slice 2: synthetic layouts, coverage, provenance, idempotent import | Accepted |
 | M1 slice 3: cross-document duplicate handling | Accepted |
-| M1 slice 4: import summaries, log checks, entry point, setup documentation | In progress |
+| M1 slice 4: import summaries, log checks, entry point, setup documentation | Complete, awaiting the owner's review |
 | M2 to M8 | Not started |
 
 ## What exists
@@ -27,8 +27,9 @@ Last updated: 2026-11-05. Branch: `feature/m1-foundation`. The owner pushed `c75
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement.
+- `personal_finance.reports.import_summary`: run-level import counts in explicit units (D-036).
 - CLI: `init`, `migrate`, `account add`, `import`, `reconcile`, `documents`, `transactions`,
-  `trace`, `review list`, `totals`.
+  `trace`, `review list`, `totals`, run through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
 
@@ -37,12 +38,12 @@ data** (M5 gate). Review items cannot be resolved yet (M2).
 
 ## Acceptance criteria progress
 
-Passing end to end: A1 to A16, A19 to A24, A26 to A46.
+All 47 criteria pass, each mapped to named tests in [m1-acceptance.md](m1-acceptance.md).
+A17 is met against the corrected wording in [plan.md](plan.md). A18 is met because M1 has
+no logs and its output stays clean (D-037).
 
-Partly proven, with more to come in slice 4: A17 (counts shown, full check in slice 4,
-against the corrected wording in [plan.md](plan.md)),
-A18 (CLI output checked; no logging exists yet), A25 (`totals` checked; re-check at
-slice 4).
+**M1 is not fully closed.** One completion condition is unverified: a new-setup run from
+the README, because a clean install from `requirements-dev.txt` needs network access.
 
 A39 has provisional benchmarks, met by the figures below (D-034).
 
@@ -98,6 +99,16 @@ merges at once.
 
 ## Known limitations
 
+- A clean install from `requirements-dev.txt` has not been performed. Neither has
+  `pip install` of the package, so the declared `pf` script is only checked statically.
+- `bin/pf` has only been run on this Mac. It needs `.venv` at the root of its checkout.
+- A file's counts in an import summary describe the moment it was imported. Later files in
+  the same run can change them, so only the run summary and the account lines are final.
+- `internal_error` and the unexpected-error message carry no detail by design, so such a
+  problem must be reproduced with synthetic data to be diagnosed.
+- File and account names are shown as typed, so a name holding sensitive text is displayed
+  and stored. The argument parser also echoes invalid option values.
+- An interrupted import leaves earlier files in the run committed, with no summary.
 - `ledger_transaction` values can be updated. Keeping corrections out of base
   columns is an application rule for M2, not something the database enforces.
 - The database cannot enforce that every transaction has at least one source.
