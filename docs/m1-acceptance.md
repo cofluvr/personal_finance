@@ -67,17 +67,67 @@ From "M1 acceptance criteria" in [plan.md](plan.md).
 | Condition | Status | Evidence |
 |---|---|---|
 | All tests pass | Passed | See "Tests actually executed" in [handoff.md](handoff.md) |
-| A new-setup run works from the README | **Unverified** | The README walkthrough and a source checkout passed using existing environments. Installing from `requirements-dev.txt` in a clean environment needs network access and was not performed |
+| A new-setup run works from the README | Passed | Clean install on 2026-11-06. See "Clean-install verification" below |
 | The decision log records the database, parser and deduplication rules | Passed | D-001, D-018, D-005 to D-008 and D-026 to D-033 |
 
 ## Deferred and unverified
 
 | Item | Status | Where |
 |---|---|---|
-| Clean install from `requirements-dev.txt` | Unverified | Needs one approved network run |
-| `pip install` of the package and its `pf` script | Unverified | Needs setuptools. Only checked statically |
 | Merge-heavy performance (F3) | Deferred | Backlog in [plan.md](plan.md) |
 | Pending and posted reconciliation, resolving review items, undoing merges | Deferred | M2 |
 | Correcting coverage after import | Deferred | M2 |
 | CSV-to-PDF matching | Deferred | M7 |
 | Remote state and repository visibility | Unverified | GitHub was not contacted |
+
+## Clean-install verification
+
+Performed 2026-11-06 at `6815e19`, on one Mac (Python 3.12.6, pip 24.2), in fresh clones
+and fresh virtual environments under `build/`. The existing `.venv` was not used.
+
+Environment for every step: `PIP_NO_CACHE_DIR=1` and `PIP_DISABLE_PIP_VERSION_CHECK=1`, so
+nothing came from a cache or was written to one, and no unrelated request was made.
+`TMPDIR` pointed into `build/`, and `PYTHONPATH` was unset.
+
+**Source checkout and `bin/pf`:**
+
+```sh
+git clone --no-hardlinks <this repository> "build/m1-clean/source checkout"
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m pytest
+```
+
+**Package and `pf` script**, from a second clone, then deleted before running `pf`:
+
+```sh
+python3 -m venv "build/m1-clean/package venv"
+"build/m1-clean/package venv/bin/python" -m pip install "build/m1-clean/package checkout"
+```
+
+| Check | `bin/pf` | Installed `pf` |
+|---|---|---|
+| Install | Exit 0 | Exit 0, non-editable |
+| Installed packages | hypothesis 6.170.14, iniconfig 2.3.1, packaging 26.3, pluggy 1.7.0, Pygments 2.21.0, pytest 9.2.0, sortedcontainers 2.4.0, pip 24.2 | personal-finance 0.1.0, pip 24.2. Built with setuptools 84.2.1, in pip's temporary build environment |
+| `pip check` | No broken requirements | No broken requirements |
+| Full suite | **712 passed**, exit 0 | Not run: this environment has no pytest, and the suite tests `src/` |
+| README walkthrough | Exit 0 | Exit 0, output identical apart from IDs and paths |
+| Totals | Inflows 2530.00, outflows 256.05, net 2273.95, 10 transactions | The same |
+| Success, failed file, stopped command, closed pipe | Exit 0, 1, 2, 141 | Exit 0, 1, 2, 141 |
+| Corrupt ledger | Exit 2, no traceback | Exit 2, no traceback |
+
+Installed `pf` ran outside any checkout, from a folder holding a decoy `personal_finance`
+package. It loaded `cli.py` from the environment's `site-packages`. As a control,
+`python -m personal_finance` from that same folder did import the decoy.
+
+Substitutions, all needed to keep to the rules above:
+
+- The README's `mktemp -d` was replaced with a path under `build/`, because `mktemp -d`
+  ignored `TMPDIR` here.
+- `TRANSACTION_ID` was replaced with the first ID from `transactions`.
+- For installed `pf`, `bin/pf` became the script's path, and the fixtures were copied beside
+  the walkthrough.
+
+Limits: `requirements-dev.txt` pins versions without hashes, and setuptools is only bounded
+as `>=68`, so a later build can use a different version. Only this Mac and Python version
+were tested. An editable install was not tested.

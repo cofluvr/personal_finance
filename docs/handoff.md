@@ -1,8 +1,8 @@
 # Session Handoff: After M1 Slice 4
 
-For a fresh session. Written 2026-11-06. Slices 1 to 3 are accepted by the owner. **Slice 4
-is complete and awaits the owner's review.** Do not start M2 until the owner says so. M1 has
-one unverified completion condition, a clean install. See [m1-acceptance.md](m1-acceptance.md).
+For a fresh session. Written 2026-11-06. Slices 1 to 4 are accepted by the owner. **All M1
+completion conditions are met, and the owner's final sign-off is pending.** Do not start M2
+until the owner says so. See [m1-acceptance.md](m1-acceptance.md).
 Slice 4's design decisions are D-036 to D-039.
 
 ## Current state
@@ -15,7 +15,7 @@ Slice 4's design decisions are D-036 to D-039.
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
-| Entry point | `bin/pf`, using this checkout's `.venv` |
+| Entry point | `bin/pf`, using this checkout's `.venv`. An installed `pf` script also works |
 | Data | Synthetic only. Keep databases outside the repository |
 
 **Remote state.** The owner intentionally pushed `c75aee0` (end of slice 1) to
@@ -78,7 +78,10 @@ first version of the boundary reported a closed pipe as an unexpected problem.
 
 | Check | Result |
 |---|---|
-| `.venv/bin/python -m pytest` at the final code commit, `c33b417` | **712 passed**, exit code 0 |
+| Clean install at `6815e19`: fresh clone and environment, pinned dependencies, full suite | **712 passed**, exit code 0 |
+| README example at `6815e19`, through `bin/pf` and through the installed `pf` | Exit code 0 for both, identical output apart from IDs and paths |
+| Exit codes at `6815e19`, both entry points | 0, 1, 2 and 141 as documented |
+| `.venv/bin/python -m pytest` at the final code commit, `c33b417` | 712 passed, exit code 0 |
 | The same suite in a source checkout of `c33b417`, in a path with spaces | 712 passed, exit code 0 |
 | `tests/scenarios` repeated 3 times at `c33b417` | 281 passed each time |
 | Targeted deliberate breaks, slice 4 | 44 breaks, all caught on a final run, after closing 3 test gaps. Script and results in `build/slice4-breaks/`, ignored and may not survive |
@@ -101,9 +104,9 @@ first version of the boundary reported a closed pipe as an unexpected problem.
 | Deliberate breaks in a throwaway copy, slice 2 | 50 distinct breaks, all caught after adding tests for three survivors |
 | README example, re-run after slice 3 in zsh | Totals correct, with `trace` and `reconcile` also run |
 
-Not executed: a clean install from `requirements-dev.txt`, and `pip install` of the package,
-because both need network access. The source-checkout runs above are not a clean install:
-pytest came from the existing `.venv`, used read-only. Deliberate-break checks are not part of the suite, so repeat them for new
+The commands, versions and substitutions of the clean install are in
+[m1-acceptance.md](m1-acceptance.md). The `c33b417` source-checkout run above was not a clean
+install: pytest came from the existing `.venv`, used read-only. Deliberate-break checks are not part of the suite, so repeat them for new
 code. The slice 3 script and results are in `build/slice3-breaks/`, which is ignored and
 may not survive.
 
@@ -118,7 +121,7 @@ may not survive.
 - Reconciliation cost is quadratic in fully overlapping files and in distinct spellings
   per block. See [status.md](status.md).
 - The original file is not kept (M5). The database is not encrypted (M5).
-- A clean install and the `pip`-installed `pf` script are unverified.
+- Setup is verified on this Mac and Python 3.12.6 only. Dependency pins have no hashes.
 - A file's summary counts are as of its import. Only the run and account lines are final.
 - The full list is in [status.md](status.md).
 
@@ -201,8 +204,8 @@ or export presents legacy creation timestamps.**
 
 ## Awaiting the owner
 
-- Review of slice 4 and the M1 acceptance matrix.
-- A decision on the clean install: one approved network run, or waiving it for M1.
+- Final M1 sign-off. The owner's clean-install message was cut off mid-sentence at "If setup
+  works and all required", so any instruction after that was not received.
 - Authorization to start M2.
 - Pushing. Not authorized. Nothing since `c75aee0` has been pushed.
 
@@ -228,8 +231,8 @@ any new command shows legacy creation timestamps.
 |---|---|---|
 | Local commits on `feature/m1-foundation` | Approved by the owner, and remains approved | Confirm in the kickoff prompt |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
-| Installing dependencies | Was approved for pytest and Hypothesis only | Ask for anything new. None is expected |
-| Network access | Was approved for that install and for reading Claude Code docs | Ask for any use, including the clean install |
+| Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
+| Network access | Was approved for the clean-install dependencies only, now used | Ask for any use |
 
 Never approved, and not to be assumed:
 

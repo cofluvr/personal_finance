@@ -117,7 +117,7 @@ def test_the_module_route_still_works(tmp_path):
 
 
 def test_the_declared_script_resolves_to_a_callable():
-    """A static check only. Installing the package stays unverified (D-038)."""
+    """A static check. The installed script itself needs network access to check (D-038)."""
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
     module, function = project["scripts"]["pf"].split(":")
     assert callable(getattr(importlib.import_module(module), function))

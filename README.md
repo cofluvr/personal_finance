@@ -131,8 +131,6 @@ python3 -m venv .venv
 
 Tests run offline and use only synthetic data. Decisions are recorded in the [decision log](docs/decisions.md), the delivery order is in the [implementation plan](docs/plan.md), and supported formats are in [document layouts](docs/layouts.md).
 
-**Verification limit:** these install commands have not been run from a clean state, because that needs network access. The launcher and the tests have been run with an existing `.venv`.
-
 ## Running pf
 
 `bin/pf` runs the application with this checkout's `.venv`. Nothing needs installing beyond creating that environment, and it works from any directory and from paths containing spaces.
@@ -142,7 +140,7 @@ bin/pf --help
 bin/pf import --help
 ```
 
-To run it by name, add the `bin` folder to `PATH`, or link `bin/pf` from a folder already on it. `pyproject.toml` also declares a `pf` script for `pip install`, but that route needs setuptools and has not been verified.
+To run it by name, add the `bin` folder to `PATH`, or link `bin/pf` from a folder already on it. Alternatively, `python -m pip install .` in a virtual environment installs the package and a `pf` script. Building it downloads setuptools.
 
 | Exit code | Meaning |
 |---|---|

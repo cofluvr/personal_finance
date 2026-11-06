@@ -7,7 +7,7 @@ Last updated: 2026-11-06. Branch: `feature/m1-foundation`. The owner pushed `c75
 | M1 slice 1: scaffolding, money, schema, migrations | Accepted |
 | M1 slice 2: synthetic layouts, coverage, provenance, idempotent import | Accepted |
 | M1 slice 3: cross-document duplicate handling | Accepted |
-| M1 slice 4: import summaries, log checks, entry point, setup documentation | Complete, awaiting the owner's review |
+| M1 slice 4: import summaries, log checks, entry point, setup documentation | Accepted |
 | M2 to M8 | Not started |
 
 ## What exists
@@ -42,8 +42,9 @@ All 47 criteria pass, each mapped to named tests in [m1-acceptance.md](m1-accept
 A17 is met against the corrected wording in [plan.md](plan.md). A18 is met because M1 has
 no logs and its output stays clean (D-037).
 
-**M1 is not fully closed.** One completion condition is unverified: a new-setup run from
-the README, because a clean install from `requirements-dev.txt` needs network access.
+All M1 completion conditions are met, including a new-setup run from the README. The clean
+install and both entry points were verified on 2026-11-06 (see
+[m1-acceptance.md](m1-acceptance.md)). The owner's final M1 sign-off is pending.
 
 A39 has provisional benchmarks, met by the figures below (D-034).
 
@@ -99,9 +100,10 @@ merges at once.
 
 ## Known limitations
 
-- A clean install from `requirements-dev.txt` has not been performed. Neither has
-  `pip install` of the package, so the declared `pf` script is only checked statically.
-- `bin/pf` has only been run on this Mac. It needs `.venv` at the root of its checkout.
+- Setup and both entry points have only been verified on this Mac with Python 3.12.6.
+  `bin/pf` needs `.venv` at the root of its checkout.
+- Dependencies are pinned without hashes, and setuptools is only bounded as `>=68`, so a
+  later package build can use a different version. An editable install is untested.
 - A file's counts in an import summary describe the moment it was imported. Later files in
   the same run can change them, so only the run summary and the account lines are final.
 - `internal_error` and the unexpected-error message carry no detail by design, so such a

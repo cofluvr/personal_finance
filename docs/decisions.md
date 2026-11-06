@@ -600,8 +600,8 @@ added to them or to each other.
 
 - `bin/pf` is the verified launcher. It runs this checkout's `.venv` from any directory, and
   paths containing spaces are supported.
-- `[project.scripts]` also declares `pf`. Installing the package needs setuptools, which the
-  local `.venv` lacks, so that route stays unverified until an install is authorized.
+- `[project.scripts]` also declares `pf`. Installing the package needs setuptools, downloaded
+  by pip as a build requirement. A non-editable install was verified on 2026-11-06.
 - Checking a clone that shares an existing environment is a source-checkout check. It is
   not a clean install, and must not be called one.
 
