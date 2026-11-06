@@ -40,18 +40,31 @@ def dense_rows(months: int, rows_per_month: int) -> list[list[str]]:
     return months_of_rows
 
 
-def variant_rows(months: int, rows_per_month: int) -> list[list[str]]:
+def variant_rows(months: int, rows_per_month: int, spellings: int = 500) -> list[list[str]]:
     """One amount and one merchant with many reference-free spellings in one block."""
     start = date(2024, 1, 1)
     months_of_rows = []
     for month in range(months):
         rows = [
             f"{_card_date(start + timedelta(days=30 * month + index % 30))},"
-            f"SYNTHETIC CAFE BRANCH{index % 500:03d}X,5.00,"
+            f"SYNTHETIC CAFE BRANCH{index % spellings:05d}X,5.00,"
             for index in range(rows_per_month)
         ]
         months_of_rows.append(rows)
     return months_of_rows
+
+
+def full_reexports(copies: int, rows: int) -> list[str]:
+    """The same dense rows exported again and again: every file overlaps every other."""
+    start = date(2024, 1, 1)
+    body = [
+        f"{_card_date(start + timedelta(days=index % 360))},SYNTHETIC CAFE,5.00,"
+        for index in range(rows)
+    ]
+    # Leading spaces are stripped by the parser and keep the files from being identical.
+    return [
+        CARD_HEADER + " " * copy + "".join(f"{row}\n" for row in body) for copy in range(copies)
+    ]
 
 
 def with_overlap(months_of_rows: list[list[str]], overlap_fraction: int = 10) -> list[str]:

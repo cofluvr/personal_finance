@@ -513,7 +513,6 @@ def _primary_rank(row: Record, documents):
     return (
         _STATUS_RANK[row.settlement_status],
         -dates,
-        not _has_reliable_id(row, documents),
         not row.description,
         _record_key(row, documents),
     )

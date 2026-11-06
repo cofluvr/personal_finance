@@ -178,6 +178,13 @@ class TestPrimaryRecord:
         )
         assert result.groups[0].primary_record_id == "2"
 
+    def test_a_record_with_a_description_is_preferred(self):
+        result = outcome(
+            self.documents,
+            [row("1", "a", external_id="X", description=None), row("2", "b", external_id="X")],
+        )
+        assert result.groups[0].primary_record_id == "2"
+
     def test_the_choice_does_not_depend_on_input_order(self):
         rows = [row("1", "a", external_id="X"), row("2", "b", external_id="X")]
         forward = outcome(self.documents, rows).groups[0].primary_record_id
@@ -282,6 +289,20 @@ class TestExactPairing:
         partial = doc("b", coverage_kind="partial", id_guarantee="none")
         for other in (partial, doc("b", id_guarantee="none")):
             assert merged(outcome([declared("a"), other], [row("1", "a"), row("2", "b")])) == set()
+
+    def test_a_dated_partial_claim_is_not_confident(self):
+        partial = doc(
+            "b", coverage_kind="partial", coverage_start="2026-01-01", coverage_end="2026-01-31",
+            date_basis="posting", evidence="document_metadata", id_guarantee="none",
+        )
+        result = outcome([declared("a"), partial], [row("1", "a"), row("2", "b")])
+        assert merged(result) == set()
+        assert result.items[0].reasons == ("coverage_partial",)
+
+    def test_a_row_before_a_claim_starts_is_not_confident(self):
+        documents = [declared("a"), declared("b", "2026-01-05", "2026-01-31")]
+        rows = [row("1", "a", posting_date="2026-01-02"), row("2", "b", posting_date="2026-01-02")]
+        assert merged(outcome(documents, rows)) == set()
 
     def test_different_date_bases_are_not_confident(self):
         documents = [declared("a"), declared("b", basis="transaction")]

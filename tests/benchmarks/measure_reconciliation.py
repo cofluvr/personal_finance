@@ -3,6 +3,7 @@
 Not part of the test suite. Run from the repository root:
 
     PYTHONPATH=src:tests/benchmarks .venv/bin/python tests/benchmarks/measure_reconciliation.py
+    (add --worst for the stress shapes, or rows per month such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards.
 """
@@ -12,7 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from synthetic_ledger import dense_rows, ordinary_rows, variant_rows, with_overlap
+from synthetic_ledger import dense_rows, full_reexports, ordinary_rows, variant_rows, with_overlap
 
 from personal_finance.db.migrate import connect, create_database
 from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1
@@ -25,7 +26,10 @@ SHAPES = {"ordinary": ordinary_rows, "dense": dense_rows, "variants": variant_ro
 
 
 def measure(shape: str, months: int, rows_per_month: int) -> None:
-    files = with_overlap(SHAPES[shape](months, rows_per_month))
+    run(shape, with_overlap(SHAPES[shape](months, rows_per_month)))
+
+
+def run(shape: str, files: list[str]) -> None:
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
         path = root / "ledger.db"
@@ -53,7 +57,7 @@ def measure(shape: str, months: int, rows_per_month: int) -> None:
         rows = len(records)
         items = len(derivation.items)
         print(
-            f"{shape:9} rows={rows:7} files={len(files):3} "
+            f"{shape:12} rows={rows:7} files={len(files):3} "
             f"first={import_seconds[0]:7.2f}s last={import_seconds[-1]:7.2f}s "
             f"cumulative={sum(import_seconds):8.2f}s derive={derive_seconds:6.2f}s "
             f"steps={derivation.candidate_steps:9} items={items:6}",
@@ -62,7 +66,18 @@ def measure(shape: str, months: int, rows_per_month: int) -> None:
         conn.close()
 
 
+def worst_cases() -> None:
+    """Shapes chosen to stress the two costs that do not follow row count alone."""
+    for copies, rows in ((6, 2000), (12, 2000), (24, 2000), (12, 8000)):
+        run(f"reexport{copies}", full_reexports(copies, rows))
+    for spellings in (500, 1000):
+        run(f"spell{spellings}", with_overlap(variant_rows(24, 1000, spellings)))
+
+
 def main() -> None:
+    if sys.argv[1:] == ["--worst"]:
+        worst_cases()
+        return
     sizes = [(24, 200), (24, 1000), (24, 4000)]
     if len(sys.argv) > 1:
         sizes = [(24, int(value)) for value in sys.argv[1:]]

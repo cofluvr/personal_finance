@@ -60,6 +60,11 @@ def test_channel_words_inside_a_merchant_name_are_kept(left, right):
     assert parse_description(left, DEFAULT_RULES).merchant[0] in ("card", "visa")
 
 
+def test_channel_terms_are_stripped_only_as_a_leading_run():
+    assert parse_description("POS DEBIT ACME SYSTEMS", DEFAULT_RULES).merchant == ("acme", "systems")
+    assert parse_description("ACME POS SYSTEMS", DEFAULT_RULES).merchant == ("acme", "pos", "systems")
+
+
 @pytest.mark.parametrize(
     "left, right",
     [

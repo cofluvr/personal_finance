@@ -431,6 +431,46 @@ class TestSplits:
         other.close()
 
 
+    def test_a_same_document_issue_stays_with_its_own_record_through_a_split(self, conn, checking):
+        pending = "S-7,2026-01-09,,SYNTHETIC CAFE,-5.00,PENDING"
+        checking("a.csv", self.posted_one, pending)
+        checking("b.csv", self.unknown)
+        checking("c.csv", self.posted_two)
+
+        statuses = conn.execute(
+            """SELECT parse.settlement_status
+               FROM review_issue_subject subject
+               JOIN review_issue issue ON issue.id = subject.review_issue_id
+               JOIN transaction_source link ON link.transaction_id = subject.transaction_id
+               JOIN record_parse parse ON parse.source_record_id = link.source_record_id
+               WHERE issue.rule = 'same_document_pending_posted'
+               ORDER BY 1"""
+        ).fetchall()
+        assert statuses == [("pending",), ("posted",)]
+
+    def test_a_split_caused_by_a_rule_change_says_so(self, conn, card, tmp_path):
+        strict = replace(DEFAULT_RULES, similarity_threshold_percent=76)
+        row = cafe(description="BLUE BOTTLE COFFEE OAKLAND")
+        blocker = "01/10/2026,BLUE BOTTLE COFFEE BERKELEY,,"
+        first = tmp_path / "a.csv"
+        second = tmp_path / "b.csv"
+        first.write_text(CARD_HEADER + row + "\n" + blocker + "\n", encoding="utf-8")
+        second.write_text(CARD_HEADER + row + "\n", encoding="utf-8")
+        for path in (first, second):
+            import_files(conn, [path], account_id="acct", layout=SYNTHETIC_CARD_V1,
+                         declared_coverage=declare_complete(*JANUARY), rules=strict)
+        assert transactions(conn) == 1
+
+        conn.execute("BEGIN IMMEDIATE")
+        reconcile_account(conn, "acct", DEFAULT_RULES)
+        conn.execute("COMMIT")
+
+        assert transactions(conn) == 2
+        assert conn.execute(
+            "SELECT action, reason, rules_fingerprint FROM transaction_link_history ORDER BY id DESC"
+        ).fetchone() == ("split", "matching_rules_changed", DEFAULT_RULES.fingerprint())
+
+
 class TestRepeatsAndReview:
     def test_a1_a38_repeat_imports_change_nothing(self, conn, card, tmp_path):
         card("a.csv", cafe(), cafe("01/11/2026"))
@@ -683,7 +723,10 @@ class TestExistingAccounts:
                FROM document_interpretation ORDER BY source_document_id"""
         ).fetchall()
         assert meaning == [("synthetic_card_v1", "1", "none", 0)] * 2
-        assert conn.execute("SELECT COUNT(*) FROM source_record_origin").fetchone() == (2,)
+        assert conn.execute(
+            """SELECT source_record_id, original_transaction_id FROM source_record_origin
+               ORDER BY 1"""
+        ).fetchall() == [("r1", "t1"), ("r2", "t2")]
 
         file = tmp_path / "a.csv"
         file.write_bytes(content)
@@ -693,7 +736,48 @@ class TestExistingAccounts:
         conn.close()
 
 
-def seed_version_two(conn, content):
+    def test_the_backfill_keeps_the_meaning_of_checking_documents(self, tmp_path):
+        old = tmp_path / "old_migrations"
+        old.mkdir()
+        for name in ("0001_initial.sql", "0002_block_replace.sql"):
+            shutil.copy(MIGRATIONS_DIR / name, old / name)
+        path = tmp_path / "old.db"
+        create_database(path, old)
+        conn = connect(path)
+        seed_version_two(conn, b"synthetic", layout_id="synthetic_checking_v1")
+
+        migrate(conn)
+
+        assert set(conn.execute(
+            """SELECT layout_id, external_id_namespace, external_id_guarantee,
+                      pending_in_transaction_basis, pending_in_posting_basis
+               FROM document_interpretation"""
+        ).fetchall()) == {
+            ("synthetic_checking_v1", "synthetic_checking_v1", "stable_unique", 1, 0)
+        }
+        conn.close()
+
+    def test_the_backfill_gives_an_unknown_layout_no_guarantee(self, tmp_path):
+        old = tmp_path / "old_migrations"
+        old.mkdir()
+        for name in ("0001_initial.sql", "0002_block_replace.sql"):
+            shutil.copy(MIGRATIONS_DIR / name, old / name)
+        path = tmp_path / "old.db"
+        create_database(path, old)
+        conn = connect(path)
+        seed_version_two(conn, b"synthetic", layout_id="some_other_layout")
+
+        migrate(conn)
+
+        assert set(conn.execute(
+            """SELECT external_id_namespace, external_id_guarantee,
+                      pending_in_transaction_basis, pending_in_posting_basis
+               FROM document_interpretation"""
+        ).fetchall()) == {(None, "none", None, None)}
+        conn.close()
+
+
+def seed_version_two(conn, content, layout_id="synthetic_card_v1"):
     """Two documents with the same row, as a ledger stood before reconciliation existed."""
     conn.execute(
         "INSERT INTO account (id, display_name, account_type) VALUES ('acct', 'a', 'credit_card')"
@@ -704,8 +788,8 @@ def seed_version_two(conn, content):
         conn.execute(
             """INSERT INTO source_document (id, content_sha256, file_name, byte_size, format,
                                             layout_id)
-               VALUES (?, ?, 'x.csv', ?, 'csv', 'synthetic_card_v1')""",
-            (document, digest, len(data)),
+               VALUES (?, ?, 'x.csv', ?, 'csv', ?)""",
+            (document, digest, len(data), layout_id),
         )
         conn.execute(
             """INSERT INTO document_coverage (source_document_id, account_id, coverage_kind,
