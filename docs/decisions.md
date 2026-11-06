@@ -447,6 +447,58 @@ deterministically, with no mixing of fields between records. It may show `posted
 when its primary source is posted. An `unknown` source status stays unchanged in
 `record_parse` and `trace`. Pending-to-posted reconciliation remains M2.
 
+## D-031 Candidate grouping — Approved as an initial heuristic, implemented in slice 3
+
+- A candidate link needs the same signed amount, no shared document, no proof of
+  distinctness (D-026), a date within the window on any date of either side, and a
+  similar description (D-032). A same-date counterpart never suppresses a near-date
+  one.
+- Linked transactions form connected groups. No pairwise relationships are stored.
+- A group spanning up to `max_group_span_days` (14) is one review item.
+- A longer run is divided into fixed calendar blocks of that length, each extended by
+  the date window. Every linked pair therefore shares at least one item, and a
+  transaction can sit in two items.
+- Disclosures count distinct affected transactions and never sum item memberships.
+- This is a review heuristic. It creates review items and never authorizes a merge.
+
+## D-032 Description similarity — Approved as an initial heuristic, implemented in slice 3
+
+Candidate evidence only. It never enters the automatic merge path, and no claim of
+general accuracy is made.
+
+Normalization: NFKC and casefold, join hyphens and apostrophes inside a word, strip
+`SQ`-style prefixes only before `*`, strip channel terms only as a leading run, and
+split into tokens. Mixed letter-and-digit tokens and a leading number stay as merchant
+tokens. Later pure numbers and masked numbers become references, compared rather than
+discarded.
+
+Two descriptions are similar when neither is blank and their folded text is identical.
+Otherwise both need sufficient merchant evidence (not only generic words), matching
+first tokens, and either full containment of the shorter in the longer (at least two
+tokens, or one of at least five characters) or a token Dice score of at least 0.75. A
+single-token merchant with different references is not similar.
+
+Known misses, which count twice with no flag: `3M COMPANY` / `3M CO`, `24 HOUR FITNESS`
+/ `24HR FITNESS`, `NORTHWIND MKT` / `NORTHWIND MARKET`, `SQ *CAFE` / `CAFE`.
+
+Known false positives, which cost one review: `NORTHWIND STORE 12` / `NORTHWIND STORE
+98`, `76 GAS 1234` / `76 GAS 9876`, `BLUE BOTTLE COFFEE OAKLAND` / `BLUE BOTTLE COFFEE
+BERKELEY`.
+
+## D-033 Rule versions and existing accounts — Approved, implemented in slice 3
+
+- Matching rules are one effective configuration per reconciliation, applied to a
+  whole account. They live in code as `MatchingRules`, and a parameter can override
+  them. Nothing stores an override as production configuration.
+- `account_reconciliation` records a fingerprint of the effective configuration,
+  including `RULES_VERSION` and any overridden setting. An account counts as current
+  only when its fingerprint equals the one in use, so a marker cannot claim currency
+  for a different configuration.
+- Any import attempt for an account, including a byte-identical repeat, reconciles it
+  once if it is not current. After that a repeat is a true no-op.
+- `reconcile` covers accounts with no new file, and `totals` discloses accounts that
+  are not current.
+
 ## Not yet decided
 
 From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend details
