@@ -84,7 +84,6 @@ code.
 | Totals wording | Account inflows, account outflows, net account movement | D-010 |
 | Repository | Do not move it. Real data needs the M5 gate first | D-019 |
 | Security proposal | **Unapplied.** Unverified, and not active protection | D-025 |
-
 | External-ID matching | A differing description alone does not conflict for a reliable ID, and both are preserved. Conflicts in amount, status or a date present on both records are flagged | D-006 |
 | Unresolved rows | Exact matches stay possible duplicates when an unresolved row could affect the count. Reliable ID matches are not affected | D-024 |
 
