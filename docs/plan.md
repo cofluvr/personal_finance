@@ -138,7 +138,7 @@ it end to end.
 | A41 | Complete coverage with an unresolved row | Disclosure stays, and no transaction is created for the row | 2 |
 | A15 | Two simultaneous imports | Ledger stays consistent with no double-counting | 2 |
 | A16 | Property test: random import order and repeats, across complete, partial and unknown coverage | Financial totals, source associations and unresolved candidate relationships are equivalent for every order. Generated IDs and display order are not compared | 3 |
-| A17 | Import summary | New, duplicate, flagged and failed counts add up to the rows read | 4 |
+| A17 | Import summary | Import summaries report counts with explicit units. Where counts form a partition, they reconcile within that unit. File outcomes reconcile to files attempted, and row outcomes reconcile to rows read under the documented parsing definitions. Transaction matches, review flags, and review groups are reported separately because they may overlap and must not be added into a single row total. Disclosure of unresolved records and failed files is preserved, and row counts are not fabricated when a file cannot be read | 4 |
 | A18 | Logs during import | Contain no sentinel merchant names or amounts | 4 |
 | A19 | Network calls during tests | Sockets blocked; the full suite still passes | 1 |
 | A25 | `totals` output | Uses the labels from D-010 and never says income or spending | 4 |

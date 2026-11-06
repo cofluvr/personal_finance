@@ -506,9 +506,13 @@ BERKELEY`.
   whole account. They live in code as `MatchingRules`, and a parameter can override
   them. Nothing stores an override as production configuration.
 - `account_reconciliation` records a fingerprint of the effective configuration,
-  including `RULES_VERSION` and any overridden setting. An account counts as current
-  only when its fingerprint equals the one in use, so a marker cannot claim currency
-  for a different configuration.
+  including `RULES_VERSION` and any overridden setting.
+- An account is current only when its fingerprint equals the one in use and every live
+  transaction records its primary source. So a marker cannot claim currency for a
+  different configuration, or for transactions missing required metadata.
+- An account with no transactions has nothing to reconcile and is never stale.
+- `stale_accounts` is the only definition. `is_current` and the `totals` disclosure both
+  use it, so they cannot drift.
 - Any import attempt for an account, including a byte-identical repeat, reconciles it
   once if it is not current. After that a repeat is a true no-op.
 - `reconcile` covers accounts with no new file, and `totals` discloses accounts that

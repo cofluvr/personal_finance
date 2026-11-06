@@ -1,9 +1,8 @@
 # Session Handoff: After M1 Slice 3
 
 For a fresh session. Written 2026-11-05. Slices 1 and 2 are provisionally accepted.
-**Slice 3 is accepted by the owner.** One follow-up, F1 below, is open and awaits the
-owner's approval. Do not start slice 4 until the owner says so. Slice 3's design
-decisions are D-026 to D-035.
+**Slice 3 is accepted by the owner, and follow-up F1 is fixed.** Do not start slice 4
+until the owner says so. Slice 3's design decisions are D-026 to D-035.
 
 ## Current state
 
@@ -67,7 +66,9 @@ explains. `database_busy` was verified, including a commit blocked after reconci
 
 | Check | Result |
 |---|---|
-| `.venv/bin/python -m pytest` at the final code commit, `143f57c` | **641 passed** |
+| `.venv/bin/python -m pytest` at the final code commit, `dfe412f` | **651 passed** |
+| Targeted deliberate breaks, F1 | 2 breaks on the shared check, both caught |
+| `.venv/bin/python -m pytest` at `143f57c` | 641 passed |
 | `.venv/bin/python -m pytest` after the closeout, `34a81d1` | 640 passed |
 | Scenario tests repeated 3 times after the closeout | 212 passed each time |
 | Targeted deliberate breaks, closeout | 22 breaks, all caught, after closing 3 test gaps |
@@ -93,7 +94,6 @@ may not survive.
 - Coverage cannot be changed after import (M2).
 - Users cannot undo merges or resolve review items (M2).
 - Similarity has documented misses and false positives (D-032).
-- An account can read as current while a merged transaction lacks a primary source (F1).
 - Identity timestamps from before migration 0004 can be fallback values (F2).
 - A39 acceptance covers the documented fixtures only, in which nothing merges (F3).
 - Reconciliation cost is quadratic in fully overlapping files and in distinct spellings
@@ -136,27 +136,19 @@ may not survive.
 
 ## Open follow-ups
 
-**F1. Marked current without primary-source metadata. Open, needs the owner's approval.**
-Confirmed on a temporary ledger. Migration 0004 leaves `primary_source_record_id` NULL on
-a transaction merged before it, and does not touch `account_reconciliation`. The
-fingerprint still matches, so `is_current` returns True, `accounts_not_current` returns 0,
-a repeat import does not catch up, and `totals` says nothing. Only `trace` shows the
-problem, and running `reconcile` by hand fixes it. No test covers this. It can only affect
-a ledger that had merges at schema version 3.
-
-Proposed correction, not applied: treat an account as not current while any of its
-transactions has a NULL primary source, in both `is_current` and `accounts_not_current`.
-That needs no migration, and the existing catch-up paths then work. Add two tests: a
-migrated account reads as not current and a repeat import repairs it, and `totals`
-discloses it until then. The alternative, a migration clearing those markers, adds a
-schema step to express a rule that belongs in the check.
+**F1. Marked current without primary-source metadata. Fixed in `dfe412f`.** Migration 0004
+leaves a transaction merged before it with no primary source, while its marker still
+matched. `stale_accounts` is now the single definition of current (D-033): the rules must
+match and every live transaction must record its primary source. Accounts with no
+transactions are never stale. No migration was needed. A repeat import or `reconcile`
+catches up, and `totals` discloses the account until then.
 
 **F2. Legacy identity timestamps. Partly done.** An ID retired before migration 0004 has
 no stored `created_at`, so a revival uses its first record's link time (D-029). `trace`
 now labels this as approximate, for every event of that ID, inferred from the first
-identity event being `revived`. Remaining work, when a surface needs it: nothing marks
-`ledger_transaction.created_at` itself as a fallback, and no command shows it today. Any
-future UI or export of that column must first add a stored marker.
+identity event being `revived`. Nothing marks `ledger_transaction.created_at` itself as a
+fallback, and no command shows it today. **A stored marker is a prerequisite before any UI
+or export presents legacy creation timestamps.**
 
 **F3. Merge-heavy benchmark. Backlog.** See "Backlog benchmarks" in [plan.md](plan.md).
 
@@ -181,11 +173,18 @@ Define import-summary units explicitly, and report each in its own unit:
 | Ledger effect | New logical transactions, confidently matched source records |
 | Review | Review groups, distinct affected transactions |
 
-Do not force counts with different units into one reconciliation sum. Only sums within
-one unit are meaningful, such as valid plus unresolved equalling rows read.
-**A17 in [plan.md](plan.md) currently says new, duplicate, flagged and failed counts add up
-to the rows read, which mixes these units.** Propose new wording for the owner to approve
-as part of slice 4 planning.
+Do not force counts with different units into one reconciliation sum. A17 in
+[plan.md](plan.md) now has the owner's corrected wording, replacing the old mixed-unit
+sum:
+
+> Import summaries report counts with explicit units. Where counts form a partition, they
+> reconcile within that unit. File outcomes reconcile to files attempted, and row outcomes
+> reconcile to rows read under the documented parsing definitions. Transaction matches,
+> review flags, and review groups are reported separately because they may overlap and
+> must not be added into a single row total.
+
+Preserve disclosure of unresolved records and failed files. Do not fabricate row counts
+when a file cannot be read.
 
 Verify the entry point and setup using the existing local `.venv`, without downloading
 anything. A clean installation from `requirements-dev.txt` needs network access and stays
@@ -193,7 +192,7 @@ unverified until separately authorized. Say so plainly rather than implying it w
 
 ## Awaiting the owner
 
-- Approval, or a change, of the F1 correction.
+- Authorization to start slice 4.
 - Pushing. Not authorized. Nothing since `c75aee0` has been pushed.
 
 Next, when the owner approves: slice 4 in [plan.md](plan.md). Pending-to-posted
@@ -226,8 +225,8 @@ Read docs/handoff.md first, then the files it lists. Confirm the branch is
 feature/m1-foundation and run the test suite before changing anything.
 
 Task: M1 slice 4 only: complete import summaries, log checks, a pf entry point and
-setup documentation. Follow "Slice 4 planning notes" in the handoff. Report the status of
-follow-up F1 first. Propose a plan and wait for my approval before writing code.
+setup documentation. Follow "Slice 4 planning notes" in the handoff. Propose a plan and
+wait for my approval before writing code.
 
 Local commits on feature/m1-foundation are approved after I authorize implementation.
 Pushing needs my explicit approval each time. No network, no new dependencies, and no
