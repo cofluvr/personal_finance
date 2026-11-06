@@ -126,16 +126,30 @@ class TestCandidates:
         assert members(result) == {frozenset({("3",), ("4",)})}
         assert result.recomputed_pairs == 1
 
-    def test_a_long_run_keeps_no_block_holding_only_a_decided_pair(self):
+    def test_a_block_holding_only_a_decided_pair_raises_no_item(self):
+        """A rejected pair alone in a calendar block, its group joined around that block by a
+        record whose two dates skip it, so the group survives and the block has no open link."""
         rules = replace(DEFAULT_RULES, max_group_span_days=4, date_window_days=3)
-        documents = [doc("a"), doc("b")]
-        records = [row("1", "a", day="2026-01-01"), row("2", "b", day="2026-01-03"),
-                   row("3", "a", 2, day="2026-01-05"), row("4", "b", 2, day="2026-01-07")]
-        before = outcome(documents, records, rules=rules)
-        result = outcome(documents, records, rejected(["1"], ["2"]), rules=rules)
-        assert len(before.items) >= 1
-        for item in result.items:
-            assert {("1",), ("2",)} != set(item.members)
+        start = date(2026, 1, 10).toordinal() // 4 * 4
+
+        def day(offset):
+            return date.fromordinal(start + offset).isoformat()
+
+        documents = [doc(name) for name in "abcde"]
+        records = [
+            row("c", "a", day=day(-1)),
+            row("a", "b", day=day(2)),
+            row("u", "c", day=day(5)),
+            row("v", "d", day=day(7)),
+            row("x", "e", day=day(9), transaction_date=day(-2)),
+        ]
+        block = {("a",), ("u",)}
+        assert block in [set(item.members) for item in outcome(documents, records, rules=rules).items]
+
+        result = outcome(documents, records, rejected(["a"], ["u"]), rules=rules)
+
+        assert result.items
+        assert block not in [set(item.members) for item in result.items]
 
 
 class TestWithholding:

@@ -12,7 +12,7 @@ from personal_finance import cli
 from personal_finance.cli import CONFLICT_NOTICE, UNDO_NOTICE, main
 from personal_finance.db.migrate import connect
 from personal_finance.reconcile import decisions as decisions_module
-from personal_finance.reconcile.apply import reconcile_account
+from personal_finance.reconcile.apply import load_constraints, reconcile_account
 from personal_finance.reconcile.cross_document import (
     REASON_WITHHELD,
     RULE_CANDIDATES,
@@ -1005,6 +1005,45 @@ class TestUndoToken:  # S21
     def test_the_token_has_the_documented_form(self, ledger):
         _, token = self.decided(ledger)
         assert re.fullmatch(r"d1-[0-9a-f]{16}", token)
+
+
+class TestConstraintsApplied:
+    def insert(self, ledger, relation):
+        conn = ledger.conn()
+        left, right = [row[0] for row in conn.execute("SELECT id FROM source_record")]
+        (account,) = conn.execute("SELECT id FROM account WHERE display_name = 'A'").fetchone()
+        conn.execute(
+            """INSERT INTO decision (id, account_id, review_issue_id, item_revision)
+               VALUES ('d', ?, 'issue', 'r2-0')""",
+            (account,),
+        )
+        conn.execute(
+            """INSERT INTO decision_constraint (decision_id, relation, pair_number,
+                   left_transaction_id, right_transaction_id, left_record_id, right_record_id)
+               VALUES ('d', ?, 1, 't1', 't2', ?, ?)""",
+            (relation, left, right),
+        )
+        return conn, account
+
+    def test_same_event_is_reserved_and_never_read_as_a_rejection(self, ledger):
+        pair_up(ledger)
+        conn, account = self.insert(ledger, "same_event")
+        assert load_constraints(conn, account) == ()
+        conn.close()
+
+    def test_a_different_event_row_is_read(self, ledger):
+        pair_up(ledger)
+        conn, account = self.insert(ledger, "different_event")
+        assert len(load_constraints(conn, account)) == 1
+        conn.close()
+
+    def test_another_accounts_decisions_are_not_read(self, ledger):
+        pair_up(ledger)
+        ledger.add_account("B")
+        conn, _ = self.insert(ledger, "different_event")
+        (other,) = conn.execute("SELECT id FROM account WHERE display_name = 'B'").fetchone()
+        assert load_constraints(conn, other) == ()
+        conn.close()
 
 
 class TestHistory:  # S14

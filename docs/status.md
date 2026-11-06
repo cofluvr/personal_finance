@@ -121,8 +121,8 @@ any group a constraint touches has its direct links compared again, pair by pair
 | 2,000 | 0.037s | 2.611s | 1.898s | 1,999,000 |
 | 4,000 | 0.046s | 7.542s | 9.613s | 7,998,000 |
 
-**This is quadratic in the units of a touched group.** Doubling the group costs about 4 times, and
-the number of constraints makes no difference. Every later import and reconcile of that account
+**This is quadratic in the units of a touched group.** Doubling the group compares 4 times as many
+pairs, and the number of constraints does not change that count. Every later import and reconcile of that account
 pays it. Groups no constraint touches are not recomputed. Matching semantics were not changed to
 reduce this. A real ledger holds such a group only if the same amount and description recur within
 the date window across thousands of rows.
@@ -136,7 +136,8 @@ the date window across thousands of rows.
 
 The first version of `review reject` took 19.6s at 2,000 because validation listed every direct
 pair in the item. It now checks only the stated pairs. `review show` lists at most 50 pairs for the
-same reason. Timings vary by about 30% between runs here.
+same reason. These timings vary by up to about 2 times between runs here, and other work on the
+machine was not controlled. Pairs compared are exact.
 
 ## Known limitations
 

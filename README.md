@@ -173,10 +173,6 @@ bin/pf import --db "$DB" --account "Synthetic Card" --layout synthetic_card_v1 \
 bin/pf documents --db "$DB"
 bin/pf review list --db "$DB"
 bin/pf review show --db "$DB" ITEM_ID
-bin/pf review reject --db "$DB" --account "Synthetic Checking" ITEM_ID --revision REVISION --pair T1 T2
-bin/pf review decisions --db "$DB"
-bin/pf review decision show --db "$DB" DECISION_ID
-bin/pf review undo --db "$DB" --account "Synthetic Checking" DECISION_ID --revision REVISION
 bin/pf totals --db "$DB"
 bin/pf transactions --db "$DB"
 bin/pf trace --db "$DB" TRANSACTION_ID
@@ -192,6 +188,13 @@ bin/pf reconcile --db "$DB"
 `review list` gives each open item an ID, and `review show` displays one item's evidence.
 
 ## Rejecting a Candidate Pair
+
+```sh
+bin/pf review reject --db "$DB" --account ACCOUNT ITEM_ID --revision REVISION --pair T1 T2
+bin/pf review decisions --db "$DB"
+bin/pf review decision show --db "$DB" DECISION_ID
+bin/pf review undo --db "$DB" --account ACCOUNT DECISION_ID --revision REVISION
+```
 
 `review reject` records that two transactions in a `cross_document_candidates` item are different events. Other kinds of item cannot be acted on yet, and possible duplicates cannot yet be confirmed, so true duplicates stay open and counted.
 

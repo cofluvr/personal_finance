@@ -634,11 +634,7 @@ def _texts_related(one, other, rules, related) -> bool:
         return True
     key = (one, other) if one < other else (other, one)
     if key not in related:
-        left, right = parse_description(one, rules), parse_description(other, rules)
-        block = block_key(left, rules)
-        related[key] = (
-            block is not None and block == block_key(right, rules) and similar(left, right, rules)
-        )
+        related[key] = similar(parse_description(one, rules), parse_description(other, rules), rules)
     return related[key]
 
 
