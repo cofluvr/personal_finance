@@ -10,6 +10,10 @@ import re
 MIN_CENTS = -(2**63)
 MAX_CENTS = 2**63 - 1
 
+# Far longer than any valid amount. Checked first so that hostile or corrupt
+# input never reaches int(), which raises its own error on very long digit runs.
+MAX_AMOUNT_TEXT = 64
+
 _DIGITS = r"(?P<whole>[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)?(?:\.(?P<fraction>[0-9]+))?"
 _SIGNED = re.compile(r"(?P<sign>[+-]?\$?|\$[+-])" + _DIGITS)
 _BRACKETED = re.compile(r"\(\$?" + _DIGITS + r"\)")
@@ -32,6 +36,8 @@ def parse_cents(text: str) -> int | None:
     body = text.strip()
     if not body:
         return None
+    if len(body) > MAX_AMOUNT_TEXT:
+        raise MoneyParseError("amount text is too long")
 
     bracketed = _BRACKETED.fullmatch(body)
     match = bracketed or _SIGNED.fullmatch(body)

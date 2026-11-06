@@ -36,7 +36,9 @@ def test_new_database_is_at_the_latest_version(conn):
 def test_new_database_has_the_expected_tables(conn):
     assert table_names(conn) == {
         "account",
+        "account_reconciliation",
         "document_coverage",
+        "document_interpretation",
         "import_attempt",
         "import_run",
         "ledger_transaction",
@@ -45,6 +47,9 @@ def test_new_database_has_the_expected_tables(conn):
         "review_issue_subject",
         "source_document",
         "source_record",
+        "source_record_origin",
+        "transaction_identity_history",
+        "transaction_link_history",
         "transaction_source",
     }
 
@@ -163,6 +168,55 @@ def test_migration_applied_while_waiting_for_the_lock_is_skipped(conn, monkeypat
     monkeypatch.setattr(migrate_module, "schema_version", version_seen)
 
     assert migrate(conn) == latest
+
+
+def test_one_record_per_document_rule_can_be_relaxed_by_a_later_migration(conn):
+    """M2 may need one event to hold two records from one document (D-008)."""
+    conn.executescript(
+        f"""
+        INSERT INTO account (id, display_name, account_type) VALUES ('a', 'A', 'checking');
+        INSERT INTO source_document (id, content_sha256, file_name, byte_size, format, layout_id)
+            VALUES ('d', '{"a" * 64}', 'x.csv', 1, 'csv', 'l');
+        INSERT INTO source_record (id, source_document_id, account_id, record_index, raw_json,
+                                   raw_fingerprint, occurrence)
+            VALUES ('pending', 'd', 'a', 1, '[]', '{"b" * 64}', 1),
+                   ('posted', 'd', 'a', 2, '[]', '{"c" * 64}', 1),
+                   ('other', 'd', 'a', 3, '[]', '{"d" * 64}', 1);
+        INSERT INTO ledger_transaction (id, account_id, posting_date, amount_cents)
+            VALUES ('t', 'a', '2026-01-05', -100);
+        INSERT INTO transaction_source (transaction_id, source_record_id, source_document_id,
+                                        account_id, link_rule)
+            VALUES ('t', 'pending', 'd', 'a', 'new_record');
+        """
+    )
+    original = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE name = 'transaction_source'"
+    ).fetchone()[0]
+    rebuilt = original.replace("UNIQUE (transaction_id, source_document_id),", "")
+    rebuilt = rebuilt.replace("transaction_source", "transaction_source_new", 1)
+    assert rebuilt.count("source_document_id),") == 0
+
+    conn.executescript(
+        f"""
+        BEGIN;
+        {rebuilt};
+        INSERT INTO transaction_source_new SELECT * FROM transaction_source;
+        DROP TABLE transaction_source;
+        ALTER TABLE transaction_source_new RENAME TO transaction_source;
+        CREATE UNIQUE INDEX automatic_links_one_per_document
+            ON transaction_source (transaction_id, source_document_id)
+            WHERE link_rule <> 'confirmed_same_event';
+        COMMIT;
+        """
+    )
+
+    insert_link = """INSERT INTO transaction_source (transaction_id, source_record_id,
+                                                     source_document_id, account_id, link_rule)
+                     VALUES ('t', ?, 'd', 'a', ?)"""
+    conn.execute(insert_link, ("posted", "confirmed_same_event"))
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(insert_link, ("other", "new_record"))
+    assert conn.execute("SELECT COUNT(*) FROM transaction_source").fetchone() == (2,)
 
 
 def test_concurrent_migrations_apply_once(tmp_path):

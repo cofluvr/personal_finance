@@ -1,0 +1,10 @@
+# coverage-kind: complete
+# coverage-start: 2026-01-01
+# coverage-end: 2026-01-31
+# coverage-basis: posting
+# generated-on: 2026-02-01
+Transaction ID,Transaction Date,Posted Date,Description,Amount,Status
+SYN-1001,2026-01-02,2026-01-03,SYNTHETIC PAYROLL,2500.00,POSTED
+SYN-1002,2026-01-05,2026-01-06,SYNTHETIC GROCER,-82.15,POSTED
+SYN-1003,2026-01-12,2026-01-13,SYNTHETIC UTILITY,-120.40,POSTED
+SYN-1004,2026-01-30,,SYNTHETIC CAFE,-6.50,PENDING

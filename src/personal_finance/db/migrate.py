@@ -40,9 +40,10 @@ def load_migrations(directory: Path = MIGRATIONS_DIR) -> list[Migration]:
     return migrations
 
 
-def connect(path: Path) -> sqlite3.Connection:
+def connect(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
     """Open an existing database. A missing file is an error, never a new ledger."""
-    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=rw", uri=True, autocommit=True)
+    mode = "ro" if read_only else "rw"
+    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode={mode}", uri=True, autocommit=True)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn

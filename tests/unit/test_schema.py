@@ -5,6 +5,8 @@ import sqlite3
 
 import pytest
 
+from personal_finance.money import MAX_CENTS, MIN_CENTS
+
 SHA_A = "a" * 64
 SHA_B = "b" * 64
 
@@ -91,6 +93,24 @@ class TestAmounts:
         assert isinstance(total, int)
         assert total == 10_000
 
+    @pytest.mark.parametrize("value", [MAX_CENTS, MIN_CENTS])
+    def test_limits_of_the_integer_range_round_trip(self, ledger, value):
+        add_transaction(ledger, "txn-1", "acct-1", amount=value)
+        row = ledger.execute("SELECT amount_cents FROM ledger_transaction").fetchone()
+        assert row == (value,)
+
+    @pytest.mark.parametrize("value", [MAX_CENTS + 1, MIN_CENTS - 1, 10**30])
+    def test_values_beyond_the_integer_range_are_refused(self, ledger, value):
+        with pytest.raises(OverflowError):
+            add_transaction(ledger, "txn-1", "acct-1", amount=value)
+        assert ledger.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone() == (0,)
+
+    def test_a_sum_beyond_the_integer_range_is_an_error_not_a_float(self, ledger):
+        add_transaction(ledger, "txn-1", "acct-1", amount=MAX_CENTS)
+        add_transaction(ledger, "txn-2", "acct-1", amount=1)
+        with pytest.raises(sqlite3.OperationalError, match="integer overflow"):
+            ledger.execute("SELECT SUM(amount_cents) FROM ledger_transaction").fetchone()
+
     def test_only_usd_is_accepted(self, ledger):
         with pytest.raises(sqlite3.IntegrityError):
             ledger.execute(
@@ -153,6 +173,14 @@ class TestRecordParse:
         self.insert(ledger, "unresolved", reason_code="missing_amount")
         self.insert(ledger, "parsed", parser_version="v2", amount_cents=1, posting_date="2026-01-05")
         assert ledger.execute("SELECT COUNT(*) FROM record_parse").fetchone() == (2,)
+
+    def test_a_new_parser_version_leaves_earlier_evidence_unchanged(self, ledger):
+        self.insert(ledger, "parsed", amount_cents=100, posting_date="2026-01-05", description="OLD")
+        before = ledger.execute("SELECT * FROM record_parse").fetchall()
+        self.insert(ledger, "parsed", parser_version="v2", amount_cents=250,
+                    posting_date="2026-01-06", description="NEW")
+        rows = ledger.execute("SELECT * FROM record_parse WHERE parser_version = 'v1'").fetchall()
+        assert rows == before
 
     def test_settlement_status_defaults_to_unknown_not_posted(self, ledger):
         self.insert(ledger, "parsed", amount_cents=1, posting_date="2026-01-05")
@@ -322,6 +350,68 @@ class TestImmutability:
         )
         with pytest.raises(sqlite3.IntegrityError, match="immutable|append-only"):
             ledger.execute(statement)
+
+    @pytest.mark.parametrize(
+        ("statement", "table"),
+        [
+            (
+                """INSERT OR REPLACE INTO source_document
+                       (id, content_sha256, file_name, byte_size, format, layout_id)
+                   VALUES ('doc-new', :sha, 'other.csv', 1, 'csv', 'other')""",
+                "source_document",
+            ),
+            (
+                """INSERT OR REPLACE INTO source_document
+                       (id, content_sha256, file_name, byte_size, format, layout_id)
+                   VALUES ('doc-1', :other_sha, 'other.csv', 1, 'csv', 'other')""",
+                "source_document",
+            ),
+            (
+                """INSERT OR REPLACE INTO source_record
+                       (id, source_document_id, account_id, record_index, raw_json,
+                        raw_fingerprint, occurrence)
+                   VALUES ('rec-1', 'doc-1', 'acct-1', 9, '[]', :sha, 9)""",
+                "source_record",
+            ),
+            (
+                """INSERT OR REPLACE INTO source_record
+                       (id, source_document_id, account_id, record_index, raw_json,
+                        raw_fingerprint, occurrence)
+                   VALUES ('rec-new', 'doc-1', 'acct-1', 1, '[]', :sha, 9)""",
+                "source_record",
+            ),
+            (
+                """INSERT OR REPLACE INTO source_record
+                       (id, source_document_id, account_id, record_index, raw_json,
+                        raw_fingerprint, occurrence)
+                   VALUES ('rec-new', 'doc-1', 'acct-1', 9, '[]', :fingerprint, 1)""",
+                "source_record",
+            ),
+            (
+                """INSERT OR REPLACE INTO record_parse
+                       (source_record_id, parser_version, status, amount_cents, posting_date)
+                   VALUES ('rec-1', 'v1', 'parsed', 999, '2026-01-05')""",
+                "record_parse",
+            ),
+            (
+                """INSERT OR REPLACE INTO document_coverage
+                       (source_document_id, account_id, coverage_kind)
+                   VALUES ('doc-1', 'acct-1', 'partial')""",
+                "document_coverage",
+            ),
+        ],
+    )
+    def test_protected_data_cannot_be_replaced(self, ledger, statement, table):
+        add_coverage(ledger, "doc-1", "acct-1", "unknown")
+        ledger.execute(
+            """INSERT INTO record_parse (source_record_id, parser_version, status,
+                                         amount_cents, posting_date)
+               VALUES ('rec-1', 'v1', 'parsed', 1, '2026-01-05')"""
+        )
+        before = ledger.execute(f"SELECT * FROM {table}").fetchall()
+        with pytest.raises(sqlite3.IntegrityError, match="immutable|append-only"):
+            ledger.execute(statement, {"sha": SHA_A, "other_sha": SHA_B, "fingerprint": "f" * 64})
+        assert ledger.execute(f"SELECT * FROM {table}").fetchall() == before
 
     def test_account_details_can_still_be_edited(self, ledger):
         ledger.execute("UPDATE account SET display_name = 'Renamed' WHERE id = 'acct-1'")

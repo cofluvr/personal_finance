@@ -1,0 +1,22 @@
+#!/bin/sh
+# Runs the CLI with this checkout's .venv, from any directory. See decisions.md D-038.
+set -eu
+
+script=$0
+while [ -L "$script" ]; do
+    target=$(readlink "$script")
+    case $target in
+        /*) script=$target ;;
+        *) script=$(dirname -- "$script")/$target ;;
+    esac
+done
+root=$(CDPATH='' cd -- "$(dirname -- "$script")/.." && pwd -P)
+
+python=$root/.venv/bin/python
+if [ ! -x "$python" ]; then
+    echo "Error: no Python environment at $root/.venv. See Development Setup in README.md." >&2
+    exit 2
+fi
+
+# -P keeps the caller's directory off the import path.
+PYTHONPATH=$root/src exec "$python" -P -m personal_finance "$@"
