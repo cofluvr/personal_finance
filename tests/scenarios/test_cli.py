@@ -761,3 +761,22 @@ def test_a_busy_reconcile_changes_nothing_and_says_so(db, monkeypatch, capsys):
 
     assert code == 2
     assert "changed nothing" in capsys.readouterr().err
+
+
+def test_a_busy_migration_says_busy_and_can_be_retried(tmp_path, monkeypatch, capsys):
+    path = old_ledger(tmp_path)
+    before = digest(path)
+    monkeypatch.setattr(cli, "connect", impatient_connect)
+    holder = connect(path)
+    holder.execute("BEGIN IMMEDIATE")
+
+    code = main(["migrate", "--db", str(path)])
+    holder.execute("ROLLBACK")
+    holder.close()
+
+    error = capsys.readouterr().err
+    assert code == 2
+    assert "database is busy" in error
+    assert "migration failed" not in error
+    assert digest(path) == before
+    assert main(["migrate", "--db", str(path)]) == 0

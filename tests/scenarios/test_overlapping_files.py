@@ -7,7 +7,6 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -445,9 +444,18 @@ class TestSplits:
             "SELECT posting_date FROM ledger_transaction WHERE id = ?", (retired,)
         ).fetchone() == ("2026-01-10",)
 
-    def test_identity_survives_merge_retirement_split_and_revival(self, conn, checking):
-        checking("a.csv", self.unknown)
-        checking("b.csv", self.posted_one)
+    def test_identity_survives_merge_retirement_split_and_revival(self, conn, checking, monkeypatch):
+        distinctive = "2026-01-02T03:04:05.678Z"
+        original = apply.reconcile_account
+
+        def stamp_new_rows_first(connection, *args, **kwargs):
+            connection.execute("UPDATE ledger_transaction SET created_at = ?", (distinctive,))
+            return original(connection, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(pipeline, "reconcile_account", stamp_new_rows_first)
+            checking("a.csv", self.unknown)
+            checking("b.csv", self.posted_one)
         retired, = conn.execute(
             "SELECT from_transaction_id FROM transaction_link_history"
         ).fetchone()
@@ -456,11 +464,10 @@ class TestSplits:
                WHERE transaction_id = ?""",
             (retired,),
         ).fetchall()
-        assert retirement[:2] == ("retired", "reliable_external_id")
-        original_created_at = retirement[2]
+        assert retirement == ("retired", "reliable_external_id", distinctive)
+        original_created_at = distinctive
         assert conn.execute("SELECT 1 FROM ledger_transaction WHERE id = ?", (retired,)).fetchone() is None
 
-        time.sleep(0.01)
         checking("c.csv", self.posted_two)
 
         assert conn.execute(
