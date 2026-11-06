@@ -49,7 +49,7 @@ def semantic_view(conn):
     ):
         reasons = tuple(json.loads(evidence).get("reasons", ()))
         entry = issues.setdefault(issue, (kind, rule, status, reasons, set()))
-        entry[4].add(members[transaction_id] if transaction_id else keys[record_id])
+        entry[4].add(members[transaction_id] if transaction_id else frozenset({keys[record_id]}))
     relationships = sorted(
         (kind, rule, status, reasons, sorted(map(sorted, subjects)))
         for kind, rule, status, reasons, subjects in issues.values()
