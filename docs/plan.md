@@ -58,9 +58,11 @@ Each slice stops for review.
 2. Two invented CSV layouts, coverage metadata, provenance, idempotent import:
    - `synthetic_checking_v1`: external IDs, signed amounts.
    - `synthetic_card_v1`: no IDs, separate debit and credit columns.
-3. Duplicate handling (D-005 to D-008).
-4. CLI (`init`, `account add`, `import`, `review list`, `totals`), import
-   summaries, setup documentation.
+   Includes the CLI needed to exercise it: `init`, `account add`, `import`,
+   `documents`, `transactions`, `trace`, `review list`, `totals`. Each new row
+   becomes a new transaction, and output warns that overlaps are not checked.
+3. Cross-document duplicate handling (D-005 to D-008).
+4. Complete import summaries, log checks, a `pf` entry point, setup documentation.
 
 Out of scope for M1: real institution layouts, PDFs, the browser UI, transfer
 logic, categories, archiving, encryption, resolving review items.
@@ -88,7 +90,7 @@ it end to end.
 | ID | Scenario | Expected result | Slice |
 |---|---|---|---|
 | A5a | 2 identical rows in one file, 3 in another, both with confirmed complete coverage of that date on the same date basis | Exactly 3 transactions, no review item for the pairing | 3 |
-| A5b | The same rows where either file has partial or unknown coverage | All 5 records stay as separate transactions, flagged together as one open review item, with the amount at risk disclosed | 3 |
+| A5b | The same rows where either file has partial or unknown coverage | All 5 records stay as separate transactions, flagged together as one open review item. Summaries say totals may be overstated, without presenting an exact adjustment | 3 |
 | A6 | Near-match with a date one day off | Both kept and counted, and shown in `review list` | 3 |
 | A7 | Same external ID, different amount | Flagged, never merged | 3 |
 | A8 | Same rows in two different accounts | Never matched | Part 1, 3 |
@@ -97,6 +99,11 @@ it end to end.
 | A22 | Identical-looking purchases on a date where the two files' shared coverage is that single date | Kept separate and flagged, even when both claim complete coverage | 3 |
 | A23 | Coverage dates derived only from the earliest and latest rows | Never recorded as complete; recorded as unknown | Part 1, 2 |
 | A24 | Same rows, coverage stated on different date bases (transaction versus posting) | Not treated as confirmed overlap; flagged | 3 |
+| A26 | User declaration of complete coverage | Needs account, inclusive dates, date basis and the explicit flag; stored as `user_declared` | 2 |
+| A27 | Rows with no counterpart in another document, coverage unknown | Not flagged: unknown coverage alone never enters review | 3 |
+| A28 | Overlapping candidate groups | Summaries show no single exact adjustment figure | 3 |
+| A29 | One external ID repeated within a document | Kept, counted and flagged | 2 |
+| A30 | Pending and posted versions within a document | Kept, counted and flagged, with each record's status preserved | 2 |
 
 ### Missing and malformed values
 
@@ -113,6 +120,7 @@ it end to end.
 |---|---|---|---|
 | A13 | Every transaction | Links to at least one source record, with its document, row number and the unaltered original row | Part 1, 2 |
 | A14 | One bad file among good ones | Good files commit; the bad file leaves no partial data and is reported | 2 |
+| A31 | Failure or process crash partway through a file | No records or transactions remain, and the file can be imported again | 2 |
 | A15 | Two simultaneous imports | Ledger stays consistent with no double-counting | 2 |
 | A16 | Property test: random import order and repeats, across complete, partial and unknown coverage | Totals **and** unresolved-review outcomes are identical for every order | 3 |
 | A17 | Import summary | New, duplicate, flagged and failed counts add up to the rows read | 4 |

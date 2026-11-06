@@ -265,7 +265,8 @@ Application and test execution stay offline, and the test suite blocks sockets.
 
 The package is not installed into the venv. pytest finds it through
 `pythonpath = ["src"]`. An editable install would need `setuptools`, which is a
-further download, so the CLI entry point is decided in slice 4.
+further download. Until slice 4 decides the entry point, the CLI runs as
+`PYTHONPATH=src .venv/bin/python -m personal_finance`.
 
 ## D-021 Representations within one document — Default
 

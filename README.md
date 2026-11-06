@@ -117,7 +117,7 @@ These features are not part of the initial release unless explicitly reprioritiz
 
 ## Project Status
 
-Early implementation of the Python backend. The application cannot import files yet and must not be used with real financial data. See [implementation status](docs/status.md).
+Early implementation of the Python backend. It imports two invented CSV layouts only, does not yet detect duplicates across files, and must not be used with real financial data. See [implementation status](docs/status.md).
 
 ## Development Setup
 
@@ -129,4 +129,34 @@ python3 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-Tests run offline and use only synthetic data. Decisions are recorded in the [decision log](docs/decisions.md), and the delivery order is in the [implementation plan](docs/plan.md).
+Tests run offline and use only synthetic data. Decisions are recorded in the [decision log](docs/decisions.md), the delivery order is in the [implementation plan](docs/plan.md), and supported formats are in [document layouts](docs/layouts.md).
+
+## Synthetic Example
+
+Keep databases outside this repository. Totals are account movements, not income or spending.
+
+```sh
+export PYTHONPATH=src
+PF=".venv/bin/python -m personal_finance"
+DB="$(mktemp -d)/demo.db"
+F=tests/fixtures/synthetic
+
+$PF init --db "$DB"
+$PF account add --db "$DB" --name "Synthetic Checking" --type checking
+$PF account add --db "$DB" --name "Synthetic Card" --type credit_card
+
+# Coverage is stated in the first file. The second has none, so it stays unknown.
+$PF import --db "$DB" --account "Synthetic Checking" --layout synthetic_checking_v1 \
+  $F/checking_jan_complete.csv $F/checking_problem_rows.csv
+
+# This file states no coverage, so the user declares it explicitly.
+$PF import --db "$DB" --account "Synthetic Card" --layout synthetic_card_v1 \
+  --declare-complete-coverage --coverage-start 2026-01-01 --coverage-end 2026-01-31 \
+  --coverage-basis posting $F/card_jan_no_metadata.csv
+
+$PF documents --db "$DB"
+$PF review list --db "$DB"
+$PF totals --db "$DB"
+$PF transactions --db "$DB"
+$PF trace --db "$DB" TRANSACTION_ID
+```

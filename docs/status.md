@@ -4,40 +4,65 @@ Last updated: 2026-11-05. Branch: `feature/m1-foundation` (local only).
 
 | Milestone | Status |
 |---|---|
-| M1 slice 1: scaffolding, money, schema, migrations | Complete, awaiting review |
-| M1 slice 2: synthetic layouts, coverage, provenance, idempotent import | Not started |
-| M1 slice 3: duplicate handling | Not started |
-| M1 slice 4: CLI, import summaries, setup documentation | Not started |
+| M1 slice 1: scaffolding, money, schema, migrations | Complete, provisionally accepted |
+| M1 slice 2: synthetic layouts, coverage, provenance, idempotent import | Complete, awaiting review |
+| M1 slice 3: cross-document duplicate handling | Not started |
+| M1 slice 4: import summaries, log checks, entry point, setup documentation | Not started |
 | M2 to M8 | Not started |
 
 ## What exists
 
 - `personal_finance.money`: exact parsing and formatting of amounts.
 - `personal_finance.db.migrate`: database creation, connections, migrations.
-- Migration `0001_initial`: the M1 schema, with no rows written by any application
-  code yet.
+- Migrations `0001_initial` and `0002_block_replace`.
+- `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
+  per-file import.
+- `personal_finance.reconcile.same_document`: flags possible duplicates within one
+  document. Merges nothing.
+- `personal_finance.reports.totals`: account inflows, outflows and net movement.
+- CLI: `init`, `account add`, `import`, `documents`, `transactions`, `trace`,
+  `review list`, `totals`.
 
 ## What does not exist yet
 
-There is no importer, deduplication, CLI or totals report. The application cannot
-yet read a file. **It must not be used with real financial data** (M5 gate).
+**Cross-document duplicate detection does not exist.** Importing two overlapping
+files that are not byte-identical counts their shared rows twice. Import and totals
+output both say so.
+
+No real institution layout is supported. **It must not be used with real financial
+data** (M5 gate).
 
 ## Acceptance criteria progress
 
-Fully passing: A19 (network blocked in tests).
+Passing end to end: A1, A9, A10, A11, A12, A13, A14, A15, A19, A23, A26, A29, A30,
+A31.
 
-Proven at module or schema level only, with end-to-end proof still to come: A8,
-A9, A10, A11, A12, A13, A23.
+Partly proven, with more to come in later slices: A8 (schema only), A17 (counts
+shown, full check in slice 4), A18 (CLI output checked; no logging exists yet), A25
+(`totals` checked; re-check at slice 4).
 
-All others are not yet testable. See [plan.md](plan.md).
+All others depend on slice 3. See [plan.md](plan.md).
 
 ## Known limitations
 
 - `ledger_transaction` values can be updated. Keeping corrections out of base
   columns is an application rule for M2, not something the database enforces.
 - The database cannot enforce that every transaction has at least one source.
-  That is checked by test A13 in later slices.
+  Tests check this after success, failure and crash.
 - Merges cannot yet be undone. `transaction_source` has no history until M2.
+- Coverage cannot be changed after import. A file imported with unknown coverage
+  cannot be declared complete later: the attempt fails with `coverage_conflict`,
+  and an M2 workflow is needed.
+- The original file is not kept. Row contents and the file's hash are stored, and
+  archiving arrives at M5.
+- Pending and posted rows are only flagged when amount and description match. A
+  tip or a changed description is not detected in one document until M2.
+- Identical rows in one document are always separate. This is true of the invented
+  layouts and must be proven for each real layout.
+- Failed attempts may go unrecorded if the database stays busy. The CLI still
+  reports them.
+- A file with a large number of rows holds the write lock for the whole import.
+  Other writers wait up to 5 seconds and then report `database_busy`.
 - `create_database` leaves its file behind if a migration fails, and a later
   attempt then refuses to overwrite it.
 - Edited migration files are not detected. Only the version number is tracked.
