@@ -595,6 +595,7 @@ def digest(path):
         (["documents"], []),
         (["transactions"], []),
         (["review", "list"], []),
+        (["review", "show"], ["some-id"]),
         (["totals"], []),
         (["trace"], ["some-id"]),
     ],

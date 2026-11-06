@@ -7,6 +7,7 @@ output, Python logging, and any file a run leaves behind.
 import ast
 import logging
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -117,6 +118,36 @@ class TestOutput:
         transaction_id = out.split()[0]
         assert main(["trace", "--db", db, transaction_id]) == 0
         assert MERCHANT in capsys.readouterr().out
+
+    def test_review_show_shows_data_by_design_and_only_when_asked(self, workspace, capsys):
+        """An explicit request for one item, under the same terms as trace (D-037)."""
+        db = str(workspace / "ledger.db")
+        for command in setup_commands(db):
+            main(command)
+        main(import_command(db, workspace))
+        capsys.readouterr()
+
+        assert main(["review", "list", "--db", db]) == 0
+        listing = capsys.readouterr().out
+        assert_clean(listing)
+        items = re.findall(r"^Item ([^:]+): (\S+)", listing, re.MULTILINE)
+        assert {kind for _, kind in items} == {"possible_duplicate:", "unresolved_record:"}
+
+        shown = ""
+        for item, _ in items:
+            assert main(["review", "show", "--db", db, item]) == 0
+            shown += capsys.readouterr().out
+        assert MERCHANT in shown and AMOUNT in shown and "SENTINELCELL" in shown
+
+    def test_a_refused_review_show_repeats_nothing_it_was_given(self, workspace, capsys):
+        db = str(workspace / "ledger.db")
+        for command in setup_commands(db):
+            main(command)
+        capsys.readouterr()
+
+        assert main(["review", "show", "--db", db, MERCHANT]) == 2
+        captured = capsys.readouterr()
+        assert_clean(captured.out + captured.err)
 
     def test_the_ledger_holds_the_sentinels_so_these_checks_mean_something(
         self, workspace, capsys
@@ -267,6 +298,19 @@ class TestCliBoundary:
         monkeypatch.setattr(cli, "open_ledger", raises(sensitive()))
 
         assert main([*command, "--db", db]) == 2
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.strip() == f"Error: {UNEXPECTED_ERROR}"
+        assert_clean(captured.err + caplog.text)
+
+    def test_an_unexpected_error_in_review_show_is_a_fixed_failure(
+        self, db, capsys, caplog, monkeypatch
+    ):
+        caplog.set_level(logging.DEBUG)
+        monkeypatch.setattr(cli, "load_review_evidence", raises(sensitive()))
+
+        assert main(["review", "show", "--db", db, "some-item"]) == 2
 
         captured = capsys.readouterr()
         assert captured.out == ""

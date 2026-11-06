@@ -6,6 +6,7 @@ associations and the same review relationships.
 
 import json
 
+from personal_finance.reports.review_evidence import load_review_evidence, review_revision
 from personal_finance.reports.totals import account_movement
 
 
@@ -59,4 +60,5 @@ def semantic_view(conn):
         "transactions": transactions,
         "link_rules": rules,
         "review": relationships,
+        "revisions": sorted(review_revision(load_review_evidence(conn, issue)) for issue in issues),
     }

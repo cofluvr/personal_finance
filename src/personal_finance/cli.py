@@ -1,7 +1,7 @@
 """Command line interface.
 
 Output goes to the terminal only. Nothing here writes a log, and only the
-commands that exist to show transactions print descriptions or raw rows (D-037).
+commands that exist to show selected data print descriptions or raw rows (D-037).
 """
 
 import argparse
@@ -33,6 +33,11 @@ from personal_finance.reconcile.cross_document import (
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reports.import_summary import summarize_run
+from personal_finance.reports.review_evidence import (
+    load_review_evidence,
+    review_revision,
+    rows_sharing_a_document,
+)
 from personal_finance.reports.totals import account_movement
 
 ACCOUNT_TYPES = ("checking", "savings", "credit_card", "loan", "investment", "retirement")
@@ -78,6 +83,37 @@ FAILURE_EXPLANATIONS = {
         "the history workflow planned for M2."
     ),
 }
+
+
+RULE_EXPLANATIONS = {
+    "cross_document_candidates": "Records in different documents look alike, without proof.",
+    "cross_document_external_id": "Records share a reliable ID but cannot be merged safely.",
+    "same_document_repeated_external_id": "One external ID appears on several rows of a document.",
+    "same_document_pending_posted": (
+        "A pending row and a posted row of one document may be one event."
+    ),
+}
+
+REASON_EXPLANATIONS = {
+    "similar_description": "same amount, dates within the window, similar description",
+    "coverage_unknown": "a document's coverage is unknown",
+    "coverage_partial": "a document's coverage is partial",
+    "different_basis": "the documents state coverage on different date bases",
+    "date_outside_coverage": "the date falls outside a coverage claim",
+    "pending_not_covered": "a coverage claim says nothing about pending rows",
+    "boundary_date": "the date is too close to the end of what coverage supports",
+    "single_day_overlap": "the documents overlap by a single day",
+    "unresolved_row": "an unresolved row could affect the count",
+    "external_id_conflict": "records with this ID disagree on a material field",
+    "external_id_repeated": "this ID is repeated within a document",
+}
+
+UNRESOLVED_NOTICE = "This row created no transaction and is not included in totals."
+
+DUPLICATE_NOTICE = (
+    "These transactions stay separate and are all counted in full. Totals may be overstated, "
+    "and no exact adjustment can be stated."
+)
 
 
 class CommandError(Exception):
@@ -132,6 +168,11 @@ def build_parser() -> argparse.ArgumentParser:
     review = commands.add_parser("review", help="inspect the review queue")
     review_commands = review.add_subparsers(dest="review_command", required=True)
     command("list", review_commands, handler=run_review_list, help="list open review items")
+    show = command(
+        "show", review_commands, handler=run_review_show,
+        help="show the evidence behind one review item, including amounts and descriptions",
+    )
+    show.add_argument("item_id", help="an item ID from review list")
 
     totals = command("totals", handler=run_totals, help="show account movement")
     totals.add_argument("--account", help="account name or ID")
@@ -546,9 +587,9 @@ def run_review_list(args) -> int:
     ).fetchall()
     for issue, kind, rule, evidence, members, file_name, index in rows:
         if kind == "unresolved_record":
-            print(f"{kind}: {rule}, {file_name} row {index}")
+            print(f"Item {issue}: {kind}: {rule}, {file_name} row {index}")
             continue
-        print(f"{kind}: {rule}, {members} transactions{describe_evidence(evidence)}")
+        print(f"Item {issue}: {kind}: {rule}, {members} transactions{describe_evidence(evidence)}")
         subjects = conn.execute(
             """SELECT transaction_id FROM review_issue_subject
                WHERE review_issue_id = ? ORDER BY transaction_id""",
@@ -557,7 +598,136 @@ def run_review_list(args) -> int:
         for (transaction_id,) in subjects:
             print(f"  Transaction {transaction_id}")
     print(f"Open review items: {len(rows)}")
+    if rows:
+        print("To see an item's evidence, including amounts and descriptions, run review show.")
     return 0
+
+
+def shown(value) -> str:
+    """A value as printed, or missing. Escapes keep a cell from imitating other output."""
+    if not value:
+        return "missing"
+    text = str(value)
+    return "".join(
+        char if char.isprintable() else char.encode("unicode_escape").decode() for char in text
+    )
+
+
+def shown_amount(cents: int | None) -> str:
+    return "missing" if cents is None else format_cents(cents)
+
+
+def run_review_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    item = load_review_evidence(conn, args.item_id)
+    if item is None:
+        raise CommandError("review item not found. A later import can replace one: run review list")
+
+    print(f"Review item {item.issue_id}")
+    print(f"  Kind: {item.kind}")
+    print(f"  Rule: {item.rule}")
+    print(f"  Status: {item.status}")
+    print(f"  Revision: {review_revision(item)}")
+    print_machine_reasons(item)
+
+    shared = rows_sharing_a_document(item)
+    names = {document.content_sha256: document.file_name for document in item.documents}
+    if shared:
+        print("Records from the same document:")
+    for digest, rows in shared.items():
+        print(f"  {names[digest]}: rows {', '.join(map(str, rows))}")
+
+    for number, entry in enumerate(item.transactions, start=1):
+        print(f"Transaction {number} of {len(item.transactions)}: {entry.transaction_id}")
+        print_transaction_evidence(entry, shared)
+    for record in item.unresolved:
+        print_record_evidence(record, "unresolved, no transaction", shared)
+
+    print("Coverage evidence:")
+    for document in item.documents:
+        print_document_evidence(document)
+    if item.account_stale:
+        print(
+            "This account has not been reconciled under the current matching rules, so this "
+            "evidence may be out of date. Run reconcile."
+        )
+    return 0
+
+
+def print_machine_reasons(item) -> None:
+    print("Machine-generated reasons:")
+    print(f"  {RULE_EXPLANATIONS.get(item.rule, f'Unresolved row: {item.rule}.')}")
+    for reason in item.reasons:
+        print(f"  {reason}: {REASON_EXPLANATIONS.get(reason, 'no explanation recorded')}")
+    if item.date_start:
+        print(f"  Dates involved: {item.date_start} to {item.date_end}")
+    print(f"  {UNRESOLVED_NOTICE if item.unresolved else DUPLICATE_NOTICE}")
+
+
+def print_transaction_evidence(entry, shared) -> None:
+    print("  Current logical transaction values:")
+    print(f"    Transaction date: {shown(entry.transaction_date)}")
+    print(f"    Posting date: {shown(entry.posting_date)}")
+    print(f"    Amount: {shown_amount(entry.amount_cents)}")
+    print(f"    Status: {entry.settlement_status}")
+    print(f"    Description: {shown(entry.description)}")
+    print(f"    External ID: {shown(entry.external_id)}")
+
+    ranks = {
+        record.record_id: primary_rank(
+            record.parsed.settlement_status, record.parsed.transaction_date,
+            record.parsed.posting_date, record.parsed.description, record.content_sha256,
+            record.row,
+        )
+        for record in entry.records
+    }
+    primary = next(
+        (record for record in entry.records
+         if (record.content_sha256, record.row) == entry.primary_source),
+        None,
+    )
+    primary_id = primary.record_id if primary else None
+    print("  Primary-source selection:")
+    if primary is None:
+        print("    Not recorded. Run reconcile to record it.")
+    else:
+        print(f"    {primary.file_name} row {primary.row} supplies the values above")
+    for record in entry.records:
+        print_record_evidence(record, describe_role(record.record_id, primary_id, ranks), shared)
+
+
+def print_record_evidence(record, role, shared) -> None:
+    parsed = record.parsed
+    print(f"  Source {record.file_name}, row {record.row}")
+    print(f"    Record: {record.record_id}")
+    print(f"    Role: {role}")
+    print(f"    Link rule: {record.link_rule or 'none'}")
+    if record.content_sha256 in shared:
+        print("    Shares its document with another record in this item")
+    print(f"    Original source cells: {list(record.cells)}")
+    print("    Parsed source values:")
+    print(f"      Result: {parsed.status}{f' ({parsed.reason_code})' if parsed.reason_code else ''}")
+    print(f"      Transaction date: {shown(parsed.transaction_date)}")
+    print(f"      Posting date: {shown(parsed.posting_date)}")
+    print(f"      Amount: {shown_amount(parsed.amount_cents)}")
+    print(f"      Status: {parsed.settlement_status}")
+    print(f"      Description: {shown(parsed.description)}")
+    print(f"      External ID: {shown(parsed.external_id)}")
+
+
+def print_document_evidence(document) -> None:
+    print(f"  {document.file_name}")
+    print(f"    Document SHA-256: {document.content_sha256}")
+    print(f"    Layout: {document.layout_id}, parser version {document.parser_version}")
+    print(f"    Coverage kind: {document.coverage_kind}")
+    print(f"    Claimed interval: {shown(document.coverage_start)} to {shown(document.coverage_end)}")
+    print(f"    Date basis: {shown(document.date_basis)}")
+    print(f"    Coverage evidence: {shown(document.coverage_evidence)}")
+    print(f"    Generated on: {shown(document.generated_on)}")
+    if document.effective_end is not None:
+        print(f"    Last date matching relies on: {document.effective_end}")
+        print(f"    Pending rows: {'included' if document.pending_covered else 'excluded'}")
+    print(f"    External ID guarantee: {document.id_guarantee}")
 
 
 def run_totals(args) -> int:
