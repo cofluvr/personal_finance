@@ -8,12 +8,20 @@ For a fresh session. Written 2026-11-05. Slices 1 and 2 are provisionally accept
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `feature/m1-foundation`, local only, never pushed |
+| Branch | `feature/m1-foundation`. **Partly on GitHub: see below** |
 | Latest code commit | `c5c0991`. Run `git log -1` for the latest commit, which may be this handoff |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
 | Data | Synthetic only. Keep databases outside the repository |
+
+**Remote state.** The local reflog records a push of `c75aee0` (end of slice 1) to
+`origin/feature/m1-foundation` at 21:07:46 on 2026-11-05, which also set upstream
+tracking. No Claude session command made that push, and its source is not known.
+Commits after `c75aee0` exist only locally as far as local data shows. The remote
+was not contacted, so its current state and the repository's visibility are
+unverified. Tracked content at that commit was documentation, code and tests, with
+no CSV, PDF or database files. Do not push, and do not change the remote branch.
 
 Read first: this file, [decisions.md](decisions.md), [plan.md](plan.md),
 [layouts.md](layouts.md), [status.md](status.md). Then the code in
@@ -44,8 +52,8 @@ for complete coverage not hiding unresolved rows.
 |---|---|
 | `.venv/bin/python -m pytest` at `c5c0991` | **411 passed** |
 | Scenario tests repeated 5 times, including concurrency | All passed (at 406 tests, before the last 5 were added) |
-| Deliberate breaks in a throwaway copy, slice 1 | 30 valid breaks, all caught after fixing two test gaps |
-| Deliberate breaks in a throwaway copy, slice 2 | 51 breaks, all caught after adding tests for three survivors |
+| Deliberate breaks in a throwaway copy, slice 1 | 26 distinct breaks, all caught after fixing two test gaps |
+| Deliberate breaks in a throwaway copy, slice 2 | 50 distinct breaks, all caught after adding tests for three survivors |
 | README example, in zsh and `sh` | Totals correct. The final `trace` line was run separately, not in this script |
 
 Not executed: a fresh install from `requirements-dev.txt`, because it needs network
