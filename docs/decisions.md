@@ -446,7 +446,8 @@ the direct regression test.
 - A retired ID's `created_at` is kept in `transaction_identity_history`, separate from
   source moves, and a revival restores it exactly. An ID retired before migration 0004
   has no such record, so it takes the timestamp of its first record's link, written in
-  the same import.
+  the same import. That is a fallback and not an exact creation time: `trace` labels it
+  approximate, and no precision is claimed for it.
 
 ## D-030 Displayed values of a merged transaction — Approved, implemented in slice 3
 
@@ -525,6 +526,9 @@ datasets. They are measured by `tests/benchmarks/measure_reconciliation.py` and 
 deliberately not test assertions, because wall-clock checks would be flaky.
 
 The quadratic stress cases stay documented as known limitations.
+
+Acceptance of A39 is limited to those fixtures. Nothing merges in them, so the cost of
+applying many merges is not yet measured (see "Backlog benchmarks" in [plan.md](plan.md)).
 
 ## D-035 Migration is explicit — Approved
 

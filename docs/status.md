@@ -6,7 +6,7 @@ Last updated: 2026-11-05. Branch: `feature/m1-foundation`. The owner pushed `c75
 |---|---|
 | M1 slice 1: scaffolding, money, schema, migrations | Complete, provisionally accepted |
 | M1 slice 2: synthetic layouts, coverage, provenance, idempotent import | Complete, provisionally accepted |
-| M1 slice 3: cross-document duplicate handling | Provisionally accepted, closeout fixes complete, awaiting final acceptance |
+| M1 slice 3: cross-document duplicate handling | Accepted, with follow-up F1 open (see [handoff.md](handoff.md)) |
 | M1 slice 4: import summaries, log checks, entry point, setup documentation | Not started |
 | M2 to M8 | Not started |
 
@@ -118,7 +118,11 @@ merges at once.
 - Long runs of repeated purchases become several overlapping review items. Reviewing
   them as a group arrives in M2.
 - A transaction merged before migration 0004 shows no primary source until its account is
-  next reconciled, and a revived ID retired before 0004 uses its link timestamp.
+  reconciled. **The account still reads as current meanwhile, so nothing prompts that**
+  (follow-up F1). Run `reconcile` to repair it.
+- An ID retired before migration 0004 has no stored `created_at`. If revived, it uses its
+  first record's link time. `trace` labels that as approximate, but the column itself
+  carries no marker (follow-up F2).
 - A multi-step upgrade is atomic per step, not as a whole. After a failure the ledger stays
   at the last good version, and commands refuse it until `migrate` succeeds.
 - Coverage cannot be changed after import. A file imported with unknown coverage

@@ -146,6 +146,15 @@ it end to end.
 M1 is finished when all tests pass, a new-setup run works from the README, and
 the decision log records the database, parser and deduplication rules.
 
+## Backlog benchmarks
+
+Not scheduled, and not part of A39 acceptance.
+
+- **Merge-heavy overlapping exports:** complete overlapping exports with confirmed
+  coverage, so that most rows merge. Measure reconciliation computation and database
+  application separately, because the fixtures behind D-034 merge nothing and so never
+  exercise link, history and retirement writes at scale.
+
 ## Phase 1B backlog
 
 Recorded for later planning. None of this is in M1 scope.
