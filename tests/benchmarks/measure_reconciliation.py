@@ -25,7 +25,7 @@ from synthetic_ledger import dense_rows, full_reexports, ordinary_rows, variant_
 from personal_finance.db.migrate import connect, create_database
 from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1
 from personal_finance.ingest.pipeline import import_files
-from personal_finance.reconcile.apply import _load_evidence
+from personal_finance.reconcile.apply import load_evidence
 from personal_finance.reconcile.cross_document import derive
 from personal_finance.reconcile.rules import DEFAULT_RULES
 
@@ -58,7 +58,7 @@ def run(shape: str, files: list[str]) -> None:
             import_seconds.append(time.perf_counter() - started)
             assert result.outcome == "imported", result
 
-        documents, records, unresolved, _ = _load_evidence(conn, "acct")
+        documents, records, unresolved, _ = load_evidence(conn, "acct")
         started = time.perf_counter()
         derivation = derive(documents, records, unresolved, DEFAULT_RULES)
         derive_seconds = time.perf_counter() - started
