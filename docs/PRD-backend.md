@@ -510,6 +510,34 @@ Outputs:
 - Debt and net-worth effects.
 - Assumptions and missing inputs.
 
+### Scenario Inputs and Comparison
+
+The local UI must let the user create a named scenario and enter dated changes to income and expenses, including raises, bonuses, recurring bills, annual expenses, and one-time purchases.
+
+Each input must distinguish:
+
+- Amount.
+- Effective date or date range.
+- One-time versus recurring.
+- Replacement of an existing planned item versus an additional item.
+- Confirmed versus uncertain.
+- Take-home/after-tax versus gross, where applicable.
+
+After the user requests recalculation, compare the scenario with the baseline and show both absolute values and differences for:
+
+- Monthly cash flow.
+- Daily and weekly spending allowances.
+- Required savings.
+- Savings-goal completion dates.
+- Debt balances and net worth.
+- Cash shortfalls and unmet goals.
+
+Requirements:
+
+- Prevent double-counting existing income or expenses when a scenario changes them.
+- Scenarios must not alter actual transactions.
+- Promoting a scenario into the active plan requires explicit confirmation.
+
 ## 16. Lightweight Tax Reserve
 
 - User configures a reserve percentage.

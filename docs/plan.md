@@ -145,3 +145,12 @@ it end to end.
 
 M1 is finished when all tests pass, a new-setup run works from the README, and
 the decision log records the database, parser and deduplication rules.
+
+## Phase 1B backlog
+
+Recorded for later planning. None of this is in M1 scope.
+
+- **Financial scenarios:** a local UI for named scenarios with dated income and
+  expense changes, compared with the baseline after the user requests
+  recalculation. Inputs, comparison outputs and safeguards are in
+  [PRD-backend.md](PRD-backend.md) §15, "Scenario Inputs and Comparison".
