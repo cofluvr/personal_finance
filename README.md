@@ -162,3 +162,10 @@ pf trace --db "$DB" TRANSACTION_ID
 # Importing reconciles the account. This does the same without a new file.
 pf reconcile --db "$DB"
 ```
+
+After updating the code, an older ledger must be upgraded before use. Commands refuse it and change nothing until then. `migrate` upgrades the schema, and `reconcile` then updates how transactions are grouped.
+
+```sh
+pf migrate --db "$DB"
+pf reconcile --db "$DB"
+```

@@ -359,6 +359,10 @@ goes to the unresolved queue, and only a document-level problem fails the file.
 
 Failure codes and reason codes never contain file contents.
 
+Reconciliation runs inside that same transaction, so a lost lock or a blocked commit
+leaves no partial import and no partial reconciliation. `database_busy` is reported as a
+failure with what to do next, and retrying completes the work (Approved for now, D-034).
+
 ## D-024 Coverage is not extraction — Approved
 
 Complete source coverage does not mean every row was parsed successfully. Coverage
@@ -439,6 +443,10 @@ the direct regression test.
 - Source grouping is deterministic for a given set of documents and rules, and can
   change as documents arrive. This is separate from public ID stability.
 - Applying merges and splits is atomic with the import.
+- A retired ID's `created_at` is kept in `transaction_identity_history`, separate from
+  source moves, and a revival restores it exactly. An ID retired before migration 0004
+  has no such record, so it takes the timestamp of its first record's link, written in
+  the same import.
 
 ## D-030 Displayed values of a merged transaction — Approved, implemented in slice 3
 
@@ -446,6 +454,12 @@ A merged transaction shows all its values from one primary source record, chosen
 deterministically, with no mixing of fields between records. It may show `posted`
 when its primary source is posted. An `unknown` source status stays unchanged in
 `record_parse` and `trace`. Pending-to-posted reconciliation remains M2.
+
+The primary source is chosen by, in order: settlement status (posted, then unknown, then
+pending), more dates present, having a description, then lowest document hash and row
+number. It is stored as `primary_source_record_id`, and `trace` names it and says which
+criterion each alternative lost on. A transaction merged before migration 0004 has no
+recorded primary until its account is next reconciled, and the backfill does not guess.
 
 ## D-031 Candidate grouping — Approved as an initial heuristic, implemented in slice 3
 
@@ -499,15 +513,28 @@ BERKELEY`.
 - `reconcile` covers accounts with no new file, and `totals` discloses accounts that
   are not current.
 
-## D-034 Reconciliation performance — Default, proposed target awaiting approval
+## D-034 Reconciliation performance — Approved as provisional benchmarks
 
-Whole-account re-derivation after each import is accepted initially, subject to
-measurement. Measured figures and their limits are in [status.md](status.md).
+Whole-account re-derivation after each import stays for now, and so does holding the
+write lock through it. Neither locking nor matching was redesigned.
 
-Proposed target for A39, from those measurements: at about 100,000 rows in one account,
-one import stays under 10 seconds, and 24 monthly imports stay under 2 minutes in
-total. No target is proposed for the stress shapes, because their cost does not follow
-row count alone.
+Provisional A39 benchmarks: under 10 seconds for one import, and under 2 minutes for the
+24-import sequence. They apply only to the documented ordinary and dense fixtures of
+about 100,000 rows on the machine recorded in [status.md](status.md), not to arbitrary
+datasets. They are measured by `tests/benchmarks/measure_reconciliation.py` and are
+deliberately not test assertions, because wall-clock checks would be flaky.
+
+The quadratic stress cases stay documented as known limitations.
+
+## D-035 Migration is explicit — Approved
+
+- `migrate` upgrades the schema and its required metadata. It never changes transaction
+  grouping. `reconcile` updates grouping. The two stay separate.
+- Read commands open the ledger read-only and never upgrade it. Every other command also
+  refuses an outdated schema. Each explains how to migrate and changes nothing.
+- Each migration step is atomic. If one fails it leaves no changes, steps before it stay
+  applied, and running `migrate` again resumes.
+- A migration that has been committed is not edited, because edits are not detected.
 
 ## Not yet decided
 

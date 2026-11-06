@@ -1,8 +1,9 @@
 # Session Handoff: After M1 Slice 3
 
 For a fresh session. Written 2026-11-05. Slices 1 and 2 are provisionally accepted.
-**Slice 3 is complete and awaiting the owner's review.** Do not start slice 4 or M2
-until the owner says so. Its design decisions are D-026 to D-034.
+**Slice 3 is provisionally accepted, with its closeout fixes complete, and awaits final
+acceptance.** Do not start slice 4 or M2 until the owner says so. Its design decisions
+are D-026 to D-035.
 
 ## Current state
 
@@ -54,15 +55,23 @@ history and the reconciliation marker. Adds the `reconcile` command, and replace
 old overlap notice with accurate disclosure.
 
 **Found while building slice 3:** the CLI never applied migrations to an existing
-ledger, so `open_ledger` now does. The first A16 generator never produced a split and
-almost no exact pairs, so focused generators and an exhaustive split test were added.
+ledger. The first A16 generator never produced a split and almost no exact pairs, so
+focused generators and an exhaustive split test were added.
+
+**Slice 3 closeout:** migration is an explicit `migrate` command, and read commands are
+read-only and explain an outdated schema (D-035). Migration `0004` preserves a retired
+ID's `created_at` for revival and records the primary source, which `trace` now names and
+explains. `database_busy` was verified, including a commit blocked after reconciliation.
 
 ## Tests actually executed
 
 | Check | Result |
 |---|---|
-| `.venv/bin/python -m pytest` at the end of slice 3 | **604 passed** |
-| Scenario tests repeated 5 times, slice 3 | 177 passed each time |
+| `.venv/bin/python -m pytest` after the closeout | **640 passed** |
+| Scenario tests repeated 3 times after the closeout | 212 passed each time |
+| Targeted deliberate breaks, closeout | 22 breaks, all caught, after closing 3 test gaps |
+| `.venv/bin/python -m pytest` at the end of slice 3, before the closeout | 604 passed |
+| Scenario tests repeated 5 times, before the closeout | 177 passed each time |
 | A16, one-off runs of 3,000 examples of each generator | All passed. Focused run reached 1,650 exact merges and 700 boundary-date reasons, but only 1 split, which the exhaustive test covers |
 | Deliberate breaks in a throwaway copy, slice 3 | 69 distinct breaks, all caught, after closing 8 test gaps and removing one rank term that could never decide anything |
 | Reconciliation measurements | See [status.md](status.md) |
@@ -118,15 +127,15 @@ may not survive.
 | Candidate grouping | Connected groups, bounded by fixed calendar blocks, counted as distinct transactions | D-031 |
 | Similarity | Candidate evidence only, with known limits | D-032 |
 | Rule versions | Fingerprint of the effective configuration per account | D-033 |
-| Performance target | **Proposed, not approved** | D-034 |
+| Performance | Provisional benchmarks for the documented fixtures only. Current locking stays. Not test assertions | D-034 |
+| Migration | Explicit, and separate from reconciliation. Read commands stay read-only | D-035 |
 
 ## Awaiting the owner
 
-- Review of slice 3.
-- Approval or change of the A39 target proposed in D-034.
-- Whether any commit since `c75aee0` is pushed. Nothing has been pushed by a session.
+- Final acceptance of slice 3.
+- Pushing. Not authorized. Nothing since `c75aee0` has been pushed.
 
-Next after review, if approved: slice 4 in [plan.md](plan.md). Pending-to-posted
+Next after acceptance, if approved: slice 4 in [plan.md](plan.md). Pending-to-posted
 reconciliation and resolving review items remain M2, and transfers remain M3.
 
 ## Permission approvals to renew

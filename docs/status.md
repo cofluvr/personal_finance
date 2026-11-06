@@ -6,7 +6,7 @@ Last updated: 2026-11-05. Branch: `feature/m1-foundation`. The owner pushed `c75
 |---|---|
 | M1 slice 1: scaffolding, money, schema, migrations | Complete, provisionally accepted |
 | M1 slice 2: synthetic layouts, coverage, provenance, idempotent import | Complete, provisionally accepted |
-| M1 slice 3: cross-document duplicate handling | Complete, awaiting review |
+| M1 slice 3: cross-document duplicate handling | Provisionally accepted, closeout fixes complete, awaiting final acceptance |
 | M1 slice 4: import summaries, log checks, entry point, setup documentation | Not started |
 | M2 to M8 | Not started |
 
@@ -14,8 +14,8 @@ Last updated: 2026-11-05. Branch: `feature/m1-foundation`. The owner pushed `c75
 
 - `personal_finance.money`: exact parsing and formatting of amounts.
 - `personal_finance.db.migrate`: database creation, connections, migrations.
-- Migrations `0001_initial`, `0002_block_replace` and `0003_reconciliation`. The CLI
-  applies outstanding migrations whenever it opens a ledger.
+- Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation` and
+  `0004_identity_and_primary`, applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
 - `personal_finance.reconcile.same_document`: flags possible duplicates within one
@@ -27,7 +27,7 @@ Last updated: 2026-11-05. Branch: `feature/m1-foundation`. The owner pushed `c75
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement.
-- CLI: `init`, `account add`, `import`, `reconcile`, `documents`, `transactions`,
+- CLI: `init`, `migrate`, `account add`, `import`, `reconcile`, `documents`, `transactions`,
   `trace`, `review list`, `totals`.
 
 ## What does not exist yet
@@ -43,40 +43,57 @@ Partly proven, with more to come in slice 4: A17 (counts shown, full check in sl
 A18 (CLI output checked; no logging exists yet), A25 (`totals` checked; re-check at
 slice 4).
 
-A39 has no approved time target yet. D-034 proposes one.
+A39 has provisional benchmarks, met by the figures below (D-034).
 
 The security controls proposal is **not applied** and provides no protection
 (D-025).
 
 ## Reconciliation measurements
 
-From `tests/benchmarks/measure_reconciliation.py`, on this machine, 2026-11-05. All rows
-are in one account with unknown coverage, so every overlap is compared. Each file
-repeats 10% of the month before.
+Measured 2026-11-05 with `tests/benchmarks/measure_reconciliation.py`.
 
-| Shape | Rows | Files | First import | Last import | All imports | Candidate steps |
+**Machine:** Mac14,7 with an Apple M2, 8 cores, 8 GB memory, macOS 27.2, Python 3.12.6,
+SQLite 3.45.3. Other work on the machine was not controlled.
+
+**Fixtures:** one account, `synthetic_card_v1`, unknown coverage, 24 monthly files. Each
+later file repeats the last 10% of the month before.
+
+| Fixture | Parameters |
+|---|---|
+| Ordinary | Seed 7, 400 merchants, random amounts from 1.00 to 199.99, random day in the month |
+| Dense | One merchant, one amount (5.00), rows spread evenly over 30 days |
+
+**What a timing covers:** one `import_files` call, which reads and parses the file,
+writes records, reconciles the account and commits. Setup is excluded: generating data,
+writing the CSV files and creating the database.
+
+| Fixture | Rows a month | Source records | Logical transactions | Last import | Slowest import | All 24 imports |
 |---|---|---|---|---|---|---|
-| Ordinary | 5,260 | 24 | 0.02s | 0.14s | 1.83s | 464 |
-| Ordinary | 26,300 | 24 | 0.06s | 0.84s | 11.39s | 2,341 |
-| Ordinary | 105,200 | 24 | 0.30s | 4.68s | 62.41s | 9,894 |
-| Dense, one merchant and amount | 5,260 | 24 | 0.01s | 0.14s | 1.80s | 63,201 |
-| Dense, one merchant and amount | 26,300 | 24 | 0.06s | 1.12s | 13.44s | 319,317 |
-| Dense, one merchant and amount | 105,200 | 24 | 0.32s | 6.52s | 77.03s | 1,272,777 |
-| 500 spellings, one block | 105,200 | 24 | 0.48s | 4.56s | 68.99s | 1,219,200 |
+| Ordinary | 200 | 5,260 | 5,260 | 0.14s | 0.14s | 1.84s |
+| Ordinary | 1,000 | 26,300 | 26,300 | 0.90s | 0.90s | 11.44s |
+| Ordinary | 4,000 | 105,200 | 105,200 | 4.92s | 4.92s | 61.34s |
+| Dense | 200 | 5,260 | 5,260 | 0.16s | 0.16s | 2.03s |
+| Dense | 1,000 | 26,300 | 26,300 | 1.16s | 1.18s | 14.19s |
+| Dense | 4,000 | 105,200 | 105,200 | 5.32s | 5.57s | 67.74s |
 
-- Each import re-derives the account, so its cost grows with account size, and total
-  cost across a series of imports grows faster than the row count.
-- Stress, full re-exports of 2,000 dense rows: 6 files 2.47s in total, 12 files 8.07s,
-  24 files 31.40s. Steps were 59,985, 263,934 and 1,103,724, so work grows about 4 times
-  each time the file count doubles. **This shape is quadratic in overlapping files.**
-- Stress, 12 re-exports of 8,000 dense rows: 96,000 rows, last import 5.54s, 38.65s in
-  total.
-- Stress, distinct spellings of one amount in one similarity block, derivation alone:
-  1,000 took 0.45s, 2,000 took 1.85s, 5,000 took 10.24s, 10,000 took 40.72s. **This is
-  quadratic in distinct spellings.** It needs one amount and one first-token prefix
-  across thousands of spellings, which is not expected, but nothing prevents it.
-- These are measurements of these shapes, not general guarantees. The expected dataset
-  of about 100,000 rows across 30 accounts is nearer the smallest rows above.
+The 4,000-row fixtures meet the D-034 benchmarks.
+
+Unknown coverage means nothing merges, so source records equal logical transactions.
+These fixtures therefore measure candidate discovery, not the cost of applying many
+merges at once.
+
+**Known stress limitations, which are not covered by the benchmarks:**
+
+- Full re-exports of 2,000 dense rows: 6 files took 2.48s in total, 12 files 8.04s and 24
+  files 32.38s. Candidate steps were 59,985, 263,934 and 1,103,724, so work grows about 4
+  times each time the file count doubles. **This is quadratic in overlapping files.**
+- 12 re-exports of 8,000 dense rows: 96,000 records, slowest import 6.09s, 39.45s in total.
+- Distinct spellings of one amount in one similarity block, derivation alone, measured
+  before the closeout, which did not change this code: 1,000 took 0.45s, 2,000 took
+  1.85s, 5,000 took 10.24s and 10,000 took 40.72s. **This is quadratic in distinct
+  spellings.** It is not expected in practice, but nothing prevents it.
+- These are measurements of these shapes, not general guarantees. The expected dataset of
+  about 100,000 rows across 30 accounts is nearer the smallest rows above.
 
 ## Known limitations
 
@@ -87,7 +104,10 @@ repeats 10% of the month before.
 - Users cannot undo merges until M2. Automatic moves are recorded in
   `transaction_link_history`, and automatic splits happen only for machine-made merges.
 - Import holds the write lock through reconciliation. At about 100,000 rows in one
-  account that exceeds the 5-second wait, so a concurrent writer reports `database_busy`.
+  account that can exceed the 5-second wait, so a concurrent writer reports
+  `database_busy`. It explains what to do, leaves nothing partial, and a retry succeeds.
+- `reconcile` across all accounts commits each account separately. If it stops at a busy
+  ledger, accounts already reported stay reconciled and the rest are untouched.
 - An ID-bearing row against an ID-less row can only be a possible duplicate, so such
   overlaps stay flagged and counted twice. Revisit for CSV-to-PDF matching (M7).
 - Similarity has known misses and false positives (D-032). A miss on rows without
@@ -97,10 +117,10 @@ repeats 10% of the month before.
   confident ID-less pairing for its document.
 - Long runs of repeated purchases become several overlapping review items. Reviewing
   them as a group arrives in M2.
-- A revived transaction ID gets a new `created_at`. `trace` shows every source but does
-  not mark which one supplied the displayed values.
-- Reading commands also apply outstanding migrations, so they can write once after an
-  upgrade.
+- A transaction merged before migration 0004 shows no primary source until its account is
+  next reconciled, and a revived ID retired before 0004 uses its link timestamp.
+- A multi-step upgrade is atomic per step, not as a whole. After a failure the ledger stays
+  at the last good version, and commands refuse it until `migrate` succeeds.
 - Coverage cannot be changed after import. A file imported with unknown coverage
   cannot be declared complete later. The attempt fails with `coverage_conflict`,
   existing data stays unchanged, and the message explains the limitation. M2 adds
