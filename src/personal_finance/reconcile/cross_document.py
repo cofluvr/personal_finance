@@ -31,6 +31,14 @@ GUARANTEE_STABLE_UNIQUE = "stable_unique"
 
 _STATUS_RANK = {"posted": 0, "unknown": 1, "pending": 2}
 
+# How the source supplying a transaction's displayed values is chosen, in order (D-030).
+PRIMARY_CRITERIA = (
+    "settlement status (posted, then unknown, then pending)",
+    "more dates present",
+    "has a description",
+    "lowest document hash, then row number",
+)
+
 
 @dataclass(frozen=True)
 class Document:
@@ -508,13 +516,29 @@ def _group(rows, rule, documents) -> TransactionGroup:
 
 
 def _primary_rank(row: Record, documents):
-    """Depends only on the record itself, so import order cannot affect the choice."""
-    dates = (row.transaction_date is not None) + (row.posting_date is not None)
-    return (
-        _STATUS_RANK[row.settlement_status],
-        -dates,
-        not row.description,
-        _record_key(row, documents),
+    return primary_rank(
+        row.settlement_status,
+        row.transaction_date,
+        row.posting_date,
+        row.description,
+        documents[row.document_id].content_sha256,
+        row.row_index,
+    )
+
+
+def primary_rank(status, transaction_date, posting_date, description, content_sha256, row_index):
+    """Order sources for display, lowest first, one term per entry of PRIMARY_CRITERIA.
+
+    Depends only on the record itself, so import order cannot affect the choice.
+    """
+    dates = (transaction_date is not None) + (posting_date is not None)
+    return (_STATUS_RANK[status], -dates, not description, (content_sha256, row_index))
+
+
+def deciding_criterion(chosen, other) -> str:
+    """The first criterion on which a chosen source beat another."""
+    return next(
+        text for mine, theirs, text in zip(chosen, other, PRIMARY_CRITERIA) if mine != theirs
     )
 
 

@@ -25,6 +25,11 @@ from personal_finance.ingest.layouts import LAYOUTS
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.money import format_cents
 from personal_finance.reconcile.apply import reconcile_account
+from personal_finance.reconcile.cross_document import (
+    PRIMARY_CRITERIA,
+    deciding_criterion,
+    primary_rank,
+)
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reports.totals import account_movement, accounts_not_current
 
@@ -35,7 +40,16 @@ MATCHING_NOTICE = (
     "Other duplicates can go undetected, for example where descriptions differ."
 )
 
+BUSY_EXPLANATION = (
+    "database is busy: another process is using the ledger. The step that failed changed "
+    "nothing. Wait for that process to finish, then run this command again."
+)
+
 FAILURE_EXPLANATIONS = {
+    "database_busy": (
+        "Another process held the ledger, so this file was not imported and nothing from it "
+        "was kept. Wait for that process to finish, then import the file again."
+    ),
     "account_mismatch": (
         "This exact file is already imported for a different account, so it was not linked to "
         "the requested account. The existing import is unchanged."
@@ -331,14 +345,15 @@ def run_transactions(args) -> int:
 def run_trace(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     transaction = conn.execute(
-        """SELECT transaction_date, posting_date, amount_cents, settlement_status, description
+        """SELECT transaction_date, posting_date, amount_cents, settlement_status, description,
+                  primary_source_record_id
            FROM ledger_transaction WHERE id = ?""",
         (args.transaction_id,),
     ).fetchone()
     if transaction is None:
         return trace_retired(conn, args.transaction_id)
 
-    transaction_date, posting_date, cents, status, description = transaction
+    transaction_date, posting_date, cents, status, description, primary_id = transaction
     print(f"Transaction {args.transaction_id}")
     print(f"  Transaction date: {transaction_date or 'missing'}")
     print(f"  Posting date: {posting_date or 'missing'}")
@@ -349,7 +364,8 @@ def run_trace(args) -> int:
     sources = conn.execute(
         """SELECT document.file_name, document.content_sha256, document.layout_id,
                   record.id, record.record_index, record.raw_json, link.link_rule,
-                  parse.settlement_status, origin.original_transaction_id
+                  parse.settlement_status, origin.original_transaction_id,
+                  parse.transaction_date, parse.posting_date, parse.description
            FROM transaction_source link
            JOIN source_record record ON record.id = link.source_record_id
            JOIN source_document document ON document.id = link.source_document_id
@@ -361,18 +377,40 @@ def run_trace(args) -> int:
            ORDER BY document.imported_at""",
         (args.transaction_id,),
     ).fetchall()
+
+    ranks = {
+        source[3]: primary_rank(source[7], source[9], source[10], source[11], source[1], source[4])
+        for source in sources
+    }
     print("Current sources:")
-    for name, digest, layout_id, record_id, index, raw_json, rule, status, original in sources:
+    for (name, digest, layout_id, record_id, index, raw_json, rule, source_status, original,
+         *_) in sources:
         print(f"Source {name}, row {index}")
         print(f"  Document SHA-256: {digest}")
         print(f"  Layout: {layout_id}")
         print(f"  Record: {record_id}")
         print(f"  Link rule: {rule}")
-        print(f"  Source status: {status}")
+        print(f"  Role: {describe_role(record_id, primary_id, ranks)}")
+        print(f"  Source status: {source_status}")
         print(f"  Original transaction: {original or 'unknown'}")
         print(f"  Original row: {json.loads(raw_json)}")
+
+    if primary_id is None:
+        print("Displayed values: source not recorded. Run reconcile to record it.")
+    elif len(sources) > 1:
+        print(f"Displayed values come from record {primary_id}, chosen by, in order:")
+        for number, criterion in enumerate(PRIMARY_CRITERIA, start=1):
+            print(f"  {number}. {criterion}")
     print_history(conn, args.transaction_id)
     return 0
+
+
+def describe_role(record_id, primary_id, ranks) -> str:
+    if primary_id is None:
+        return "not recorded"
+    if record_id == primary_id:
+        return "primary, supplies the displayed values"
+    return f"alternative, not selected on: {deciding_criterion(ranks[primary_id], ranks[record_id])}"
 
 
 def print_history(conn, transaction_id) -> None:
@@ -390,6 +428,16 @@ def print_history(conn, transaction_id) -> None:
         print("Historical moves (not current membership):")
     for created_at, action, reason, record_id, source, target in moves:
         print(f"  {created_at} {action}: record {record_id} moved from {source} to {target} ({reason})")
+
+    events = conn.execute(
+        """SELECT created_at, event, reason, transaction_created_at
+           FROM transaction_identity_history WHERE transaction_id = ? ORDER BY id""",
+        (transaction_id,),
+    ).fetchall()
+    if events:
+        print("Identity history:")
+    for created_at, event, reason, original_created_at in events:
+        print(f"  {created_at} {event} ({reason}), first created {original_created_at}")
 
 
 def trace_retired(conn, transaction_id) -> int:
@@ -496,6 +544,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {error}", file=sys.stderr)
         return 2
     except sqlite3.OperationalError as error:
-        reason = "database is busy" if "locked" in str(error) else "database error"
+        reason = BUSY_EXPLANATION if "locked" in str(error) else "database error"
         print(f"Error: {reason}", file=sys.stderr)
         return 2

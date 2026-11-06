@@ -7,6 +7,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -39,7 +40,8 @@ JANUARY = ("2026-01-01", "2026-01-31", "posting")
 ALL_TABLES = (
     "source_document", "document_coverage", "document_interpretation", "source_record",
     "record_parse", "source_record_origin", "ledger_transaction", "transaction_source",
-    "transaction_link_history", "review_issue", "review_issue_subject",
+    "transaction_link_history", "transaction_identity_history", "review_issue",
+    "review_issue_subject",
     "account_reconciliation",
 )
 
@@ -384,6 +386,28 @@ class TestProvenance:
         ).fetchone() == ("FULLER NAME", "2026-01-09", "posted")
 
 
+class TestPrimarySource:
+    def test_every_transaction_records_a_primary_among_its_own_sources(self, conn, checking, card):
+        checking("a.csv", "S-1,,2026-01-10,SYNTHETIC CAFE,-5.00,", "S-2,,2026-01-11,X,-1.00,")
+        checking("b.csv", "S-1,2026-01-09,2026-01-10,FULLER NAME,-5.00,POSTED")
+        assert conn.execute(
+            """SELECT COUNT(*) FROM ledger_transaction entry
+               WHERE NOT EXISTS (SELECT 1 FROM transaction_source link
+                                 WHERE link.transaction_id = entry.id
+                                   AND link.source_record_id = entry.primary_source_record_id)"""
+        ).fetchone() == (0,)
+
+    def test_displayed_values_equal_the_primary_records_parse(self, conn, checking):
+        checking("a.csv", "S-1,,2026-01-10,SYNTHETIC CAFE,-5.00,")
+        checking("b.csv", "S-1,2026-01-09,2026-01-10,FULLER NAME,-5.00,POSTED")
+        assert conn.execute(
+            """SELECT entry.description = parse.description,
+                      entry.settlement_status = parse.settlement_status
+               FROM ledger_transaction entry
+               JOIN record_parse parse ON parse.source_record_id = entry.primary_source_record_id"""
+        ).fetchall() == [(1, 1)]
+
+
 class TestSplits:
     unknown = "S-1,2026-01-09,,SYNTHETIC CAFE,-5.00,"
     posted_one = "S-1,2026-01-09,2026-01-10,SYNTHETIC CAFE,-5.00,POSTED"
@@ -420,6 +444,82 @@ class TestSplits:
         assert conn.execute(
             "SELECT posting_date FROM ledger_transaction WHERE id = ?", (retired,)
         ).fetchone() == ("2026-01-10",)
+
+    def test_identity_survives_merge_retirement_split_and_revival(self, conn, checking):
+        checking("a.csv", self.unknown)
+        checking("b.csv", self.posted_one)
+        retired, = conn.execute(
+            "SELECT from_transaction_id FROM transaction_link_history"
+        ).fetchone()
+        (retirement,) = conn.execute(
+            """SELECT event, reason, transaction_created_at FROM transaction_identity_history
+               WHERE transaction_id = ?""",
+            (retired,),
+        ).fetchall()
+        assert retirement[:2] == ("retired", "reliable_external_id")
+        original_created_at = retirement[2]
+        assert conn.execute("SELECT 1 FROM ledger_transaction WHERE id = ?", (retired,)).fetchone() is None
+
+        time.sleep(0.01)
+        checking("c.csv", self.posted_two)
+
+        assert conn.execute(
+            "SELECT created_at FROM ledger_transaction WHERE id = ?", (retired,)
+        ).fetchone() == (original_created_at,)
+        assert conn.execute(
+            """SELECT event, reason, transaction_created_at FROM transaction_identity_history
+               WHERE transaction_id = ? ORDER BY id""",
+            (retired,),
+        ).fetchall() == [
+            ("retired", "reliable_external_id", original_created_at),
+            ("revived", "external_id_conflict", original_created_at),
+        ]
+
+    def test_an_id_retired_again_keeps_its_timestamp(self, conn, card, tmp_path):
+        strict = replace(DEFAULT_RULES, similarity_threshold_percent=76)
+        row = cafe(description="BLUE BOTTLE COFFEE OAKLAND")
+        first = tmp_path / "a.csv"
+        second = tmp_path / "b.csv"
+        first.write_text(CARD_HEADER + row + "\n01/10/2026,BLUE BOTTLE COFFEE BERKELEY,,\n", encoding="utf-8")
+        second.write_text(CARD_HEADER + row + "\n", encoding="utf-8")
+        declared = declare_complete(*JANUARY)
+        for path in (first, second):
+            import_files(conn, [path], account_id="acct", layout=SYNTHETIC_CARD_V1,
+                         declared_coverage=declared)
+        original = dict(conn.execute("SELECT id, created_at FROM ledger_transaction"))
+        assert len(original) == 2
+
+        for rules in (strict, DEFAULT_RULES, strict, DEFAULT_RULES):
+            conn.execute("BEGIN IMMEDIATE")
+            reconcile_account(conn, "acct", rules)
+            conn.execute("COMMIT")
+
+        assert dict(conn.execute("SELECT id, created_at FROM ledger_transaction")) == original
+        events = conn.execute(
+            "SELECT event FROM transaction_identity_history ORDER BY id"
+        ).fetchall()
+        assert events == [("retired",), ("revived",), ("retired",), ("revived",)]
+
+    def test_an_id_retired_before_identity_history_uses_its_link_timestamp(self, conn, checking):
+        checking("a.csv", self.unknown)
+        checking("b.csv", self.posted_one)
+        conn.executescript(
+            """DROP TRIGGER transaction_identity_history_no_delete;
+               DELETE FROM transaction_identity_history;"""
+        )
+        link_time = conn.execute(
+            """SELECT link.created_at FROM transaction_source link
+               JOIN transaction_link_history history
+                   ON history.source_record_id = link.source_record_id"""
+        ).fetchone()
+        checking("c.csv", self.posted_two)
+
+        retired, = conn.execute(
+            "SELECT from_transaction_id FROM transaction_link_history ORDER BY id LIMIT 1"
+        ).fetchone()
+        assert conn.execute(
+            "SELECT created_at FROM ledger_transaction WHERE id = ?", (retired,)
+        ).fetchone() == link_time
 
     def test_the_split_outcome_matches_never_having_merged(self, conn, checking, tmp_path):
         checking("a.csv", self.unknown)
@@ -617,6 +717,90 @@ import_files(connect(Path(sys.argv[1])), [Path(sys.argv[2])], account_id="acct",
         conn.close()
 
 
+class TestBusyDatabase:
+    """A lost lock must leave nothing behind, and a retry must complete the work."""
+
+    @pytest.fixture(autouse=True)
+    def run_row(self, conn):
+        conn.execute("INSERT INTO import_run (id) VALUES ('run')")
+
+    @pytest.fixture
+    def overlap(self, conn, card, tmp_path):
+        card("a.csv", cafe(), declared=JANUARY)
+        path = tmp_path / "b.csv"
+        path.write_text(CARD_HEADER + cafe() + "\n" + cafe("01/20/2026", "2.00") + "\n", encoding="utf-8")
+        return path
+
+    def attempt(self, db_path, path, declared=None):
+        """Import with almost no patience. The caller closes the returned connection."""
+        blocked = connect(db_path)
+        blocked.execute("PRAGMA busy_timeout = 50")
+        return blocked, pipeline._import_file(
+            blocked, "run", path, "acct", SYNTHETIC_CARD_V1, declared
+        )
+
+    def assert_retry_completes(self, conn, path):
+        (retried,) = import_files(
+            conn, [path], account_id="acct", layout=SYNTHETIC_CARD_V1,
+            declared_coverage=declare_complete(*JANUARY),
+        )
+        assert (retried.outcome, retried.matched_records) == ("imported", 1)
+        assert transactions(conn) == 2
+        assert is_current(conn, "acct", DEFAULT_RULES)
+
+    def test_a_blocked_write_lock_fails_cleanly(self, conn, db_path, overlap):
+        before = dump(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        blocked, result = self.attempt(db_path, overlap, declare_complete(*JANUARY))
+        conn.execute("COMMIT")
+
+        assert (result.outcome, result.failure_code) == ("failed", "database_busy")
+        assert dump(conn) == before
+        blocked.close()
+        self.assert_retry_completes(conn, overlap)
+
+    def test_a_commit_blocked_after_reconciliation_leaves_nothing(self, conn, db_path, overlap):
+        """All the matching work is done here, and still none of it may survive."""
+        before = dump(conn)
+        reader = connect(db_path, read_only=True)
+        reader.execute("BEGIN")
+        reader.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()
+
+        blocked, result = self.attempt(db_path, overlap, declare_complete(*JANUARY))
+
+        assert (result.outcome, result.failure_code) == ("failed", "database_busy")
+        assert not blocked.in_transaction
+        reader.execute("ROLLBACK")
+        reader.close()
+        blocked.close()
+
+        assert dump(conn) == before
+        self.assert_retry_completes(conn, overlap)
+
+    def test_a_blocked_catch_up_on_a_repeat_import_stays_retryable(
+        self, conn, db_path, card, tmp_path
+    ):
+        card("a.csv", cafe())
+        conn.execute("DELETE FROM account_reconciliation")
+        before = dump(conn)
+        reader = connect(db_path, read_only=True)
+        reader.execute("BEGIN")
+        reader.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()
+
+        blocked, result = self.attempt(db_path, tmp_path / "a.csv")
+        reader.execute("ROLLBACK")
+        reader.close()
+        blocked.close()
+
+        assert (result.outcome, result.failure_code) == ("failed", "database_busy")
+        assert dump(conn) == before
+        assert not is_current(conn, "acct", DEFAULT_RULES)
+
+        (retried,) = import_files(conn, [tmp_path / "a.csv"], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        assert (retried.outcome, retried.reconciled) == ("already_imported", True)
+        assert is_current(conn, "acct", DEFAULT_RULES)
+
+
 class TestStoredInterpretation:
     def test_interpretation_is_stored_at_import(self, conn, checking):
         checking("a.csv", "S-1,,2026-01-10,SYNTHETIC CAFE,-5.00,POSTED")
@@ -743,6 +927,38 @@ class TestExistingAccounts:
         assert transactions(conn) == 1
         conn.close()
 
+
+    def version_three_ledger(self, tmp_path):
+        old = tmp_path / "old_migrations"
+        old.mkdir()
+        for migration in load_migrations()[:3]:
+            shutil.copy(migration.path, old / migration.path.name)
+        path = tmp_path / "old.db"
+        create_database(path, old)
+        conn = connect(path)
+        seed_version_two(conn, (CARD_HEADER + cafe() + "
+").encode("utf-8"))
+        return conn
+
+    def test_the_backfill_records_the_only_source_of_a_transaction(self, tmp_path):
+        conn = self.version_three_ledger(tmp_path)
+        migrate(conn)
+        assert dict(conn.execute("SELECT id, primary_source_record_id FROM ledger_transaction")) == {
+            "t1": "r1", "t2": "r2",
+        }
+        conn.close()
+
+    def test_the_backfill_does_not_guess_the_primary_of_a_merged_transaction(self, tmp_path):
+        conn = self.version_three_ledger(tmp_path)
+        conn.execute("UPDATE transaction_source SET transaction_id = 't1' WHERE transaction_id = 't2'")
+        conn.execute("DELETE FROM ledger_transaction WHERE id = 't2'")
+
+        migrate(conn)
+
+        assert conn.execute(
+            "SELECT id, primary_source_record_id FROM ledger_transaction"
+        ).fetchall() == [("t1", None)]
+        conn.close()
 
     def test_the_backfill_keeps_the_meaning_of_checking_documents(self, tmp_path):
         old = tmp_path / "old_migrations"

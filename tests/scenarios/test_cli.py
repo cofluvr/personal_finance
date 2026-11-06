@@ -437,6 +437,60 @@ def test_trace_separates_current_sources_from_history(db, tmp_path, capsys):
     assert f"from {retired} to {survivor}" in history
 
 
+def test_trace_names_the_primary_source_and_explains_the_selection(db, tmp_path, capsys):
+    header = "Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+    first = tmp_path / "a.csv"
+    second = tmp_path / "b.csv"
+    first.write_text(header + "S-1,,2026-01-10,SYNTHETIC CAFE,-5.00,\n")
+    second.write_text(header + "S-1,2026-01-09,2026-01-10,FULLER NAME,-5.00,POSTED\n")
+    import_checking(db, first)
+    import_checking(db, second)
+    conn = connect(Path(db))
+    transaction_id, primary = conn.execute(
+        "SELECT id, primary_source_record_id FROM ledger_transaction"
+    ).fetchone()
+    conn.close()
+    capsys.readouterr()
+
+    main(["trace", "--db", db, transaction_id])
+    out = capsys.readouterr().out
+
+    assert "Description: FULLER NAME" in out
+    assert out.count("Role: primary, supplies the displayed values") == 1
+    assert "Role: alternative, not selected on: settlement status" in out
+    assert "'SYNTHETIC CAFE'" in out, "the alternative's evidence stays visible"
+    assert "Source status: unknown" in out
+    assert f"Displayed values come from record {primary}, chosen by, in order:" in out
+    assert "4. lowest document hash, then row number" in out
+
+
+def test_trace_explains_a_primary_that_was_never_recorded(db, tmp_path, capsys):
+    conn, _, survivor = merged_trace_setup(db, tmp_path)
+    conn.execute("UPDATE ledger_transaction SET primary_source_record_id = NULL WHERE id = ?", (survivor,))
+    conn.close()
+    capsys.readouterr()
+
+    main(["trace", "--db", db, survivor])
+    out = capsys.readouterr().out
+    assert "Displayed values: source not recorded. Run reconcile" in out
+
+    main(["reconcile", "--db", db])
+    capsys.readouterr()
+    main(["trace", "--db", db, survivor])
+    assert "Role: primary" in capsys.readouterr().out
+
+
+def test_trace_shows_identity_history_apart_from_current_sources(db, tmp_path, capsys):
+    conn, retired, _ = merged_trace_setup(db, tmp_path)
+    conn.close()
+    capsys.readouterr()
+
+    main(["trace", "--db", db, retired])
+    out = capsys.readouterr().out
+    assert "Identity history:" in out
+    assert "retired (exact_coverage_pair), first created" in out
+
+
 def test_trace_of_a_retired_id_names_its_current_transaction(db, tmp_path, capsys):
     conn, retired, survivor = merged_trace_setup(db, tmp_path)
     conn.close()
@@ -635,3 +689,75 @@ def test_a_failed_migration_reports_where_the_ledger_stands(tmp_path, monkeypatc
     error = capsys.readouterr().err
     assert "migration failed at schema version 2" in error
     assert "Run migrate again" in error
+
+
+def impatient_connect(path, *, read_only=False):
+    conn = connect(path, read_only=read_only)
+    conn.execute("PRAGMA busy_timeout = 50")
+    return conn
+
+
+def test_a_busy_import_is_reported_as_a_failure_with_what_to_do(db, tmp_path, monkeypatch, capsys):
+    path = card_file(tmp_path, "a.csv", "01/10/2026,SYNTHETIC CAFE,5.00,")
+    monkeypatch.setattr(cli, "connect", impatient_connect)
+    holder = connect(Path(db))
+    holder.execute("BEGIN IMMEDIATE")
+
+    code = import_card_file(db, path)
+    holder.execute("ROLLBACK")
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "database is busy" in captured.err
+    assert "changed nothing" in captured.err
+    assert "run this command again" in captured.err
+    assert "imported" not in captured.out
+
+    assert import_card_file(db, path) == 0
+    assert "imported 1 rows" in capsys.readouterr().out
+
+
+def test_a_file_blocked_at_commit_is_reported_and_the_exit_code_shows_it(
+    db, tmp_path, monkeypatch, capsys
+):
+    path = card_file(tmp_path, "a.csv", "01/10/2026,SYNTHETIC CAFE,5.00,")
+    monkeypatch.setattr(cli, "connect", impatient_connect)
+    reader = connect(Path(db), read_only=True)
+    original = pipeline.reconcile_account
+
+    def reader_arrives_during_reconciliation(*args, **kwargs):
+        reader.execute("BEGIN")
+        reader.execute("SELECT COUNT(*) FROM account").fetchone()
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "reconcile_account", reader_arrives_during_reconciliation)
+
+    code = import_card_file(db, path)
+    reader.execute("ROLLBACK")
+    reader.close()
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "failed (database_busy)" in out
+    assert "nothing from it was kept" in out
+    assert "import the file again" in out
+    assert "Files: 0 imported, 0 already imported, 1 failed" in out
+
+    conn = connect(Path(db))
+    assert conn.execute("SELECT COUNT(*) FROM source_document").fetchone() == (0,)
+    assert conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone() == (0,)
+    conn.close()
+    monkeypatch.undo()
+    assert import_card_file(db, path) == 0
+
+
+def test_a_busy_reconcile_changes_nothing_and_says_so(db, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "connect", impatient_connect)
+    holder = connect(Path(db))
+    holder.execute("BEGIN IMMEDIATE")
+
+    code = main(["reconcile", "--db", db])
+    holder.execute("ROLLBACK")
+
+    assert code == 2
+    assert "changed nothing" in capsys.readouterr().err

@@ -32,10 +32,10 @@ def semantic_view(conn):
     members = {key: frozenset(value) for key, value in members.items()}
 
     transactions = frozenset(
-        (members[row[0]], *row[1:])
+        (members[row[0]], keys[row[1]], *row[2:])
         for row in conn.execute(
-            """SELECT id, account_id, external_id, transaction_date, posting_date, amount_cents,
-                      description, settlement_status
+            """SELECT id, primary_source_record_id, account_id, external_id, transaction_date,
+                      posting_date, amount_cents, description, settlement_status
                FROM ledger_transaction"""
         )
     )

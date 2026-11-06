@@ -47,9 +47,9 @@ def reconcile_account(
     documents, records, unresolved, import_order = _load_evidence(conn, account_id)
     derivation = derive(documents, records, unresolved, rules)
 
-    state = _State(conn, account_id, records, derivation, import_order)
+    state = _State(conn, account_id, records, derivation, import_order, rules, trigger_document_id)
     state.write_transactions()
-    moved = state.write_links(rules, trigger_document_id, _last_fingerprint(conn, account_id))
+    moved = state.write_links(_last_fingerprint(conn, account_id))
     state.write_review_items()
     state.repoint_other_issues()
     state.retire_unused_transactions()
@@ -128,10 +128,15 @@ def _load_evidence(conn, account_id):
 class _State:
     """The account as stored, and the changes that bring it in line."""
 
-    def __init__(self, conn, account_id, records, derivation, import_order):
+    def __init__(self, conn, account_id, records, derivation, import_order, rules, trigger):
         self.conn = conn
         self.account_id = account_id
         self.derivation = derivation
+        self.rules = rules
+        self.trigger_document_id = trigger
+        # Why records moved into or out of a transaction, for its identity history.
+        self.moved_in = {}
+        self.moved_out = {}
         self.records = {record.id: record for record in records}
 
         self.links = {}
@@ -158,9 +163,11 @@ class _State:
         self.target_rule = {}
         self.new_members = {}
         self.primary = {}
+        self.first_record = {}
         for group in derivation.groups:
             first = min(group.record_ids, key=import_order.__getitem__)
             public_id = origins[first]
+            self.first_record[public_id] = first
             self.primary[public_id] = self.records[group.primary_record_id]
             self.new_members[public_id] = set(group.record_ids)
             for record_id in group.record_ids:
@@ -172,34 +179,60 @@ class _State:
             row[0]: row[1:]
             for row in self.conn.execute(
                 """SELECT id, external_id, transaction_date, posting_date, amount_cents,
-                          description, settlement_status
+                          description, settlement_status, primary_source_record_id, created_at
                    FROM ledger_transaction WHERE account_id = ?""",
                 (self.account_id,),
             )
         }
-        self.stored_ids = set(stored)
+        self.stored_created_at = {key: value[-1] for key, value in stored.items()}
+        self.revived = {}
         for transaction_id, record in self.primary.items():
             values = (record.external_id, record.transaction_date, record.posting_date,
-                      record.amount_cents, record.description, record.settlement_status)
+                      record.amount_cents, record.description, record.settlement_status,
+                      record.id)
             if transaction_id not in stored:
+                created_at = self._created_at_of_retired(transaction_id)
+                self.revived[transaction_id] = created_at
                 self.conn.execute(
                     """INSERT INTO ledger_transaction (id, account_id, external_id,
                                                        transaction_date, posting_date,
                                                        amount_cents, description,
-                                                       settlement_status)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (transaction_id, self.account_id, *values),
+                                                       settlement_status,
+                                                       primary_source_record_id, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (transaction_id, self.account_id, *values, created_at),
                 )
-            elif stored[transaction_id] != values:
+            elif stored[transaction_id][:-1] != values:
                 self.conn.execute(
                     """UPDATE ledger_transaction
                        SET external_id = ?, transaction_date = ?, posting_date = ?,
-                           amount_cents = ?, description = ?, settlement_status = ?
+                           amount_cents = ?, description = ?, settlement_status = ?,
+                           primary_source_record_id = ?
                        WHERE id = ?""",
                     (*values, transaction_id),
                 )
 
-    def write_links(self, rules, trigger_document_id, last_fingerprint) -> int:
+    def _created_at_of_retired(self, transaction_id) -> str:
+        """The retired row's timestamp, or for a row retired before migration 0004, when
+        its first record was linked, which is the same import."""
+        row = self.conn.execute(
+            """SELECT transaction_created_at FROM transaction_identity_history
+               WHERE transaction_id = ? AND event = 'retired' ORDER BY id DESC LIMIT 1""",
+            (transaction_id,),
+        ).fetchone()
+        return row[0] if row else self.links[self.first_record[transaction_id]][3]
+
+    def _record_identity_event(self, transaction_id, event, created_at, reason) -> None:
+        self.conn.execute(
+            """INSERT INTO transaction_identity_history (transaction_id, event,
+                                                         transaction_created_at, reason,
+                                                         rules_fingerprint, trigger_document_id)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (transaction_id, event, created_at, reason, self.rules.fingerprint(),
+             self.trigger_document_id),
+        )
+
+    def write_links(self, last_fingerprint) -> int:
         moved = [
             record_id for record_id, link in self.links.items()
             if self.target[record_id] != link[0]
@@ -220,16 +253,16 @@ class _State:
                 (new_id, record_id, document_id, self.account_id, self.target_rule[record_id],
                  created_at),
             )
-            action, reason = self._describe_move(
-                record_id, old_id, new_id, rules, last_fingerprint
-            )
+            action, reason = self._describe_move(record_id, old_id, new_id, last_fingerprint)
+            self.moved_in.setdefault(new_id, reason)
+            self.moved_out.setdefault(old_id, reason)
             self.conn.execute(
                 """INSERT INTO transaction_link_history (source_record_id, from_transaction_id,
                                                          to_transaction_id, action, reason,
                                                          rules_fingerprint, trigger_document_id)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (record_id, old_id, new_id, action, reason, rules.fingerprint(),
-                 trigger_document_id),
+                (record_id, old_id, new_id, action, reason, self.rules.fingerprint(),
+                 self.trigger_document_id),
             )
 
         for record_id, link in self.links.items():
@@ -238,15 +271,18 @@ class _State:
                     "UPDATE transaction_source SET link_rule = ? WHERE source_record_id = ?",
                     (self.target_rule[record_id], record_id),
                 )
+        for transaction_id, created_at in self.revived.items():
+            reason = self.moved_in[transaction_id]
+            self._record_identity_event(transaction_id, "revived", created_at, reason)
         return len(moved)
 
-    def _describe_move(self, record_id, old_id, new_id, rules, last_fingerprint):
+    def _describe_move(self, record_id, old_id, new_id, last_fingerprint):
         left_behind = self.old_members[old_id] - self.new_members[new_id]
         if not left_behind:
             return "merged", self.target_rule[record_id]
         reason = self.derivation.separation_reasons.get(record_id)
         if reason is None:
-            changed = last_fingerprint not in (None, rules.fingerprint())
+            changed = last_fingerprint not in (None, self.rules.fingerprint())
             reason = "matching_rules_changed" if changed else "evidence_changed"
         return "split", reason
 
@@ -396,10 +432,11 @@ class _State:
             )
 
     def retire_unused_transactions(self) -> None:
-        self.conn.executemany(
-            "DELETE FROM ledger_transaction WHERE id = ?",
-            [(transaction_id,) for transaction_id in self.stored_ids - set(self.primary)],
-        )
+        for transaction_id, created_at in self.stored_created_at.items():
+            if transaction_id not in self.primary:
+                reason = self.moved_out[transaction_id]
+                self._record_identity_event(transaction_id, "retired", created_at, reason)
+                self.conn.execute("DELETE FROM ledger_transaction WHERE id = ?", (transaction_id,))
 
 
 def _record_set(item) -> frozenset[str]:

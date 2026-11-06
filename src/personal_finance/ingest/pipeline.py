@@ -161,7 +161,7 @@ def _import_content(
         parsed = _parse(record, layout)
         _insert_parse(conn, record_id, layout, parsed)
         if parsed.reason_code is None:
-            transaction_id = _insert_transaction(conn, account_id, parsed)
+            transaction_id = _insert_transaction(conn, account_id, parsed, record_id)
             _link(conn, transaction_id, record_id, document_id, account_id)
             transactions.append((transaction_id, parsed))
         else:
@@ -324,15 +324,16 @@ def _insert_parse(conn, record_id, layout, parsed: ParsedRow) -> None:
     )
 
 
-def _insert_transaction(conn, account_id, parsed: ParsedRow) -> str:
+def _insert_transaction(conn, account_id, parsed: ParsedRow, record_id) -> str:
     transaction_id = _new_id()
     conn.execute(
         """INSERT INTO ledger_transaction (id, account_id, external_id, transaction_date,
                                            posting_date, amount_cents, description,
-                                           settlement_status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                                           settlement_status, primary_source_record_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (transaction_id, account_id, parsed.external_id, parsed.transaction_date,
-         parsed.posting_date, parsed.amount_cents, parsed.description, parsed.settlement_status),
+         parsed.posting_date, parsed.amount_cents, parsed.description, parsed.settlement_status,
+         record_id),
     )
     return transaction_id
 
