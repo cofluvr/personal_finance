@@ -15,6 +15,7 @@ from personal_finance.db.migrate import (
     load_migrations,
 )
 from personal_finance.ingest import pipeline
+from personal_finance.reconcile.apply import ReconcileResult
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "synthetic"
 CHECKING = FIXTURES / "checking_jan_complete.csv"
@@ -75,11 +76,11 @@ def test_a_duplicate_account_name_is_refused(db, capsys):
 def test_import_summary(db, capsys):
     assert import_checking(db, CHECKING) == 0
     out = capsys.readouterr().out
-    assert "imported 4 rows: 4 transactions, 0 unresolved, 0 possible-duplicate groups, 0 matched" in out
+    assert "Source rows read: 4 (4 valid, 0 unresolved)" in out
     assert "coverage complete 2026-01-01 to 2026-01-31, posting basis (document_metadata)" in out
-    assert "Files: 1 imported, 0 already imported, 0 failed" in out
+    assert "Files attempted: 1 (1 imported, 0 already imported, 0 failed)" in out
     assert "Cross-document duplicates are not checked yet" not in out
-    assert "Open possible-duplicate groups in this account: 0" in out
+    assert "Open review groups: 0, covering 0 distinct affected transactions." in out
 
 
 def test_repeat_import_summary(db, capsys):
@@ -93,7 +94,7 @@ def test_a_failed_file_gives_a_failing_exit_code_and_the_others_still_import(db,
     assert import_checking(db, CARD, CHECKING) == 1
     out = capsys.readouterr().out
     assert "card_jan_no_metadata.csv: failed (header_mismatch)" in out
-    assert "Files: 1 imported, 0 already imported, 1 failed" in out
+    assert "Files attempted: 2 (1 imported, 0 already imported, 1 failed)" in out
 
 
 def test_a_file_for_another_account_is_rejected_not_skipped(db, capsys):
@@ -110,7 +111,7 @@ def test_a_file_for_another_account_is_rejected_not_skipped(db, capsys):
     assert "was not linked to the requested account" in out
     assert "existing import is unchanged" in out
     assert "nothing changed" not in out
-    assert "Files: 0 imported, 0 already imported, 1 failed" in out
+    assert "Files attempted: 1 (0 imported, 0 already imported, 1 failed)" in out
 
 
 def test_a_coverage_conflict_explains_the_limitation_and_changes_nothing(db, capsys):
@@ -403,7 +404,10 @@ def test_import_reports_matches(db, tmp_path, capsys):
         tmp_path, "b.csv", "01/10/2026,SYNTHETIC CAFE,5.00,", "01/12/2026,SYNTHETIC CAFE,7.00,"
     )
     import_card_file(db, second, *declared)
-    assert "1 transactions, 0 unresolved, 0 possible-duplicate groups, 1 matched" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Source rows read: 2 (2 valid, 0 unresolved)" in out
+    assert "Confidently consolidated records: 1" in out
+    assert "Net change in live logical transactions: +1" in out
 
 
 def merged_trace_setup(db, tmp_path):
@@ -536,7 +540,7 @@ def test_trace_of_an_unknown_id_is_an_error(db, capsys):
 def test_reconcile_catches_up_an_account_without_a_new_file(db, tmp_path, monkeypatch, capsys):
     declared = declaration()
     with monkeypatch.context() as patch:
-        patch.setattr(pipeline, "reconcile_account", lambda *args, **kwargs: None)
+        patch.setattr(pipeline, "reconcile_account", lambda *args, **kwargs: ReconcileResult(None, 0))
         import_card_file(db, card_file(tmp_path, "a.csv", "01/10/2026,SYNTHETIC CAFE,5.00,"), *declared)
         import_card_file(
             db,
@@ -560,7 +564,7 @@ def test_reconcile_catches_up_an_account_without_a_new_file(db, tmp_path, monkey
 def test_repeat_import_says_when_it_reconciled(db, tmp_path, monkeypatch, capsys):
     path = card_file(tmp_path, "a.csv", "01/10/2026,SYNTHETIC CAFE,5.00,")
     with monkeypatch.context() as patch:
-        patch.setattr(pipeline, "reconcile_account", lambda *args, **kwargs: None)
+        patch.setattr(pipeline, "reconcile_account", lambda *args, **kwargs: ReconcileResult(None, 0))
         import_card_file(db, path)
     capsys.readouterr()
 
@@ -714,7 +718,7 @@ def test_a_busy_import_is_reported_as_a_failure_with_what_to_do(db, tmp_path, mo
     assert "imported" not in captured.out
 
     assert import_card_file(db, path) == 0
-    assert "imported 1 rows" in capsys.readouterr().out
+    assert "Source rows read: 1 (1 valid, 0 unresolved)" in capsys.readouterr().out
 
 
 def test_a_file_blocked_at_commit_is_reported_and_the_exit_code_shows_it(
@@ -741,7 +745,7 @@ def test_a_file_blocked_at_commit_is_reported_and_the_exit_code_shows_it(
     assert "failed (database_busy)" in out
     assert "nothing from it was kept" in out
     assert "import the file again" in out
-    assert "Files: 0 imported, 0 already imported, 1 failed" in out
+    assert "Files attempted: 1 (0 imported, 0 already imported, 1 failed)" in out
 
     conn = connect(Path(db))
     assert conn.execute("SELECT COUNT(*) FROM source_document").fetchone() == (0,)

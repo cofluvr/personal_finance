@@ -1,7 +1,7 @@
 """Command line interface.
 
 Output goes to the terminal only. Nothing here writes a log, and only the
-commands that exist to show transactions print descriptions or raw rows.
+commands that exist to show transactions print descriptions or raw rows (D-037).
 """
 
 import argparse
@@ -31,6 +31,7 @@ from personal_finance.reconcile.cross_document import (
     primary_rank,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.totals import account_movement
 
 ACCOUNT_TYPES = ("checking", "savings", "credit_card", "loan", "investment", "retirement")
@@ -43,6 +44,12 @@ MATCHING_NOTICE = (
 BUSY_EXPLANATION = (
     "database is busy: another process is using the ledger. The step that failed changed "
     "nothing. Wait for that process to finish, then run this command again."
+)
+
+UNEXPECTED_ERROR = (
+    "an unexpected problem stopped this command, so it may not have finished. Anything not "
+    "yet committed was discarded. Details are not shown or saved, because they could contain "
+    "financial data. Check the ledger with totals before running it again."
 )
 
 FAILURE_EXPLANATIONS = {
@@ -75,7 +82,7 @@ class CommandError(Exception):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="personal_finance")
+    parser = argparse.ArgumentParser(prog="pf")
     commands = parser.add_subparsers(dest="command", required=True)
 
     def command(name, parent=commands, *, handler, help):
@@ -137,7 +144,7 @@ def open_ledger(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
     if current < latest:
         raise CommandError(
             f"this ledger uses schema version {current} and this code needs {latest}. "
-            f"Nothing was changed. Run: migrate --db {path}"
+            f"Nothing was changed. Run: pf migrate --db {path}"
         )
     if current > latest:
         raise CommandError(
@@ -242,40 +249,82 @@ def run_import(args) -> int:
         declared_coverage=declared,
     )
 
+    if len(results) > 1:
+        print("Each file's counts describe the moment it was imported.")
     for result in results:
-        if result.outcome == "failed":
-            print(f"{result.file_name}: failed ({result.failure_code})")
-            if result.failure_code in FAILURE_EXPLANATIONS:
-                print(f"  {FAILURE_EXPLANATIONS[result.failure_code]}")
-        elif result.outcome == "already_imported" and result.reconciled:
-            print(f"{result.file_name}: already imported; account reconciled under current rules")
-        elif result.outcome == "already_imported":
-            print(f"{result.file_name}: already imported, nothing changed")
+        print_file_result(result)
+
+    summary = summarize_run(conn, results)
+    print_run_summary(summary)
+    print_account_state(account_movement(conn, account_id))
+    return 1 if summary.files_failed else 0
+
+
+def print_file_result(result) -> None:
+    if result.outcome == "failed":
+        print(f"{result.file_name}: failed ({result.failure_code})")
+        if result.failure_code in FAILURE_EXPLANATIONS:
+            print(f"  {FAILURE_EXPLANATIONS[result.failure_code]}")
+        if result.rows_attempted is None:
+            print("  Source rows: unavailable")
         else:
-            print(
-                f"{result.file_name}: imported {result.rows_read} rows: "
-                f"{result.transactions_created} transactions, "
-                f"{result.unresolved_records} unresolved, "
-                f"{result.candidate_groups} possible-duplicate groups, "
-                f"{result.matched_records} matched existing transactions; "
-                f"{describe_coverage(result.coverage)}"
-            )
+            print(f"  Source rows: {result.rows_attempted} read, then rolled back. None were kept.")
+    elif result.outcome == "already_imported" and result.reconciled:
+        print(f"{result.file_name}: already imported; account reconciled under current rules")
+        print_ledger_effect(result.net_transactions, result.memberships_changed)
+    elif result.outcome == "already_imported":
+        print(f"{result.file_name}: already imported, nothing changed")
+    else:
+        print(f"{result.file_name}: imported; {describe_coverage(result.coverage)}")
+        print_record_counts(result)
+        print_ledger_effect(result.net_transactions, result.memberships_changed)
+        print(f"  Open review groups touching this file: {result.open_review_groups}")
 
-    def count(outcome):
-        return sum(result.outcome == outcome for result in results)
 
+def print_record_counts(counts) -> None:
     print(
-        f"Files: {count('imported')} imported, {count('already_imported')} already imported, "
-        f"{count('failed')} failed"
+        f"  Source rows read: {counts.rows_read} "
+        f"({counts.valid_records} valid, {counts.unresolved_records} unresolved)"
     )
-    print(describe_open_groups(account_movement(conn, account_id)))
-    return 1 if count("failed") else 0
+    print(f"  Final logical transactions for those valid records: {counts.final_transactions}")
+    print(f"  Confidently consolidated records: {counts.consolidated_records}")
+
+
+def print_ledger_effect(net_transactions, memberships_changed) -> None:
+    print(f"  Net change in live logical transactions: {net_transactions:+d}")
+    print(f"  Source memberships changed: {memberships_changed}")
+
+
+def print_run_summary(summary) -> None:
+    print("Run summary:")
+    print(
+        f"  Files attempted: {summary.files_attempted} ({summary.files_imported} imported, "
+        f"{summary.files_already_imported} already imported, {summary.files_failed} failed)"
+    )
+    if summary.files_imported:
+        print_record_counts(summary)
+    else:
+        print("  Source rows: none, because no file was newly imported")
+    print_ledger_effect(summary.net_transactions, summary.memberships_changed)
+    if summary.failed_rows_attempted:
+        print(
+            f"  Failed files: {summary.failed_rows_attempted} rows read, then rolled back. "
+            "None were kept."
+        )
+    if summary.failed_files_without_row_count:
+        print(f"  Failed files with row counts unavailable: {summary.failed_files_without_row_count}")
+
+
+def print_account_state(movement) -> None:
+    print("This account after the run:")
+    print(f"  {describe_open_groups(movement)}")
+    print(f"  Unresolved records, not included in totals: {movement.unresolved_records}")
 
 
 def describe_open_groups(movement) -> str:
     return (
-        f"Open possible-duplicate groups in this account: {movement.candidate_groups}, "
-        f"covering {movement.transactions_in_candidate_groups} distinct transactions."
+        f"Open review groups: {movement.candidate_groups}, covering "
+        f"{movement.transactions_in_candidate_groups} distinct affected transactions."
     )
 
 
@@ -552,4 +601,7 @@ def main(argv: list[str] | None = None) -> int:
     except sqlite3.OperationalError as error:
         reason = BUSY_EXPLANATION if "locked" in str(error) else "database error"
         print(f"Error: {reason}", file=sys.stderr)
+        return 2
+    except Exception:
+        print(f"Error: {UNEXPECTED_ERROR}", file=sys.stderr)
         return 2

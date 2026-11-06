@@ -27,7 +27,12 @@ from personal_finance.ingest.coverage import declare_complete
 from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1, SYNTHETIC_CHECKING_V1
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.reconcile import apply
-from personal_finance.reconcile.apply import is_current, reconcile_account, stale_accounts
+from personal_finance.reconcile.apply import (
+    ReconcileResult,
+    is_current,
+    reconcile_account,
+    stale_accounts,
+)
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reports.totals import account_movement
 
@@ -141,7 +146,7 @@ class TestConfidentMatches:
         result = card("b.csv", *reversed(rows), declared=JANUARY)
 
         assert transactions(conn) == 3
-        assert (result.transactions_created, result.matched_records) == (0, 3)
+        assert (result.valid_records, result.consolidated_records) == (3, 3)
         assert conn.execute("SELECT COUNT(*) FROM transaction_source").fetchone() == (6,)
         assert open_items(conn) == []
 
@@ -751,7 +756,7 @@ class TestBusyDatabase:
             conn, [path], account_id="acct", layout=SYNTHETIC_CARD_V1,
             declared_coverage=declare_complete(*JANUARY),
         )
-        assert (retried.outcome, retried.matched_records) == ("imported", 1)
+        assert (retried.outcome, retried.consolidated_records) == ("imported", 1)
         assert transactions(conn) == 2
         assert is_current(conn, "acct", DEFAULT_RULES)
 
@@ -888,7 +893,7 @@ class TestExistingAccounts:
         declared = declare_complete(*JANUARY)
 
         with monkeypatch.context() as patch:
-            patch.setattr(pipeline, "reconcile_account", lambda *args, **kwargs: None)
+            patch.setattr(pipeline, "reconcile_account", lambda *args, **kwargs: ReconcileResult(None, 0))
             for path in (first, second):
                 import_files(conn, [path], account_id="acct", layout=SYNTHETIC_CARD_V1,
                              declared_coverage=declared)

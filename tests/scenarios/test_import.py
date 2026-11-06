@@ -100,7 +100,7 @@ class TestSuccessfulImport:
     def test_checking_file(self, conn, account):
         (result,) = checking(conn, FIXTURES / "checking_jan_complete.csv")
         assert result.outcome == "imported"
-        assert (result.rows_read, result.transactions_created, result.unresolved_records) == (4, 4, 0)
+        assert (result.rows_read, result.valid_records, result.unresolved_records) == (4, 4, 0)
 
         movement = account_movement(conn)
         assert movement.inflow_cents == 250000
@@ -110,7 +110,7 @@ class TestSuccessfulImport:
 
     def test_card_file(self, conn, account):
         (result,) = card(conn, FIXTURES / "card_jan_no_metadata.csv")
-        assert result.transactions_created == 4
+        assert result.valid_records == 4
 
         movement = account_movement(conn)
         assert movement.inflow_cents == 3000
@@ -137,7 +137,7 @@ class TestSuccessfulImport:
     def test_failed_rows_do_not_fail_the_file(self, conn, account):
         (result,) = checking(conn, FIXTURES / "checking_problem_rows.csv")
         assert result.outcome == "imported"
-        assert (result.rows_read, result.transactions_created, result.unresolved_records) == (6, 2, 4)
+        assert (result.rows_read, result.valid_records, result.unresolved_records) == (6, 2, 4)
 
 
 class TestMissingInformation:
@@ -302,7 +302,7 @@ class TestCoverage:
     def test_a_declaration_may_cover_less_than_the_file(self, conn, account):
         declared = declare_complete("2026-01-05", "2026-01-05", "posting")
         (result,) = card(conn, FIXTURES / "card_jan_no_metadata.csv", declared=declared)
-        assert result.transactions_created == 4
+        assert result.valid_records == 4
 
     def test_coverage_belongs_to_the_named_account(self, conn, account):
         card(conn, FIXTURES / "card_jan_no_metadata.csv", account_id="other")
@@ -581,7 +581,7 @@ class TestRepresentationsWithinADocument:
         rows = "SYN-1,2026-01-05,,SYNTHETIC A,-1.00,POSTED\nSYN-1,2026-01-05,,SYNTHETIC A,-1.00,POSTED\n"
         (result,) = checking(conn, write("x.csv", CHECKING_HEADER + rows))
 
-        assert result.candidate_groups == 1
+        assert result.open_review_groups == 1
         movement = account_movement(conn)
         assert movement.transactions == 2
         assert movement.outflow_cents == 200

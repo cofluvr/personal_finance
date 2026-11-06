@@ -10,7 +10,7 @@ import hashlib
 import json
 import sqlite3
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from personal_finance.ingest import coverage as coverage_rules
@@ -21,21 +21,39 @@ from personal_finance.ingest.layouts import Layout, ParsedRow
 from personal_finance.reconcile.apply import is_current, reconcile_account
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reconcile.same_document import find_candidate_groups
+from personal_finance.reports.import_summary import consolidated_records, final_transactions
 
 
 @dataclass(frozen=True)
 class FileResult:
+    """One file's outcome, with counts as of its import (D-036).
+
+    A count that does not apply to the outcome is None, never zero. rows_attempted is
+    only for a failed file that was parsed and then rolled back.
+    """
+
     file_name: str
     outcome: str
     failure_code: str | None = None
     source_document_id: str | None = None
     coverage: Coverage | None = None
-    rows_read: int = 0
-    transactions_created: int = 0
-    matched_records: int = 0
-    unresolved_records: int = 0
-    candidate_groups: int = 0
+    rows_read: int | None = None
+    rows_attempted: int | None = None
+    valid_records: int | None = None
+    unresolved_records: int | None = None
+    final_transactions: int | None = None
+    consolidated_records: int | None = None
+    open_review_groups: int | None = None
+    net_transactions: int | None = None
+    memberships_changed: int | None = None
     reconciled: bool = False
+
+
+@dataclass
+class _Progress:
+    """What survives a rollback, so a failure can say how far the file got."""
+
+    rows_attempted: int | None = None
 
 
 def _new_id() -> str:
@@ -70,13 +88,16 @@ def _import_file(
     conn, run_id, path, account_id, layout, declared, rules=DEFAULT_RULES
 ) -> FileResult:
     digest = None
+    progress = _Progress()
     try:
         content = path.read_bytes()
         digest = hashlib.sha256(content).hexdigest()
         conn.execute("BEGIN IMMEDIATE")
+        before = _live_transactions(conn, account_id)
         result = _import_content(
-            conn, run_id, path.name, content, digest, account_id, layout, declared, rules
+            conn, run_id, path.name, content, digest, account_id, layout, declared, rules, progress
         )
+        result = replace(result, net_transactions=_live_transactions(conn, account_id) - before)
         conn.execute("COMMIT")
         return result
     except ImportFailure as failure:
@@ -99,7 +120,9 @@ def _import_file(
            VALUES (?, ?, ?, ?, 'failed', ?)""",
         (_new_id(), run_id, path.name, digest, code),
     )
-    return FileResult(path.name, "failed", failure_code=code)
+    return FileResult(
+        path.name, "failed", failure_code=code, rows_attempted=progress.rows_attempted
+    )
 
 
 def _rollback(conn) -> None:
@@ -115,8 +138,14 @@ def _write_if_possible(conn, statement, parameters) -> None:
         pass
 
 
+def _live_transactions(conn, account_id) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM ledger_transaction WHERE account_id = ?", (account_id,)
+    ).fetchone()[0]
+
+
 def _import_content(
-    conn, run_id, name, content, digest, account_id, layout, declared, rules
+    conn, run_id, name, content, digest, account_id, layout, declared, rules, progress
 ) -> FileResult:
     _require_unchanged_definition(conn, layout)
     existing = conn.execute(
@@ -128,6 +157,7 @@ def _import_content(
         )
 
     metadata, records = read_document(content, layout)
+    progress.rows_attempted = len(records)
     coverage = _resolve_coverage(metadata, layout, declared)
     generated_on = _generated_on(metadata)
 
@@ -171,8 +201,7 @@ def _import_content(
     for rule, members in find_candidate_groups(transactions):
         _insert_candidate_issue(conn, document_id, rule, members)
 
-    reconcile_account(conn, account_id, rules, trigger_document_id=document_id)
-    matched = _matched_records(conn, document_id)
+    reconciliation = reconcile_account(conn, account_id, rules, trigger_document_id=document_id)
 
     _insert_attempt(conn, run_id, name, digest, "imported", document_id)
     return FileResult(
@@ -181,10 +210,12 @@ def _import_content(
         source_document_id=document_id,
         coverage=coverage,
         rows_read=len(records),
-        transactions_created=len(transactions) - matched,
-        matched_records=matched,
+        valid_records=len(transactions),
         unresolved_records=unresolved,
-        candidate_groups=_open_groups_touching(conn, document_id),
+        final_transactions=final_transactions(conn, [document_id]),
+        consolidated_records=consolidated_records(conn, [document_id]),
+        open_review_groups=_open_groups_touching(conn, document_id),
+        memberships_changed=reconciliation.moved_records,
         reconciled=True,
     )
 
@@ -210,8 +241,11 @@ def _repeat_import(
 
     # Accounts imported before reconciliation, or under other rules, catch up here once.
     reconciled = not is_current(conn, account_id, rules)
+    moved = 0
     if reconciled:
-        reconcile_account(conn, account_id, rules, trigger_document_id=document_id)
+        moved = reconcile_account(
+            conn, account_id, rules, trigger_document_id=document_id
+        ).moved_records
 
     _insert_attempt(conn, run_id, name, digest, "already_imported", document_id)
     return FileResult(
@@ -219,6 +253,7 @@ def _repeat_import(
         "already_imported",
         source_document_id=document_id,
         coverage=stored,
+        memberships_changed=moved,
         reconciled=reconciled,
     )
 
@@ -248,17 +283,6 @@ def _require_unchanged_definition(conn, layout: Layout) -> None:
     ).fetchall()
     if any(row != _interpretation(layout) for row in stored):
         raise ImportFailure("layout_definition_changed")
-
-
-def _matched_records(conn, document_id) -> int:
-    return conn.execute(
-        """SELECT COUNT(*) FROM transaction_source link
-           WHERE link.source_document_id = ?
-             AND EXISTS (SELECT 1 FROM transaction_source other
-                         WHERE other.transaction_id = link.transaction_id
-                           AND other.source_document_id <> link.source_document_id)""",
-        (document_id,),
-    ).fetchone()[0]
 
 
 def _open_groups_touching(conn, document_id) -> int:
