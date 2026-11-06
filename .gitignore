@@ -1,0 +1,57 @@
+# Python and tooling
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.hypothesis/
+.coverage
+.DS_Store
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+
+# Databases and their sidecar files
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Financial documents and exports: denied by default
+*.csv
+*.tsv
+*.pdf
+*.ofx
+*.qfx
+*.qif
+*.xls
+*.xlsx
+
+# Backups and archives
+*.bak
+*.backup
+*.dump
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# Local data folders
+/data/
+/inbox/
+/imports/
+/statements/
+/archive/
+/backups/
+
+# Deliberately synthetic fixtures stay committable. See docs/decisions.md D-019.
+!tests/fixtures/synthetic/**/*.csv
+!tests/fixtures/synthetic/**/*.pdf
