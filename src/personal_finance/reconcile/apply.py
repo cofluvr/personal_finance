@@ -32,9 +32,35 @@ class ReconcileResult:
     moved_records: int
 
 
+def stale_accounts(
+    conn: sqlite3.Connection, rules: MatchingRules, account_id: str | None = None
+) -> list[str]:
+    """Accounts needing reconciliation. This is the only definition of current (D-033).
+
+    An account with live transactions is current only if it was last reconciled under
+    this exact configuration and every transaction records its primary source. An account
+    with no transactions has nothing to reconcile, so it is never stale.
+    """
+    rows = conn.execute(
+        """SELECT account.id
+           FROM account
+           LEFT JOIN account_reconciliation marker ON marker.account_id = account.id
+           WHERE (:account IS NULL OR account.id = :account)
+             AND EXISTS (SELECT 1 FROM ledger_transaction entry
+                         WHERE entry.account_id = account.id)
+             AND (marker.rules_fingerprint IS NULL
+                  OR marker.rules_fingerprint <> :fingerprint
+                  OR EXISTS (SELECT 1 FROM ledger_transaction entry
+                             WHERE entry.account_id = account.id
+                               AND entry.primary_source_record_id IS NULL))
+           ORDER BY account.id""",
+        {"account": account_id, "fingerprint": rules.fingerprint()},
+    )
+    return [row[0] for row in rows]
+
+
 def is_current(conn: sqlite3.Connection, account_id: str, rules: MatchingRules) -> bool:
-    """True only if the account was last reconciled under this exact configuration."""
-    return _last_fingerprint(conn, account_id) == rules.fingerprint()
+    return not stale_accounts(conn, rules, account_id)
 
 
 def reconcile_account(

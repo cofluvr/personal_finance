@@ -27,7 +27,7 @@ from personal_finance.ingest.coverage import declare_complete
 from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1, SYNTHETIC_CHECKING_V1
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.reconcile import apply
-from personal_finance.reconcile.apply import is_current, reconcile_account
+from personal_finance.reconcile.apply import is_current, reconcile_account, stale_accounts
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reports.totals import account_movement
 
@@ -1100,6 +1100,155 @@ class TestUpgradeWorkflow:
         assert conn.execute("SELECT COUNT(*) FROM document_interpretation").fetchone() == (2,)
         assert migrate(conn) == len(migrations)
         conn.close()
+
+
+class TestCurrentness:
+    """An account is current only with current rules and complete primary sources."""
+
+    content = (CARD_HEADER + cafe() + "\n").encode("utf-8")
+
+    def merged_at_version_three(self, tmp_path):
+        """A ledger merged and marked current at version 3, then upgraded through 0004."""
+        migrations = load_migrations()
+        folders = {}
+        for versions in (2, 3):
+            folders[versions] = tmp_path / f"migrations_{versions}"
+            folders[versions].mkdir()
+            for migration in migrations[:versions]:
+                shutil.copy(migration.path, folders[versions] / migration.path.name)
+
+        path = tmp_path / "old.db"
+        create_database(path, folders[2])
+        conn = connect(path)
+        seed_version_two(conn, self.content)
+        migrate(conn, folders[3])
+
+        conn.execute(
+            """UPDATE transaction_source SET transaction_id = 't1', link_rule = 'exact_coverage_pair'
+               WHERE transaction_id = 't2'"""
+        )
+        conn.execute(
+            "UPDATE transaction_source SET link_rule = 'exact_coverage_pair' WHERE transaction_id = 't1'"
+        )
+        conn.execute("DELETE FROM ledger_transaction WHERE id = 't2'")
+        conn.execute(
+            """INSERT INTO account_reconciliation (account_id, rules_version, rules_fingerprint,
+                                                   rules_json)
+               VALUES ('acct', 1, ?, ?)""",
+            (DEFAULT_RULES.fingerprint(), DEFAULT_RULES.to_json()),
+        )
+        migrate(conn)
+        return path, conn
+
+    def missing_primary(self, conn):
+        return conn.execute(
+            "SELECT COUNT(*) FROM ledger_transaction WHERE primary_source_record_id IS NULL"
+        ).fetchone()[0]
+
+    def repeat(self, conn, tmp_path):
+        file = tmp_path / "a.csv"
+        file.write_bytes(self.content)
+        (result,) = import_files(conn, [file], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        return result
+
+    def test_an_upgraded_merge_without_a_primary_source_is_not_current(self, tmp_path):
+        _, conn = self.merged_at_version_three(tmp_path)
+
+        assert self.missing_primary(conn) == 1
+        assert conn.execute(
+            "SELECT rules_fingerprint FROM account_reconciliation"
+        ).fetchone() == (DEFAULT_RULES.fingerprint(),)
+        assert not is_current(conn, "acct", DEFAULT_RULES)
+        assert stale_accounts(conn, DEFAULT_RULES) == ["acct"]
+        conn.close()
+
+    def test_totals_discloses_the_stale_account_without_changing_the_database(
+        self, tmp_path, capsys
+    ):
+        path, conn = self.merged_at_version_three(tmp_path)
+        conn.close()
+        before = path.read_bytes()
+
+        assert main(["totals", "--db", str(path)]) == 0
+
+        out = capsys.readouterr().out
+        assert "1 accounts have not been reconciled" in out
+        assert "may not record a primary source" in out
+        assert path.read_bytes() == before
+
+    def test_a_repeat_import_catches_up_and_the_next_one_is_a_no_op(self, tmp_path):
+        _, conn = self.merged_at_version_three(tmp_path)
+
+        first = self.repeat(conn, tmp_path)
+
+        assert (first.outcome, first.reconciled) == ("already_imported", True)
+        assert self.missing_primary(conn) == 0
+        assert transactions(conn) == 1
+        assert is_current(conn, "acct", DEFAULT_RULES)
+        settled = dump(conn)
+
+        second = self.repeat(conn, tmp_path)
+
+        assert (second.outcome, second.reconciled) == ("already_imported", False)
+        assert dump(conn) == settled
+        conn.close()
+
+    def test_the_reconcile_command_also_catches_up(self, tmp_path, capsys):
+        path, conn = self.merged_at_version_three(tmp_path)
+        conn.close()
+
+        assert main(["reconcile", "--db", str(path)]) == 0
+        capsys.readouterr()
+        assert main(["totals", "--db", str(path)]) == 0
+        assert "have not been reconciled" not in capsys.readouterr().out
+
+    def test_an_already_current_account_stays_current(self, conn, card, tmp_path):
+        card("a.csv", cafe(), declared=JANUARY)
+        card("b.csv", cafe(), declared=JANUARY)
+        assert is_current(conn, "acct", DEFAULT_RULES)
+        before = dump(conn)
+
+        (result,) = import_files(
+            conn, [tmp_path / "a.csv"], account_id="acct", layout=SYNTHETIC_CARD_V1
+        )
+
+        assert result.reconciled is False
+        assert is_current(conn, "acct", DEFAULT_RULES)
+        assert stale_accounts(conn, DEFAULT_RULES) == []
+        assert dump(conn) == before
+
+    def test_different_rules_alone_make_an_account_stale(self, conn, card):
+        card("a.csv", cafe())
+        other = replace(DEFAULT_RULES, date_window_days=9)
+        assert stale_accounts(conn, other) == ["acct"]
+        assert stale_accounts(conn, DEFAULT_RULES) == []
+
+    def test_a_missing_marker_alone_makes_an_account_stale(self, conn, card):
+        card("a.csv", cafe())
+        conn.execute("DELETE FROM account_reconciliation")
+        assert stale_accounts(conn, DEFAULT_RULES) == ["acct"]
+
+    def test_an_empty_account_is_never_stale(self, conn, account):
+        assert is_current(conn, "acct", DEFAULT_RULES)
+        assert stale_accounts(conn, DEFAULT_RULES) == []
+
+    def test_an_account_with_only_unresolved_rows_is_not_permanently_stale(
+        self, conn, card, tmp_path
+    ):
+        card("a.csv", "01/10/2026,SYNTHETIC CAFE,,")
+        assert transactions(conn) == 0
+        assert stale_accounts(conn, DEFAULT_RULES) == []
+
+        (result,) = import_files(
+            conn, [tmp_path / "a.csv"], account_id="acct", layout=SYNTHETIC_CARD_V1
+        )
+        assert result.reconciled is False
+
+    def test_a_scoped_check_ignores_other_accounts(self, conn, card):
+        card("a.csv", cafe(), account_id="other")
+        conn.execute("DELETE FROM account_reconciliation")
+        assert stale_accounts(conn, DEFAULT_RULES, "acct") == []
+        assert stale_accounts(conn, DEFAULT_RULES, "other") == ["other"]
 
 
 def seed_version_two(conn, content, layout_id="synthetic_card_v1"):

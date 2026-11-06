@@ -24,14 +24,14 @@ from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import LAYOUTS
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.money import format_cents
-from personal_finance.reconcile.apply import reconcile_account
+from personal_finance.reconcile.apply import reconcile_account, stale_accounts
 from personal_finance.reconcile.cross_document import (
     PRIMARY_CRITERIA,
     deciding_criterion,
     primary_rank,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
-from personal_finance.reports.totals import account_movement, accounts_not_current
+from personal_finance.reports.totals import account_movement
 
 ACCOUNT_TYPES = ("checking", "savings", "credit_card", "loan", "investment", "retirement")
 
@@ -520,11 +520,12 @@ def run_totals(args) -> int:
     print("Disclosures:")
     print("- These are account movements. They include transfers and card payments.")
     print(f"- {MATCHING_NOTICE}")
-    stale = accounts_not_current(conn, DEFAULT_RULES.fingerprint(), account_id)
+    stale = stale_accounts(conn, DEFAULT_RULES, account_id)
     if stale:
         print(
-            f"- {stale} accounts have not been reconciled under the current matching rules, "
-            "so overlapping files there may be counted twice. Run reconcile."
+            f"- {len(stale)} accounts have not been reconciled under the current matching "
+            "rules, so overlapping files there may be counted twice, or their transactions "
+            "may not record a primary source. Run reconcile."
         )
     if movement.unresolved_records:
         print(
