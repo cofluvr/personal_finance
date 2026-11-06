@@ -6,6 +6,7 @@ associations and the same review relationships.
 
 import json
 
+from personal_finance.reconcile.apply import load_constraints
 from personal_finance.reports.review_evidence import load_review_evidence, review_revision
 from personal_finance.reports.totals import account_movement
 
@@ -19,6 +20,18 @@ def _record_keys(conn):
                JOIN source_document document ON document.id = record.source_document_id"""
         )
     }
+
+
+def active_constraints(conn):
+    """Each active stated pair as two sets of stable record keys, in no particular order."""
+    keys = _record_keys(conn)
+    return sorted(
+        sorted(
+            (sorted(keys[record] for record in side) for side in (constraint.left, constraint.right))
+        )
+        for (account,) in conn.execute("SELECT id FROM account").fetchall()
+        for constraint in load_constraints(conn, account)
+    )
 
 
 def semantic_view(conn):
@@ -35,7 +48,7 @@ def semantic_view(conn):
     transactions = frozenset(
         (members[row[0]], keys[row[1]], *row[2:])
         for row in conn.execute(
-            """SELECT id, primary_source_record_id, account_id, external_id, transaction_date,
+            """SELECT id, primary_source_record_id, external_id, transaction_date,
                       posting_date, amount_cents, description, settlement_status
                FROM ledger_transaction"""
         )
@@ -60,5 +73,6 @@ def semantic_view(conn):
         "transactions": transactions,
         "link_rules": rules,
         "review": relationships,
+        "constraints": active_constraints(conn),
         "revisions": sorted(review_revision(load_review_evidence(conn, issue)) for issue in issues),
     }

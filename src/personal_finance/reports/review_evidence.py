@@ -10,18 +10,19 @@ import sqlite3
 from dataclasses import asdict, dataclass
 
 from personal_finance.ingest.coverage import effective_end
-from personal_finance.reconcile.apply import stale_accounts
+from personal_finance.reconcile.apply import load_constraints, stale_accounts
 from personal_finance.reconcile.rules import DEFAULT_RULES
 
 # Bump whenever the material evidence changes, so an old token can never appear current.
-REVISION_VERSION = 1
+REVISION_VERSION = 2
 
 # Fields left out of a revision. Random IDs and names say where evidence is stored or how
 # it is labelled, not what it says. Records are identified by document hash and row
 # instead. A stale account is a warning about the rules, and any effect of reconciling
 # reaches the token through the evidence itself.
 IMMATERIAL_FIELDS = frozenset(
-    {"issue_id", "transaction_id", "record_id", "file_name", "account_stale"}
+    {"issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
+     "account_name", "decision_id"}
 )
 
 
@@ -87,6 +88,22 @@ class DocumentEvidence:
 
 
 @dataclass(frozen=True)
+class DecidedRecord:
+    content_sha256: str
+    file_name: str
+    row: int
+
+
+@dataclass(frozen=True)
+class DecidedPair:
+    """One stated pair of an active decision, as records on two sides."""
+
+    decision_id: str
+    left: tuple[DecidedRecord, ...]
+    right: tuple[DecidedRecord, ...]
+
+
+@dataclass(frozen=True)
 class ReviewEvidence:
     issue_id: str
     kind: str
@@ -100,6 +117,10 @@ class ReviewEvidence:
     unresolved: tuple[RecordEvidence, ...]
     documents: tuple[DocumentEvidence, ...]
     account_stale: bool
+    account_id: str
+    account_name: str
+    # Active decisions with a side in this item (D-043).
+    decided: tuple[DecidedPair, ...]
 
     @property
     def records(self) -> tuple[RecordEvidence, ...]:
@@ -163,6 +184,9 @@ def load_review_evidence(conn: sqlite3.Connection, issue_id: str) -> ReviewEvide
         documents[digest] = _document(digest, file_name, rest[8:])
         accounts.add(account_id)
 
+    account_id = next(iter(accounts))
+    held = {record.record_id for records in linked.values() for record in records}
+    held.update(record.record_id for record in unresolved)
     return ReviewEvidence(
         issue_id,
         kind,
@@ -175,7 +199,53 @@ def load_review_evidence(conn: sqlite3.Connection, issue_id: str) -> ReviewEvide
         tuple(sorted(unresolved, key=_record_key)),
         tuple(documents[digest] for digest in sorted(documents)),
         bool(accounts & set(stale_accounts(conn, DEFAULT_RULES))),
+        account_id,
+        conn.execute("SELECT display_name FROM account WHERE id = ?", (account_id,)).fetchone()[0],
+        _decided_pairs(conn, account_id, held),
     )
+
+
+def _decided_pairs(conn, account_id, held) -> tuple[DecidedPair, ...]:
+    pairs = [
+        DecidedPair(
+            constraint.decision_id,
+            _decided_records(conn, constraint.left),
+            _decided_records(conn, constraint.right),
+        )
+        for constraint in load_constraints(conn, account_id)
+        if held.intersection((*constraint.left, *constraint.right))
+    ]
+    return tuple(sorted((_ordered_sides(pair) for pair in pairs), key=_pair_key))
+
+
+def _decided_records(conn, record_ids) -> tuple[DecidedRecord, ...]:
+    found = [
+        DecidedRecord(
+            *conn.execute(
+                """SELECT document.content_sha256, document.file_name, record.record_index
+                   FROM source_record record
+                   JOIN source_document document ON document.id = record.source_document_id
+                   WHERE record.id = ?""",
+                (record_id,),
+            ).fetchone()
+        )
+        for record_id in record_ids
+    ]
+    return tuple(sorted(found, key=_decided_key))
+
+
+def _decided_key(record: DecidedRecord) -> tuple[str, int]:
+    return record.content_sha256, record.row
+
+
+def _ordered_sides(pair: DecidedPair) -> DecidedPair:
+    """Which side is left depends on generated IDs, so a revision must not see it."""
+    left, right = sorted((pair.left, pair.right), key=lambda side: list(map(_decided_key, side)))
+    return DecidedPair(pair.decision_id, left, right)
+
+
+def _pair_key(pair: DecidedPair):
+    return [list(map(_decided_key, side)) for side in (pair.left, pair.right)]
 
 
 def _record_key(record: RecordEvidence) -> tuple[str, int]:

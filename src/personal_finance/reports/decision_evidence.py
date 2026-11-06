@@ -1,0 +1,232 @@
+"""What one stored decision rests on, and what undoing it would regroup (D-043, D-045).
+
+Everything here reads the ledger and nothing writes to it.
+"""
+
+import hashlib
+import json
+import sqlite3
+from dataclasses import asdict, dataclass
+
+from personal_finance.reconcile.apply import load_constraints, load_evidence
+from personal_finance.reconcile.cross_document import derive
+from personal_finance.reconcile.rules import MatchingRules
+
+# Bump whenever the material below changes, so an old token can never appear current.
+DECISION_REVISION_VERSION = 1
+
+STATE_ACTIVE = "active"
+STATE_UNDONE = "undone"
+
+
+@dataclass(frozen=True)
+class BoundRecord:
+    record_id: str
+    content_sha256: str
+    file_name: str
+    row: int
+    # Where the record is now, or None if it is not in a transaction.
+    transaction_id: str | None
+
+
+@dataclass(frozen=True)
+class BoundPair:
+    relation: str
+    # Transaction IDs at decision time. A merge can retire them since.
+    left_transaction_id: str
+    right_transaction_id: str
+    left: tuple[BoundRecord, ...]
+    right: tuple[BoundRecord, ...]
+
+
+@dataclass(frozen=True)
+class DecisionEvidence:
+    decision_id: str
+    account_id: str
+    account_name: str
+    review_issue_id: str
+    created_at: str
+    state: str
+    undone_at: str | None
+    pairs: tuple[BoundPair, ...]
+
+
+@dataclass(frozen=True)
+class UndoOutlook:
+    """What undoing would do to the evidence as it stands now."""
+
+    revision: str
+    transactions_now: int
+    transactions_after: int
+
+
+def list_decisions(conn: sqlite3.Connection, account_id: str | None = None) -> list[tuple]:
+    """IDs, states and counts only, so that routine output holds no financial data."""
+    return conn.execute(
+        """SELECT decision.id, account.display_name, decision.created_at,
+                  CASE WHEN undone.id IS NULL THEN 'active' ELSE 'undone' END,
+                  (SELECT COUNT(DISTINCT pair_number) FROM decision_constraint pair
+                   WHERE pair.decision_id = decision.id)
+           FROM decision
+           JOIN account ON account.id = decision.account_id
+           LEFT JOIN decision_event undone
+               ON undone.decision_id = decision.id AND undone.event = 'undone'
+           WHERE :account IS NULL OR decision.account_id = :account
+           ORDER BY decision.created_at, decision.id""",
+        {"account": account_id},
+    ).fetchall()
+
+
+def load_decision(conn: sqlite3.Connection, decision_id: str) -> DecisionEvidence | None:
+    row = conn.execute(
+        """SELECT decision.account_id, account.display_name, decision.review_issue_id,
+                  decision.created_at, undone.created_at
+           FROM decision
+           JOIN account ON account.id = decision.account_id
+           LEFT JOIN decision_event undone
+               ON undone.decision_id = decision.id AND undone.event = 'undone'
+           WHERE decision.id = ?""",
+        (decision_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    account_id, account_name, issue, created_at, undone_at = row
+
+    sides = {}
+    for number, relation, left_transaction, right_transaction, left, right in conn.execute(
+        """SELECT pair_number, relation, left_transaction_id, right_transaction_id,
+                  left_record_id, right_record_id
+           FROM decision_constraint WHERE decision_id = ?""",
+        (decision_id,),
+    ):
+        entry = sides.setdefault(number, (relation, left_transaction, right_transaction, set(), set()))
+        entry[3].add(left)
+        entry[4].add(right)
+
+    pairs = tuple(
+        BoundPair(relation, left_transaction, right_transaction,
+                  _bound_records(conn, left), _bound_records(conn, right))
+        for _, (relation, left_transaction, right_transaction, left, right) in sorted(sides.items())
+    )
+    state = STATE_UNDONE if undone_at else STATE_ACTIVE
+    return DecisionEvidence(
+        decision_id, account_id, account_name, issue, created_at, state, undone_at, pairs
+    )
+
+
+def _bound_records(conn, record_ids) -> tuple[BoundRecord, ...]:
+    found = []
+    for record_id in record_ids:
+        found.append(
+            BoundRecord(
+                record_id,
+                *conn.execute(
+                    """SELECT document.content_sha256, document.file_name, record.record_index,
+                              link.transaction_id
+                       FROM source_record record
+                       JOIN source_document document ON document.id = record.source_document_id
+                       LEFT JOIN transaction_source link ON link.source_record_id = record.id
+                       WHERE record.id = ?""",
+                    (record_id,),
+                ).fetchone(),
+            )
+        )
+    return tuple(sorted(found, key=lambda record: (record.content_sha256, record.row)))
+
+
+def undo_outlook(
+    conn: sqlite3.Connection, decision: DecisionEvidence, rules: MatchingRules
+) -> UndoOutlook:
+    """The undo token, and the transaction counts either side of an undo (D-045).
+
+    The token covers the decision's state and everything relevant to regrouping: what
+    derivation gives with and without this decision, and the evidence of every record
+    that differs between the two or is bound by the decision. Evidence that cannot affect
+    the undo leaves it unchanged, so an unrelated file does not force another inspection.
+    """
+    documents, records, unresolved, _ = load_evidence(conn, decision.account_id)
+    constraints = load_constraints(conn, decision.account_id)
+    others = tuple(item for item in constraints if item.decision_id != decision.decision_id)
+    now = derive(documents, records, unresolved, rules, constraints)
+    after = derive(documents, records, unresolved, rules, others)
+
+    by_id = {document.id: document for document in documents}
+    keys = {
+        record.id: (by_id[record.document_id].content_sha256, record.row_index)
+        for record in records
+    }
+
+    scope = {
+        bound.record_id for pair in decision.pairs for bound in (*pair.left, *pair.right)
+    }
+    for changed in set(now.groups) ^ set(after.groups):
+        scope.update(changed.record_ids)
+    for changed in set(now.items) ^ set(after.items):
+        scope.update(record for member in changed.members for record in member)
+    for result in (now, after):
+        for group in result.groups:
+            if scope.intersection(group.record_ids):
+                scope.update(group.record_ids)
+
+    def key_of(record_id):
+        return keys.get(record_id)
+
+    def keyed(record_ids):
+        return sorted(map(key_of, record_ids), key=repr)
+
+    def view(result):
+        return {
+            "groups": sorted(
+                ([keyed(group.record_ids), group.link_rule, key_of(group.primary_record_id)]
+                 for group in result.groups if scope.intersection(group.record_ids)),
+                key=repr,
+            ),
+            "items": sorted(
+                ([item.rule, sorted(map(keyed, item.members), key=repr), item.reasons,
+                  item.date_start, item.date_end]
+                 for item in result.items
+                 if scope.intersection(record for member in item.members for record in member)),
+                key=repr,
+            ),
+        }
+
+    material = {
+        "state": decision.state,
+        "pairs": sorted(_pair_keys(pair) for pair in decision.pairs),
+        "rules": rules.fingerprint(),
+        "records": sorted(
+            ([key_of(record.id), _without(asdict(record), "id", "document_id")]
+             for record in records if record.id in scope),
+            key=repr,
+        ),
+        "documents": sorted(
+            (_without(asdict(by_id[document_id]), "id")
+             for document_id in {record.document_id for record in records if record.id in scope}),
+            key=repr,
+        ),
+        "other_decisions": sorted(
+            sorted((keyed(item.left), keyed(item.right)), key=repr)
+            for item in others
+            if scope.intersection((*item.left, *item.right))
+        ),
+        "with_decision": view(now),
+        "without_decision": view(after),
+    }
+    return UndoOutlook(decision_revision(material), len(now.groups), len(after.groups))
+
+
+def decision_revision(material: dict) -> str:
+    text = json.dumps(material, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    return f"d{DECISION_REVISION_VERSION}-{digest}"
+
+
+def _pair_keys(pair: BoundPair) -> list:
+    return sorted(
+        [[(record.content_sha256, record.row) for record in side]
+         for side in (pair.left, pair.right)]
+    )
+
+
+def _without(fields: dict, *names: str) -> dict:
+    return {key: value for key, value in fields.items() if key not in names}

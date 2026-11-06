@@ -10,6 +10,8 @@ from personal_finance import cli
 from personal_finance.reports.review_evidence import (
     IMMATERIAL_FIELDS,
     REVISION_VERSION,
+    DecidedPair,
+    DecidedRecord,
     DocumentEvidence,
     ParsedValues,
     RecordEvidence,
@@ -46,11 +48,18 @@ def document():
     )
 
 
+def decided():
+    return DecidedPair(
+        "decision", (DecidedRecord("a" * 64, "a.csv", 1),), (DecidedRecord("a" * 64, "a.csv", 2),)
+    )
+
+
 def item():
     return ReviewEvidence(
         "issue", "possible_duplicate", "cross_document_candidates", "open",
         ("coverage_unknown",), "2026-01-05", "2026-01-06",
-        (transaction(1), transaction(2)), (record(3),), (document(),), False,
+        (transaction(1), transaction(2)), (record(3),), (document(),), False, "account", "A",
+        (decided(),),
     )
 
 
@@ -86,7 +95,8 @@ CASES = dict(variations(item()))
 
 def test_the_walk_reaches_nested_evidence():
     assert {"reasons", "documents.effective_end", "transactions.amount_cents",
-            "transactions.records.parsed.amount_cents", "unresolved.cells"} <= set(CASES)
+            "transactions.records.parsed.amount_cents", "unresolved.cells",
+            "decided.decision_id"} <= set(CASES)
 
 
 @pytest.mark.parametrize("name", sorted(CASES))
@@ -97,11 +107,12 @@ def test_every_field_is_material_or_explicitly_exempt(name):
 
 def test_exempt_fields_are_identifiers_names_and_the_stale_warning_only():
     assert IMMATERIAL_FIELDS == {
-        "issue_id", "transaction_id", "record_id", "file_name", "account_stale"
+        "issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
+        "account_name", "decision_id",
     }
 
 
-@pytest.mark.parametrize("field", ["transactions", "unresolved", "documents"])
+@pytest.mark.parametrize("field", ["transactions", "unresolved", "documents", "decided"])
 def test_removing_a_member_changes_the_revision(field):
     fewer = replace(item(), **{field: getattr(item(), field)[1:]})
     assert review_revision(fewer) != review_revision(item())
@@ -116,12 +127,12 @@ def test_moving_a_record_between_transactions_changes_the_revision():
 
 
 def test_the_definition_is_pinned_so_a_change_must_bump_the_version():
-    assert REVISION_VERSION == 1
-    assert review_revision(item()) == "r1-ab090195f32fface"
+    assert REVISION_VERSION == 2
+    assert review_revision(item()) == "r2-89838aeca64b1dec"
 
 
 def test_the_token_has_the_documented_form():
-    assert re.fullmatch(r"r1-[0-9a-f]{16}", review_revision(item()))
+    assert re.fullmatch(r"r2-[0-9a-f]{16}", review_revision(item()))
 
 
 def test_rows_sharing_a_document_ignores_documents_with_one_record():

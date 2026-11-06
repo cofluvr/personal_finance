@@ -18,6 +18,10 @@ class AccountMovement:
     unresolved_records: int
     candidate_groups: int
     transactions_in_candidate_groups: int
+    decision_conflicts: int = 0
+    transactions_in_decision_conflicts: int = 0
+    transactions_with_withheld_match: int = 0
+    transactions_with_changed_basis: int = 0
 
 
 def account_movement(conn: sqlite3.Connection, account_id: str | None = None) -> AccountMovement:
@@ -53,4 +57,24 @@ def account_movement(conn: sqlite3.Connection, account_id: str | None = None) ->
         {"account": account_id},
     ).fetchone()
 
-    return AccountMovement(inflow, outflow, net, transactions, pending, unresolved, groups, members)
+    conflicts = conn.execute(
+        """SELECT COUNT(DISTINCT issue.id), COUNT(DISTINCT subject.transaction_id),
+                  COUNT(DISTINCT CASE WHEN EXISTS (
+                      SELECT 1 FROM json_each(issue.evidence_json, '$.reasons')
+                      WHERE value = 'automatic_match_withheld')
+                      THEN subject.transaction_id END),
+                  COUNT(DISTINCT CASE WHEN EXISTS (
+                      SELECT 1 FROM json_each(issue.evidence_json, '$.reasons')
+                      WHERE value = 'decision_basis_changed')
+                      THEN subject.transaction_id END)
+           FROM review_issue issue
+           JOIN review_issue_subject subject ON subject.review_issue_id = issue.id
+           JOIN ledger_transaction entry ON entry.id = subject.transaction_id
+           WHERE issue.kind = 'decision_conflict' AND issue.status = 'open'
+             AND (:account IS NULL OR entry.account_id = :account)""",
+        {"account": account_id},
+    ).fetchone()
+
+    return AccountMovement(
+        inflow, outflow, net, transactions, pending, unresolved, groups, members, *conflicts
+    )
