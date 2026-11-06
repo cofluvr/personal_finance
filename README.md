@@ -1,2 +1,122 @@
-# personal_finance
-Local-first personal finance tracking with a Python backend and iOS companion: statement ingestion, transaction reconciliation, household budgets, savings goals, and financial planning.
+# Local-First Personal Finance
+
+A personal finance application that turns financial statements into trustworthy spending insights, actionable budgets, and forward-looking financial plans.
+
+The project has two primary deliverables:
+
+1. **Python backend and local web interface** for importing financial documents, reconciling transactions, tracking finances, and planning.
+2. **Native iOS companion** for viewing spending allowances and financial summaries on the go, including offline access after syncing with the Mac.
+
+## Product Goals
+
+- Understand how much was spent each month and on what.
+- Calculate daily and weekly spending allowances that protect savings goals.
+- Track household finances with personal and shared expense attribution.
+- Reliably exclude internal transfers and credit-card payments from spending totals.
+- Plan for annual expenses, graduated loan payments, savings goals, and future financial changes.
+- Keep financial data local by default.
+- Avoid required subscriptions or paid APIs.
+
+## Core Features
+
+### Document Ingestion and Reconciliation
+
+- Import CSV exports and text-based PDF statements.
+- Initial institution targets: Capital One, US Bank, and American Express.
+- Identify accounts from statement metadata.
+- Detect duplicate transactions across overlapping documents.
+- Reconcile pending and posted versions of transactions.
+- Identify transfers between owned accounts.
+- Preserve source-document provenance and user corrections.
+
+### Spending and Household Management
+
+- Configurable categories, subcategories, and tags.
+- Fixed versus discretionary expense classification.
+- Transaction splits across categories and household members.
+- Personal, shared, and household-wide reporting.
+- Local browser-based review interface.
+
+### Budgeting and Planning
+
+- Daily and weekly spending guidance.
+- Original targets alongside revised remaining allowances.
+- Emergency funds, house savings, and early loan payoff goals.
+- Annual and irregular expense reserves.
+- Graduated loan payment schedules.
+- Conservative financial scenarios.
+- Configurable reserves for untaxed side income.
+- Cash-flow, debt, and net-worth summaries.
+
+### iOS Companion
+
+- Secure local-network synchronization.
+- Protected offline snapshots.
+- At-a-glance spending allowances.
+- Personal and household views.
+- Clear freshness and incomplete-data warnings.
+
+## Privacy and Security Principles
+
+- The Mac is the authoritative source of financial data.
+- The iPhone stores only the information needed for offline viewing.
+- No cloud-hosted database by default.
+- No banking passwords stored by the application.
+- No external AI processing of real financial data by default.
+- No telemetry or financial-data transmission by default.
+- Real statements, credentials, and databases remain outside the AI coding workspace.
+- Any future institution connection or cloud service requires explicit approval.
+
+Claude Code may be used to develop the application using synthetic or sanitized fixtures. It is not assumed to provide local model inference.
+
+## Initial Scope
+
+The initial application supports:
+
+- USD.
+- Approximately two years of history across up to 30 accounts.
+- Checking, savings, credit cards, loans, investments, and retirement accounts.
+- One administrator managing all household data.
+- On-demand operation on macOS.
+- A read-only iOS companion after local synchronization.
+
+## Delivery Plan
+
+1. Financial foundation: ingestion, normalization, deduplication, transfers, and review.
+2. Planning: budgets, goals, annual expenses, loans, and scenarios.
+3. Mobile companion: secure synchronization and offline viewing.
+4. Optional enhancements: receipts, mobile editing, institution connections, and cloud hosting.
+
+## Planned Enhancements
+
+- Receipt photography and item-level transaction splitting.
+- Mobile transaction corrections and goal editing.
+- Scheduled financial institution refreshes.
+- Optional local AI-assisted categorization.
+- XLSX ingestion.
+- Notifications.
+- Optional private cloud hosting.
+
+These features are not part of the initial release unless explicitly reprioritized.
+
+## Product Documentation
+
+- [Backend PRD](docs/PRD-backend.md)
+- [iOS PRD](docs/PRD-ios.md)
+- [Shared Data and Sync Contract](docs/shared-contract.md)
+
+## Development Principles
+
+- Correct accounting before polished visualizations.
+- Preserve original records and explain derived values.
+- Never silently discard uncertain financial information.
+- Keep actual transactions separate from hypothetical scenarios.
+- Use exact monetary arithmetic.
+- Require tests for duplicates, transfers, and financial allocations.
+- Keep operational maintenance low.
+
+## Project Status
+
+Planning and requirements definition.
+
+Technology choices, installation instructions, and development commands will be documented as implementation proceeds.
