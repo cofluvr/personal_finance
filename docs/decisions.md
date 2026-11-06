@@ -175,6 +175,9 @@ found in document metadata.
 Boundary dates do not override a confident match based on a validated,
 account-scoped external ID with compatible material fields.
 
+Amended by D-027 (effective interval for metadata claims) and clarified by D-028
+(single-day scope).
+
 ## D-008 One record per document per transaction — Approved
 
 A logical transaction can hold at most one source record from any one document.
@@ -374,6 +377,75 @@ describes the document, and parsing describes what was read from it.
 [security-controls-proposal.md](security-controls-proposal.md) is unapplied. Its
 version requirements and VS Code behaviour are unverified, and it must not be
 described as active protection.
+
+## D-026 Identifier guarantees are persisted — Approved, implemented in slice 3
+
+- Each document stores how it was interpreted at import: layout, parser version,
+  ID namespace, ID guarantee, and whether pending rows fall inside its coverage
+  claim. Reconciliation reads this stored evidence, never current Python
+  configuration, so a code change cannot silently reinterpret history.
+- A layout definition that differs from what is stored for the same layout and
+  parser version fails the import.
+- The same ID in a validated namespace, with compatible material fields, is a
+  confident match (D-006). Different IDs establish distinctness only in a validated
+  namespace whose layout guarantees stable, unique transaction identifiers.
+- Temporary limitation: an ID-bearing row against an ID-less row can only be a
+  possible duplicate. Revisit for CSV-to-PDF matching (M7).
+
+One-time clarification: `synthetic_checking_v1` IDs are declared stable and unique
+within the layout's account-scoped namespace. This is allowed once, because the
+layout is invented and synthetic-only. It does not generalize: changing a real
+layout's guarantee needs explicit versioning and a migration decision.
+
+Checked before backfilling: the CSV fixtures for this layout repeat no ID and reuse
+none across files. The inline row in `test_a_repeated_external_id_stays_visible_and_counted`
+is an intentional violation (A29). A repeated ID stays flagged under D-021.
+
+## D-027 Effective coverage for metadata claims — Approved, implemented in slice 3
+
+Amends D-007. The claimed interval stays in `document_coverage` unchanged as source
+evidence. Matching derives a separate effective interval.
+
+| Coverage | Effective end |
+|---|---|
+| `document_metadata` with `generated_on` | The earlier of `coverage_end` and the day before `generated_on` |
+| `document_metadata` without `generated_on` | The day before `coverage_end` |
+| `user_declared` | `coverage_end`. This restriction does not apply |
+
+- Dates after the generation date do not establish complete coverage.
+- The generation day itself stays excluded: date-only metadata cannot show that the
+  day was complete.
+- Missing or inconsistent metadata is never read as stronger evidence.
+
+## D-028 Single-day overlaps apply to ID-less matching only — Approved
+
+The single-day policy in D-007 applies only to ID-less, coverage-based matching, for
+every kind of coverage evidence. A validated, account-scoped external ID with
+compatible material fields can establish a confident match when coverage overlaps
+for one day, is unknown, or is otherwise insufficient for ID-less matching. A45 is
+the direct regression test.
+
+## D-029 Source movement history — Approved, implemented in slice 3
+
+- Automatic splits are allowed for machine-generated merges only. Explicit user
+  decisions take precedence from M2, and no automatic reconciliation may silently
+  overturn one.
+- Every source record is preserved. An append-only history records each move between
+  transactions, with the reason, the rules version and the triggering document.
+- Each record keeps its original transaction identity. A group's public ID is the
+  original ID of its earliest-imported record, so a split can revive a retired ID.
+- `trace` distinguishes current membership from historical moves. A retired ID whose
+  records now sit in several transactions lists all of them, never a single target.
+- Source grouping is deterministic for a given set of documents and rules, and can
+  change as documents arrive. This is separate from public ID stability.
+- Applying merges and splits is atomic with the import.
+
+## D-030 Displayed values of a merged transaction — Approved, implemented in slice 3
+
+A merged transaction shows all its values from one primary source record, chosen
+deterministically, with no mixing of fields between records. It may show `posted`
+when its primary source is posted. An `unknown` source status stays unchanged in
+`record_parse` and `trace`. Pending-to-posted reconciliation remains M2.
 
 ## Not yet decided
 

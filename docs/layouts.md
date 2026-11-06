@@ -5,7 +5,9 @@ tested layouts. **No real institution's format is supported.** Both layouts belo
 are invented for development.
 
 A layout's meaning never changes once used. A change needs a new `layout_id`, so
-stored documents keep the meaning they were imported under.
+stored documents keep the meaning they were imported under. The one exception is a
+synthetic-only clarification of `synthetic_checking_v1` IDs (D-026), which does not
+apply to real layouts.
 
 ## What "complete" means
 
@@ -17,7 +19,8 @@ the stated basis, falls within the inclusive interval is present in this documen
 - It comes from document metadata or a user declaration, never from row dates.
 - A user declaration vouches for the whole end date, under the layout's pending
   definition below. Document metadata does not, unless its generation date shows
-  the end date had passed (D-007).
+  the end date had passed (D-007). Dates on or after a metadata document's generation
+  date do not establish completeness (D-027).
 - It does not mean every row was parsed. Unresolved rows stay disclosed (D-024).
 
 ## synthetic_checking_v1
@@ -29,7 +32,7 @@ Columns: `Transaction ID, Transaction Date, Posted Date, Description, Amount, St
 | Amount | Signed. Negative is money leaving the account |
 | Dates | `YYYY-MM-DD`. Blank stays missing, and one date is enough |
 | Status | `PENDING`, `POSTED`, or blank (unknown) |
-| Transaction ID | Declared reliable: stable across exports for one account |
+| Transaction ID | Declared reliable: stable across exports and unique within this layout's namespace for one account (D-026) |
 | Metadata | Optional `# key: value` lines before the header |
 | Coverage | Metadata or user declaration, on either date basis |
 

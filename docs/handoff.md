@@ -1,7 +1,8 @@
 # Session Handoff: M1 Slice 3
 
 For a fresh session. Written 2026-11-05. Slices 1 and 2 are provisionally accepted.
-**Slice 3 has not started.**
+**Slice 3 has not started.** Its design decisions so far are D-026 to D-030. The
+owner's approval of candidate grouping and similarity is not yet recorded here.
 
 ## Current state
 
