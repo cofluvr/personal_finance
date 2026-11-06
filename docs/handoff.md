@@ -246,13 +246,10 @@ slices:
 
 ## M2.2 handoff
 
-**Before implementing M2.2: open gate.** The owner's request to prepare this handoff refers to
-qualifications in their approval message. That message was not available to the session that
-wrote this, so **those qualifications are not recorded here**. Everything below is the plan as
-presented, which that request treats as approved. Get the qualifications from the owner and
-record them before implementing, and treat them as overriding anything below that they change.
+**Gate closed.** The owner's qualifications are recorded as D-045 and override anything below
+that they change. Migration 0005 and the `review_issue` rebuild are confirmed.
 
-**Scope and acceptance tests:** "M2.2 scope" and "M2.2 acceptance criteria" (S1 to S17) in
+**Scope and acceptance tests:** "M2.2 scope" and "M2.2 acceptance criteria" (S1 to S23) in
 [plan.md](plan.md). In short: migration 0005, constraints in `derive()`, `review reject`, `review
 decisions`, `review decision show`, `review undo`, and revision version 2, for
 `cross_document_candidates` items only.
@@ -311,8 +308,6 @@ probed on throwaway ledgers, and neither has run through `migrate` yet.
 
 ## Awaiting the owner
 
-- The qualifications from the M2.2 approval message, which this handoff does not hold.
-- Confirmation in the kickoff prompt that M2.2 implementation may start.
 - Pushing. Not authorized. `feature/m2-review` is local only.
 
 ## Recommended M2 scope

@@ -194,7 +194,8 @@ Direction from planning, not yet decisions:
 
 ### M2.2 scope
 
-The rules are D-042 (rejection and constraints), D-043 (validation and undo) and D-044 (conflicts).
+The rules are D-042 (rejection and constraints), D-043 (validation and undo), D-044 (conflicts)
+and D-045 (the owner's qualifications, which override the others where they differ).
 Planning replaced three earlier ideas: decisions are pair constraints rather than partitions, only
 stated pairs are bound rather than pinning decided records, and conflicts have their own kind
 rather than sharing `possible_duplicate`.
@@ -230,7 +231,7 @@ removed. Direct links are recomputed only inside groups a constraint touches.
 | S1 | Migration 0005 works on a populated ledger, keeps every issue and subject, and foreign keys still hold. Decision tables refuse update, delete and replace |
 | S2 | With no constraints, `derive()` output is identical to today, and A16 still passes |
 | S3 | Reject leaves totals unchanged and moves no records, and source evidence is byte-identical |
-| S4 | A two-member item closes. A three-member item keeps the undecided pair open |
+| S4 | A two-member item closes by removal, and undo can raise a new item. A three-member item keeps the undecided pair open |
 | S5 | Refused, with nothing changed: wrong account, wrong item, matching token on the wrong item, old token, stale account, pair outside the item, repeated pair, unsupported item type |
 | S6 | A stale account is not reconciled by the refused command |
 | S7 | A decision survives repeat imports, `reconcile`, unrelated files and a rules change |
@@ -244,6 +245,12 @@ removed. Direct links are recomputed only inside groups a constraint touches.
 | S15 | Property test: import order does not change the outcome for any fixed decisions |
 | S16 | Link recomputation matches union-find components, with a measured cost on dense groups |
 | S17 | Privacy: `reject`, `undo` and `review decisions` show no amounts or descriptions. Escaping tests stay |
+| S18 | Chain A–B–C: A–C is not a direct candidate and is refused |
+| S19 | Later evidence that splits an existing automatic merge raises the count and movements, and is disclosed. A rejection that would itself change totals or memberships refuses atomically |
+| S20 | Conflict wording is reason-specific, both reasons are explained, and counts are per category and never implied disjoint |
+| S21 | Evidence relevant to regrouping that changes after `review decision show` makes undo refuse |
+| S22 | Equivalent decisions made at different valid points in the import sequence give the same outcome |
+| S23 | A failing migration 0005 on a populated ledger leaves everything as it was |
 
 ## Backlog benchmarks
 

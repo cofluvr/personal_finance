@@ -758,6 +758,56 @@ Decision-related conflicts are a separate classification, not a variety of possi
 - Widening the kind needs `review_issue` rebuilt. Moving the `review_issue_subject` rows out and back
   in one transaction worked on a populated ledger. A plain rebuild fails its foreign keys at commit.
 
+## D-045 Owner's qualifications on M2.2 — Approved, to be implemented in M2.2
+
+Given by the owner on 2026-11-06 with the confirmation to start M2.2. They override anything in
+D-042 to D-044 or the plan that they change. Migration 0005 and the populated `review_issue`
+rebuild are confirmed.
+
+**Closing an item (amends S4).** An item closes by removal: when no undecided candidate
+relationship remains, derivation stops producing it and the row goes, as for any item no longer
+warranted. The decision and its source-record constraints stay in append-only history. Undo may
+raise a new item with a new ID. Nothing is marked resolved in a way that suppresses candidates
+after undo.
+
+**Pair validation (amends D-043 step 4).** Each pair must be a direct, undecided candidate
+relationship, not merely two transactions in one connected group. It is checked under the same
+write lock as account, item, revision and status. In a chain A–B–C where A and C are not directly
+linked, A–C cannot be rejected. The cross-product of source records is bound at decision time, and
+new records are not bound automatically.
+
+**Withholding (confirms D-042).** Later evidence can split an existing automatic merge, raising
+the transaction count and account movements. This is tested and disclosed. Rejecting the displayed
+unmerged pair must itself leave totals and source memberships unchanged. If it would change them,
+the command refuses atomically and explains that separating an existing merge belongs to a later
+workflow. All source evidence and identity and link history are preserved. `same_event`, when built,
+must preserve explicit confirmed groupings unless superseded. Confirmation is not implemented here.
+
+**Conflict wording (extends D-044).** Each reason has its own wording, and nothing claims a merge
+was withheld when only the decision basis changed. A conflict with both reasons explains both.
+Distinct affected transactions are counted within each category. A transaction can appear in more
+than one category, so the counts are never presented as disjoint.
+
+**Undo token (extends D-043).** It covers active decision state and the current material evidence
+relevant to regrouping, not only the decision's own text. If that evidence changes after
+`review decision show`, undo refuses and asks for another inspection. Stale accounts are refused
+without reconciling. Undo re-derives from current evidence without that decision, and never restores
+an old financial snapshot.
+
+**Order independence.** Compared on equivalent active source-record constraints, grouping, totals
+and semantic review outcomes, using stable fixture evidence and never generated IDs or timestamps.
+This includes equivalent decisions made at different valid points in the import sequence.
+
+**Migration and history.** Populated migration is tested for success and for failure atomicity,
+preserving issues, subjects, foreign keys, indexes, source evidence and identity and link history.
+Decision, constraint and event history refuse update, delete and replacement.
+
+**Performance.** Dense constrained groups are measured and the cost documented. Approved matching
+semantics are not changed silently to meet a target.
+
+**Not approved:** confirmation, superseding, separating existing merges, corrections, later slices,
+network access, new dependencies, security changes and pushing.
+
 ## Not yet decided
 
 From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend details
