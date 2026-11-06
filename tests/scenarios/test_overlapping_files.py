@@ -13,7 +13,15 @@ from pathlib import Path
 import pytest
 from ledger_view import semantic_view
 
-from personal_finance.db.migrate import MIGRATIONS_DIR, connect, create_database, migrate
+from personal_finance.cli import main
+from personal_finance.db.migrate import (
+    MIGRATIONS_DIR,
+    connect,
+    create_database,
+    load_migrations,
+    migrate,
+    schema_version,
+)
 from personal_finance.ingest import pipeline
 from personal_finance.ingest.coverage import declare_complete
 from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1, SYNTHETIC_CHECKING_V1
@@ -774,6 +782,101 @@ class TestExistingAccounts:
                       pending_in_transaction_basis, pending_in_posting_basis
                FROM document_interpretation"""
         ).fetchall()) == {(None, "none", None, None)}
+        conn.close()
+
+
+class TestUpgradeWorkflow:
+    def old_ledger(self, tmp_path):
+        old = tmp_path / "old_migrations"
+        old.mkdir()
+        for name in ("0001_initial.sql", "0002_block_replace.sql"):
+            shutil.copy(MIGRATIONS_DIR / name, old / name)
+        path = tmp_path / "old.db"
+        create_database(path, old)
+        conn = connect(path)
+        seed_version_two(conn, (CARD_HEADER + cafe() + "\n").encode("utf-8"))
+        conn.close()
+        return path
+
+    def test_migration_changes_schema_and_reconciliation_changes_grouping(self, tmp_path, capsys):
+        path = self.old_ledger(tmp_path)
+        db = str(path)
+
+        assert main(["totals", "--db", db]) == 2
+        assert "migrate --db" in capsys.readouterr().err
+
+        assert main(["migrate", "--db", db]) == 0
+        conn = connect(path)
+        assert transactions(conn) == 2, "migration must not change grouping"
+        assert conn.execute("SELECT COUNT(*) FROM account_reconciliation").fetchone() == (0,)
+        assert conn.execute("SELECT COUNT(*) FROM transaction_link_history").fetchone() == (0,)
+        conn.close()
+        capsys.readouterr()
+
+        assert main(["totals", "--db", db]) == 0
+        assert "1 accounts have not been reconciled" in capsys.readouterr().out
+
+        assert main(["reconcile", "--db", db]) == 0
+        conn = connect(path)
+        assert transactions(conn) == 1
+        assert is_current(conn, "acct", DEFAULT_RULES)
+        conn.close()
+        capsys.readouterr()
+
+        assert main(["totals", "--db", db]) == 0
+        assert "have not been reconciled" not in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "broken",
+        [
+            "CREATE TABLE half_done (id TEXT) STRICT; INSERT INTO half_done VALUES ('x');"
+            "INSERT INTO account (id) VALUES ('missing required columns');",
+            "UPDATE ledger_transaction SET amount_cents = 0; SELECT no_such_function();",
+        ],
+    )
+    def test_a_failed_migration_step_leaves_no_trace(self, tmp_path, broken):
+        path = self.old_ledger(tmp_path)
+        folder = tmp_path / "next_migrations"
+        folder.mkdir()
+        for migration in load_migrations():
+            shutil.copy(migration.path, folder / migration.path.name)
+        latest = len(load_migrations())
+        conn = connect(path)
+        migrate(conn)
+        before = dump(conn)
+        tables = conn.execute("SELECT name FROM sqlite_master ORDER BY name").fetchall()
+
+        (folder / f"{latest + 1:04d}_broken.sql").write_text(broken, encoding="utf-8")
+        with pytest.raises(sqlite3.Error):
+            migrate(conn, folder)
+
+        assert schema_version(conn) == latest
+        assert dump(conn) == before
+        assert conn.execute("SELECT name FROM sqlite_master ORDER BY name").fetchall() == tables
+
+        (folder / f"{latest + 1:04d}_broken.sql").write_text(
+            "CREATE TABLE repaired (id TEXT) STRICT;", encoding="utf-8"
+        )
+        assert migrate(conn, folder) == latest + 1
+        conn.close()
+
+    def test_a_failed_upgrade_leaves_earlier_steps_applied_and_can_resume(self, tmp_path):
+        path = self.old_ledger(tmp_path)
+        folder = tmp_path / "next_migrations"
+        folder.mkdir()
+        migrations = load_migrations()
+        shutil.copy(migrations[2].path, folder / migrations[2].path.name)
+        for migration in migrations[:2]:
+            shutil.copy(migration.path, folder / migration.path.name)
+        (folder / "0004_broken.sql").write_text("SELECT no_such_function();", encoding="utf-8")
+        conn = connect(path)
+
+        with pytest.raises(sqlite3.Error):
+            migrate(conn, folder)
+
+        assert schema_version(conn) == 3
+        assert conn.execute("SELECT COUNT(*) FROM document_interpretation").fetchone() == (2,)
+        assert migrate(conn) == len(migrations)
         conn.close()
 
 

@@ -11,7 +11,14 @@ import sys
 import uuid
 from pathlib import Path
 
-from personal_finance.db.migrate import connect, create_database, migrate
+from personal_finance.db.migrate import (
+    MigrationError,
+    connect,
+    create_database,
+    load_migrations,
+    migrate,
+    schema_version,
+)
 from personal_finance.ingest.coverage import DATE_BASES, declare_complete
 from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import LAYOUTS
@@ -64,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         return sub
 
     command("init", handler=run_init, help="create a new ledger database")
+    command("migrate", handler=run_migrate, help="upgrade a ledger to the current schema")
 
     account = commands.add_parser("account", help="manage accounts")
     account_commands = account.add_subparsers(dest="account_command", required=True)
@@ -106,11 +114,22 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def open_ledger(path: Path) -> sqlite3.Connection:
+def open_ledger(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
+    """Open a ledger on the current schema. Upgrading is only ever done by migrate."""
     if not path.is_file():
         raise CommandError(f"database not found: {path}")
-    conn = connect(path)
-    migrate(conn)
+    conn = connect(path, read_only=read_only)
+    current, latest = schema_version(conn), len(load_migrations())
+    if current < latest:
+        raise CommandError(
+            f"this ledger uses schema version {current} and this code needs {latest}. "
+            f"Nothing was changed. Run: migrate --db {path}"
+        )
+    if current > latest:
+        raise CommandError(
+            f"this ledger uses schema version {current}, which is newer than this code "
+            f"({latest}). Nothing was changed."
+        )
     return conn
 
 
@@ -129,6 +148,31 @@ def run_init(args) -> int:
     except FileExistsError:
         raise CommandError(f"refusing to overwrite existing file: {args.db}") from None
     print(f"Created {args.db}")
+    return 0
+
+
+def run_migrate(args) -> int:
+    """Upgrade the schema and its metadata. Transaction grouping is left to reconcile."""
+    if not args.db.is_file():
+        raise CommandError(f"database not found: {args.db}")
+    conn = connect(args.db)
+    before = schema_version(conn)
+    try:
+        after = migrate(conn)
+    except (MigrationError, sqlite3.Error) as error:
+        if "locked" in str(error):
+            raise
+        raise CommandError(
+            f"migration failed at schema version {schema_version(conn)}. The failed step left "
+            "no changes, and steps before it stay applied. Run migrate again once the "
+            "problem is fixed."
+        ) from None
+
+    if after == before:
+        print(f"Already at schema version {after}.")
+    else:
+        print(f"Upgraded from schema version {before} to {after}.")
+        print("Transaction grouping was not changed. Run reconcile to update it.")
     return 0
 
 
@@ -242,7 +286,7 @@ def run_reconcile(args) -> int:
 
 
 def run_documents(args) -> int:
-    conn = open_ledger(args.db)
+    conn = open_ledger(args.db, read_only=True)
     rows = conn.execute(
         """SELECT document.file_name, document.layout_id, account.display_name,
                   coverage_kind, coverage_start, coverage_end, date_basis, evidence,
@@ -270,7 +314,7 @@ def run_documents(args) -> int:
 
 
 def run_transactions(args) -> int:
-    conn = open_ledger(args.db)
+    conn = open_ledger(args.db, read_only=True)
     rows = conn.execute(
         """SELECT id, COALESCE(transaction_date, posting_date), amount_cents,
                   settlement_status, description
@@ -285,7 +329,7 @@ def run_transactions(args) -> int:
 
 
 def run_trace(args) -> int:
-    conn = open_ledger(args.db)
+    conn = open_ledger(args.db, read_only=True)
     transaction = conn.execute(
         """SELECT transaction_date, posting_date, amount_cents, settlement_status, description
            FROM ledger_transaction WHERE id = ?""",
@@ -382,7 +426,7 @@ def describe_evidence(evidence: str) -> str:
 
 
 def run_review_list(args) -> int:
-    conn = open_ledger(args.db)
+    conn = open_ledger(args.db, read_only=True)
     rows = conn.execute(
         """SELECT issue.id, issue.kind, issue.rule, issue.evidence_json,
                   COUNT(subject.transaction_id), MIN(document.file_name),
@@ -412,7 +456,7 @@ def run_review_list(args) -> int:
 
 
 def run_totals(args) -> int:
-    conn = open_ledger(args.db)
+    conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
     movement = account_movement(conn, account_id)
 

@@ -1,17 +1,18 @@
 """The commands a person runs, in process, using only synthetic data."""
 
+import hashlib
 import shutil
+import sqlite3
 from pathlib import Path
 
 import pytest
 
+from personal_finance import cli
 from personal_finance.cli import main
 from personal_finance.db.migrate import (
-    MIGRATIONS_DIR,
     connect,
     create_database,
     load_migrations,
-    schema_version,
 )
 from personal_finance.ingest import pipeline
 
@@ -515,15 +516,122 @@ def test_repeat_import_says_when_it_reconciled(db, tmp_path, monkeypatch, capsys
     assert "already imported, nothing changed" in capsys.readouterr().out
 
 
-def test_commands_upgrade_an_older_ledger(tmp_path, capsys):
+def old_ledger(tmp_path, versions=2):
+    """A ledger created by earlier code, on an earlier schema."""
     old = tmp_path / "old_migrations"
     old.mkdir()
-    for name in ("0001_initial.sql", "0002_block_replace.sql"):
-        shutil.copy(MIGRATIONS_DIR / name, old / name)
+    for migration in load_migrations()[:versions]:
+        shutil.copy(migration.path, old / migration.path.name)
     path = tmp_path / "old.db"
     create_database(path, old)
+    return path
 
-    assert main(["documents", "--db", str(path)]) == 0
-    conn = connect(path)
-    assert schema_version(conn) == len(load_migrations())
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "name, extra",
+    [
+        (["documents"], []),
+        (["transactions"], []),
+        (["review", "list"], []),
+        (["totals"], []),
+        (["trace"], ["some-id"]),
+    ],
+)
+def test_read_commands_explain_an_old_schema_and_change_nothing(tmp_path, capsys, name, extra):
+    path = old_ledger(tmp_path)
+    before = digest(path)
+
+    assert main([*name, "--db", str(path), *extra]) == 2
+
+    error = capsys.readouterr().err
+    assert "schema version 2" in error
+    assert "Nothing was changed" in error
+    assert "migrate --db" in error
+    assert digest(path) == before
+
+
+def test_write_commands_also_refuse_an_old_schema(tmp_path, capsys):
+    path = old_ledger(tmp_path)
+    before = digest(path)
+
+    assert main(["account", "add", "--db", str(path), "--name", "X", "--type", "checking"]) == 2
+    assert main(["reconcile", "--db", str(path)]) == 2
+    assert main(["import", "--db", str(path), "--account", "X", "--layout", "synthetic_card_v1",
+                 str(CARD)]) == 2
+
+    assert "migrate --db" in capsys.readouterr().err
+    assert digest(path) == before
+
+
+def test_a_newer_schema_is_refused_without_change(db, capsys):
+    conn = connect(Path(db))
+    conn.execute("PRAGMA user_version = 9999")
     conn.close()
+    before = digest(Path(db))
+
+    assert main(["totals", "--db", db]) == 2
+    assert "newer than this code" in capsys.readouterr().err
+    assert digest(Path(db)) == before
+
+
+@pytest.mark.parametrize("command", [["documents"], ["transactions"], ["totals"]])
+def test_read_commands_leave_a_current_ledger_byte_identical(db, capsys, command):
+    import_card(db)
+    before = digest(Path(db))
+    assert main([*command, "--db", db]) == 0
+    assert digest(Path(db)) == before
+
+
+def test_read_commands_open_the_ledger_read_only(db, monkeypatch):
+    opened = []
+
+    def recording_connect(path, *, read_only=False):
+        opened.append(read_only)
+        return connect(path, read_only=read_only)
+
+    monkeypatch.setattr(cli, "connect", recording_connect)
+    main(["totals", "--db", db])
+    main(["documents", "--db", db])
+    assert opened == [True, True]
+
+
+def test_a_read_only_connection_cannot_write(db):
+    conn = connect(Path(db), read_only=True)
+    with pytest.raises(sqlite3.OperationalError):
+        conn.execute("INSERT INTO import_run (id) VALUES ('x')")
+    conn.close()
+
+
+def test_migrate_upgrades_and_says_grouping_is_unchanged(tmp_path, capsys):
+    path = old_ledger(tmp_path)
+
+    assert main(["migrate", "--db", str(path)]) == 0
+    out = capsys.readouterr().out
+    assert f"Upgraded from schema version 2 to {len(load_migrations())}" in out
+    assert "Transaction grouping was not changed. Run reconcile" in out
+
+    assert main(["migrate", "--db", str(path)]) == 0
+    assert "Already at schema version" in capsys.readouterr().out
+
+
+def test_migrate_refuses_a_missing_ledger(tmp_path, capsys):
+    assert main(["migrate", "--db", str(tmp_path / "missing.db")]) == 2
+    assert "database not found" in capsys.readouterr().err
+    assert not (tmp_path / "missing.db").exists()
+
+
+def test_a_failed_migration_reports_where_the_ledger_stands(tmp_path, monkeypatch, capsys):
+    path = old_ledger(tmp_path)
+
+    def failing(conn):
+        raise sqlite3.IntegrityError("injected")
+
+    monkeypatch.setattr(cli, "migrate", failing)
+    assert main(["migrate", "--db", str(path)]) == 2
+    error = capsys.readouterr().err
+    assert "migration failed at schema version 2" in error
+    assert "Run migrate again" in error
