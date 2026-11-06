@@ -233,7 +233,7 @@ def test_a_reader_closing_the_output_is_neither_an_error_nor_a_success(tmp_path)
     errors = process.stderr.read()
     process.stderr.close()
 
-    assert process.wait(timeout=60) == cli.BROKEN_PIPE_EXIT
+    assert process.wait(timeout=60) == 141
     assert errors == ""
 
 
