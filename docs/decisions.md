@@ -544,6 +544,74 @@ applying many merges is not yet measured (see "Backlog benchmarks" in [plan.md](
   applied, and running `migrate` again resumes.
 - A migration that has been committed is not edited, because edits are not detected.
 
+## D-036 Import summary units — Approved
+
+Counts keep their own units. Only the first two below are partitions, and nothing else is
+added to them or to each other.
+
+| Count | Definition | Reconciles? |
+|---|---|---|
+| Files attempted | Files named in the run | Imported + already imported + failed |
+| Source rows read | Non-blank data rows in a successfully imported file (see [layouts.md](layouts.md)) | Valid records + unresolved records |
+| Valid records accepted | Rows stored with a parsed result | Part of rows read only |
+| Final logical transactions | Distinct live transactions those valid records now belong to | No |
+| Confidently consolidated records | Valid records whose live transaction also has a source record from another document | No |
+| Net change in live logical transactions | Signed change in the account's live transactions, measured inside the file's database transaction | No |
+| Source memberships changed | Source records in the account whose transaction changed during reconciliation | No |
+| Open review groups | Open possible-duplicate review items in the account | No |
+| Distinct affected transactions | Different transactions in those groups | No |
+
+- Records accepted are never described as transactions created. A one-row file can add two
+  live transactions by splitting an earlier merge, and a file can add none.
+- "New" and "matched" are not reported as outcomes of a record, because reconciliation can
+  regroup records later. Consolidation is a state at a stated moment.
+- A file's own counts describe the moment it was imported. The run summary reads the ledger
+  after the last file, so a later file in the run is reflected.
+- Net change and memberships changed are sums over the run's files, each measured under its
+  own write lock, so they exclude other processes.
+- Account review totals are final-state counts, never sums of per-file snapshots.
+- Rows from a failed file are never reported as read or stored. A failed file has either a
+  known attempted count, when it was parsed and then rolled back, or no count, shown as
+  unavailable. Neither is ever shown as zero, and neither joins the row partition.
+- A file already imported reads no rows, so it has no row counts.
+- User-facing text says "review groups", never "flags", for group membership. Review
+  memberships, one transaction in one group, are not reported.
+
+## D-037 No application logging, and a safe CLI boundary — Approved
+
+- M1 writes no logs. Output goes to the terminal only, and the database is the only file
+  written.
+- `main` catches unexpected exceptions and prints one fixed message with exit code 2. The
+  exception's text is never shown, because it can quote file contents.
+- Expected validation, migration and `database_busy` errors keep their sanitized messages.
+- User cancellation is not an application error, so it is not caught there.
+- No traceback or diagnostic dump is written to disk. The cost is that an unexpected error
+  must be reproduced with synthetic data to be diagnosed.
+- Scope of the privacy rule: import summaries, `reconcile`, `documents`, `review list` and
+  error paths never show descriptions, amounts or raw rows. `transactions` and `trace` exist
+  to show selected data and are not leaks. `totals` shows only aggregate amounts.
+- File and account names are shown as the user typed them.
+- Tests allow the ledger, its SQLite support files and explicitly requested outputs, and
+  fail on any other new file.
+
+## D-038 Entry point — Approved
+
+- `bin/pf` is the verified launcher. It runs this checkout's `.venv` from any directory, and
+  paths containing spaces are supported.
+- `[project.scripts]` also declares `pf`. Installing the package needs setuptools, which the
+  local `.venv` lacks, so that route stays unverified until an install is authorized.
+- Checking a clone that shares an existing environment is a source-checkout check. It is
+  not a clean install, and must not be called one.
+
+## D-039 Temporary files during development — Approved
+
+- pytest's temporary directories may sit outside the repository, for synthetic test
+  artifacts only, with normal cleanup. This authorizes nothing else outside the repository.
+- Walkthroughs, clone checks and deliberate breaks use `build/`.
+- External memory and scratchpad files are not read or written voluntarily. Files managed
+  by the tool harness are distinct from the session's own actions, and any unavoidable
+  boundary limitation is reported.
+
 ## Not yet decided
 
 From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend details

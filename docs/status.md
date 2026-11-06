@@ -4,10 +4,10 @@ Last updated: 2026-11-05. Branch: `feature/m1-foundation`. The owner pushed `c75
 
 | Milestone | Status |
 |---|---|
-| M1 slice 1: scaffolding, money, schema, migrations | Complete, provisionally accepted |
-| M1 slice 2: synthetic layouts, coverage, provenance, idempotent import | Complete, provisionally accepted |
+| M1 slice 1: scaffolding, money, schema, migrations | Accepted |
+| M1 slice 2: synthetic layouts, coverage, provenance, idempotent import | Accepted |
 | M1 slice 3: cross-document duplicate handling | Accepted |
-| M1 slice 4: import summaries, log checks, entry point, setup documentation | Not started |
+| M1 slice 4: import summaries, log checks, entry point, setup documentation | In progress |
 | M2 to M8 | Not started |
 
 ## What exists
