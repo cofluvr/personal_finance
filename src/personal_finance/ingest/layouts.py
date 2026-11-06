@@ -34,8 +34,15 @@ class Layout:
     # Date basis a coverage claim can use, mapped to whether pending transactions
     # fall within a complete claim on that basis.
     pending_in_complete_coverage: Mapping[str, bool]
-    external_ids_reliable: bool = False
+    # What the layout promises about its IDs: none, stable or stable_unique. Only a
+    # namespace with a guarantee makes IDs comparable (D-026).
+    external_id_guarantee: str = "none"
+    external_id_namespace: str | None = None
     has_metadata_preamble: bool = False
+
+    @property
+    def external_ids_reliable(self) -> bool:
+        return self.external_id_guarantee != "none"
 
 
 def _date(text: str, date_format: str, problems: list[str]) -> str | None:
@@ -126,7 +133,8 @@ SYNTHETIC_CHECKING_V1 = Layout(
     columns=("Transaction ID", "Transaction Date", "Posted Date", "Description", "Amount", "Status"),
     parse_row=_parse_checking_row,
     pending_in_complete_coverage={"transaction": True, "posting": False},
-    external_ids_reliable=True,
+    external_id_guarantee="stable_unique",
+    external_id_namespace="synthetic_checking_v1",
     has_metadata_preamble=True,
 )
 

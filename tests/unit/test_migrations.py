@@ -36,7 +36,9 @@ def test_new_database_is_at_the_latest_version(conn):
 def test_new_database_has_the_expected_tables(conn):
     assert table_names(conn) == {
         "account",
+        "account_reconciliation",
         "document_coverage",
+        "document_interpretation",
         "import_attempt",
         "import_run",
         "ledger_transaction",
@@ -45,6 +47,8 @@ def test_new_database_has_the_expected_tables(conn):
         "review_issue_subject",
         "source_document",
         "source_record",
+        "source_record_origin",
+        "transaction_link_history",
         "transaction_source",
     }
 

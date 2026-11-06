@@ -36,14 +36,16 @@ class MatchingRules:
         }
     )
 
-    def fingerprint(self) -> str:
-        """Identify this configuration, including RULES_VERSION and any override."""
+    def to_json(self) -> str:
         settings = {
             key: sorted(value) if isinstance(value, frozenset) else value
             for key, value in asdict(self).items()
         }
-        text = json.dumps({"version": RULES_VERSION, "settings": settings}, sort_keys=True)
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+        return json.dumps({"version": RULES_VERSION, "settings": settings}, sort_keys=True)
+
+    def fingerprint(self) -> str:
+        """Identify this configuration, including RULES_VERSION and any override."""
+        return hashlib.sha256(self.to_json().encode("utf-8")).hexdigest()
 
 
 DEFAULT_RULES = MatchingRules()

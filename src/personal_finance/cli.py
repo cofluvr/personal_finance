@@ -11,7 +11,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from personal_finance.db.migrate import connect, create_database
+from personal_finance.db.migrate import connect, create_database, migrate
 from personal_finance.ingest.coverage import DATE_BASES, declare_complete
 from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import LAYOUTS
@@ -97,7 +97,9 @@ def build_parser() -> argparse.ArgumentParser:
 def open_ledger(path: Path) -> sqlite3.Connection:
     if not path.is_file():
         raise CommandError(f"database not found: {path}")
-    return connect(path)
+    conn = connect(path)
+    migrate(conn)
+    return conn
 
 
 def find_account(conn, reference: str) -> str:
@@ -203,19 +205,21 @@ def run_documents(args) -> int:
         """SELECT document.file_name, document.layout_id, account.display_name,
                   coverage_kind, coverage_start, coverage_end, date_basis, evidence,
                   (SELECT COUNT(*) FROM source_record record
-                   WHERE record.source_document_id = document.id)
+                   WHERE record.source_document_id = document.id),
+                  CASE date_basis WHEN 'transaction' THEN pending_in_transaction_basis
+                                  ELSE pending_in_posting_basis END
            FROM source_document document
            JOIN document_coverage coverage ON coverage.source_document_id = document.id
+           JOIN document_interpretation meaning ON meaning.source_document_id = document.id
            JOIN account ON account.id = coverage.account_id
            ORDER BY document.imported_at, document.file_name"""
     ).fetchall()
-    for name, layout_id, account, kind, start, end, basis, evidence, records in rows:
+    for name, layout_id, account, kind, start, end, basis, evidence, records, pending in rows:
         line = f"{name}: {records} records, account {account}, layout {layout_id}, "
         line += f"coverage {kind}"
         if kind != "unknown":
             line += f" {start or '?'} to {end or '?'}, {basis or 'no'} basis, evidence {evidence}"
         if kind == "complete":
-            pending = LAYOUTS[layout_id].pending_in_complete_coverage[basis]
             line += f", pending {'included' if pending else 'excluded'}"
         print(line)
     if not rows:

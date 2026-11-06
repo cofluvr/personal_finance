@@ -1,9 +1,9 @@
 """Imports files into the ledger, one database transaction per file.
 
 The write lock is held from the duplicate check to the commit, so concurrent
-imports of one file cannot both succeed, and a failure leaves nothing behind.
-Slice 3 adds cross-document matching. Until then every new row is a new
-transaction.
+imports of one file cannot both succeed, and a failure leaves nothing behind. Each
+row first becomes its own transaction, then the account is reconciled inside the
+same database transaction.
 """
 
 import hashlib
@@ -18,6 +18,8 @@ from personal_finance.ingest.coverage import Coverage
 from personal_finance.ingest.csv_reader import RawRecord, read_document
 from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import Layout, ParsedRow
+from personal_finance.reconcile.apply import is_current, reconcile_account
+from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reconcile.same_document import find_candidate_groups
 
 
@@ -30,8 +32,10 @@ class FileResult:
     coverage: Coverage | None = None
     rows_read: int = 0
     transactions_created: int = 0
+    matched_records: int = 0
     unresolved_records: int = 0
     candidate_groups: int = 0
+    reconciled: bool = False
 
 
 def _new_id() -> str:
@@ -45,12 +49,14 @@ def import_files(
     account_id: str,
     layout: Layout,
     declared_coverage: Coverage | None = None,
+    rules: MatchingRules = DEFAULT_RULES,
 ) -> list[FileResult]:
     """Import each file independently. One failure never stops the others."""
     run_id = _new_id()
     conn.execute("INSERT INTO import_run (id) VALUES (?)", (run_id,))
     results = [
-        _import_file(conn, run_id, path, account_id, layout, declared_coverage) for path in paths
+        _import_file(conn, run_id, path, account_id, layout, declared_coverage, rules)
+        for path in paths
     ]
     _write_if_possible(
         conn,
@@ -60,14 +66,16 @@ def import_files(
     return results
 
 
-def _import_file(conn, run_id, path, account_id, layout, declared) -> FileResult:
+def _import_file(
+    conn, run_id, path, account_id, layout, declared, rules=DEFAULT_RULES
+) -> FileResult:
     digest = None
     try:
         content = path.read_bytes()
         digest = hashlib.sha256(content).hexdigest()
         conn.execute("BEGIN IMMEDIATE")
         result = _import_content(
-            conn, run_id, path.name, content, digest, account_id, layout, declared
+            conn, run_id, path.name, content, digest, account_id, layout, declared, rules
         )
         conn.execute("COMMIT")
         return result
@@ -107,12 +115,17 @@ def _write_if_possible(conn, statement, parameters) -> None:
         pass
 
 
-def _import_content(conn, run_id, name, content, digest, account_id, layout, declared) -> FileResult:
+def _import_content(
+    conn, run_id, name, content, digest, account_id, layout, declared, rules
+) -> FileResult:
+    _require_unchanged_definition(conn, layout)
     existing = conn.execute(
         "SELECT id, layout_id FROM source_document WHERE content_sha256 = ?", (digest,)
     ).fetchone()
     if existing is not None:
-        return _repeat_import(conn, run_id, name, digest, existing, account_id, layout, declared)
+        return _repeat_import(
+            conn, run_id, name, digest, existing, account_id, layout, declared, rules
+        )
 
     metadata, records = read_document(content, layout)
     coverage = _resolve_coverage(metadata, layout, declared)
@@ -132,6 +145,14 @@ def _import_content(conn, run_id, name, content, digest, account_id, layout, dec
         (document_id, account_id, coverage.kind, coverage.start, coverage.end,
          coverage.date_basis, coverage.evidence),
     )
+    conn.execute(
+        """INSERT INTO document_interpretation (source_document_id, layout_id, parser_version,
+                                                external_id_namespace, external_id_guarantee,
+                                                pending_in_transaction_basis,
+                                                pending_in_posting_basis)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (document_id, layout.layout_id, layout.parser_version, *_interpretation(layout)),
+    )
 
     transactions = []
     unresolved = 0
@@ -147,9 +168,11 @@ def _import_content(conn, run_id, name, content, digest, account_id, layout, dec
             _insert_unresolved_issue(conn, record_id, parsed.reason_code)
             unresolved += 1
 
-    groups = find_candidate_groups(transactions)
-    for rule, members in groups:
+    for rule, members in find_candidate_groups(transactions):
         _insert_candidate_issue(conn, document_id, rule, members)
+
+    reconcile_account(conn, account_id, rules, trigger_document_id=document_id)
+    matched = _matched_records(conn, document_id)
 
     _insert_attempt(conn, run_id, name, digest, "imported", document_id)
     return FileResult(
@@ -158,13 +181,17 @@ def _import_content(conn, run_id, name, content, digest, account_id, layout, dec
         source_document_id=document_id,
         coverage=coverage,
         rows_read=len(records),
-        transactions_created=len(transactions),
+        transactions_created=len(transactions) - matched,
+        matched_records=matched,
         unresolved_records=unresolved,
-        candidate_groups=len(groups),
+        candidate_groups=_open_groups_touching(conn, document_id),
+        reconciled=True,
     )
 
 
-def _repeat_import(conn, run_id, name, digest, existing, account_id, layout, declared) -> FileResult:
+def _repeat_import(
+    conn, run_id, name, digest, existing, account_id, layout, declared, rules
+) -> FileResult:
     document_id, layout_id = existing
     if layout_id != layout.layout_id:
         raise ImportFailure("layout_mismatch")
@@ -181,8 +208,69 @@ def _repeat_import(conn, run_id, name, digest, existing, account_id, layout, dec
     if declared is not None and declared != stored:
         raise ImportFailure("coverage_conflict")
 
+    # Accounts imported before reconciliation, or under other rules, catch up here once.
+    reconciled = not is_current(conn, account_id, rules)
+    if reconciled:
+        reconcile_account(conn, account_id, rules, trigger_document_id=document_id)
+
     _insert_attempt(conn, run_id, name, digest, "already_imported", document_id)
-    return FileResult(name, "already_imported", source_document_id=document_id, coverage=stored)
+    return FileResult(
+        name,
+        "already_imported",
+        source_document_id=document_id,
+        coverage=stored,
+        reconciled=reconciled,
+    )
+
+
+def _interpretation(layout: Layout) -> tuple:
+    """What this layout says its documents mean, in stored form."""
+    pending = layout.pending_in_complete_coverage
+
+    def stored(basis):
+        return int(pending[basis]) if basis in pending else None
+
+    return (
+        layout.external_id_namespace,
+        layout.external_id_guarantee,
+        stored("transaction"),
+        stored("posting"),
+    )
+
+
+def _require_unchanged_definition(conn, layout: Layout) -> None:
+    """A layout's meaning never changes once used, so a difference is refused (D-026)."""
+    stored = conn.execute(
+        """SELECT DISTINCT external_id_namespace, external_id_guarantee,
+                           pending_in_transaction_basis, pending_in_posting_basis
+           FROM document_interpretation WHERE layout_id = ? AND parser_version = ?""",
+        (layout.layout_id, layout.parser_version),
+    ).fetchall()
+    if any(row != _interpretation(layout) for row in stored):
+        raise ImportFailure("layout_definition_changed")
+
+
+def _matched_records(conn, document_id) -> int:
+    return conn.execute(
+        """SELECT COUNT(*) FROM transaction_source link
+           WHERE link.source_document_id = ?
+             AND EXISTS (SELECT 1 FROM transaction_source other
+                         WHERE other.transaction_id = link.transaction_id
+                           AND other.source_document_id <> link.source_document_id)""",
+        (document_id,),
+    ).fetchone()[0]
+
+
+def _open_groups_touching(conn, document_id) -> int:
+    return conn.execute(
+        """SELECT COUNT(DISTINCT issue.id)
+           FROM review_issue issue
+           JOIN review_issue_subject subject ON subject.review_issue_id = issue.id
+           JOIN transaction_source link ON link.transaction_id = subject.transaction_id
+           WHERE issue.kind = 'possible_duplicate' AND issue.status = 'open'
+             AND link.source_document_id = ?""",
+        (document_id,),
+    ).fetchone()[0]
 
 
 def _resolve_coverage(metadata, layout, declared) -> Coverage:
@@ -255,6 +343,11 @@ def _link(conn, transaction_id, record_id, document_id, account_id) -> None:
                                            account_id, link_rule)
            VALUES (?, ?, ?, ?, 'new_record')""",
         (transaction_id, record_id, document_id, account_id),
+    )
+    conn.execute(
+        """INSERT INTO source_record_origin (source_record_id, original_transaction_id)
+           VALUES (?, ?)""",
+        (record_id, transaction_id),
     )
 
 
