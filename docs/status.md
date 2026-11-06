@@ -9,8 +9,9 @@ Last updated: 2026-11-06. Branch: `feature/m2-review`, local only, from `643e1b1
 | M1 slice 3: cross-document duplicate handling | Accepted |
 | M1 slice 4: import summaries, log checks, entry point, setup documentation | Accepted |
 | **M1 overall** | **Complete and accepted** |
-| M2.1: review evidence and revision tokens | Complete, awaiting owner review |
-| M2.2 to M2.9 | Provisional, not approved |
+| M2.1: review evidence and revision tokens | Accepted |
+| M2.2: decision core, pair rejection and undo | Plan approved, not implemented |
+| M2.3 to M2.9 | Provisional, not approved |
 | M3 to M8 | Not started |
 
 ## What exists

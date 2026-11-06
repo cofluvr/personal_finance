@@ -149,13 +149,14 @@ the decision log records the database, parser and deduplication rules.
 
 ## M2 plan
 
-M2.1 is approved and complete. **M2.2 to M2.9 are provisional**: a direction, not approval to
-implement, and each needs its own approval. D-041 lists requirements they must meet.
+M2.1 is accepted. The M2.2 plan is approved and not implemented. **M2.3 to M2.9 are provisional**:
+a direction, not approval to implement, and each needs its own approval. D-041 lists requirements
+they must meet.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M2.1 | Review evidence: `review list` IDs, `review show`, revision tokens. Read-only, no migration | Complete, awaiting review |
-| M2.2 | Decision core: stable-ID storage, precedence over automatic reconciliation, reject and undo | Provisional |
+| M2.1 | Review evidence: `review list` IDs, `review show`, revision tokens. Read-only, no migration | Accepted |
+| M2.2 | Decision core: stable-ID storage, precedence over automatic reconciliation, pair rejection and undo | Plan approved, not implemented |
 | M2.3 | Confirm, including part of a group | Provisional |
 | M2.4 | Separating machine-made merges | Provisional |
 | M2.5 | New evidence that touches a decided record, and superseding a decision | Provisional |
@@ -172,7 +173,7 @@ Direction from planning, not yet decisions:
 - Precedence has to land with the first stored decision, because the next reconcile would
   otherwise undo it. So storage and survival across imports cannot be separate slices.
 - A group can hold several records from one document, which `transaction_source` refuses to
-  merge, so confirming needs more than yes or no. See D-041 for reject.
+  merge, so confirming needs more than yes or no. Reject is settled by D-042.
 - Undoing a decision re-derives from current evidence. Undoing a machine-made merge is a new
   decision, because otherwise the next reconcile would merge the records again.
 
@@ -190,6 +191,59 @@ Direction from planning, not yet decisions:
 | R8 | Read commands | Open read-only, and leave every table and the file unchanged |
 | R9 | Outdated schema | Explains `migrate`, and writes nothing |
 | R10 | Privacy | Explicit inspection shows data. Routine output, refusals and unexpected errors do not |
+
+### M2.2 scope
+
+The rules are D-042 (rejection and constraints), D-043 (validation and undo) and D-044 (conflicts).
+Planning replaced three earlier ideas: decisions are pair constraints rather than partitions, only
+stated pairs are bound rather than pinning decided records, and conflicts have their own kind
+rather than sharing `possible_duplicate`.
+
+In scope:
+
+- Migration 0005: decision, constraint and event tables, append-only with triggers, and the
+  `decision_conflict` kind. A new `decision_id` column on `transaction_link_history`.
+- Constraints in `derive()`, withheld merges and both conflict reasons.
+- `review reject`, `review decisions`, `review decision show`, `review undo`.
+- Revision version 2. `review show` gains an account line and an "already decided" section.
+- Rejection applies to `cross_document_candidates` items only. Others are refused with an
+  explanation.
+
+```sh
+pf review reject --db DB --account A ITEM_ID --revision R --pair T1 T2 [--pair T1 T3]
+pf review undo --db DB --account A DECISION_ID --revision R
+```
+
+`--pair` repeats so that one decision stays atomic, since a first rejection would otherwise change
+the token for a second.
+
+Deferred: confirm and partitions, superseding, separating machine merges, external-ID and
+same-document items, fingerprint hints, corrections.
+
+Candidate discovery uses union-find and stores no pairs (D-031), so one link cannot simply be
+removed. Direct links are recomputed only inside groups a constraint touches.
+
+### M2.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| S1 | Migration 0005 works on a populated ledger, keeps every issue and subject, and foreign keys still hold. Decision tables refuse update, delete and replace |
+| S2 | With no constraints, `derive()` output is identical to today, and A16 still passes |
+| S3 | Reject leaves totals unchanged and moves no records, and source evidence is byte-identical |
+| S4 | A two-member item closes. A three-member item keeps the undecided pair open |
+| S5 | Refused, with nothing changed: wrong account, wrong item, matching token on the wrong item, old token, stale account, pair outside the item, repeated pair, unsupported item type |
+| S6 | A stale account is not reconciled by the refused command |
+| S7 | A decision survives repeat imports, `reconcile`, unrelated files and a rules change |
+| S8 | A third document that would merge a rejected pair gives three transactions and a `decision_conflict` |
+| S9 | Conflicts are counted apart from possible duplicates in `totals`, summaries and `review list` |
+| S10 | A decision in one overlapping item applies in the other, and that item's token changes |
+| S11 | Exact re-export of a bound row: the decision does not transfer, and the new pair stays undecided |
+| S12 | An automatic split of a bound transaction raises `decision_basis_changed` |
+| S13 | Undo equals a ledger built without the decision, with no imports since and with imports since |
+| S14 | Decision and undo history stay append-only, and retired IDs revive with their `created_at` |
+| S15 | Property test: import order does not change the outcome for any fixed decisions |
+| S16 | Link recomputation matches union-find components, with a measured cost on dense groups |
+| S17 | Privacy: `reject`, `undo` and `review decisions` show no amounts or descriptions. Escaping tests stay |
 
 ## Backlog benchmarks
 
