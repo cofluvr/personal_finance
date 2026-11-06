@@ -82,6 +82,19 @@ Complete coverage says only that nothing inside the interval is missing. Rows
 outside the interval are allowed and carry no claim. What complete means for
 pending transactions is defined per layout in [layouts.md](layouts.md).
 
+Four kinds of evidence must stay distinct:
+
+| Evidence | Stored as | Establishes completeness? |
+|---|---|---|
+| Explicit user confirmation | `complete`, `user_declared` | Yes, including the whole end date (D-007) |
+| Validated layout metadata | `complete`, `document_metadata` | Yes, within the limits of D-007, and only where the layout declares that its metadata means this |
+| A date range that does not establish completeness | `partial` | No |
+| Unknown or partial coverage | `unknown` or `partial` | No |
+
+A bare date range is not a claim of completeness. In `synthetic_checking_v1`, dates
+without a `coverage-kind` fail the file. A real layout whose statement period does
+not prove completeness records it as `partial` (M6).
+
 ## D-006 Duplicate confidence rules — Approved, implemented in slice 3
 
 Replaces the exact-match rule proposed in the original plan. Exact date, amount
@@ -92,9 +105,10 @@ All comparisons are within one account.
 | Evidence | Outcome |
 |---|---|
 | Byte-identical file (SHA-256) | Skip and record the attempt |
-| Same reliable external ID, same amount | Confident duplicate, whatever the coverage |
-| Same reliable external ID, different amount | Possible duplicate |
-| Exact match, both documents have `complete` coverage of the date on the same basis, and it is not a boundary date (D-007) | Confident duplicate, paired one-for-one |
+| Same reliable external ID, compatible material fields | Confident duplicate, whatever the coverage |
+| Same reliable external ID, conflicting amount or other material field | Possible duplicate |
+| Same reliable external ID repeated within either document | Possible duplicate |
+| Exact match, both documents have `complete` coverage of the date on the same basis, the row falls within both claims, it is not a boundary date (D-007), and no unresolved row could affect the count (D-024) | Confident duplicate, paired one-for-one |
 | Exact match, coverage partial or unknown on either side | Possible duplicate |
 | Exact match on a boundary date | Possible duplicate |
 | Exact match, coverage stated on different date bases | Possible duplicate |
@@ -103,6 +117,12 @@ All comparisons are within one account.
 
 - External IDs count as reliable only if the layout declares them so. Otherwise
   they are ordinary evidence.
+- Material fields are amount, settlement status, and any date present on both
+  records. A date missing from one record is compatible and is not filled in from
+  the other. A differing description alone is not a conflict for a reliable ID
+  (Default), but both are preserved.
+- A pending row and a posted row sharing an ID conflict on status, so they stay
+  flagged until M2.
 - The 3-day window is a starting value.
 - Only plausible candidates enter review: a row needs a real counterpart in
   another document. Unknown coverage alone never flags a row.
@@ -122,13 +142,21 @@ resolution arrives in M2.
 
 ## D-007 Boundary dates — Approved, implemented in slice 3
 
-A date is a boundary date, and so cannot support a confident match, when either
-holds:
+A date is a boundary date, and so cannot support a confident match, when any of
+these holds:
 
-- The two documents' shared coverage is that single date, because each may hold
-  a different part of the day.
-- The date is a document's last covered date and the document was generated that
-  same day, because later activity may be missing.
+- The two documents' shared coverage is that single date, because each may hold a
+  different part of the day.
+- The date is the last covered date of a `document_metadata` claim, and the
+  document was generated that same day, because later activity may be missing.
+- The date is the last covered date of a `document_metadata` claim and the document
+  gives no generation date. The end date is not assumed complete.
+
+The last two do not apply to `user_declared` coverage. A user declaration vouches
+for the entire inclusive end date, even when generation metadata is absent. The
+user is confirming full coverage of that interval under the layout's pending and
+posted definition. This assumption is never applied automatically to a date range
+found in document metadata.
 
 ## D-008 One record per document per transaction — Approved
 
@@ -287,8 +315,13 @@ status are not flagged, because a tested layout treats them as separate events.
 A byte-identical file is one document. Importing it again changes no ledger data
 and records an `already_imported` attempt, except where the new request
 contradicts what was recorded. A different account, layout or coverage declaration
-is a failed attempt, with nothing changed. Coverage is immutable, so correcting a
-declaration needs an M2 workflow.
+is a failed attempt, with nothing changed, and is never reported as already
+imported. Tests confirm that a different account leaves the original import intact.
+
+Coverage correction (Approved): the limitation stays until M2 adds a correction and
+history workflow. A conflict leaves existing data unchanged and explains the
+limitation. Deleting the database or editing SQL directly must not be recommended
+as a workaround.
 
 ## D-023 Failure handling — Default
 
@@ -298,6 +331,25 @@ transactions. Failed attempts are recorded afterwards with a fixed code. A bad r
 goes to the unresolved queue, and only a document-level problem fails the file.
 
 Failure codes and reason codes never contain file contents.
+
+## D-024 Coverage is not extraction — Approved
+
+Complete source coverage does not mean every row was parsed successfully. Coverage
+describes the document, and parsing describes what was read from it.
+
+- Unresolved-row disclosures always remain, whatever the coverage.
+- Completeness must not be used to conceal extraction failures or to manufacture
+  transaction identities.
+- Default for slice 3: one-for-one pairing relies on counts, and an unresolved row
+  can distort a count. Exact matches are only possible duplicates when either
+  document has an unresolved row that could fall on that date, including one whose
+  date is unknown. A reliable external ID match is not affected.
+
+## D-025 Security controls proposal — Not applied
+
+[security-controls-proposal.md](security-controls-proposal.md) is unapplied. Its
+version requirements and VS Code behaviour are unverified, and it must not be
+described as active protection.
 
 ## Not yet decided
 

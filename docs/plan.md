@@ -102,6 +102,10 @@ it end to end.
 | A26 | User declaration of complete coverage | Needs account, inclusive dates, date basis and the explicit flag; stored as `user_declared` | 2 |
 | A27 | Rows with no counterpart in another document, coverage unknown | Not flagged: unknown coverage alone never enters review | 3 |
 | A28 | Overlapping candidate groups | Summaries show no single exact adjustment figure | 3 |
+| A32 | Match on the inclusive end date, both documents `user_declared` | Confident, with no generation date needed | 3 |
+| A33 | Match on the end date of a `document_metadata` claim with no generation date, or generated that day | Possible duplicate: the end date is not assumed complete | 3 |
+| A34 | Same reliable external ID with a conflicting date or status, or repeated within a document | Flagged, never merged | 3 |
+| A35 | Exact match where an unresolved row could affect the count | Possible duplicate, with the unresolved disclosure kept | 3 |
 | A29 | One external ID repeated within a document | Kept, counted and flagged | 2 |
 | A30 | Pending and posted versions within a document | Kept, counted and flagged, with each record's status preserved | 2 |
 
@@ -121,8 +125,14 @@ it end to end.
 | A13 | Every transaction | Links to at least one source record, with its document, row number and the unaltered original row | Part 1, 2 |
 | A14 | One bad file among good ones | Good files commit; the bad file leaves no partial data and is reported | 2 |
 | A31 | Failure or process crash partway through a file | No records or transactions remain, and the file can be imported again | 2 |
+| A36 | Merged transaction | Every source record stays linked and traceable, and no raw evidence changes | 3 |
+| A37 | Failure or crash during matching | No partial merge state; the file can be imported again | 3 |
+| A38 | Repeat imports after merges and flags | No new links, transactions or review items | 3 |
+| A39 | Large synthetic dataset | Candidate discovery uses indexed lookups, not all-pairs comparison, and stays practical | 3 |
+| A40 | Byte-identical file under a different account | Rejected and explained; existing import preserved | 2 |
+| A41 | Complete coverage with an unresolved row | Disclosure stays, and no transaction is created for the row | 2 |
 | A15 | Two simultaneous imports | Ledger stays consistent with no double-counting | 2 |
-| A16 | Property test: random import order and repeats, across complete, partial and unknown coverage | Totals **and** unresolved-review outcomes are identical for every order | 3 |
+| A16 | Property test: random import order and repeats, across complete, partial and unknown coverage | Financial totals, source associations and unresolved candidate relationships are equivalent for every order. Generated IDs and display order are not compared | 3 |
 | A17 | Import summary | New, duplicate, flagged and failed counts add up to the rows read | 4 |
 | A18 | Logs during import | Contain no sentinel merchant names or amounts | 4 |
 | A19 | Network calls during tests | Sockets blocked; the full suite still passes | 1 |

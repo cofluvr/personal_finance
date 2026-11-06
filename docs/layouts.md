@@ -15,8 +15,10 @@ the stated basis, falls within the inclusive interval is present in this documen
 - It says nothing about dates outside the interval. Rows there are allowed.
 - It covers one account.
 - It comes from document metadata or a user declaration, never from row dates.
-- The end date is included in full. Boundary dates are treated cautiously when
-  matching (D-007).
+- A user declaration vouches for the whole end date, under the layout's pending
+  definition below. Document metadata does not, unless its generation date shows
+  the end date had passed (D-007).
+- It does not mean every row was parsed. Unresolved rows stay disclosed (D-024).
 
 ## synthetic_checking_v1
 
