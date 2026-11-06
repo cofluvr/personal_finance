@@ -120,7 +120,7 @@ All comparisons are within one account.
 - Material fields are amount, settlement status, and any date present on both
   records. A date missing from one record is compatible and is not filled in from
   the other. A differing description alone is not a conflict for a reliable ID
-  (Default), but both are preserved.
+  (Approved), but both are preserved.
 - A pending row and a posted row sharing an ID conflict on status, so they stay
   flagged until M2.
 - The 3-day window is a starting value.
@@ -340,7 +340,7 @@ describes the document, and parsing describes what was read from it.
 - Unresolved-row disclosures always remain, whatever the coverage.
 - Completeness must not be used to conceal extraction failures or to manufacture
   transaction identities.
-- Default for slice 3: one-for-one pairing relies on counts, and an unresolved row
+- For slice 3 (Approved): one-for-one pairing relies on counts, and an unresolved row
   can distort a count. Exact matches are only possible duplicates when either
   document has an unresolved row that could fall on that date, including one whose
   date is unknown. A reliable external ID match is not affected.

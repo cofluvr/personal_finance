@@ -8,20 +8,19 @@ For a fresh session. Written 2026-11-05. Slices 1 and 2 are provisionally accept
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `feature/m1-foundation`. **Partly on GitHub: see below** |
+| Branch | `feature/m1-foundation`. Partly pushed: see below |
 | Latest code commit | `c5c0991`. Run `git log -1` for the latest commit, which may be this handoff |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
 | Data | Synthetic only. Keep databases outside the repository |
 
-**Remote state.** The local reflog records a push of `c75aee0` (end of slice 1) to
-`origin/feature/m1-foundation` at 21:07:46 on 2026-11-05, which also set upstream
-tracking. No Claude session command made that push, and its source is not known.
-Commits after `c75aee0` exist only locally as far as local data shows. The remote
-was not contacted, so its current state and the repository's visibility are
-unverified. Tracked content at that commit was documentation, code and tests, with
-no CSV, PDF or database files. Do not push, and do not change the remote branch.
+**Remote state.** The owner intentionally pushed `c75aee0` (end of slice 1) to
+`origin/feature/m1-foundation` on 2026-11-05, which also set upstream tracking. The
+local reflog records this as the last push, and later commits are ahead of it
+locally. **Unverified:** the remote's current state and the repository's visibility,
+because GitHub was not contacted. Tracked content at that commit was documentation,
+code and tests, with no CSV, PDF or database files.
 
 Read first: this file, [decisions.md](decisions.md), [plan.md](plan.md),
 [layouts.md](layouts.md), [status.md](status.md). Then the code in
@@ -86,9 +85,8 @@ code.
 | Repository | Do not move it. Real data needs the M5 gate first | D-019 |
 | Security proposal | **Unapplied.** Unverified, and not active protection | D-025 |
 
-Defaults added for slice 3, open to review: differing descriptions alone do not
-conflict for a reliable ID (D-006), and unresolved rows downgrade count-based
-matches (D-024).
+| External-ID matching | A differing description alone does not conflict for a reliable ID, and both are preserved. Conflicts in amount, status or a date present on both records are flagged | D-006 |
+| Unresolved rows | Exact matches stay possible duplicates when an unresolved row could affect the count. Reliable ID matches are not affected | D-024 |
 
 ## Slice 3 scope
 
@@ -155,17 +153,16 @@ Propose these with a recommendation and wait for approval before coding:
 
 ## Permission approvals to renew
 
-Approvals from the previous session do not carry over. Ask for these again:
-
-| Permission | Previous approval | Next session |
+| Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m1-foundation` | Approved | **Renew** |
-| Installing dependencies | pytest and Hypothesis only | Renew if anything new is needed. None is expected |
-| Network access | That install, plus reading Claude Code docs | Renew for any use. Slice 3 needs none |
+| Local commits on `feature/m1-foundation` | Approved by the owner, and remains approved | Confirm in the kickoff prompt |
+| Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
+| Installing dependencies | Was approved for pytest and Hypothesis only | Ask for anything new. None is expected |
+| Network access | Was approved for that install and for reading Claude Code docs | Ask for any use. Slice 3 needs none |
 
 Never approved, and not to be assumed:
 
-- Pushing, or rewriting history.
+- Rewriting history.
 - Modifying the parent repository.
 - Reading parent or sibling directories, unrelated project memory, or any file
   outside `personal_finance/`, including user-level configuration.
@@ -185,8 +182,9 @@ Task: M1 slice 3, cross-document transaction deduplication only.
 Start by proposing answers to the design questions in the handoff, with a
 recommendation each, and wait for my approval before writing code.
 
-Permissions for this session: [local commits on feature/m1-foundation: yes/no].
-No pushing, no network, no new dependencies, and no access outside this folder.
+Local commits on feature/m1-foundation are approved. Pushing needs my explicit
+approval each time. No network, no new dependencies, and no access outside this
+folder.
 Synthetic data only. The security proposal stays unapplied.
 
 Run tests and report actual results. Use deliberate breaks in a throwaway copy to
