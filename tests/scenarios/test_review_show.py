@@ -20,7 +20,7 @@ LEDGER_TABLES = (
     "document_interpretation", "source_record", "record_parse", "source_record_origin",
     "ledger_transaction", "transaction_source", "transaction_link_history",
     "transaction_identity_history", "review_issue", "review_issue_subject",
-    "account_reconciliation",
+    "account_reconciliation", "decision", "decision_constraint", "decision_event",
 )
 
 
