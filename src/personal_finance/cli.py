@@ -436,8 +436,13 @@ def print_history(conn, transaction_id) -> None:
     ).fetchall()
     if events:
         print("Identity history:")
+    # A revival with no retirement before it means the ID was retired before migration
+    # 0004 kept timestamps, so this value is a fallback for the whole ID and is not exact.
+    label = "first created"
+    if events and events[0][1] == "revived":
+        label = "first created approximately, from its link time, not an exact record:"
     for created_at, event, reason, original_created_at in events:
-        print(f"  {created_at} {event} ({reason}), first created {original_created_at}")
+        print(f"  {created_at} {event} ({reason}), {label} {original_created_at}")
 
 
 def trace_retired(conn, transaction_id) -> int:

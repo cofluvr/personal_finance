@@ -780,3 +780,35 @@ def test_a_busy_migration_says_busy_and_can_be_retried(tmp_path, monkeypatch, ca
     assert "migration failed" not in error
     assert digest(path) == before
     assert main(["migrate", "--db", str(path)]) == 0
+
+
+def test_trace_does_not_present_a_fallback_timestamp_as_exact(db, tmp_path, capsys):
+    header = "Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+    rows = (
+        "S-1,2026-01-09,,SYNTHETIC CAFE,-5.00,\n",
+        "S-1,2026-01-09,2026-01-10,SYNTHETIC CAFE,-5.00,POSTED\n",
+        "S-1,2026-01-09,2026-01-11,SYNTHETIC CAFE,-5.00,POSTED\n",
+    )
+    files = []
+    for number, row in enumerate(rows):
+        path = tmp_path / f"{number}.csv"
+        path.write_text(header + row)
+        files.append(path)
+    import_checking(db, files[0])
+    import_checking(db, files[1])
+
+    conn = connect(Path(db))
+    retired = conn.execute("SELECT from_transaction_id FROM transaction_link_history").fetchone()[0]
+    # Stand in for an ID retired before migration 0004, which left no identity record.
+    conn.executescript(
+        """DROP TRIGGER transaction_identity_history_no_delete;
+           DELETE FROM transaction_identity_history;"""
+    )
+    conn.close()
+    import_checking(db, files[2])
+    capsys.readouterr()
+
+    main(["trace", "--db", db, retired])
+    out = capsys.readouterr().out
+    assert "first created approximately, from its link time, not an exact record:" in out
+    assert "), first created 2" not in out
