@@ -85,6 +85,46 @@ def test_a_failed_file_gives_a_failing_exit_code_and_the_others_still_import(db,
     assert "Files: 1 imported, 0 already imported, 1 failed" in out
 
 
+def test_a_file_for_another_account_is_rejected_not_skipped(db, capsys):
+    import_card(db)
+    capsys.readouterr()
+
+    code = main(["import", "--db", db, "--account", "Checking", "--layout", "synthetic_card_v1",
+                 str(CARD)])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "failed (account_mismatch)" in out
+    assert "already imported for a different account" in out
+    assert "was not linked to the requested account" in out
+    assert "existing import is unchanged" in out
+    assert "nothing changed" not in out
+    assert "Files: 0 imported, 0 already imported, 1 failed" in out
+
+
+def test_a_coverage_conflict_explains_the_limitation_and_changes_nothing(db, capsys):
+    import_card(db)
+    capsys.readouterr()
+    main(["totals", "--db", db])
+    totals_before = capsys.readouterr().out
+    main(["documents", "--db", db])
+    documents_before = capsys.readouterr().out
+
+    assert import_card(db, *declaration()) == 1
+
+    out = capsys.readouterr().out
+    assert "failed (coverage_conflict)" in out
+    assert "Coverage is fixed when a document is first imported" in out
+    assert "Existing data is unchanged" in out
+    assert "M2" in out
+    assert "delete" not in out.lower()
+    assert "sql" not in out.lower()
+    main(["totals", "--db", db])
+    assert capsys.readouterr().out == totals_before
+    main(["documents", "--db", db])
+    assert capsys.readouterr().out == documents_before
+
+
 def test_totals_use_account_movement_terms(db, capsys):
     import_checking(db, CHECKING)
     capsys.readouterr()

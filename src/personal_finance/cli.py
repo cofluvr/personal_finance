@@ -25,6 +25,22 @@ CROSS_DOCUMENT_NOTICE = (
     "Cross-document duplicates are not checked yet: overlapping files are counted more than once."
 )
 
+FAILURE_EXPLANATIONS = {
+    "account_mismatch": (
+        "This exact file is already imported for a different account, so it was not linked to "
+        "the requested account. The existing import is unchanged."
+    ),
+    "layout_mismatch": (
+        "This exact file is already imported under a different layout. "
+        "The existing import is unchanged."
+    ),
+    "coverage_conflict": (
+        "Coverage is fixed when a document is first imported, and a declaration cannot replace "
+        "coverage the document states. Existing data is unchanged. Correcting coverage needs "
+        "the history workflow planned for M2."
+    ),
+}
+
 
 class CommandError(Exception):
     pass
@@ -157,6 +173,8 @@ def run_import(args) -> int:
     for result in results:
         if result.outcome == "failed":
             print(f"{result.file_name}: failed ({result.failure_code})")
+            if result.failure_code in FAILURE_EXPLANATIONS:
+                print(f"  {FAILURE_EXPLANATIONS[result.failure_code]}")
         elif result.outcome == "already_imported":
             print(f"{result.file_name}: already imported, nothing changed")
         else:

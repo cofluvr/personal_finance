@@ -203,6 +203,25 @@ class TestMissingInformation:
         assert account_movement(imported).unresolved_records == 4
 
 
+class TestCoverageIsNotExtraction:
+    TEXT = (
+        "# coverage-kind: complete\n# coverage-start: 2026-01-01\n# coverage-end: 2026-01-31\n"
+        "# coverage-basis: transaction\n" + CHECKING_HEADER
+        + "SYN-1,2026-01-05,,SYNTHETIC A,-1.00,POSTED\n"
+        + "SYN-2,2026-01-06,,SYNTHETIC B,,POSTED\n"
+    )
+
+    def test_complete_coverage_does_not_hide_unresolved_rows(self, conn, account, write):
+        (result,) = checking(conn, write("x.csv", self.TEXT))
+        assert result.coverage.kind == "complete"
+        assert result.unresolved_records == 1
+        assert account_movement(conn).unresolved_records == 1
+
+    def test_complete_coverage_does_not_create_a_transaction_for_a_bad_row(self, conn, account, write):
+        checking(conn, write("x.csv", self.TEXT))
+        assert conn.execute("SELECT external_id FROM ledger_transaction").fetchall() == [("SYN-1",)]
+
+
 class TestProvenance:
     def test_every_transaction_traces_to_its_source(self, conn, account):
         checking(conn, FIXTURES / "checking_jan_complete.csv")
@@ -388,6 +407,24 @@ class TestRepeatedImport:
         (result,) = card(conn, path, account_id="other")
         assert result.failure_code == "account_mismatch"
         assert counts(conn) == before
+
+    def test_a_rejected_account_association_preserves_the_existing_import(self, conn, account):
+        path = FIXTURES / "card_jan_no_metadata.csv"
+        card(conn, path)
+        owner_before = account_movement(conn, "acct")
+
+        (result,) = card(conn, path, account_id="other")
+
+        assert result.outcome == "failed"
+        assert result.source_document_id is None
+        assert account_movement(conn, "acct") == owner_before
+        assert account_movement(conn, "other").transactions == 0
+        assert conn.execute("SELECT account_id FROM document_coverage").fetchall() == [("acct",)]
+        assert conn.execute(
+            """SELECT outcome, failure_code, source_document_id FROM import_attempt
+               WHERE outcome = 'failed'"""
+        ).fetchall() == [("failed", "account_mismatch", None)]
+        assert card(conn, path)[0].outcome == "already_imported"
 
     def test_identical_content_under_another_layout_is_refused(self, conn, account):
         path = FIXTURES / "card_jan_no_metadata.csv"
