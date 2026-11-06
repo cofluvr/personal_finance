@@ -63,6 +63,7 @@ Each slice stops for review.
    becomes a new transaction, and output warns that overlaps are not checked.
 3. Cross-document duplicate handling (D-005 to D-008).
 4. Complete import summaries, log checks, a `pf` entry point, setup documentation.
+   Results are in [m1-acceptance.md](m1-acceptance.md).
 
 Out of scope for M1: real institution layouts, PDFs, the browser UI, transfer
 logic, categories, archiving, encryption, resolving review items.

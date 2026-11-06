@@ -117,11 +117,11 @@ These features are not part of the initial release unless explicitly reprioritiz
 
 ## Project Status
 
-Early implementation of the Python backend. It imports two invented CSV layouts only, matches duplicates across overlapping files within an account, and must not be used with real financial data. See [implementation status](docs/status.md).
+Early implementation of the Python backend. It imports two invented CSV layouts only, matches duplicates across overlapping files within an account, and must not be used with real financial data. See [implementation status](docs/status.md) and the [M1 acceptance matrix](docs/m1-acceptance.md).
 
 ## Development Setup
 
-Requires Python 3.12 or later on macOS. Installing the development tools is the only step that needs network access. The application has no runtime dependencies.
+Requires Python 3.12 or later on macOS. Installing the development tools is the only step that needs network access. The application itself has no runtime dependencies.
 
 ```sh
 python3 -m venv .venv
@@ -131,41 +131,80 @@ python3 -m venv .venv
 
 Tests run offline and use only synthetic data. Decisions are recorded in the [decision log](docs/decisions.md), the delivery order is in the [implementation plan](docs/plan.md), and supported formats are in [document layouts](docs/layouts.md).
 
-## Synthetic Example
+**Verification limit:** these install commands have not been run from a clean state, because that needs network access. The launcher and the tests have been run with an existing `.venv`.
 
-Keep databases outside this repository. Totals are account movements, not income or spending.
+## Running pf
+
+`bin/pf` runs the application with this checkout's `.venv`. Nothing needs installing beyond creating that environment, and it works from any directory and from paths containing spaces.
 
 ```sh
-pf() { PYTHONPATH=src .venv/bin/python -m personal_finance "$@"; }
+bin/pf --help
+bin/pf import --help
+```
+
+To run it by name, add the `bin` folder to `PATH`, or link `bin/pf` from a folder already on it. `pyproject.toml` also declares a `pf` script for `pip install`, but that route needs setuptools and has not been verified.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | The command finished |
+| 1 | `import` finished, but at least one file failed. Other files in the run are kept |
+| 2 | The command stopped: bad usage, a validation error, a busy ledger, or an unexpected problem |
+
+## Synthetic Example
+
+Run these from the repository root. Keep real data out of this repository, and databases outside it. Totals are account movements, not income or spending.
+
+```sh
 DB="$(mktemp -d)/demo.db"
 F=tests/fixtures/synthetic
 
-pf init --db "$DB"
-pf account add --db "$DB" --name "Synthetic Checking" --type checking
-pf account add --db "$DB" --name "Synthetic Card" --type credit_card
+bin/pf init --db "$DB"
+bin/pf account add --db "$DB" --name "Synthetic Checking" --type checking
+bin/pf account add --db "$DB" --name "Synthetic Card" --type credit_card
 
 # Coverage is stated in the first file. The second has none, so it stays unknown.
-pf import --db "$DB" --account "Synthetic Checking" --layout synthetic_checking_v1 \
+bin/pf import --db "$DB" --account "Synthetic Checking" --layout synthetic_checking_v1 \
   $F/checking_jan_complete.csv $F/checking_problem_rows.csv
 
 # This file states no coverage, so the user declares it explicitly.
-pf import --db "$DB" --account "Synthetic Card" --layout synthetic_card_v1 \
+bin/pf import --db "$DB" --account "Synthetic Card" --layout synthetic_card_v1 \
   --declare-complete-coverage --coverage-start 2026-01-01 --coverage-end 2026-01-31 \
   --coverage-basis posting $F/card_jan_no_metadata.csv
 
-pf documents --db "$DB"
-pf review list --db "$DB"
-pf totals --db "$DB"
-pf transactions --db "$DB"
-pf trace --db "$DB" TRANSACTION_ID
+bin/pf documents --db "$DB"
+bin/pf review list --db "$DB"
+bin/pf totals --db "$DB"
+bin/pf transactions --db "$DB"
+bin/pf trace --db "$DB" TRANSACTION_ID
 
 # Importing reconciles the account. This does the same without a new file.
-pf reconcile --db "$DB"
+bin/pf reconcile --db "$DB"
 ```
+
+`transactions` and `trace` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents` and `review list` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
+
+## Reading an Import Summary
+
+Each count keeps its own unit, so do not add different lines together. A file's lines describe the moment it was imported. The run summary and the account lines read the ledger after the last file.
+
+| Line | Meaning |
+|---|---|
+| Files attempted | Equals imported + already imported + failed |
+| Source rows read | Non-blank data rows in newly imported files. Equals valid + unresolved |
+| Final logical transactions for those valid records | Distinct transactions those records now belong to |
+| Confidently consolidated records | Valid records whose transaction also has a record from another document |
+| Net change in live logical transactions | The ledger's signed change. It can exceed the rows read, because a new file can split an earlier merge, and it can be zero |
+| Source memberships changed | Source records moved to a different transaction during reconciliation |
+| Open review groups | Possible duplicates awaiting review, with the distinct transactions they affect. Groups can overlap |
+| Unresolved records | Rows that could not be read as a transaction. They are not in totals |
+
+A failed file never counts towards rows read. It shows either `Source rows: unavailable`, or a count of rows read and then rolled back, of which none were kept. See [D-036](docs/decisions.md).
+
+## Upgrading a Ledger
 
 After updating the code, an older ledger must be upgraded before use. Commands refuse it and change nothing until then. `migrate` upgrades the schema, and `reconcile` then updates how transactions are grouped.
 
 ```sh
-pf migrate --db "$DB"
-pf reconcile --db "$DB"
+bin/pf migrate --db "$DB"
+bin/pf reconcile --db "$DB"
 ```

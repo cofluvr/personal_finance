@@ -80,6 +80,18 @@ Identical rows of the same status are separate events in both layouts. This is a
 property of these invented layouts, and each real layout must prove it. Evidence
 that rows may be one event is flagged under D-021.
 
+## What counts as a row
+
+These definitions apply to every layout and are what import summaries count (D-036).
+
+- A **source row** is a data row after the metadata lines and the header. Those are not rows.
+- A completely blank line is not a row. Nothing is stored for it, and row numbers skip it.
+- A line of spaces, or of empty cells such as `,,,`, is a row, and it ends up unresolved.
+- Every source row of an imported file is either a **valid record** or an **unresolved
+  record**, so rows read = valid + unresolved.
+- Row numbers count source rows from 1. They are not file line numbers.
+- A failed file keeps no rows. Its rows are never counted as read or stored.
+
 ## Unresolved row reasons
 
 `missing_amount`, `missing_date`, `invalid_amount`, `invalid_date`, `invalid_status`,
