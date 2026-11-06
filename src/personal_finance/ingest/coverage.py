@@ -5,7 +5,7 @@ looks at transaction rows, so it cannot be inferred from their dates.
 """
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from personal_finance.ingest.errors import ImportFailure
 
@@ -52,6 +52,19 @@ def from_metadata(metadata: dict[str, str]) -> Coverage:
     if kind == "partial":
         return _partial(start, end, basis)
     raise ImportFailure("invalid_coverage_metadata")
+
+
+def effective_end(coverage_end: str, evidence: str, generated_on: str | None) -> str:
+    """Last date a complete claim can support for matching. See decisions.md D-027.
+
+    The claimed end stays stored as evidence. A user declaration vouches for its whole
+    interval. Date-only metadata cannot show that its generation day was complete, or
+    vouch for later days, and missing metadata never counts as stronger evidence.
+    """
+    if evidence != "document_metadata":
+        return coverage_end
+    limit = date.fromisoformat(generated_on or coverage_end) - timedelta(days=1)
+    return min(coverage_end, limit.isoformat())
 
 
 def _complete(start, end, date_basis, evidence) -> Coverage:

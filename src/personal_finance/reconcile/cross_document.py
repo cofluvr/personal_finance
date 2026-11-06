@@ -13,10 +13,13 @@ feeds the other. Description similarity only ever creates review items.
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
+from personal_finance.ingest.coverage import effective_end
 from personal_finance.reconcile.rules import MatchingRules
+from personal_finance.reconcile.similarity import fold, parse_description, similar
 
 LINK_NEW = "new_record"
 LINK_EXTERNAL_ID = "reliable_external_id"
+LINK_EXACT = "exact_coverage_pair"
 
 RULE_EXTERNAL_ID = "cross_document_external_id"
 
@@ -125,8 +128,12 @@ def derive(
     ordered = sorted(records, key=lambda row: _record_key(row, by_id))
 
     id_merges, id_conflicts, separation = _match_reliable_ids(ordered, by_id)
-    merged = {row.id for merge in id_merges for row in merge}
+    id_less = [row for row in ordered if not _has_reliable_id(row, by_id)]
+    exact_merges, _ = _match_exact(id_less, by_id, unresolved, rules)
+
+    merged = {row.id for merge in id_merges + exact_merges for row in merge}
     units = [(merge, LINK_EXTERNAL_ID) for merge in id_merges]
+    units += [(merge, LINK_EXACT) for merge in exact_merges]
     units += [([row], LINK_NEW) for row in ordered if row.id not in merged]
 
     groups = tuple(_group(rows, rule, by_id) for rows, rule in units)
@@ -214,6 +221,115 @@ def _status_class(row: Record) -> str:
 
 def _dates_agree(left: str | None, right: str | None) -> bool:
     return left is None or right is None or left == right
+
+
+def _match_exact(rows, documents, unresolved, rules):
+    """Pair identical rows one-for-one where coverage justifies it (D-006, D-007).
+
+    Rows in one bucket are interchangeable, so the k-th row of each document pairs
+    with the k-th of the others. A document therefore contributes at most one row to
+    a transaction, and two rows against three gives exactly three transactions.
+    """
+    buckets = defaultdict(lambda: defaultdict(list))
+    for row in rows:
+        text = fold(row.description)
+        if text:
+            key = (row.transaction_date, row.posting_date, row.amount_cents, text, _status_class(row))
+            buckets[key][row.document_id].append(row)
+
+    blockers = _index_unresolved(unresolved)
+    merges, reasons = [], defaultdict(set)
+    for key, by_document in buckets.items():
+        if len(by_document) < 2:
+            continue
+
+        names = sorted(by_document, key=lambda name: documents[name].content_sha256)
+        trusted = set()
+        for position, left in enumerate(names):
+            for right in names[position + 1 :]:
+                gap = _coverage_gap(documents[left], documents[right], key, blockers, rules)
+                if gap is None:
+                    trusted.add((left, right))
+                    continue
+                for row in by_document[left] + by_document[right]:
+                    reasons[row.id].add(gap)
+
+        for slot in range(max(len(members) for members in by_document.values())):
+            present = [name for name in names if slot < len(by_document[name])]
+            joined = _DisjointSet(len(present))
+            for one, left in enumerate(present):
+                for other in range(one + 1, len(present)):
+                    if (left, present[other]) in trusted:
+                        joined.union(one, other)
+            for component in joined.components():
+                if len(component) > 1:
+                    merges.append([by_document[present[index]][slot] for index in component])
+    return merges, reasons
+
+
+def _coverage_gap(left, right, key, blockers, rules) -> str | None:
+    """Why two documents cannot support a confident match on this key, if they cannot."""
+    transaction_date, posting_date, amount, text, status = key
+    if "unknown" in (left.coverage_kind, right.coverage_kind):
+        return "coverage_unknown"
+    if left.coverage_kind != "complete" or right.coverage_kind != "complete":
+        return "coverage_partial"
+    if left.date_basis != right.date_basis:
+        return "different_basis"
+
+    day = transaction_date if left.date_basis == "transaction" else posting_date
+    if day is None or not (_claims(left, day) and _claims(right, day)):
+        return "date_outside_coverage"
+    if status == "pending" and not (left.pending_covered and right.pending_covered):
+        return "pending_not_covered"
+
+    last_safe = min(_effective_end(left), _effective_end(right))
+    if day > last_safe:
+        return "boundary_date"
+    if max(left.coverage_start, right.coverage_start) == last_safe:
+        return "single_day_overlap"
+
+    dates = {value for value in (transaction_date, posting_date) if value}
+    for document in (left, right):
+        if _unresolved_could_affect(document.id, dates, amount, text, blockers, rules):
+            return "unresolved_row"
+    return None
+
+
+def _claims(document: Document, day: str) -> bool:
+    return document.coverage_start <= day <= document.coverage_end
+
+
+def _effective_end(document: Document) -> str:
+    return effective_end(document.coverage_end, document.evidence, document.generated_on)
+
+
+def _index_unresolved(unresolved):
+    """Map document to dated rows, with None holding rows of unknown date."""
+    index = defaultdict(lambda: defaultdict(list))
+    for row in unresolved:
+        dates = {value for value in (row.transaction_date, row.posting_date) if value}
+        for value in dates or {None}:
+            index[row.document_id][value].append(row)
+    return index
+
+
+def _unresolved_could_affect(document_id, dates, amount, text, blockers, rules) -> bool:
+    """An unresolved row matters only if nothing known about it rules it out (D-024)."""
+    by_date = blockers.get(document_id)
+    if not by_date:
+        return False
+
+    description = parse_description(text, rules)
+    for value in (None, *dates):
+        for row in by_date.get(value, ()):
+            if row.amount_cents is not None and row.amount_cents != amount:
+                continue
+            if not fold(row.description):
+                return True
+            if similar(parse_description(row.description, rules), description, rules):
+                return True
+    return False
 
 
 def _group(rows, rule, documents) -> TransactionGroup:

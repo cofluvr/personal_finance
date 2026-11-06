@@ -1,6 +1,11 @@
 """The derivation as a pure function, using synthetic records only."""
 
-from personal_finance.reconcile.cross_document import Document, Record, derive
+from personal_finance.reconcile.cross_document import (
+    Document,
+    Record,
+    UnresolvedRecord,
+    derive,
+)
 from personal_finance.reconcile.rules import DEFAULT_RULES
 
 
@@ -175,3 +180,179 @@ class TestPrimaryRecord:
         forward = outcome(self.documents, rows).groups[0].primary_record_id
         backward = outcome(list(reversed(self.documents)), list(reversed(rows)))
         assert backward.groups[0].primary_record_id == forward == "1"
+
+
+def declared(name, start="2026-01-01", end="2026-01-31", basis="posting", **fields):
+    fields.setdefault("id_guarantee", "none")
+    return doc(
+        name,
+        coverage_kind="complete",
+        coverage_start=start,
+        coverage_end=end,
+        date_basis=basis,
+        evidence="user_declared",
+        **fields,
+    )
+
+
+def metadata(name, start="2026-01-01", end="2026-01-31", basis="posting", **fields):
+    fields.setdefault("id_guarantee", "none")
+    return doc(
+        name,
+        coverage_kind="complete",
+        coverage_start=start,
+        coverage_end=end,
+        date_basis=basis,
+        evidence="document_metadata",
+        **fields,
+    )
+
+
+class TestExactPairing:
+    def test_a_match_inside_two_complete_claims_is_confident(self):
+        result = outcome([declared("a"), declared("b")], [row("1", "a"), row("2", "b")])
+        assert merged(result) == {("1", "2")}
+
+    def test_two_rows_against_three_give_exactly_three_transactions(self):
+        rows = [row(f"a{i}", "a", i) for i in (1, 2)] + [row(f"b{i}", "b", i) for i in (1, 2, 3)]
+        result = outcome([declared("a"), declared("b")], rows)
+        assert len(result.groups) == 3
+        assert merged(result) == {("a1", "b1"), ("a2", "b2")}
+
+    def test_each_transaction_holds_at_most_one_row_per_document(self):
+        rows = [row(f"{name}{i}", name, i) for name in "abc" for i in (1, 2)]
+        result = outcome([declared(name) for name in "abc"], rows)
+        by_record = {record.id: record for record in rows}
+        for group in result.groups:
+            sources = [by_record[record_id].document_id for record_id in group.record_ids]
+            assert len(sources) == len(set(sources))
+        assert len(result.groups) == 2
+
+    def test_a_user_declared_end_date_is_confident_on_a_multi_day_overlap(self):
+        documents = [declared("a", "2026-01-01", "2026-01-31"), declared("b", "2026-01-15", "2026-01-31")]
+        rows = [row("1", "a", posting_date="2026-01-31"), row("2", "b", posting_date="2026-01-31")]
+        assert merged(outcome(documents, rows)) == {("1", "2")}
+
+    def test_a_declared_interval_needs_no_generation_date(self):
+        documents = [declared("a", generated_on=None), declared("b", generated_on="2026-01-31")]
+        rows = [row("1", "a", posting_date="2026-01-31"), row("2", "b", posting_date="2026-01-31")]
+        assert merged(outcome(documents, rows)) == {("1", "2")}
+
+    def test_a_single_day_overlap_is_never_confident_without_an_id(self):
+        documents = [declared("a", "2026-01-01", "2026-01-10"), declared("b", "2026-01-10", "2026-01-20")]
+        assert merged(outcome(documents, [row("1", "a"), row("2", "b")])) == set()
+
+    def test_a_single_day_claim_on_both_sides_is_not_confident(self):
+        documents = [declared("a", "2026-01-10", "2026-01-10"), declared("b", "2026-01-10", "2026-01-10")]
+        assert merged(outcome(documents, [row("1", "a"), row("2", "b")])) == set()
+
+    def test_metadata_end_date_without_a_generation_date_is_not_confident(self):
+        rows = [row("1", "a", posting_date="2026-01-31"), row("2", "b", posting_date="2026-01-31")]
+        assert merged(outcome([metadata("a"), metadata("b")], rows)) == set()
+
+    def test_metadata_end_date_generated_that_day_is_not_confident(self):
+        documents = [metadata("a", generated_on="2026-01-31"), metadata("b", generated_on="2026-02-02")]
+        rows = [row("1", "a", posting_date="2026-01-31"), row("2", "b", posting_date="2026-01-31")]
+        assert merged(outcome(documents, rows)) == set()
+
+    def test_metadata_end_date_is_confident_once_generation_shows_it_passed(self):
+        documents = [metadata("a", generated_on="2026-02-01"), metadata("b", generated_on="2026-02-02")]
+        rows = [row("1", "a", posting_date="2026-01-31"), row("2", "b", posting_date="2026-01-31")]
+        assert merged(outcome(documents, rows)) == {("1", "2")}
+
+    def test_dates_after_a_metadata_generation_date_do_not_establish_coverage(self):
+        documents = [metadata("a", generated_on="2026-01-20"), declared("b")]
+        for day, expected in (("2026-01-19", {("1", "2")}), ("2026-01-20", set()), ("2026-01-25", set())):
+            rows = [row("1", "a", posting_date=day), row("2", "b", posting_date=day)]
+            assert merged(outcome(documents, rows)) == expected
+
+    def test_the_restriction_does_not_reach_a_user_declaration(self):
+        documents = [declared("a", generated_on="2026-01-20"), declared("b")]
+        rows = [row("1", "a", posting_date="2026-01-25"), row("2", "b", posting_date="2026-01-25")]
+        assert merged(outcome(documents, rows)) == {("1", "2")}
+
+    def test_an_effective_overlap_of_one_day_is_a_single_day_overlap(self):
+        documents = [metadata("a", "2026-01-01", "2026-01-11"), declared("b", "2026-01-10", "2026-01-20")]
+        assert merged(outcome(documents, [row("1", "a"), row("2", "b")])) == set()
+
+    def test_unknown_and_partial_coverage_are_not_confident(self):
+        partial = doc("b", coverage_kind="partial", id_guarantee="none")
+        for other in (partial, doc("b", id_guarantee="none")):
+            assert merged(outcome([declared("a"), other], [row("1", "a"), row("2", "b")])) == set()
+
+    def test_different_date_bases_are_not_confident(self):
+        documents = [declared("a"), declared("b", basis="transaction")]
+        rows = [row(name, name, transaction_date="2026-01-10") for name in "ab"]
+        assert merged(outcome(documents, rows)) == set()
+
+    def test_a_row_outside_either_claim_is_not_confident(self):
+        documents = [declared("a"), declared("b", "2026-01-01", "2026-01-05")]
+        assert merged(outcome(documents, [row("1", "a"), row("2", "b")])) == set()
+
+    def test_a_row_without_a_date_on_the_basis_is_not_confident(self):
+        documents = [declared("a", basis="transaction"), declared("b", basis="transaction")]
+        assert merged(outcome(documents, [row("1", "a"), row("2", "b")])) == set()
+
+    def test_pending_rows_need_a_claim_that_includes_them(self):
+        pending = {"settlement_status": "pending", "transaction_date": "2026-01-10", "posting_date": None}
+        rows = [row("1", "a", **pending), row("2", "b", **pending)]
+        covered = [declared(name, basis="transaction", pending_covered=True) for name in "ab"]
+        excluded = [declared(name, basis="transaction") for name in "ab"]
+        assert merged(outcome(covered, rows)) == {("1", "2")}
+        assert merged(outcome(excluded, rows)) == set()
+
+    def test_unknown_status_can_pair_with_posted_on_coverage_evidence(self):
+        rows = [row("1", "a", settlement_status="unknown"), row("2", "b")]
+        result = outcome([declared("a"), declared("b")], rows)
+        assert merged(result) == {("1", "2")}
+        assert result.groups[0].primary_record_id == "2"
+
+    def test_a_blank_description_never_pairs(self):
+        rows = [row("1", "a", description=None), row("2", "b", description=None)]
+        assert merged(outcome([declared("a"), declared("b")], rows)) == set()
+
+    def test_a_reliable_id_row_never_pairs_with_an_id_less_row(self):
+        documents = [declared("a", id_guarantee="stable_unique"), declared("b")]
+        rows = [row("1", "a", external_id="X"), row("2", "b")]
+        assert merged(outcome(documents, rows)) == set()
+
+    def test_an_unreliable_id_is_ignored_for_pairing(self):
+        rows = [row("1", "a", external_id="X"), row("2", "b", external_id="Y")]
+        assert merged(outcome([declared("a"), declared("b")], rows)) == {("1", "2")}
+
+
+class TestUnresolvedRows:
+    documents = [declared("a"), declared("b")]
+    rows = [row("1", "a"), row("2", "b")]
+
+    def assert_blocks(self, expected, **fields):
+        blocker = UnresolvedRecord("a", **fields)
+        assert (merged(outcome(self.documents, self.rows, [blocker])) == set()) is expected
+
+    def test_a_row_with_nothing_known_blocks(self):
+        self.assert_blocks(True)
+
+    def test_a_row_on_that_date_with_no_amount_blocks(self):
+        self.assert_blocks(True, posting_date="2026-01-10", description="SYNTHETIC CAFE")
+
+    def test_a_row_on_another_date_does_not_block(self):
+        self.assert_blocks(False, posting_date="2026-01-11")
+
+    def test_a_row_with_a_different_amount_does_not_block(self):
+        self.assert_blocks(False, posting_date="2026-01-10", amount_cents=-999)
+
+    def test_a_row_for_another_merchant_does_not_block(self):
+        self.assert_blocks(False, posting_date="2026-01-10", description="SYNTHETIC GROCER")
+
+    def test_a_row_with_an_unknown_date_but_matching_amount_blocks(self):
+        self.assert_blocks(True, amount_cents=-500, description="SYNTHETIC CAFE")
+
+    def test_a_row_in_an_uninvolved_document_does_not_block(self):
+        blocker = UnresolvedRecord("c")
+        documents = self.documents + [declared("c")]
+        assert merged(outcome(documents, self.rows, [blocker])) == {("1", "2")}
+
+    def test_a_reliable_id_match_ignores_unresolved_rows(self):
+        documents = [doc("a"), doc("b")]
+        rows = [row("1", "a", external_id="X"), row("2", "b", external_id="X")]
+        assert merged(outcome(documents, rows, [UnresolvedRecord("a")])) == {("1", "2")}
