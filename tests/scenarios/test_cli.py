@@ -553,7 +553,7 @@ def test_reconcile_catches_up_an_account_without_a_new_file(db, tmp_path, monkey
     assert "1 accounts have not been reconciled" in capsys.readouterr().out
 
     assert main(["reconcile", "--db", db]) == 0
-    assert "1 source records moved" in capsys.readouterr().out
+    assert "source memberships changed: 1." in capsys.readouterr().out
 
     main(["totals", "--db", db])
     out = capsys.readouterr().out

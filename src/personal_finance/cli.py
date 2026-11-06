@@ -6,6 +6,7 @@ commands that exist to show transactions print descriptions or raw rows (D-037).
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 import uuid
@@ -45,6 +46,8 @@ BUSY_EXPLANATION = (
     "database is busy: another process is using the ledger. The step that failed changed "
     "nothing. Wait for that process to finish, then run this command again."
 )
+
+BROKEN_PIPE_EXIT = 141
 
 UNEXPECTED_ERROR = (
     "an unexpected problem stopped this command, so it may not have finished. Anything not "
@@ -343,7 +346,7 @@ def run_reconcile(args) -> int:
         except BaseException:
             conn.execute("ROLLBACK")
             raise
-        print(f"Account {account_id}: {result.moved_records} source records moved.")
+        print(f"Account {account_id}: source memberships changed: {result.moved_records}.")
         print(describe_open_groups(account_movement(conn, account_id)))
     return 0
 
@@ -594,7 +597,13 @@ def run_totals(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        return args.handler(args)
+        code = args.handler(args)
+        sys.stdout.flush()
+        return code
+    except BrokenPipeError:
+        # The reader went away, as in `pf transactions | head`. Nothing went wrong here.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return BROKEN_PIPE_EXIT
     except CommandError as error:
         print(f"Error: {error}", file=sys.stderr)
         return 2

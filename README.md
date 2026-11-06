@@ -149,6 +149,7 @@ To run it by name, add the `bin` folder to `PATH`, or link `bin/pf` from a folde
 | 0 | The command finished |
 | 1 | `import` finished, but at least one file failed. Other files in the run are kept |
 | 2 | The command stopped: bad usage, a validation error, a busy ledger, or an unexpected problem |
+| 141 | The program reading the output closed it early, as in `bin/pf transactions \| head` |
 
 ## Synthetic Example
 

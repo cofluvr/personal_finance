@@ -584,7 +584,9 @@ added to them or to each other.
 - `main` catches unexpected exceptions and prints one fixed message with exit code 2. The
   exception's text is never shown, because it can quote file contents.
 - Expected validation, migration and `database_busy` errors keep their sanitized messages.
-- User cancellation is not an application error, so it is not caught there.
+- User cancellation is not an application error, so it is not caught there. The same goes
+  for a reader closing the output, as in `pf transactions | head`: the command stops
+  silently with exit code 141.
 - No traceback or diagnostic dump is written to disk. The cost is that an unexpected error
   must be reproduced with synthetic data to be diagnosed.
 - Scope of the privacy rule: import summaries, `reconcile`, `documents`, `review list` and

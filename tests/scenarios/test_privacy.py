@@ -214,6 +214,29 @@ class TestFilesLeftBehind:
         assert unexpected_files(workspace, requested=["export.txt"]) == []
 
 
+def test_a_reader_closing_the_output_is_neither_an_error_nor_a_success(tmp_path):
+    rows = "".join(f"01/10/2026,SYNTHETIC ROW {number},1.00,\n" for number in range(3000))
+    (tmp_path / "big.csv").write_text(f"Date,Description,Debit,Credit\n{rows}")
+    db = str(tmp_path / "ledger.db")
+    for command in setup_commands(db):
+        run_process(command, tmp_path)
+    run_process(["import", "--db", db, "--account", "Checking", "--layout", "synthetic_card_v1",
+                 str(tmp_path / "big.csv")], tmp_path)
+
+    process = subprocess.Popen(
+        [sys.executable, "-P", "-m", "personal_finance", "transactions", "--db", db],
+        cwd=tmp_path, env={"PYTHONPATH": str(ROOT / "src"), "PYTHONDONTWRITEBYTECODE": "1"},
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    assert "SYNTHETIC ROW" in process.stdout.readline()
+    process.stdout.close()
+    errors = process.stderr.read()
+    process.stderr.close()
+
+    assert process.wait(timeout=60) == cli.BROKEN_PIPE_EXIT
+    assert errors == ""
+
+
 @pytest.fixture
 def db(tmp_path, capsys):
     path = str(tmp_path / "ledger.db")
