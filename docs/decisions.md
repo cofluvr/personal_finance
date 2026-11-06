@@ -213,6 +213,8 @@ Limits of these controls, as reviewed on 2026-11-05:
   tool reading a file.
 - Files under `tests/fixtures/synthetic/` are deliberately not ignored, so a real
   file placed there could be committed. Only review prevents that.
+- Ignoring uppercase extensions such as `.CSV` relies on git's `core.ignorecase`,
+  which is on for this repo but is not guaranteed elsewhere.
 - Instructions to an AI tool are not an enforcement mechanism. Enforcement comes
   from tool permissions and from keeping real data out of the workspace.
 - The repo has no `.claude/settings.json`, no hooks and no `info/exclude` entries.

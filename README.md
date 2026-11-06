@@ -117,6 +117,16 @@ These features are not part of the initial release unless explicitly reprioritiz
 
 ## Project Status
 
-Planning and requirements definition.
+Early implementation of the Python backend. The application cannot import files yet and must not be used with real financial data. See [implementation status](docs/status.md).
 
-Technology choices, installation instructions, and development commands will be documented as implementation proceeds.
+## Development Setup
+
+Requires Python 3.12 or later on macOS. Installing the development tools is the only step that needs network access. The application has no runtime dependencies.
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m pytest
+```
+
+Tests run offline and use only synthetic data. Decisions are recorded in the [decision log](docs/decisions.md), and the delivery order is in the [implementation plan](docs/plan.md).
