@@ -12,16 +12,19 @@ feeds the other. Description similarity only ever creates review items.
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from datetime import date
+from itertools import combinations
 
 from personal_finance.ingest.coverage import effective_end
 from personal_finance.reconcile.rules import MatchingRules
-from personal_finance.reconcile.similarity import fold, parse_description, similar
+from personal_finance.reconcile.similarity import block_key, fold, parse_description, similar
 
 LINK_NEW = "new_record"
 LINK_EXTERNAL_ID = "reliable_external_id"
 LINK_EXACT = "exact_coverage_pair"
 
 RULE_EXTERNAL_ID = "cross_document_external_id"
+RULE_CANDIDATES = "cross_document_candidates"
 
 GUARANTEE_NONE = "none"
 GUARANTEE_STABLE_UNIQUE = "stable_unique"
@@ -129,7 +132,7 @@ def derive(
 
     id_merges, id_conflicts, separation = _match_reliable_ids(ordered, by_id)
     id_less = [row for row in ordered if not _has_reliable_id(row, by_id)]
-    exact_merges, _ = _match_exact(id_less, by_id, unresolved, rules)
+    exact_merges, exact_reasons = _match_exact(id_less, by_id, unresolved, rules)
 
     merged = {row.id for merge in id_merges + exact_merges for row in merge}
     units = [(merge, LINK_EXTERNAL_ID) for merge in id_merges]
@@ -137,8 +140,11 @@ def derive(
     units += [([row], LINK_NEW) for row in ordered if row.id not in merged]
 
     groups = tuple(_group(rows, rule, by_id) for rows, rule in units)
-    items = tuple(_id_item(conflict) for conflict in id_conflicts)
-    return Derivation(groups, items, separation)
+    candidates = [_Unit.of(rows, by_id) for rows, _ in units]
+    joined, steps = _link_candidates(candidates, rules)
+    items = [_id_item(conflict) for conflict in id_conflicts]
+    items += _candidate_items(candidates, joined, exact_reasons, rules)
+    return Derivation(groups, tuple(items), separation, steps)
 
 
 def _record_key(row: Record, documents) -> tuple[str, int]:
@@ -330,6 +336,170 @@ def _unresolved_could_affect(document_id, dates, amount, text, blockers, rules) 
             if similar(parse_description(row.description, rules), description, rules):
                 return True
     return False
+
+
+@dataclass(frozen=True)
+class _Unit:
+    """One logical transaction, as candidate discovery sees it."""
+
+    rows: tuple[Record, ...]
+    amount_cents: int
+    days: tuple[int, ...]
+    descriptions: frozenset[str]
+    # Units in one lane can never be candidates for each other.
+    lane: tuple[frozenset[str], frozenset[str]]
+
+    @classmethod
+    def of(cls, rows, documents):
+        days = {date.fromisoformat(value).toordinal() for value in _dates_of(rows)}
+        unique_namespaces = {
+            documents[row.document_id].id_namespace
+            for row in rows
+            if _has_reliable_id(row, documents)
+            and documents[row.document_id].id_guarantee == GUARANTEE_STABLE_UNIQUE
+        }
+        return cls(
+            tuple(rows),
+            rows[0].amount_cents,
+            tuple(sorted(days)),
+            frozenset(text for text in map(fold, (row.description for row in rows)) if text),
+            (frozenset(row.document_id for row in rows), frozenset(unique_namespaces)),
+        )
+
+
+def _lanes_can_link(left, right) -> bool:
+    """Not if they share a document, or IDs that prove the rows distinct (D-026)."""
+    return left[0].isdisjoint(right[0]) and left[1].isdisjoint(right[1])
+
+
+def _link_candidates(units, rules):
+    """Join units linked by amount, date window and description, without listing pairs.
+
+    Units are bucketed by amount, then by description. Within a lane rows are sorted
+    by date, so every row within the window of a given row is one contiguous range,
+    and that range only needs joining once. No pair is ever stored. Cost grows with
+    rows per lane, lanes that overlap and the distinct descriptions sharing a block.
+    """
+    by_amount = defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
+    for index, unit in enumerate(units):
+        for text in unit.descriptions:
+            lanes = by_amount[unit.amount_cents][text]
+            lanes[unit.lane].update((day, index) for day in unit.days)
+
+    joined = _DisjointSet(len(units))
+    steps = 0
+    for descriptions in by_amount.values():
+        sorted_lanes = {
+            text: {lane: sorted(entries) for lane, entries in lanes.items()}
+            for text, lanes in descriptions.items()
+        }
+        for text, lanes in sorted_lanes.items():
+            for left, right in combinations(lanes, 2):
+                if _lanes_can_link(left, right):
+                    steps += _join_lanes(lanes[left], lanes[right], rules, joined)
+        for one, other in _similar_descriptions(sorted_lanes, rules):
+            for left, left_entries in sorted_lanes[one].items():
+                for right, right_entries in sorted_lanes[other].items():
+                    if _lanes_can_link(left, right):
+                        steps += _join_lanes(left_entries, right_entries, rules, joined)
+    return joined, steps
+
+
+def _similar_descriptions(texts, rules):
+    """Pairs of different descriptions that are similar, compared only within a block."""
+    blocks = defaultdict(list)
+    for text in texts:
+        parsed = parse_description(text, rules)
+        key = block_key(parsed, rules)
+        if key is not None:
+            blocks[key].append(parsed)
+    for members in blocks.values():
+        for left, right in combinations(members, 2):
+            if similar(left, right, rules):
+                yield left.folded, right.folded
+
+
+def _join_lanes(left, right, rules, joined) -> int:
+    window = rules.date_window_days
+    low = high = 0
+    linked_through = 0
+    steps = 0
+    for day, unit in left:
+        steps += 1
+        while low < len(right) and right[low][0] < day - window:
+            low += 1
+        high = max(high, low)
+        while high < len(right) and right[high][0] <= day + window:
+            high += 1
+        if low == high:
+            continue
+        joined.union(unit, right[low][1])
+        for position in range(max(low, linked_through), high - 1):
+            joined.union(right[position][1], right[position + 1][1])
+            steps += 1
+        linked_through = max(linked_through, high - 1)
+    return steps
+
+
+def _candidate_items(units, joined, exact_reasons, rules) -> list[ReviewItem]:
+    items = []
+    for component in joined.components():
+        if len(component) < 2:
+            continue
+        members = [units[index] for index in component]
+        for part in _bounded_parts(members, rules):
+            rows = [row for unit in part for row in unit.rows]
+            reasons = {reason for row in rows for reason in exact_reasons.get(row.id, ())}
+            items.append(
+                _item(
+                    RULE_CANDIDATES,
+                    [unit.rows for unit in part],
+                    reasons or {"similar_description"},
+                    _dates_of(rows),
+                )
+            )
+    return items
+
+
+def _bounded_parts(members, rules) -> list[list[_Unit]]:
+    """Divide a long run into calendar blocks without separating any linked pair (D-031).
+
+    Each block is extended by the date window. If two units are linked, the earlier
+    date falls in some block and the later date within that block's extension, so
+    both appear in that block's part.
+    """
+    span = rules.max_group_span_days
+    first = min(unit.days[0] for unit in members)
+    last = max(unit.days[-1] for unit in members)
+    if last - first + 1 <= span:
+        return [members]
+
+    parts = []
+    for block in range(first // span, last // span + 1):
+        start = block * span
+        end = start + span - 1 + rules.date_window_days
+        part = [unit for unit in members if any(start <= day <= end for day in unit.days)]
+        if any(_lanes_can_link(a.lane, b.lane) for a, b in _lane_pairs(part)):
+            parts.append(part)
+    return _without_contained(parts)
+
+
+def _lane_pairs(part):
+    """One representative pair for each pair of lanes in the part."""
+    by_lane = {unit.lane: unit for unit in part}
+    return combinations(by_lane.values(), 2)
+
+
+def _without_contained(parts):
+    keys = [frozenset(id(unit) for unit in part) for part in parts]
+    return [
+        part
+        for position, part in enumerate(parts)
+        if not any(
+            keys[position] < other or (keys[position] == other and earlier < position)
+            for earlier, other in enumerate(keys)
+        )
+    ]
 
 
 def _group(rows, rule, documents) -> TransactionGroup:

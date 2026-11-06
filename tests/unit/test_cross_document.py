@@ -1,5 +1,8 @@
 """The derivation as a pure function, using synthetic records only."""
 
+from dataclasses import replace
+from datetime import date, timedelta
+
 from personal_finance.reconcile.cross_document import (
     Document,
     Record,
@@ -356,3 +359,181 @@ class TestUnresolvedRows:
         documents = [doc("a"), doc("b")]
         rows = [row("1", "a", external_id="X"), row("2", "b", external_id="X")]
         assert merged(outcome(documents, rows, [UnresolvedRecord("a")])) == {("1", "2")}
+
+
+def days_from(start, count):
+    first = date.fromisoformat(start)
+    return [(first + timedelta(days=offset)).isoformat() for offset in range(count)]
+
+
+def plain(name, **fields):
+    return doc(name, id_guarantee="none", **fields)
+
+
+def shares_an_item(result, left, right):
+    return any(
+        {(left,), (right,)} <= set(item.members) for item in result.items
+    )
+
+
+class TestCandidates:
+    documents = [plain("a"), plain("b")]
+
+    def test_no_counterpart_means_no_candidate(self):
+        assert outcome(self.documents, [row("1", "a")]).items == ()
+
+    def test_same_date_and_amount_with_different_merchants_is_no_candidate(self):
+        rows = [row("1", "a"), row("2", "b", description="SYNTHETIC GROCER")]
+        assert outcome(self.documents, rows).items == ()
+
+    def test_a_blank_description_is_no_evidence(self):
+        rows = [row("1", "a", description=None), row("2", "b", description=None)]
+        assert outcome(self.documents, rows).items == ()
+
+    def test_a_different_amount_or_direction_is_no_candidate(self):
+        assert outcome(self.documents, [row("1", "a"), row("2", "b", amount=-501)]).items == ()
+        assert outcome(self.documents, [row("1", "a"), row("2", "b", amount=500)]).items == ()
+
+    def test_a_similar_description_within_the_window_is_flagged_and_never_merged(self):
+        rows = [
+            row("1", "a", description="SQ *SYNTHETIC CAFE #1042"),
+            row("2", "b", posting_date="2026-01-13"),
+        ]
+        result = outcome(self.documents, rows)
+        assert merged(result) == set()
+        assert result.items[0].rule == "cross_document_candidates"
+        assert result.items[0].reasons == ("similar_description",)
+
+    def test_the_window_boundary_is_inclusive_and_configurable(self):
+        inside = [row("1", "a"), row("2", "b", posting_date="2026-01-13")]
+        outside = [row("1", "a"), row("2", "b", posting_date="2026-01-14")]
+        assert outcome(self.documents, inside).items
+        assert not outcome(self.documents, outside).items
+        wider = replace(DEFAULT_RULES, date_window_days=4)
+        assert outcome(self.documents, outside, rules=wider).items
+
+    def test_rows_in_one_document_are_not_candidates_for_each_other(self):
+        assert outcome(self.documents, [row("1", "a", 1), row("2", "a", 2)]).items == ()
+
+    def test_identical_rows_form_one_group_with_the_coverage_reason(self):
+        rows = [row(f"a{i}", "a", i) for i in (1, 2)] + [row(f"b{i}", "b", i) for i in (1, 2, 3)]
+        result = outcome([plain("a"), declared("b")], rows)
+        assert merged(result) == set()
+        assert len(result.items) == 1
+        assert len(result.items[0].members) == 5
+        assert result.items[0].reasons == ("coverage_unknown",)
+
+    def test_the_extra_row_of_a_justified_pairing_is_not_flagged(self):
+        rows = [row(f"a{i}", "a", i) for i in (1, 2)] + [row(f"b{i}", "b", i) for i in (1, 2, 3)]
+        assert outcome([declared("a"), declared("b")], rows).items == ()
+
+    def test_a_third_uncovered_document_is_flagged_against_merged_rows(self):
+        documents = [declared("a"), declared("b"), plain("c")]
+        result = outcome(documents, [row("1", "a"), row("2", "b"), row("3", "c")])
+        assert merged(result) == {("1", "2")}
+        assert flagged(result) == {frozenset({("1", "2"), ("3",)})}
+
+    def test_different_ids_in_a_guaranteed_namespace_are_never_candidates(self):
+        documents = [doc("a"), doc("b")]
+        rows = [row("1", "a", external_id="X"), row("2", "b", external_id="Y")]
+        assert outcome(documents, rows).items == ()
+
+    def test_different_ids_without_the_uniqueness_guarantee_prove_nothing(self):
+        documents = [doc("a", id_guarantee="stable"), doc("b", id_guarantee="stable")]
+        rows = [row("1", "a", external_id="X"), row("2", "b", external_id="Y")]
+        assert outcome(documents, rows).items
+
+    def test_an_id_bearing_row_against_an_id_less_row_can_only_be_a_candidate(self):
+        documents = [doc("a"), plain("b")]
+        result = outcome(documents, [row("1", "a", external_id="X"), row("2", "b")])
+        assert merged(result) == set()
+        assert result.items
+
+    def test_similarity_never_merges_even_under_complete_coverage(self):
+        rows = [row("1", "a", description="SQ *SYNTHETIC CAFE"), row("2", "b")]
+        result = outcome([declared("a"), declared("b")], rows)
+        assert merged(result) == set()
+        assert result.items
+
+
+class TestRepeatedPurchases:
+    documents = [plain("a"), plain("b")]
+
+    def test_a_same_date_counterpart_does_not_hide_a_near_date_one(self):
+        rows = [
+            row("a1", "a", posting_date="2026-01-05"),
+            row("b1", "b", 1, posting_date="2026-01-05"),
+            row("b2", "b", 2, posting_date="2026-01-06"),
+        ]
+        result = outcome(self.documents, rows)
+        assert shares_an_item(result, "a1", "b1")
+        assert shares_an_item(result, "a1", "b2")
+
+    def test_a_posting_lag_keeps_every_row_in_one_group(self):
+        rows = [
+            row("a1", "a", 1, posting_date="2026-01-05"),
+            row("a2", "a", 2, posting_date="2026-01-06"),
+            row("b1", "b", 1, posting_date="2026-01-06"),
+            row("b2", "b", 2, posting_date="2026-01-07"),
+        ]
+        result = outcome(self.documents, rows)
+        assert len(result.items) == 1
+        assert len(result.items[0].members) == 4
+
+    def test_a_short_run_stays_one_item(self):
+        rows = [row(f"{n}{i}", n, i, posting_date=d) for n in "ab" for i, d in enumerate(days_from("2026-01-05", 14), 1)]
+        assert len(outcome(self.documents, rows).items) == 1
+
+    def test_daily_purchases_stay_visible_in_bounded_items(self):
+        days = days_from("2026-01-01", 30)
+        rows = [row(f"{n}{i}", n, i, posting_date=d) for n in "ab" for i, d in enumerate(days, 1)]
+        result = outcome(self.documents, rows)
+
+        covered = {member for item in result.items for member in item.members}
+        assert len(covered) == 60
+        assert 1 < len(result.items) <= 4
+        window = DEFAULT_RULES.max_group_span_days + DEFAULT_RULES.date_window_days
+        for item in result.items:
+            span = date.fromisoformat(item.date_end) - date.fromisoformat(item.date_start)
+            assert span.days + 1 <= window
+
+    def test_every_linked_pair_shares_an_item_across_block_edges(self):
+        days = days_from("2026-01-01", 40)
+        rows = [row(f"{n}{i}", n, i, posting_date=d) for n in "ab" for i, d in enumerate(days, 1)]
+        result = outcome(self.documents, rows)
+        for left in range(1, 41):
+            for right in range(1, 41):
+                if abs(left - right) <= DEFAULT_RULES.date_window_days:
+                    assert shares_an_item(result, f"a{left}", f"b{right}"), (left, right)
+
+    def test_a_block_edge_follows_the_calendar_not_the_data(self):
+        """Ordinals divide into fixed blocks, so adding rows cannot move an edge."""
+        span = DEFAULT_RULES.max_group_span_days
+        edge = (date.fromisoformat("2026-01-01").toordinal() // span + 1) * span
+        day = date.fromordinal(edge)
+        days = [(day + timedelta(days=offset)).isoformat() for offset in range(-16, 16)]
+        rows = [row(f"{n}{i}", n, i, posting_date=d) for n in "ab" for i, d in enumerate(days, 1)]
+        result = outcome(self.documents, rows)
+
+        before = (day - timedelta(days=1)).isoformat()
+        assert any(item.date_start == day.isoformat() for item in result.items)
+        assert any(item.date_start <= before <= item.date_end and day.isoformat() <= item.date_end
+                   for item in result.items)
+
+    def test_rows_near_a_block_edge_sit_in_two_overlapping_items(self):
+        days = days_from("2026-01-01", 40)
+        rows = [row(f"{n}{i}", n, i, posting_date=d) for n in "ab" for i, d in enumerate(days, 1)]
+        result = outcome(self.documents, rows)
+        memberships = [member for item in result.items for member in item.members]
+        assert len(memberships) > len(set(memberships)) == 80
+
+    def test_dense_rows_do_no_pairwise_work(self):
+        days = days_from("2026-01-01", 200)
+        rows = [
+            row(f"{n}{d}{k}", n, 1000 * position + k, posting_date=d)
+            for n in "ab"
+            for position, d in enumerate(days)
+            for k in range(5)
+        ]
+        result = outcome(self.documents, rows)
+        assert result.candidate_steps <= 3 * len(rows)
