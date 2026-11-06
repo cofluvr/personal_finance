@@ -41,7 +41,11 @@ not encryption.
 - Blank input returns `None` (missing). Malformed input raises an error.
 - Sub-cent precision is rejected rather than rounded. Trailing zeros such as
   `12.340` are accepted because the value is exactly representable.
-- Amounts outside the SQLite 64-bit integer range are rejected.
+- Amounts outside the SQLite 64-bit integer range are rejected, and text over 64
+  characters is rejected before any conversion. Every failure on text input is a
+  `MoneyParseError`, so one bad row cannot crash an import.
+- SQLite `SUM` raises an error on overflow rather than returning a float. Reports
+  must keep using `SUM`, not `TOTAL`.
 - Floats are rejected by type, and pandas stays out of the ledger path.
 
 ## D-004 Provenance layers — Approved
@@ -50,6 +54,9 @@ not encryption.
 Parser output goes in `record_parse`, one row per record per parser version, so
 a parser change adds a row rather than rewriting history. `ledger_transaction`
 holds logical transactions, and `transaction_source` links them to records.
+
+`INSERT OR REPLACE` does not fire delete triggers, so migration `0002` adds
+before-insert triggers to refuse it.
 
 ## D-005 Document coverage is explicit — Approved
 
@@ -66,6 +73,14 @@ Coverage must never be inferred from the earliest and latest transaction dates
 alone. A gap in activity looks the same as a gap in the document. `complete`
 requires a start date, end date, date basis (transaction or posting) and evidence
 (`document_metadata` or `user_declared`), and the database enforces this.
+
+A user declaration must state the account, inclusive start and end dates, the date
+basis, and an explicit claim of complete coverage for that interval. It is stored
+with evidence `user_declared`. Without one, coverage stays unknown.
+
+Complete coverage says only that nothing inside the interval is missing. Rows
+outside the interval are allowed and carry no claim. What complete means for
+pending transactions is defined per layout in [layouts.md](layouts.md).
 
 ## D-006 Duplicate confidence rules — Approved, implemented in slice 3
 
@@ -89,16 +104,21 @@ All comparisons are within one account.
 - External IDs count as reliable only if the layout declares them so. Otherwise
   they are ordinary evidence.
 - The 3-day window is a starting value.
-- Possible duplicates stay separate transactions, both count in totals, and the
-  amount at risk is disclosed. Identical-looking rows are flagged as one group
-  rather than pairwise, and no merge is chosen for convenience.
+- Only plausible candidates enter review: a row needs a real counterpart in
+  another document. Unknown coverage alone never flags a row.
+- Possible duplicates stay separate transactions and both count in totals, so
+  totals may be overstated, and summaries must say so. Identical-looking rows are
+  flagged as one group rather than pairwise, and no merge is chosen for convenience.
+- Any amount shown for candidates is a disclosure and not an exact adjustment.
+  Overlapping groups can make a single adjustment figure meaningless, so none is
+  presented as one.
 - Assumption: a document does not list the same transaction twice. To be tested
   against real samples at M6.
 
-**Known consequence:** ID-less exports without coverage evidence put every
-overlapping row into review, and totals stay overstated until resolved. A
-`user_declared` coverage option at import is the proposed mitigation, with
-group-level resolution in M2.
+**Known consequence:** in ID-less exports without coverage evidence, rows with a
+counterpart in another document go to review, and totals stay overstated until
+resolved. Declaring coverage at import (D-005) avoids this, and group-level
+resolution arrives in M2.
 
 ## D-007 Boundary dates — Approved, implemented in slice 3
 
@@ -113,13 +133,28 @@ holds:
 ## D-008 One record per document per transaction — Approved
 
 A logical transaction can hold at most one source record from any one document.
-This rule limits merging but does not justify it: D-006 still decides whether a
-merge happens. The database enforces it with
-`UNIQUE (transaction_id, source_document_id)`, and composite foreign keys ensure
-a link cannot join a record to a transaction in another account.
+The database enforces this with `UNIQUE (transaction_id, source_document_id)`, and
+composite foreign keys stop a link joining a record to a transaction in another
+account.
 
-Import order must not change the result. Totals and open review items are
-compared across orders in acceptance test A16.
+This is an initial deduplication safeguard. It stops automatic matching collapsing
+legitimate repeated purchases. It limits merging and never justifies one: D-006
+still decides that. **It is not proof that a document cannot contain two
+representations of one financial event.**
+
+Where it applies: rows of the same status in a tested layout, which that layout
+treats as separate events.
+
+Where it does not hold, such as a pending and posted version in one export, or one
+external ID repeated within a document, the rows are kept and flagged under D-021
+rather than silently treated as separate expenses.
+
+If M2 needs one event to hold two records from a document, a migration replaces
+the constraint with a partial unique index that exempts reviewed links. A test
+proves that this migration works on populated data.
+
+Import order must not change the result. Totals and open review items are compared
+across orders in acceptance test A16.
 
 ## D-009 Stable identity for decisions and corrections — Approved, implemented in M2
 
@@ -231,6 +266,37 @@ Application and test execution stay offline, and the test suite blocks sockets.
 The package is not installed into the venv. pytest finds it through
 `pythonpath = ["src"]`. An editable install would need `setuptools`, which is a
 further download, so the CLI entry point is decided in slice 4.
+
+## D-021 Representations within one document — Default
+
+Import keeps every row of a document as its own transaction, and flags evidence
+that two rows may be one event:
+
+| Evidence within one document | Rule |
+|---|---|
+| Same external ID on more than one row | `same_document_repeated_external_id` |
+| Pending and posted rows, same amount and description, dates within 3 days | `same_document_pending_posted` |
+
+Flagged rows stay separate and count in totals until reviewed in M2. This only
+flags. Pending-to-posted reconciliation remains M2. Identical rows with the same
+status are not flagged, because a tested layout treats them as separate events.
+
+## D-022 Repeat imports of identical bytes — Default
+
+A byte-identical file is one document. Importing it again changes no ledger data
+and records an `already_imported` attempt, except where the new request
+contradicts what was recorded. A different account, layout or coverage declaration
+is a failed attempt, with nothing changed. Coverage is immutable, so correcting a
+declaration needs an M2 workflow.
+
+## D-023 Failure handling — Default
+
+Each file is imported in one database transaction, holding the write lock from
+the duplicate check to commit, so a failed import leaves no records or
+transactions. Failed attempts are recorded afterwards with a fixed code. A bad row
+goes to the unresolved queue, and only a document-level problem fails the file.
+
+Failure codes and reason codes never contain file contents.
 
 ## Not yet decided
 

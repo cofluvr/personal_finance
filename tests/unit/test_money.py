@@ -123,6 +123,36 @@ def test_limits_of_the_integer_column():
         parse_cents("-92233720368547758.09")
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "1" * 65,
+        "1" * 5000,
+        "9" * 1_000_000,
+        "1." + "0" * 1_000_000,
+        "1" + ",000" * 2000,
+        "-" + "1" * 5000,
+        "(" + "1" * 5000 + ")",
+    ],
+)
+def test_excessively_long_input_fails_safely(text):
+    with pytest.raises(MoneyParseError):
+        parse_cents(text)
+
+
+def test_surrounding_whitespace_does_not_count_towards_the_length_limit():
+    assert parse_cents(" " * 1000 + "12.34" + " " * 1000) == 1234
+
+
+@given(st.text(max_size=80))
+def test_any_text_gives_a_value_or_a_parse_error(text):
+    try:
+        result = parse_cents(text)
+    except MoneyParseError:
+        return
+    assert result is None or MIN_CENTS <= result <= MAX_CENTS
+
+
 def test_summing_a_thousand_dimes_is_exact():
     assert format_cents(sum(parse_cents("0.10") for _ in range(1000))) == "100.00"
 
