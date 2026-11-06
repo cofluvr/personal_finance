@@ -1,8 +1,8 @@
-# Session Handoff: After M1 Slice 4
+# Session Handoff: After M1
 
-For a fresh session. Written 2026-11-06. Slices 1 to 4 are accepted by the owner. **All M1
-completion conditions are met, and the owner's final sign-off is pending.** Do not start M2
-until the owner says so. See [m1-acceptance.md](m1-acceptance.md).
+For a fresh session. Written 2026-11-06. **M1 is complete and accepted: the owner gave final
+sign-off on 2026-11-06.** Its limitations and deferred benchmarks still stand. Do not start
+M2 until the owner says so. See [m1-acceptance.md](m1-acceptance.md).
 Slice 4's design decisions are D-036 to D-039.
 
 ## Current state
@@ -204,9 +204,7 @@ or export presents legacy creation timestamps.**
 
 ## Awaiting the owner
 
-- Final M1 sign-off. The owner's clean-install message was cut off mid-sentence at "If setup
-  works and all required", so any instruction after that was not received.
-- Authorization to start M2.
+- Authorization to start M2. The owner will begin M2 planning in a fresh session.
 - Pushing. Not authorized. Nothing since `c75aee0` has been pushed.
 
 ## Recommended M2 scope
@@ -232,7 +230,7 @@ any new command shows legacy creation timestamps.
 | Local commits on `feature/m1-foundation` | Approved by the owner, and remains approved | Confirm in the kickoff prompt |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
-| Network access | Was approved for the clean-install dependencies only, now used | Ask for any use |
+| Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
 
 Never approved, and not to be assumed:
 

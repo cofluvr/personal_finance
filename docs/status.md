@@ -8,6 +8,7 @@ Last updated: 2026-11-06. Branch: `feature/m1-foundation`. The owner pushed `c75
 | M1 slice 2: synthetic layouts, coverage, provenance, idempotent import | Accepted |
 | M1 slice 3: cross-document duplicate handling | Accepted |
 | M1 slice 4: import summaries, log checks, entry point, setup documentation | Accepted |
+| **M1 overall** | **Complete and accepted** |
 | M2 to M8 | Not started |
 
 ## What exists
@@ -42,9 +43,9 @@ All 47 criteria pass, each mapped to named tests in [m1-acceptance.md](m1-accept
 A17 is met against the corrected wording in [plan.md](plan.md). A18 is met because M1 has
 no logs and its output stays clean (D-037).
 
-All M1 completion conditions are met, including a new-setup run from the README. The clean
-install and both entry points were verified on 2026-11-06 (see
-[m1-acceptance.md](m1-acceptance.md)). The owner's final M1 sign-off is pending.
+**M1 is complete and accepted.** The owner gave final sign-off on 2026-11-06, based on the
+acceptance tests and the clean-install verification in [m1-acceptance.md](m1-acceptance.md).
+The limitations and deferred benchmarks below still stand.
 
 A39 has provisional benchmarks, met by the figures below (D-034).
 
