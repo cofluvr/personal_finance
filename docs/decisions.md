@@ -290,7 +290,7 @@ until redacted samples exist and have tests.
 - All development data is synthetic.
 - The M5 real-data gate is mandatory before processing actual documents.
 - Local commits on the feature branch are approved. Every push needs the owner's
-  explicit approval. The owner's own push of `c75aee0` was intentional.
+  explicit approval. The owner's own pushes of `c75aee0` and `643e1b1` were intentional.
 
 Limits of these controls, as reviewed on 2026-11-05:
 
@@ -590,8 +590,12 @@ added to them or to each other.
 - No traceback or diagnostic dump is written to disk. The cost is that an unexpected error
   must be reproduced with synthetic data to be diagnosed.
 - Scope of the privacy rule: import summaries, `reconcile`, `documents`, `review list` and
-  error paths never show descriptions, amounts or raw rows. `transactions` and `trace` exist
-  to show selected data and are not leaks. `totals` shows only aggregate amounts.
+  error paths never show descriptions, amounts or raw rows. `transactions`, `trace` and
+  `review show` exist to show selected data and are not leaks. `totals` shows only aggregate
+  amounts.
+- Amended 2026-11-06 for M2.1: `review show` displays amounts, descriptions and original
+  cells for the one item explicitly requested, under the same terms as `trace`. Its refusals
+  repeat nothing they were given. See D-040.
 - File and account names are shown as the user typed them.
 - Tests allow the ledger, its SQLite support files and explicitly requested outputs, and
   fail on any other new file.
@@ -613,6 +617,60 @@ added to them or to each other.
 - External memory and scratchpad files are not read or written voluntarily. Files managed
   by the tool harness are distinct from the session's own actions, and any unavoidable
   boundary limitation is reported.
+
+## D-040 Review evidence and revision tokens — Approved
+
+`review show` presents one item. These stay visibly separate, and a missing value is shown
+as missing, never as blank or zero:
+
+- Original source cells, exactly as read.
+- Parsed source values, per record.
+- Current logical transaction values.
+- Primary-source selection (D-030), with what each alternative lost on.
+- Coverage evidence, keeping the claim apart from what matching relies on (D-027).
+- Machine-generated reasons.
+
+Ambiguous groups show no duplicate adjustment (D-006). Records sharing a document are
+identified. Descriptions and IDs are escaped, so a cell cannot imitate another section or
+send terminal controls. `review list` gives item IDs only.
+
+**Revision token.** Each item shows `r<version>-<16 hex characters>`: the start of a SHA-256
+of its material evidence, as canonical JSON. It covers all material evidence shown to the
+user, not membership alone, and exists so that a later decision can refuse evidence that
+changed after it was viewed.
+
+| Covered now | Not covered, because it does not change what the evidence says |
+|---|---|
+| Item kind, rule, status, reasons and date range | Item, transaction and record IDs. Records are identified by document hash and row |
+| Each transaction's current values and primary source | File names, which are labels. The document hash is covered |
+| Each record's original cells, parsed values and link rule | The stale-account warning. Whatever reconciling changes reaches the token through the evidence |
+| Each document's interpretation, coverage claim and effective end | Timestamps, which are not part of the evidence loaded |
+
+- Equal evidence gives an equal token in any ledger and any import order. A repeat import
+  or a reconcile that changes nothing cannot change it, and A16 compares tokens.
+- Inputs that do not exist yet are not stubbed. Effective values from corrections, corrected
+  coverage and applicable decisions must join the token when they are introduced.
+- Any change to the inputs bumps `REVISION_VERSION`, and a test pins the definition. Tokens are
+  compared only with a fresh computation and are never stored as identity, so an old token
+  simply reads as changed.
+- It detects change and proves nothing else. It is derived from row contents, so it appears
+  only in `review show`, never in routine output.
+
+## D-041 Requirements for later M2 slices — Approved as requirements
+
+Recorded with the approval of M2.1. None of this is implemented, and the rest of the M2 plan
+in [plan.md](plan.md) is provisional and not approved for implementation.
+
+- Before M2.2, define whether reject means a pairwise distinction or a complete partition.
+  Rejecting an ambiguous group must not be treated as permission to declare every member
+  distinct.
+- Corrections and coverage conflicts must stay distinguishable from possible duplicates in
+  classification and disclosures, even if they share review infrastructure.
+- Rejecting an unmerged candidate leaves totals unchanged. Separating an existing merge may
+  change them.
+- Before corrections are introduced, define deterministic behaviour when several active
+  overrides affect one merged transaction, including exactly which effective value totals use.
+  "Neither chosen silently" is not sufficient on its own.
 
 ## Not yet decided
 

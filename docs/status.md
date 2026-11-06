@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-11-06. Branch: `feature/m1-foundation`. The owner pushed `c75aee0` to `origin`, and later commits are local, including all of slices 3 and 4. Remote state and repository visibility are unverified (see [handoff.md](handoff.md)). Handoff: [handoff.md](handoff.md).
+Last updated: 2026-11-06. Branch: `feature/m2-review`, local only, from `643e1b1`. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`. Live remote state and repository visibility are unverified (see [handoff.md](handoff.md)). Handoff: [handoff.md](handoff.md).
 
 | Milestone | Status |
 |---|---|
@@ -9,7 +9,9 @@ Last updated: 2026-11-06. Branch: `feature/m1-foundation`. The owner pushed `c75
 | M1 slice 3: cross-document duplicate handling | Accepted |
 | M1 slice 4: import summaries, log checks, entry point, setup documentation | Accepted |
 | **M1 overall** | **Complete and accepted** |
-| M2 to M8 | Not started |
+| M2.1: review evidence and revision tokens | Complete, awaiting owner review |
+| M2.2 to M2.9 | Provisional, not approved |
+| M3 to M8 | Not started |
 
 ## What exists
 
@@ -29,13 +31,15 @@ Last updated: 2026-11-06. Branch: `feature/m1-foundation`. The owner pushed `c75
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement.
 - `personal_finance.reports.import_summary`: run-level import counts in explicit units (D-036).
+- `personal_finance.reports.review_evidence`: the evidence behind one review item and its
+  revision token (D-040).
 - CLI: `init`, `migrate`, `account add`, `import`, `reconcile`, `documents`, `transactions`,
-  `trace`, `review list`, `totals`, run through the `bin/pf` launcher (D-038).
+  `trace`, `review list`, `review show`, `totals`, run through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
 
 No real institution layout is supported. **It must not be used with real financial
-data** (M5 gate). Review items cannot be resolved yet (M2).
+data** (M5 gate). Review items can be inspected but not resolved yet (M2.2 onwards).
 
 ## Acceptance criteria progress
 
@@ -140,6 +144,13 @@ merges at once.
   creation timestamps (follow-up F2).
 - A multi-step upgrade is atomic per step, not as a whole. After a failure the ledger stays
   at the last good version, and commands refuse it until `migrate` succeeds.
+- `review show` does not say whether a transaction also sits in another review item (D-031).
+  Its output for a long group is long, and there is no grouped review of long runs yet.
+- Nothing consumes the revision token yet. It is shown for M2.2 to use, and today only tests
+  compare it. It covers only inputs that exist, and is not a security measure.
+- `review show` needs the full item ID. A later import can replace an item, and the ID then
+  reads as not found.
+- `review show` escapes descriptions and IDs, but prints file names as typed (D-037).
 - Coverage cannot be changed after import. A file imported with unknown coverage
   cannot be declared complete later. The attempt fails with `coverage_conflict`,
   existing data stays unchanged, and the message explains the limitation. M2 adds

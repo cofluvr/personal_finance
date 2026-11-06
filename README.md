@@ -172,6 +172,7 @@ bin/pf import --db "$DB" --account "Synthetic Card" --layout synthetic_card_v1 \
 
 bin/pf documents --db "$DB"
 bin/pf review list --db "$DB"
+bin/pf review show --db "$DB" ITEM_ID
 bin/pf totals --db "$DB"
 bin/pf transactions --db "$DB"
 bin/pf trace --db "$DB" TRANSACTION_ID
@@ -180,7 +181,23 @@ bin/pf trace --db "$DB" TRANSACTION_ID
 bin/pf reconcile --db "$DB"
 ```
 
-`transactions` and `trace` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents` and `review list` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
+`transactions`, `trace` and `review show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents` and `review list` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
+
+## Reading a Review Item
+
+`review list` gives each open item an ID, and `review show` displays one item's evidence. Review items can be inspected but not resolved yet.
+
+| Section | Meaning |
+|---|---|
+| Machine-generated reasons | Why the item exists. These are heuristics, not proof |
+| Current logical transaction values | What the ledger counts now |
+| Primary-source selection | Which record supplies those values, and why the others did not |
+| Original source cells | The row exactly as read |
+| Parsed source values | What the parser read from that row |
+| Coverage evidence | What each document claims, and the last date matching relies on |
+| Revision | Identifies this evidence. It changes when any of it changes, and a repeat import that changes nothing leaves it alone |
+
+A value the source did not provide is shown as `missing`. Members of a possible-duplicate group are all counted in full, and no exact adjustment can be stated. See [D-040](docs/decisions.md).
 
 ## Reading an Import Summary
 

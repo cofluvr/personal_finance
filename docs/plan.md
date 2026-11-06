@@ -147,6 +147,50 @@ it end to end.
 M1 is finished when all tests pass, a new-setup run works from the README, and
 the decision log records the database, parser and deduplication rules.
 
+## M2 plan
+
+M2.1 is approved and complete. **M2.2 to M2.9 are provisional**: a direction, not approval to
+implement, and each needs its own approval. D-041 lists requirements they must meet.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M2.1 | Review evidence: `review list` IDs, `review show`, revision tokens. Read-only, no migration | Complete, awaiting review |
+| M2.2 | Decision core: stable-ID storage, precedence over automatic reconciliation, reject and undo | Provisional |
+| M2.3 | Confirm, including part of a group | Provisional |
+| M2.4 | Separating machine-made merges | Provisional |
+| M2.5 | New evidence that touches a decided record, and superseding a decision | Provisional |
+| M2.6 | Correction overrides | Provisional |
+| M2.7 | Resolving incomplete records | Provisional |
+| M2.8 | Coverage correction with history | Provisional |
+| M2.9 | Pending to posted, including tips, changed descriptions and the D-008 migration | Provisional |
+
+Direction from planning, not yet decisions:
+
+- Identity decisions anchor on `source_record.id`. A merge deletes the retired
+  `ledger_transaction` row, so transaction IDs can only be snapshots. Field corrections are a
+  separate layer that matching never reads.
+- Precedence has to land with the first stored decision, because the next reconcile would
+  otherwise undo it. So storage and survival across imports cannot be separate slices.
+- A group can hold several records from one document, which `transaction_source` refuses to
+  merge, so confirming needs more than yes or no. See D-041 for reject.
+- Undoing a decision re-derives from current evidence. Undoing a machine-made merge is a new
+  decision, because otherwise the next reconcile would merge the records again.
+
+### M2.1 acceptance criteria
+
+| ID | Scenario | Expected result |
+|---|---|---|
+| R1 | `review list` | Gives an item ID for every item. No amounts, descriptions, cells or revision |
+| R2 | `review show` on each item type | Candidate, external-ID, both same-document rules and unresolved items each show useful evidence |
+| R3 | The six kinds of evidence (D-040) | Stay visibly separate |
+| R4 | Missing values | Shown as missing. Zero stays zero, and no transaction is shown for an unresolved row |
+| R5 | Records sharing a document | Identified in a summary and on each record |
+| R6 | Ambiguous group | States that no exact adjustment exists, and shows no computed figure |
+| R7 | Revision token | Stable across repeat imports, `reconcile` and unrelated files. Changes with any material field. Equal across import orders |
+| R8 | Read commands | Open read-only, and leave every table and the file unchanged |
+| R9 | Outdated schema | Explains `migrate`, and writes nothing |
+| R10 | Privacy | Explicit inspection shows data. Routine output, refusals and unexpected errors do not |
+
 ## Backlog benchmarks
 
 Not scheduled, and not part of A39 acceptance.
