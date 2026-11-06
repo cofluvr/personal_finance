@@ -936,8 +936,7 @@ class TestExistingAccounts:
         path = tmp_path / "old.db"
         create_database(path, old)
         conn = connect(path)
-        seed_version_two(conn, (CARD_HEADER + cafe() + "
-").encode("utf-8"))
+        seed_version_two(conn, (CARD_HEADER + cafe() + "\n").encode("utf-8"))
         return conn
 
     def test_the_backfill_records_the_only_source_of_a_transaction(self, tmp_path):
