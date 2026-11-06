@@ -91,21 +91,26 @@ it end to end.
 |---|---|---|---|
 | A5a | 2 identical rows in one file, 3 in another, both with confirmed complete coverage of that date on the same date basis | Exactly 3 transactions, no review item for the pairing | 3 |
 | A5b | The same rows where either file has partial or unknown coverage | All 5 records stay as separate transactions, flagged together as one open review item. Summaries say totals may be overstated, without presenting an exact adjustment | 3 |
-| A6 | Near-match with a date one day off | Both kept and counted, and shown in `review list` | 3 |
+| A6 | Near-match with a date one day off and a matching description | Both kept and counted, and shown in `review list` | 3 |
 | A7 | Same external ID, different amount | Flagged, never merged | 3 |
 | A8 | Same rows in two different accounts | Never matched | Part 1, 3 |
 | A20 | Same reliable external ID and amount in two files with unknown coverage | Confident duplicate: coverage is not needed when identity is proven | 3 |
-| A21 | External ID from a layout that does not declare its IDs reliable | Treated as description-level evidence only; not sufficient alone | 3 |
-| A22 | Identical-looking purchases on a date where the two files' shared coverage is that single date | Kept separate and flagged, even when both claim complete coverage | 3 |
+| A21 | External ID from a layout that does not declare its IDs reliable, using a test-only synthetic layout | Treated as description-level evidence only; not sufficient alone. No production layout is added or claimed | 3 |
+| A22 | Identical-looking ID-less purchases on a date where the two files' shared coverage is that single date | Kept separate and flagged, even when both claim complete coverage, including `user_declared`. Intentional conservative policy (D-007) | 3 |
 | A23 | Coverage dates derived only from the earliest and latest rows | Never recorded as complete; recorded as unknown | Part 1, 2 |
 | A24 | Same rows, coverage stated on different date bases (transaction versus posting) | Not treated as confirmed overlap; flagged | 3 |
 | A26 | User declaration of complete coverage | Needs account, inclusive dates, date basis and the explicit flag; stored as `user_declared` | 2 |
 | A27 | Rows with no counterpart in another document, coverage unknown | Not flagged: unknown coverage alone never enters review | 3 |
 | A28 | Overlapping candidate groups | Summaries show no single exact adjustment figure | 3 |
-| A32 | Match on the inclusive end date, both documents `user_declared` | Confident, with no generation date needed | 3 |
+| A32 | ID-less match on the inclusive end date, both documents `user_declared`, shared coverage longer than one date | Confident, with no generation date needed | 3 |
 | A33 | Match on the end date of a `document_metadata` claim with no generation date, or generated that day | Possible duplicate: the end date is not assumed complete | 3 |
 | A34 | Same reliable external ID with a conflicting date or status, or repeated within a document | Flagged, never merged | 3 |
 | A35 | Exact match where an unresolved row could affect the count | Possible duplicate, with the unresolved disclosure kept | 3 |
+| A42 | Unrelated purchases with the same date and amount in different documents | No candidate and no review item | 3 |
+| A43 | Plausible merchant or description variations within the date window | Creates a review item, and never merges automatically | 3 |
+| A44 | Reliable-ID matching alongside heuristic discovery | Each runs on its own evidence: an ID match does not need a similar description, and similarity never produces a merge | 3 |
+| A45 | Reliable external ID with compatible fields on a single-day overlap | Confident: the single-day policy applies only to ID-less matching | 3 |
+| A46 | Reliable ID match where one record has `unknown` status and the other `posted` | Not a status conflict. Both source statuses are preserved, and `unknown` is not filled in | 3 |
 | A29 | One external ID repeated within a document | Kept, counted and flagged | 2 |
 | A30 | Pending and posted versions within a document | Kept, counted and flagged, with each record's status preserved | 2 |
 

@@ -112,18 +112,30 @@ All comparisons are within one account.
 | Exact match, coverage partial or unknown on either side | Possible duplicate |
 | Exact match on a boundary date | Possible duplicate |
 | Exact match, coverage stated on different date bases | Possible duplicate |
-| Same amount, date within 3 days or differing description | Possible duplicate |
+| Same amount, within the date window, with additional evidence (below) | Possible duplicate |
+| Same amount and date, with no additional evidence | Not a candidate |
 | Same document, same status | Never merged |
 
-- External IDs count as reliable only if the layout declares them so. Otherwise
-  they are ordinary evidence.
+- External IDs count as reliable only if a validated layout declares them so, and
+  they are scoped to one account. Otherwise they are ordinary evidence.
+- Reliable-ID matching is separate from heuristic candidate discovery. It runs on
+  its own evidence, and neither path substitutes for the other.
 - Material fields are amount, settlement status, and any date present on both
   records. A date missing from one record is compatible and is not filled in from
   the other. A differing description alone is not a conflict for a reliable ID
   (Approved), but both are preserved.
 - A pending row and a posted row sharing an ID conflict on status, so they stay
   flagged until M2.
-- The 3-day window is a starting value.
+- `unknown` status does not conflict with `posted`, for status comparison only. It
+  does not establish identity, and source statuses are preserved: `unknown` is
+  never filled in as `posted`. Pending-to-posted reconciliation remains M2.
+- Heuristic candidates need additional evidence beyond amount and date: a matching
+  or sufficiently similar merchant or description, a validated external identifier,
+  or another documented source-specific relationship. Different descriptions alone
+  are not positive matching evidence.
+- The bounded date window is a configurable heuristic, starting at 3 days. It is not
+  proof of identity.
+- Candidate discovery creates review items. It never authorizes an automatic merge.
 - Only plausible candidates enter review: a row needs a real counterpart in
   another document. Unknown coverage alone never flags a row.
 - Possible duplicates stay separate transactions and both count in totals, so
@@ -142,11 +154,13 @@ resolution arrives in M2.
 
 ## D-007 Boundary dates — Approved, implemented in slice 3
 
-A date is a boundary date, and so cannot support a confident match, when any of
-these holds:
+These rules apply to ID-less matching based on occurrence and coverage. A date is
+a boundary date, and so cannot support a confident match, when any of these holds:
 
-- The two documents' shared coverage is that single date, because each may hold a
-  different part of the day.
+- The two documents' shared coverage is that single date. This is an intentional
+  conservative initial policy, not a mathematical requirement: two complete claims
+  could in principle justify a match, but a wrong flag costs one review while a
+  wrong merge hides a real purchase. It applies to `user_declared` coverage too.
 - The date is the last covered date of a `document_metadata` claim, and the
   document was generated that same day, because later activity may be missing.
 - The date is the last covered date of a `document_metadata` claim and the document
@@ -157,6 +171,9 @@ for the entire inclusive end date, even when generation metadata is absent. The
 user is confirming full coverage of that interval under the layout's pending and
 posted definition. This assumption is never applied automatically to a date range
 found in document metadata.
+
+Boundary dates do not override a confident match based on a validated,
+account-scoped external ID with compatible material fields.
 
 ## D-008 One record per document per transaction — Approved
 
@@ -181,8 +198,9 @@ If M2 needs one event to hold two records from a document, a migration replaces
 the constraint with a partial unique index that exempts reviewed links. A test
 proves that this migration works on populated data.
 
-Import order must not change the result. Totals and open review items are compared
-across orders in acceptance test A16.
+Import order must not change the result. Acceptance test A16 compares financial
+totals, source associations and unresolved candidate relationships across orders,
+and does not compare generated IDs or display order.
 
 ## D-009 Stable identity for decisions and corrections — Approved, implemented in M2
 
@@ -268,6 +286,8 @@ until redacted samples exist and have tests.
   first.
 - All development data is synthetic.
 - The M5 real-data gate is mandatory before processing actual documents.
+- Local commits on the feature branch are approved. Every push needs the owner's
+  explicit approval. The owner's own push of `c75aee0` was intentional.
 
 Limits of these controls, as reviewed on 2026-11-05:
 
@@ -310,13 +330,17 @@ Flagged rows stay separate and count in totals until reviewed in M2. This only
 flags. Pending-to-posted reconciliation remains M2. Identical rows with the same
 status are not flagged, because a tested layout treats them as separate events.
 
-## D-022 Repeat imports of identical bytes — Default
+## D-022 Repeat imports of identical bytes — Default, with approved rules below
 
 A byte-identical file is one document. Importing it again changes no ledger data
 and records an `already_imported` attempt, except where the new request
 contradicts what was recorded. A different account, layout or coverage declaration
 is a failed attempt, with nothing changed, and is never reported as already
-imported. Tests confirm that a different account leaves the original import intact.
+imported.
+
+File and account (Approved): a byte-identical file under a different account is
+rejected clearly and never skipped, and the existing import is preserved. Tests
+confirm this.
 
 Coverage correction (Approved): the limitation stays until M2 adds a correction and
 history workflow. A conflict leaves existing data unchanged and explains the

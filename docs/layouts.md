@@ -66,6 +66,11 @@ Complete coverage and pending transactions:
 |---|---|---|
 | `posting` | Every posted transaction with a date in the interval | **Excluded.** This export never contains pending transactions |
 
+## Test-only layouts
+
+Tests may define extra synthetic layouts, such as one with unreliable external IDs
+for A21. These live in the tests, and are not supported or production layouts.
+
 ## Rows that may be one event
 
 Identical rows of the same status are separate events in both layouts. This is a

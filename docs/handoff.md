@@ -84,7 +84,11 @@ code.
 | Totals wording | Account inflows, account outflows, net account movement | D-010 |
 | Repository | Do not move it. Real data needs the M5 gate first | D-019 |
 | Security proposal | **Unapplied.** Unverified, and not active protection | D-025 |
-| External-ID matching | A differing description alone does not conflict for a reliable ID, and both are preserved. Conflicts in amount, status or a date present on both records are flagged | D-006 |
+| External-ID matching | Validated and account-scoped. A differing description alone does not conflict for a reliable ID, and both are preserved. Conflicts in amount, status or a date present on both records are flagged | D-006 |
+| Single-day overlap | ID-less matches stay possible duplicates, including under `user_declared` coverage. An intentional conservative policy, not a mathematical requirement. Does not override a confident reliable-ID match | D-007 |
+| Candidate discovery | Needs evidence beyond amount and date: similar merchant or description, a validated identifier, or a documented source-specific relationship. Different descriptions alone are not evidence. The date window is a configurable heuristic. Candidates create review items and never authorize a merge | D-006 |
+| Unknown status | Does not conflict with `posted`, for status comparison only. Does not establish identity, and is never filled in as `posted` | D-006 |
+| Test-only layout | A synthetic layout with unreliable IDs is allowed in tests for A21. It is not a production layout | [layouts.md](layouts.md) |
 | Unresolved rows | Exact matches stay possible duplicates when an unresolved row could affect the count. Reliable ID matches are not affected | D-024 |
 
 ## Slice 3 scope
@@ -115,10 +119,12 @@ Full wording is in [plan.md](plan.md).
 | Reordered exports with complete coverage | A2, A3 |
 | Complete versus partial or unknown coverage | A5a, A5b, A24 |
 | Inclusive end-date matching under explicit declarations | A32, with A33 and A22 as the contrast |
+| Single-day overlap versus a reliable ID | A22, A45 |
 | Two identical purchases versus three under justified coverage | A4, A5a |
 | Identical-looking purchases that remain ambiguous | A5b, A6, A22, A35 |
 | External IDs with compatible fields | A20, with A21 for unreliable IDs |
 | External IDs with conflicting amounts or other material fields | A7, A34 |
+| `unknown` versus `posted` status | A46 |
 | Different accounts never matching | A8 |
 | Repeated imports | A1, A38 |
 | Different import orders | A16 |
@@ -127,6 +133,9 @@ Full wording is in [plan.md](plan.md).
 | Candidate discovery on a large synthetic dataset | A39 |
 | Only plausible candidates enter review | A27 |
 | No exact adjustment for ambiguous groups | A28 |
+| Unrelated same-date, same-amount purchases create no candidates | A42 |
+| Plausible merchant or description variations can create candidates | A43 |
+| Reliable-ID matching stays separate from heuristic discovery | A44 |
 
 Import-order tests compare financial outcomes, source associations and unresolved
 candidate relationships. They must not require identical generated IDs or display
@@ -149,6 +158,9 @@ Propose these with a recommendation and wait for approval before coding:
    document joins it, without duplicating items on re-import.
 4. **Disclosure wording.** Decide what summaries show about candidate groups,
    without implying an exact adjustment.
+5. **Description similarity.** Define "sufficiently similar" as a deterministic,
+   offline rule with no new dependency, and decide where the configurable date
+   window lives. The window starts at 3 days.
 
 ## Permission approvals to renew
 
