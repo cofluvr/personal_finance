@@ -54,3 +54,17 @@ def account_movement(conn: sqlite3.Connection, account_id: str | None = None) ->
     ).fetchone()
 
     return AccountMovement(inflow, outflow, net, transactions, pending, unresolved, groups, members)
+
+
+def accounts_not_current(
+    conn: sqlite3.Connection, fingerprint: str, account_id: str | None = None
+) -> int:
+    """Count accounts with transactions not reconciled under this configuration."""
+    return conn.execute(
+        """SELECT COUNT(DISTINCT entry.account_id)
+           FROM ledger_transaction entry
+           LEFT JOIN account_reconciliation marker ON marker.account_id = entry.account_id
+           WHERE (marker.rules_fingerprint IS NULL OR marker.rules_fingerprint <> :fingerprint)
+             AND (:account IS NULL OR entry.account_id = :account)""",
+        {"fingerprint": fingerprint, "account": account_id},
+    ).fetchone()[0]

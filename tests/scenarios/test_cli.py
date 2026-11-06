@@ -1,10 +1,19 @@
 """The commands a person runs, in process, using only synthetic data."""
 
+import shutil
 from pathlib import Path
 
 import pytest
 
 from personal_finance.cli import main
+from personal_finance.db.migrate import (
+    MIGRATIONS_DIR,
+    connect,
+    create_database,
+    load_migrations,
+    schema_version,
+)
+from personal_finance.ingest import pipeline
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "synthetic"
 CHECKING = FIXTURES / "checking_jan_complete.csv"
@@ -65,10 +74,11 @@ def test_a_duplicate_account_name_is_refused(db, capsys):
 def test_import_summary(db, capsys):
     assert import_checking(db, CHECKING) == 0
     out = capsys.readouterr().out
-    assert "imported 4 rows: 4 transactions, 0 unresolved, 0 possible-duplicate groups" in out
+    assert "imported 4 rows: 4 transactions, 0 unresolved, 0 possible-duplicate groups, 0 matched" in out
     assert "coverage complete 2026-01-01 to 2026-01-31, posting basis (document_metadata)" in out
     assert "Files: 1 imported, 0 already imported, 0 failed" in out
-    assert "Cross-document duplicates are not checked yet" in out
+    assert "Cross-document duplicates are not checked yet" not in out
+    assert "Open possible-duplicate groups in this account: 0" in out
 
 
 def test_repeat_import_summary(db, capsys):
@@ -162,9 +172,12 @@ def test_totals_on_an_empty_ledger_are_zero(db, capsys):
     assert "Net account movement: 0.00" in capsys.readouterr().out
 
 
-def test_totals_disclose_that_overlaps_are_not_checked(db, capsys):
+def test_totals_disclose_what_matching_does_not_guarantee(db, capsys):
     main(["totals", "--db", db])
-    assert "Cross-document duplicates are not checked yet" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Rows matched confidently are counted once" in out
+    assert "Other duplicates can go undetected" in out
+    assert "not checked yet" not in out
 
 
 def test_totals_disclose_unresolved_rows(db, capsys):
@@ -185,7 +198,7 @@ def test_totals_do_not_present_an_exact_adjustment(db, tmp_path, capsys):
     capsys.readouterr()
     main(["totals", "--db", db])
     out = capsys.readouterr().out
-    assert "1 possible-duplicate groups cover 2 transactions, all counted in full" in out
+    assert "1 possible-duplicate groups cover 2 distinct transactions, all counted in full" in out
     assert "Totals may be overstated, and no exact adjustment can be stated" in out
 
 
@@ -307,3 +320,210 @@ def test_a_failed_file_reports_only_a_code(db, tmp_path, capsys):
     captured = capsys.readouterr()
     assert "SENTINEL" not in captured.out + captured.err
     assert "header_mismatch" in captured.out
+
+
+def card_file(tmp_path, name, *rows):
+    path = tmp_path / name
+    path.write_text("Date,Description,Debit,Credit\n" + "".join(f"{row}\n" for row in rows))
+    return path
+
+
+def import_card_file(db, path, *extra):
+    return main(["import", "--db", db, "--account", "Card", "--layout", "synthetic_card_v1",
+                 *extra, str(path)])
+
+
+def daily_rows(days):
+    return [f"01/{day:02d}/2026,SYNTHETIC CAFE,5.00," for day in days]
+
+
+def test_a28_overlapping_items_count_distinct_transactions_and_show_no_adjustment(
+    db, tmp_path, capsys
+):
+    days = range(1, 31)
+    import_card_file(db, card_file(tmp_path, "a.csv", *daily_rows(days)))
+    import_card_file(db, card_file(tmp_path, "b.csv", *reversed(daily_rows(days))))
+    capsys.readouterr()
+
+    main(["totals", "--db", db])
+    out = capsys.readouterr().out
+    line = next(text for text in out.splitlines() if "possible-duplicate groups" in text)
+
+    assert "cover 60 distinct transactions" in line
+    assert "no exact adjustment can be stated" in line
+    assert "150.00" not in line and "300.00" not in line
+
+    conn = connect(Path(db))
+    memberships = conn.execute(
+        """SELECT COUNT(*) FROM review_issue_subject subject
+           JOIN review_issue issue ON issue.id = subject.review_issue_id
+           WHERE issue.rule = 'cross_document_candidates'"""
+    ).fetchone()[0]
+    conn.close()
+    assert memberships > 60
+
+
+def test_an_issue_in_two_kinds_of_item_counts_its_transaction_once(db, tmp_path, capsys):
+    header = "Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+    row = "S-1,,2026-01-10,SYNTHETIC CAFE,-5.00,POSTED\n"
+    first = tmp_path / "a.csv"
+    second = tmp_path / "b.csv"
+    first.write_text(header + row + row)
+    second.write_text(header + row)
+    import_checking(db, first)
+    import_checking(db, second)
+    capsys.readouterr()
+
+    main(["totals", "--db", db])
+    out = capsys.readouterr().out
+    assert "2 possible-duplicate groups cover 3 distinct transactions" in out
+
+
+def test_review_list_shows_reasons_dates_and_members_without_contents(db, tmp_path, capsys):
+    import_card_file(db, card_file(tmp_path, "a.csv", "01/10/2026,SYNTHETIC CAFE,5.00,"))
+    import_card_file(db, card_file(tmp_path, "b.csv", "01/11/2026,SYNTHETIC CAFE,5.00,"))
+    capsys.readouterr()
+
+    main(["review", "list", "--db", db])
+    out = capsys.readouterr().out
+
+    assert "cross_document_candidates, 2 transactions" in out
+    assert "2026-01-10 to 2026-01-11, reasons: similar_description" in out
+    assert out.count("  Transaction ") == 2
+    assert "SYNTHETIC CAFE" not in out
+    assert "5.00" not in out
+
+
+def test_import_reports_matches(db, tmp_path, capsys):
+    declared = declaration()
+    import_card_file(db, card_file(tmp_path, "a.csv", "01/10/2026,SYNTHETIC CAFE,5.00,"), *declared)
+    capsys.readouterr()
+    second = card_file(
+        tmp_path, "b.csv", "01/10/2026,SYNTHETIC CAFE,5.00,", "01/12/2026,SYNTHETIC CAFE,7.00,"
+    )
+    import_card_file(db, second, *declared)
+    assert "1 transactions, 0 unresolved, 0 possible-duplicate groups, 1 matched" in capsys.readouterr().out
+
+
+def merged_trace_setup(db, tmp_path):
+    declared = declaration()
+    import_card_file(db, card_file(tmp_path, "a.csv", "01/10/2026,SYNTHETIC CAFE,5.00,"), *declared)
+    import_card_file(
+        db,
+        card_file(tmp_path, "b.csv", "01/10/2026,SYNTHETIC CAFE,5.00,", "01/12/2026,OTHER,7.00,"),
+        *declared,
+    )
+    conn = connect(Path(db))
+    (retired, survivor) = conn.execute(
+        "SELECT from_transaction_id, to_transaction_id FROM transaction_link_history"
+    ).fetchone()
+    return conn, retired, survivor
+
+
+def test_trace_separates_current_sources_from_history(db, tmp_path, capsys):
+    conn, retired, survivor = merged_trace_setup(db, tmp_path)
+    conn.close()
+    capsys.readouterr()
+
+    assert main(["trace", "--db", db, survivor]) == 0
+    out = capsys.readouterr().out
+
+    current, history = out.split("Historical moves (not current membership):")
+    assert current.count("Source ") >= 2
+    assert "Current sources:" in current
+    assert "Source status: posted" in current
+    assert "merged: record" in history
+    assert f"from {retired} to {survivor}" in history
+
+
+def test_trace_of_a_retired_id_names_its_current_transaction(db, tmp_path, capsys):
+    conn, retired, survivor = merged_trace_setup(db, tmp_path)
+    conn.close()
+    capsys.readouterr()
+
+    assert main(["trace", "--db", db, retired]) == 0
+    out = capsys.readouterr().out
+    assert f"Transaction {retired} is retired" in out
+    assert f"Transaction {survivor}: record" in out
+
+
+def test_trace_of_a_retired_id_lists_every_resulting_transaction(db, tmp_path, capsys):
+    conn, _, survivor = merged_trace_setup(db, tmp_path)
+    other = conn.execute(
+        "SELECT id FROM ledger_transaction WHERE id <> ?", (survivor,)
+    ).fetchone()[0]
+    for transaction_id in (survivor, other):
+        record = conn.execute(
+            "SELECT source_record_id FROM transaction_source WHERE transaction_id = ?",
+            (transaction_id,),
+        ).fetchone()[0]
+        conn.execute(
+            """INSERT INTO transaction_link_history (source_record_id, from_transaction_id,
+                                                     to_transaction_id, action, reason,
+                                                     rules_fingerprint)
+               VALUES (?, 'old-id', ?, 'split', 'evidence_changed', ?)""",
+            (record, transaction_id, "a" * 64),
+        )
+    conn.close()
+    capsys.readouterr()
+
+    assert main(["trace", "--db", db, "old-id"]) == 0
+    out = capsys.readouterr().out
+    assert f"Transaction {survivor}: record" in out
+    assert f"Transaction {other}: record" in out
+
+
+def test_trace_of_an_unknown_id_is_an_error(db, capsys):
+    assert main(["trace", "--db", db, "never-existed"]) == 2
+    assert "transaction not found" in capsys.readouterr().err
+
+
+def test_reconcile_catches_up_an_account_without_a_new_file(db, tmp_path, monkeypatch, capsys):
+    declared = declaration()
+    with monkeypatch.context() as patch:
+        patch.setattr(pipeline, "reconcile_account", lambda *args, **kwargs: None)
+        import_card_file(db, card_file(tmp_path, "a.csv", "01/10/2026,SYNTHETIC CAFE,5.00,"), *declared)
+        import_card_file(
+            db,
+            card_file(tmp_path, "b.csv", "01/10/2026,SYNTHETIC CAFE,5.00,", "01/12/2026,X,7.00,"),
+            *declared,
+        )
+    capsys.readouterr()
+
+    main(["totals", "--db", db])
+    assert "1 accounts have not been reconciled" in capsys.readouterr().out
+
+    assert main(["reconcile", "--db", db]) == 0
+    assert "1 source records moved" in capsys.readouterr().out
+
+    main(["totals", "--db", db])
+    out = capsys.readouterr().out
+    assert "Transactions: 2" in out
+    assert "have not been reconciled" not in out
+
+
+def test_repeat_import_says_when_it_reconciled(db, tmp_path, monkeypatch, capsys):
+    path = card_file(tmp_path, "a.csv", "01/10/2026,SYNTHETIC CAFE,5.00,")
+    with monkeypatch.context() as patch:
+        patch.setattr(pipeline, "reconcile_account", lambda *args, **kwargs: None)
+        import_card_file(db, path)
+    capsys.readouterr()
+
+    import_card_file(db, path)
+    assert "already imported; account reconciled under current rules" in capsys.readouterr().out
+    import_card_file(db, path)
+    assert "already imported, nothing changed" in capsys.readouterr().out
+
+
+def test_commands_upgrade_an_older_ledger(tmp_path, capsys):
+    old = tmp_path / "old_migrations"
+    old.mkdir()
+    for name in ("0001_initial.sql", "0002_block_replace.sql"):
+        shutil.copy(MIGRATIONS_DIR / name, old / name)
+    path = tmp_path / "old.db"
+    create_database(path, old)
+
+    assert main(["documents", "--db", str(path)]) == 0
+    conn = connect(path)
+    assert schema_version(conn) == len(load_migrations())
+    conn.close()

@@ -17,12 +17,15 @@ from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import LAYOUTS
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.money import format_cents
-from personal_finance.reports.totals import account_movement
+from personal_finance.reconcile.apply import reconcile_account
+from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reports.totals import account_movement, accounts_not_current
 
 ACCOUNT_TYPES = ("checking", "savings", "credit_card", "loan", "investment", "retirement")
 
-CROSS_DOCUMENT_NOTICE = (
-    "Cross-document duplicates are not checked yet: overlapping files are counted more than once."
+MATCHING_NOTICE = (
+    "Files are compared within each account. Rows matched confidently are counted once. "
+    "Other duplicates can go undetected, for example where descriptions differ."
 )
 
 FAILURE_EXPLANATIONS = {
@@ -33,6 +36,10 @@ FAILURE_EXPLANATIONS = {
     "layout_mismatch": (
         "This exact file is already imported under a different layout. "
         "The existing import is unchanged."
+    ),
+    "layout_definition_changed": (
+        "This layout's definition differs from the one stored for earlier documents. "
+        "Existing data is unchanged. A change of meaning needs a new layout version."
     ),
     "coverage_conflict": (
         "Coverage is fixed when a document is first imported, and a declaration cannot replace "
@@ -78,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
     importer.add_argument("--coverage-end", help="last covered date, inclusive (YYYY-MM-DD)")
     importer.add_argument("--coverage-basis", choices=DATE_BASES)
     importer.add_argument("files", nargs="+", type=Path, metavar="FILE")
+
+    reconcile = command(
+        "reconcile", handler=run_reconcile, help="re-derive accounts under the current rules"
+    )
+    reconcile.add_argument("--account", help="account name or ID (default: every account)")
 
     command("documents", handler=run_documents, help="list imported documents and their coverage")
     command("transactions", handler=run_transactions, help="list logical transactions")
@@ -177,6 +189,8 @@ def run_import(args) -> int:
             print(f"{result.file_name}: failed ({result.failure_code})")
             if result.failure_code in FAILURE_EXPLANATIONS:
                 print(f"  {FAILURE_EXPLANATIONS[result.failure_code]}")
+        elif result.outcome == "already_imported" and result.reconciled:
+            print(f"{result.file_name}: already imported; account reconciled under current rules")
         elif result.outcome == "already_imported":
             print(f"{result.file_name}: already imported, nothing changed")
         else:
@@ -184,7 +198,8 @@ def run_import(args) -> int:
                 f"{result.file_name}: imported {result.rows_read} rows: "
                 f"{result.transactions_created} transactions, "
                 f"{result.unresolved_records} unresolved, "
-                f"{result.candidate_groups} possible-duplicate groups; "
+                f"{result.candidate_groups} possible-duplicate groups, "
+                f"{result.matched_records} matched existing transactions; "
                 f"{describe_coverage(result.coverage)}"
             )
 
@@ -195,8 +210,35 @@ def run_import(args) -> int:
         f"Files: {count('imported')} imported, {count('already_imported')} already imported, "
         f"{count('failed')} failed"
     )
-    print(CROSS_DOCUMENT_NOTICE)
+    print(describe_open_groups(account_movement(conn, account_id)))
     return 1 if count("failed") else 0
+
+
+def describe_open_groups(movement) -> str:
+    return (
+        f"Open possible-duplicate groups in this account: {movement.candidate_groups}, "
+        f"covering {movement.transactions_in_candidate_groups} distinct transactions."
+    )
+
+
+def run_reconcile(args) -> int:
+    conn = open_ledger(args.db)
+    if args.account:
+        accounts = [(find_account(conn, args.account),)]
+    else:
+        accounts = conn.execute("SELECT id FROM account ORDER BY display_name").fetchall()
+
+    for (account_id,) in accounts:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            result = reconcile_account(conn, account_id)
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        print(f"Account {account_id}: {result.moved_records} source records moved.")
+        print(describe_open_groups(account_movement(conn, account_id)))
+    return 0
 
 
 def run_documents(args) -> int:
@@ -250,7 +292,7 @@ def run_trace(args) -> int:
         (args.transaction_id,),
     ).fetchone()
     if transaction is None:
-        raise CommandError("transaction not found")
+        return trace_retired(conn, args.transaction_id)
 
     transaction_date, posting_date, cents, status, description = transaction
     print(f"Transaction {args.transaction_id}")
@@ -262,29 +304,89 @@ def run_trace(args) -> int:
 
     sources = conn.execute(
         """SELECT document.file_name, document.content_sha256, document.layout_id,
-                  record.id, record.record_index, record.raw_json, link.link_rule
+                  record.id, record.record_index, record.raw_json, link.link_rule,
+                  parse.settlement_status, origin.original_transaction_id
            FROM transaction_source link
            JOIN source_record record ON record.id = link.source_record_id
            JOIN source_document document ON document.id = link.source_document_id
+           JOIN document_interpretation meaning ON meaning.source_document_id = document.id
+           JOIN record_parse parse ON parse.source_record_id = record.id
+                                  AND parse.parser_version = meaning.parser_version
+           LEFT JOIN source_record_origin origin ON origin.source_record_id = record.id
            WHERE link.transaction_id = ?
            ORDER BY document.imported_at""",
         (args.transaction_id,),
     ).fetchall()
-    for name, digest, layout_id, record_id, index, raw_json, rule in sources:
+    print("Current sources:")
+    for name, digest, layout_id, record_id, index, raw_json, rule, status, original in sources:
         print(f"Source {name}, row {index}")
         print(f"  Document SHA-256: {digest}")
         print(f"  Layout: {layout_id}")
         print(f"  Record: {record_id}")
         print(f"  Link rule: {rule}")
+        print(f"  Source status: {status}")
+        print(f"  Original transaction: {original or 'unknown'}")
         print(f"  Original row: {json.loads(raw_json)}")
+    print_history(conn, args.transaction_id)
     return 0
+
+
+def print_history(conn, transaction_id) -> None:
+    """Past moves into or out of a transaction. Membership above is what counts now."""
+    moves = conn.execute(
+        """SELECT history.created_at, history.action, history.reason,
+                  history.source_record_id, history.from_transaction_id,
+                  history.to_transaction_id
+           FROM transaction_link_history history
+           WHERE history.from_transaction_id = ?1 OR history.to_transaction_id = ?1
+           ORDER BY history.id""",
+        (transaction_id,),
+    ).fetchall()
+    if moves:
+        print("Historical moves (not current membership):")
+    for created_at, action, reason, record_id, source, target in moves:
+        print(f"  {created_at} {action}: record {record_id} moved from {source} to {target} ({reason})")
+
+
+def trace_retired(conn, transaction_id) -> int:
+    """A retired ID can lead to several transactions, so every one of them is listed."""
+    holders = conn.execute(
+        """SELECT DISTINCT link.transaction_id, link.source_record_id
+           FROM transaction_source link
+           WHERE link.source_record_id IN (
+               SELECT source_record_id FROM transaction_link_history
+               WHERE from_transaction_id = ?1 OR to_transaction_id = ?1
+               UNION
+               SELECT source_record_id FROM source_record_origin
+               WHERE original_transaction_id = ?1)
+           ORDER BY link.transaction_id, link.source_record_id""",
+        (transaction_id,),
+    ).fetchall()
+    if not holders:
+        raise CommandError("transaction not found")
+
+    print(f"Transaction {transaction_id} is retired. Its records now belong to:")
+    for current, record_id in holders:
+        print(f"  Transaction {current}: record {record_id}")
+    print_history(conn, transaction_id)
+    return 0
+
+
+def describe_evidence(evidence: str) -> str:
+    """Reason codes and dates only, so that no description or amount is printed."""
+    details = json.loads(evidence)
+    if "reasons" not in details:
+        return ""
+    reasons = ", ".join(details["reasons"])
+    return f", {details['date_start']} to {details['date_end']}, reasons: {reasons}"
 
 
 def run_review_list(args) -> int:
     conn = open_ledger(args.db)
     rows = conn.execute(
-        """SELECT issue.kind, issue.rule, COUNT(subject.transaction_id),
-                  MIN(document.file_name), MIN(record.record_index)
+        """SELECT issue.id, issue.kind, issue.rule, issue.evidence_json,
+                  COUNT(subject.transaction_id), MIN(document.file_name),
+                  MIN(record.record_index)
            FROM review_issue issue
            JOIN review_issue_subject subject ON subject.review_issue_id = issue.id
            LEFT JOIN source_record record ON record.id = subject.source_record_id
@@ -293,11 +395,18 @@ def run_review_list(args) -> int:
            GROUP BY issue.id
            ORDER BY issue.kind, MIN(document.file_name), MIN(record.record_index), issue.rule"""
     ).fetchall()
-    for kind, rule, members, file_name, index in rows:
+    for issue, kind, rule, evidence, members, file_name, index in rows:
         if kind == "unresolved_record":
             print(f"{kind}: {rule}, {file_name} row {index}")
-        else:
-            print(f"{kind}: {rule}, {members} transactions")
+            continue
+        print(f"{kind}: {rule}, {members} transactions{describe_evidence(evidence)}")
+        subjects = conn.execute(
+            """SELECT transaction_id FROM review_issue_subject
+               WHERE review_issue_id = ? ORDER BY transaction_id""",
+            (issue,),
+        ).fetchall()
+        for (transaction_id,) in subjects:
+            print(f"  Transaction {transaction_id}")
     print(f"Open review items: {len(rows)}")
     return 0
 
@@ -313,7 +422,13 @@ def run_totals(args) -> int:
     print(f"Transactions: {movement.transactions}, of which pending: {movement.pending_transactions}")
     print("Disclosures:")
     print("- These are account movements. They include transfers and card payments.")
-    print(f"- {CROSS_DOCUMENT_NOTICE}")
+    print(f"- {MATCHING_NOTICE}")
+    stale = accounts_not_current(conn, DEFAULT_RULES.fingerprint(), account_id)
+    if stale:
+        print(
+            f"- {stale} accounts have not been reconciled under the current matching rules, "
+            "so overlapping files there may be counted twice. Run reconcile."
+        )
     if movement.unresolved_records:
         print(
             f"- {movement.unresolved_records} unresolved records are not included, "
@@ -322,7 +437,8 @@ def run_totals(args) -> int:
     if movement.candidate_groups:
         print(
             f"- {movement.candidate_groups} possible-duplicate groups cover "
-            f"{movement.transactions_in_candidate_groups} transactions, all counted in full. "
+            f"{movement.transactions_in_candidate_groups} distinct transactions, "
+            "all counted in full. "
             "Totals may be overstated, and no exact adjustment can be stated."
         )
     return 0
