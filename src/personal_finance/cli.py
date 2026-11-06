@@ -10,6 +10,7 @@ import os
 import sqlite3
 import sys
 import uuid
+from itertools import islice
 from pathlib import Path
 
 from personal_finance.db.migrate import (
@@ -66,6 +67,9 @@ BUSY_EXPLANATION = (
 )
 
 BROKEN_PIPE_EXIT = 141
+
+# A dense group holds quadratically many pairs, so review show lists only the first few.
+DIRECT_PAIRS_SHOWN = 50
 
 UNEXPECTED_ERROR = (
     "an unexpected problem stopped this command, so it may not have finished. Anything not "
@@ -790,11 +794,14 @@ def describe_side(records) -> str:
 
 def print_direct_pairs(pairs) -> None:
     """Only these can be rejected. Sharing an item is not enough (D-045)."""
+    listed = list(islice(pairs, DIRECT_PAIRS_SHOWN + 1))
     print("Direct candidate pairs, undecided:")
-    if not pairs:
+    if not listed:
         print("  None.")
-    for left, right in sorted(sorted(pair) for pair in pairs):
+    for left, right in map(sorted, listed[:DIRECT_PAIRS_SHOWN]):
         print(f"  {left} {right}")
+    if len(listed) > DIRECT_PAIRS_SHOWN:
+        print(f"  Only the first {DIRECT_PAIRS_SHOWN} are listed. Other pairs here may also be direct.")
 
 
 def print_transaction_evidence(entry, shared) -> None:

@@ -644,10 +644,11 @@ changed after it was viewed.
 
 | Covered now | Not covered, because it does not change what the evidence says |
 |---|---|
-| Item kind, rule, status, reasons and date range | Item, transaction and record IDs. Records are identified by document hash and row |
+| Item kind, rule, status, reasons and date range | Item, transaction, record, account and decision IDs, and the account name. Records are identified by document hash and row |
 | Each transaction's current values and primary source | File names, which are labels. The document hash is covered |
 | Each record's original cells, parsed values and link rule | The stale-account warning. Whatever reconciling changes reaches the token through the evidence |
 | Each document's interpretation, coverage claim and effective end | Timestamps, which are not part of the evidence loaded |
+| Active decisions with a side in the item, from version 2 (D-043) | |
 
 - Equal evidence gives an equal token in any ledger and any import order. A repeat import
   or a reconcile that changes nothing cannot change it, and A16 compares tokens.
@@ -675,7 +676,7 @@ in [plan.md](plan.md) is provisional and not approved for implementation.
   overrides affect one merged transaction, including exactly which effective value totals use.
   "Neither chosen silently" is not sufficient on its own.
 
-## D-042 Rejection and the identity constraint model — Approved, to be implemented in M2.2
+## D-042 Rejection and the identity constraint model — Approved, implemented in M2.2
 
 Refines D-009 and resolves the first requirement of D-041.
 
@@ -714,7 +715,7 @@ other. Rejecting an already rejected pair is refused. Defined for M2.3: a new de
 the one it replaces and restate any pairs it keeps. Undoing it restores the old one, or refuses if
 that would contradict an active decision. Nothing is replaced implicitly.
 
-## D-043 Validating decision commands and undo — Approved, to be implemented in M2.2
+## D-043 Validating decision commands and undo — Approved, implemented in M2.2
 
 Applies the owner's qualifications on D-040.
 
@@ -740,7 +741,7 @@ A refusal changes nothing and exits with code 2.
 - The result of undo equals a ledger built without that decision. It is not necessarily the
   earlier totals, because evidence may have arrived since, and the output must say so.
 
-## D-044 Decision conflicts — Approved, to be implemented in M2.2
+## D-044 Decision conflicts — Approved, implemented in M2.2
 
 Decision-related conflicts are a separate classification, not a variety of possible duplicate.
 
@@ -758,7 +759,7 @@ Decision-related conflicts are a separate classification, not a variety of possi
 - Widening the kind needs `review_issue` rebuilt. Moving the `review_issue_subject` rows out and back
   in one transaction worked on a populated ledger. A plain rebuild fails its foreign keys at commit.
 
-## D-045 Owner's qualifications on M2.2 — Approved, to be implemented in M2.2
+## D-045 Owner's qualifications on M2.2 — Approved, implemented in M2.2
 
 Given by the owner on 2026-11-06 with the confirmation to start M2.2. They override anything in
 D-042 to D-044 or the plan that they change. Migration 0005 and the populated `review_issue`
@@ -807,6 +808,26 @@ semantics are not changed silently to meet a target.
 
 **Not approved:** confirmation, superseding, separating existing merges, corrections, later slices,
 network access, new dependencies, security changes and pushing.
+
+**How these were implemented,** where the rules above left a choice. All are defaults, open to
+change at review:
+
+- A decision's pairs are stored one row per record pair, sharing a `pair_number`. The two sides of
+  a stated pair are what `decision_basis_changed` compares.
+- A stated pair already touched by a constraint is refused as decided, even if a newer record in
+  one transaction is unbound. Such transactions are never direct candidates (D-042).
+- The undo token is `d<version>-<16 hex characters>`. It derives the account with and without the
+  decision and covers: state, pairs, rules fingerprint, the two results for every record they differ
+  on or the decision binds, those records' parsed values and documents, and other active decisions
+  touching them. An unrelated file leaves it unchanged. A rules change alters it.
+- A conflict item is one connected set of affected transactions. A per-reason count covers every
+  transaction in an item citing that reason, so an item with both reasons counts its transactions
+  under both, and the wording says "transactions in conflicts where...".
+- `review show` lists undecided direct pairs for candidate items, up to 50, and says when it stops.
+- `review decision show` shows document, row, transaction IDs and a preview of transaction counts.
+  It prints no amounts or descriptions, which is stricter than D-037 requires.
+- Link history names the decision for moves caused by withholding and by undo. Where several
+  decisions withheld one group, the lowest ID is recorded.
 
 ## Not yet decided
 

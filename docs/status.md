@@ -10,7 +10,7 @@ Last updated: 2026-11-06. Branch: `feature/m2-review`, local only, from `643e1b1
 | M1 slice 4: import summaries, log checks, entry point, setup documentation | Accepted |
 | **M1 overall** | **Complete and accepted** |
 | M2.1: review evidence and revision tokens | Accepted |
-| M2.2: decision core, pair rejection and undo | Plan approved, not implemented |
+| M2.2: decision core, pair rejection and undo | Implemented, awaiting review |
 | M2.3 to M2.9 | Provisional, not approved |
 | M3 to M8 | Not started |
 
@@ -18,8 +18,8 @@ Last updated: 2026-11-06. Branch: `feature/m2-review`, local only, from `643e1b1
 
 - `personal_finance.money`: exact parsing and formatting of amounts.
 - `personal_finance.db.migrate`: database creation, connections, migrations.
-- Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation` and
-  `0004_identity_and_primary`, applied by `init` and `migrate` only (D-035).
+- Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
+  `0004_identity_and_primary` and `0005_decisions`, applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
 - `personal_finance.reconcile.same_document`: flags possible duplicates within one
@@ -28,19 +28,23 @@ Last updated: 2026-11-06. Branch: `feature/m2-review`, local only, from `643e1b1
   review items as a pure function of its stored evidence.
 - `personal_finance.reconcile.apply`: applies that result atomically with the import,
   recording every source movement.
+- `personal_finance.reconcile.decisions`: rejecting pairs and undoing decisions, each under one
+  write lock (D-043, D-045).
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement.
 - `personal_finance.reports.import_summary`: run-level import counts in explicit units (D-036).
 - `personal_finance.reports.review_evidence`: the evidence behind one review item and its
   revision token (D-040).
+- `personal_finance.reports.decision_evidence`: what a decision binds, and the undo token (D-045).
 - CLI: `init`, `migrate`, `account add`, `import`, `reconcile`, `documents`, `transactions`,
-  `trace`, `review list`, `review show`, `totals`, run through the `bin/pf` launcher (D-038).
+  `trace`, `review list`, `review show`, `review reject`, `review decisions`,
+  `review decision show`, `review undo`, `totals`, run through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
 
 No real institution layout is supported. **It must not be used with real financial
-data** (M5 gate). Review items can be inspected but not resolved yet (M2.2 onwards).
+data** (M5 gate). Only candidate pairs can be rejected. Nothing can be confirmed yet (M2.3).
 
 ## Acceptance criteria progress
 
@@ -104,8 +108,46 @@ merges at once.
 - These are measurements of these shapes, not general guarantees. The expected dataset of
   about 100,000 rows across 30 accounts is nearer the smallest rows above.
 
+**Dense constrained groups (S16),** measured 2026-11-06 on the same machine with
+`measure_reconciliation.py --constrained`. Each candidate group is one amount, date and description
+across two unmerged documents, the worst shape for this code. Discovery stores no pairs (D-031), so
+any group a constraint touches has its direct links compared again, pair by pair.
+
+| Units in the group | Derivation, no constraints | One constraint | Constraints on 10% of units | Pairs compared |
+|---|---|---|---|---|
+| 100 | 0.001s | 0.005s | 0.005s | 4,950 |
+| 500 | 0.004s | 0.115s | 0.112s | 124,750 |
+| 1,000 | 0.008s | 0.479s | 1.056s | 499,500 |
+| 2,000 | 0.037s | 2.611s | 1.898s | 1,999,000 |
+| 4,000 | 0.046s | 7.542s | 9.613s | 7,998,000 |
+
+**This is quadratic in the units of a touched group.** Doubling the group costs about 4 times, and
+the number of constraints makes no difference. Every later import and reconcile of that account
+pays it. Groups no constraint touches are not recomputed. Matching semantics were not changed to
+reduce this. A real ledger holds such a group only if the same amount and description recur within
+the date window across thousands of rows.
+
+| Transactions in the item | Loading evidence and token | Whole `review reject`, under the write lock | Undo token and preview | Whole `review undo`, under the write lock |
+|---|---|---|---|---|
+| 100 | 0.006s | 0.013s | 0.008s | 0.012s |
+| 500 | 0.016s | 0.162s | 0.123s | 0.132s |
+| 1,000 | 0.031s | 0.499s | 0.531s | 0.509s |
+| 2,000 | 0.066s | 2.170s | 1.962s | 3.105s |
+
+The first version of `review reject` took 19.6s at 2,000 because validation listed every direct
+pair in the item. It now checks only the stated pairs. `review show` lists at most 50 pairs for the
+same reason. Timings vary by about 30% between runs here.
+
 ## Known limitations
 
+- Only `cross_document_candidates` items can be rejected, and nothing can be confirmed, so true
+  duplicates stay open and counted (M2.3).
+- A decision binds the records it names. A re-export raises the question again, so overlapping
+  exports can bring repeat reviews.
+- Withholding can raise totals through new evidence, though it is disclosed. A decision conflict
+  has no action of its own: the only response today is `review undo`.
+- `review show` escapes file names in its decided section, but its older sections print them as
+  typed, so a file name holding a newline can imitate a line there (noted below for all names).
 - Setup and both entry points have only been verified on this Mac with Python 3.12.6.
   `bin/pf` needs `.venv` at the root of its checkout.
 - Dependencies are pinned without hashes, and setuptools is only bounded as `>=68`, so a
@@ -121,7 +163,7 @@ merges at once.
   columns is an application rule for M2, not something the database enforces.
 - The database cannot enforce that every transaction has at least one source.
   Tests check this after success, failure and crash.
-- Users cannot undo merges until M2. Automatic moves are recorded in
+- Users cannot separate machine-made merges until M2.4. Automatic moves are recorded in
   `transaction_link_history`, and automatic splits happen only for machine-made merges.
 - Import holds the write lock through reconciliation. At about 100,000 rows in one
   account that can exceed the 5-second wait, so a concurrent writer reports

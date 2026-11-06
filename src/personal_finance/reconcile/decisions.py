@@ -6,6 +6,7 @@ its re-derivation or changes nothing. Refusals name no amounts or descriptions.
 
 import sqlite3
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import combinations, product
 
@@ -86,9 +87,15 @@ class Undo:
 
 
 def undecided_direct_pairs(
-    conn: sqlite3.Connection, item: ReviewEvidence, rules: MatchingRules = DEFAULT_RULES
-) -> set[frozenset[str]]:
-    """Transaction pairs in an item that a person can reject: linked directly, undecided."""
+    conn: sqlite3.Connection,
+    item: ReviewEvidence,
+    rules: MatchingRules = DEFAULT_RULES,
+    among=None,
+) -> Iterator[frozenset[str]]:
+    """Transaction pairs in an item that a person can reject: linked directly, undecided.
+
+    Lazy, because a dense group holds quadratically many. among limits it to given pairs.
+    """
     documents, records, _, _ = load_evidence(conn, item.account_id)
     rows = {record.id: record for record in records}
     members = {
@@ -99,15 +106,14 @@ def undecided_direct_pairs(
     for constraint in load_constraints(conn, item.account_id):
         decided.update(frozenset(pair) for pair in product(constraint.left, constraint.right))
 
-    found = set()
-    for left, right in combinations(sorted(members), 2):
+    pairs = combinations(sorted(members), 2) if among is None else map(sorted, among)
+    for left, right in pairs:
         bound = any(
             frozenset((one.id, other.id)) in decided
             for one, other in product(members[left], members[right])
         )
         if not bound and directly_linked(members[left], members[right], documents, rules):
-            found.add(frozenset((left, right)))
-    return found
+            yield frozenset((left, right))
 
 
 def reject_pairs(
@@ -189,7 +195,7 @@ def _check_pairs(conn, item, pairs, rules) -> None:
             raise DecisionRefused(PAIR_REPEATED)
         seen.add(pair)
 
-    direct = undecided_direct_pairs(conn, item, rules)
+    direct = set(undecided_direct_pairs(conn, item, rules, among=seen))
     for pair in seen - direct:
         raise DecisionRefused(PAIR_DECIDED if _already_decided(conn, item, pair) else PAIR_NOT_DIRECT)
 

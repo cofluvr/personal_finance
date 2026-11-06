@@ -13,7 +13,11 @@ from personal_finance.cli import CONFLICT_NOTICE, UNDO_NOTICE, main
 from personal_finance.db.migrate import connect
 from personal_finance.reconcile import decisions as decisions_module
 from personal_finance.reconcile.apply import reconcile_account
-from personal_finance.reconcile.cross_document import REASON_WITHHELD
+from personal_finance.reconcile.cross_document import (
+    REASON_WITHHELD,
+    RULE_CANDIDATES,
+    ReviewItem,
+)
 from personal_finance.reconcile.decisions import (
     DECISION_NOT_ACTIVE,
     DECISION_WRONG_ACCOUNT,
@@ -31,6 +35,7 @@ from personal_finance.reconcile.decisions import (
     WOULD_CHANGE_LEDGER,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reports import decision_evidence
 from personal_finance.reports.decision_evidence import load_decision, undo_outlook
 
 CARD_HEADER = "Date,Description,Debit,Credit\n"
@@ -284,6 +289,43 @@ class TestReject:
         assert ledger.revision(item) != before
 
 
+class TestItemRevision:
+    def built(self, tmp_path, capsys, name, stated):
+        """Three lookalikes from shared files, with decisions stated as the caller chooses."""
+        ledger = Ledger(tmp_path, capsys, name)
+        for path in sorted(tmp_path.glob("*.csv")):
+            ledger.load_path(path)
+        (item,) = ledger.items()
+        by_file = {}
+        conn = ledger.conn()
+        for transaction_id, file_name in conn.execute(
+            """SELECT link.transaction_id, document.file_name FROM transaction_source link
+               JOIN source_document document ON document.id = link.source_document_id"""
+        ):
+            by_file[file_name] = transaction_id
+        conn.close()
+        for left, right in stated:
+            ledger.reject_ok(item, (by_file[left], by_file[right]))
+        return ledger.revision(item)
+
+    def test_it_does_not_depend_on_how_decisions_were_stated(self, tmp_path, capsys):
+        writer = Ledger(tmp_path, capsys, "writer.db")
+        for name in ("a.csv", "b.csv", "c.csv", "d.csv"):
+            writer.write(name, CARD_HEADER, [CAFE])
+        plain = self.built(tmp_path, capsys, "one.db", [("a.csv", "b.csv"), ("c.csv", "d.csv")])
+        swapped = self.built(tmp_path, capsys, "two.db", [("b.csv", "a.csv"), ("d.csv", "c.csv")])
+        reordered = self.built(tmp_path, capsys, "three.db", [("d.csv", "c.csv"), ("a.csv", "b.csv")])
+        assert plain == swapped == reordered
+
+    def test_a_decision_elsewhere_in_the_account_does_not_change_it(self, ledger):
+        ledger.card("a.csv", CAFE, "04/10/2026,SYNTHETIC BOOKS,9.00,")
+        ledger.card("b.csv", CAFE, "04/10/2026,SYNTHETIC BOOKS,9.00,")
+        first, second = ledger.items()
+        token = ledger.revision(second)
+        ledger.reject_ok(first, tuple(ledger.transactions(first)))
+        assert ledger.revision(second) == token
+
+
 class TestDirectPairsOnly:
     def test_a_chain_cannot_reject_its_ends(self, ledger):  # S18
         item, one, two, three = chain(ledger)
@@ -323,6 +365,17 @@ class TestDirectPairsOnly:
         ]
         code, _, err = ledger.reject(item, (one, two))
         assert code == 2 and PAIR_NOT_DIRECT in err
+
+    def test_a_long_list_of_pairs_says_it_stops(self, ledger, monkeypatch):
+        monkeypatch.setattr(cli, "DIRECT_PAIRS_SHOWN", 1)
+        item, *_ = three_of_them(ledger)
+        out = ledger.show(item)
+        assert "Only the first 1 are listed." in out
+        assert len(ledger.direct_pairs(item)) == 1
+
+    def test_a_short_list_says_nothing_of_the_kind(self, ledger):
+        item, *_ = three_of_them(ledger)
+        assert "are listed" not in ledger.show(item)
 
     def test_a_rejected_pair_is_refused_when_repeated(self, ledger):
         item, one, two, _ = three_of_them(ledger)
@@ -854,6 +907,61 @@ class TestUndoToken:  # S21
         ledger.reject_ok(item, (one, three))
         assert ledger.decision_revision(decision) != token
 
+    def test_a_decision_with_no_effect_on_grouping_still_changes_the_token(self, ledger):
+        decision, token = self.decided(ledger)
+        ledger.card("other.csv", OTHER)
+        conn = ledger.conn()
+        (left,) = conn.execute(
+            "SELECT left_record_id FROM decision_constraint WHERE decision_id = ?", (decision,)
+        ).fetchone()
+        (right,) = conn.execute(
+            """SELECT link.source_record_id FROM transaction_source link
+               JOIN ledger_transaction entry ON entry.id = link.transaction_id
+               WHERE entry.description = 'SYNTHETIC GROCER'"""
+        ).fetchone()
+        (account,) = conn.execute("SELECT id FROM account").fetchone()
+        conn.execute(
+            """INSERT INTO decision (id, account_id, review_issue_id, item_revision)
+               VALUES ('other', ?, 'issue', 'r2-0')""",
+            (account,),
+        )
+        conn.execute(
+            """INSERT INTO decision_constraint (decision_id, relation, pair_number,
+                   left_transaction_id, right_transaction_id, left_record_id, right_record_id)
+               VALUES ('other', 'different_event', 1, 't1', 't2', ?, ?)""",
+            (left, right),
+        )
+        conn.close()
+        assert ledger.decision_revision(decision) != token
+
+    def test_an_item_regrouped_away_from_the_bound_records_counts(self, ledger, monkeypatch):
+        """Calendar blocks let undo change an item holding no bound record (D-031). That is
+        hard to reach from files, so the derivation is given such an item directly."""
+        decision, _ = self.decided(ledger)
+        ledger.card("x.csv", OTHER)
+        ledger.card("y.csv", OTHER)
+        conn = ledger.conn()
+        decided = load_decision(conn, decision)
+        far = [row[0] for row in conn.execute(
+            """SELECT link.source_record_id FROM transaction_source link
+               JOIN ledger_transaction entry ON entry.id = link.transaction_id
+               WHERE entry.description = 'SYNTHETIC GROCER'"""
+        )]
+        real = decision_evidence.derive
+        extra = ReviewItem(RULE_CANDIDATES, tuple((record,) for record in far), ("regrouped",),
+                           "2026-03-20", "2026-03-20")
+
+        def regrouping(documents, records, unresolved, rules, constraints):
+            result = real(documents, records, unresolved, rules, constraints)
+            if any(item.decision_id == decision for item in constraints):
+                return result
+            return replace(result, items=(*result.items, extra))
+
+        plain = undo_outlook(conn, decided, DEFAULT_RULES).revision
+        monkeypatch.setattr(decision_evidence, "derive", regrouping)
+        assert undo_outlook(conn, decided, DEFAULT_RULES).revision != plain
+        conn.close()
+
     def test_an_unrelated_file_does_not(self, ledger):
         decision, token = self.decided(ledger)
         ledger.card("other.csv", OTHER)
@@ -1028,8 +1136,15 @@ class TestPrivacy:  # S17
         ledger.card("b.csv", CAFE, extra=SECOND_HALF)
         ledger.card("c.csv", CAFE)
         (item,) = ledger.items()
-        members = ledger.direct_pairs(item)
-        decision = ledger.reject_ok(item, members[0])
+        conn = ledger.conn()
+        (forged,) = conn.execute(
+            """SELECT link.transaction_id FROM transaction_source link
+               JOIN source_document document ON document.id = link.source_document_id
+               WHERE document.file_name LIKE 'a%'"""
+        ).fetchone()
+        conn.close()
+        pair = next(pair for pair in ledger.direct_pairs(item) if forged in pair)
+        decision = ledger.reject_ok(item, pair)
         decided = ledger.show(item).split("Already decided")[1].split("Direct candidate")[0]
         for text in (decided, ledger.run("review", "decision", "show", decision)[1]):
             assert "\nDecision forged" not in text
