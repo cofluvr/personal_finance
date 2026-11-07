@@ -829,6 +829,66 @@ with M2.2 on 2026-11-07:
 - Link history names the decision for moves caused by withholding and by undo. Where several
   decisions withheld one group, the lowest ID is recorded.
 
+## D-046 Confirmation, partitions and superseding — Approved for M2.3
+
+Approved by the owner on 2026-11-07 with the M2.3 plan. Builds on D-042 to D-045 and changes none
+of them.
+
+```sh
+pf review confirm --db DB --account A ITEM_ID --revision R --group T1 T2 [--group T3] \
+   [--supersedes D --supersedes-revision d2-… --keep N ...]
+```
+
+**Partitions.** Each named transaction is in exactly one `--group`. Unnamed transactions stay
+undecided. Within a group every pair of transactions is stored as `same_event`, binding the
+cross-product of their records. Between two groups the pair is stored as `different_event`, even
+when the two are not direct candidates, because the person stated it. Nothing is implied: one
+`--group A B` says nothing about C. A decision that states no pair at all is refused.
+
+| Question | Rule |
+|---|---|
+| Items | `cross_document_candidates` and `decision_conflict` only. Others are refused |
+| A group | Connected through direct links (D-045), or for a conflict item through one withheld automatic merge |
+| One document | A group may hold at most one record from any document. D-008 and `transaction_source` stay as they are |
+| Size | At most 50 transactions named in one decision |
+| Contradiction | A group holding both sides of an active `different_event` pair needs `--supersedes` |
+| Totals | Only the stated merges may change memberships. Anything else refuses atomically |
+
+**Derivation.** Records joined by active `same_event` constraints form fixed units. An automatic merge
+touching a confirmed unit joins it only if the result keeps one record per document and no
+`different_event` pair. Otherwise every automatic merge in that combination is withheld, its
+records stay separate or in their confirmed unit, and `automatic_match_withheld` is raised. A
+confirmed grouping survives repeat imports, rules changes and new files, and changes only by undo
+or superseding. Its records link with rule `confirmed_same_event`. With no `same_event` constraint,
+`derive()` is unchanged.
+
+**Conflicts.** There is no separate conflict command. A conflict is settled, and closes by removal,
+when one active confirmation's partition separates every pair of the transactions it affects, or
+when confirmation has joined them. A rejection never settles a conflict, so D-044 holds exactly as
+built in M2.2, where a withheld match whose pairs a rejection already covers still raises one.
+
+**Superseding.** One decision at a time, and in M2.3 only for contradiction by a confirmation.
+Superseding because of new evidence stays in M2.5.
+
+- A decision is active unless it was undone, or an active decision supersedes it.
+- The new decision names the old one and its current undo token. Every old pair is either
+  contradicted by the new partition or kept with `--keep N`, and anything else is refused. Kept pairs
+  are copied record for record, so they bind no new records.
+- Undoing the superseding decision restores the old one, or refuses if that would contradict an
+  active decision. Undoing a superseded decision is refused, naming the decision that replaced it.
+
+**Tokens.** Revision version 3 adds each decided pair's relation. Decision revision version 2 adds the
+decision's kind, its relation per pair, what it supersedes, and computes the outcome without it
+with any superseded decision restored. Superseding needs the item's token and the old decision's
+token, both checked under the write lock.
+
+**Disclosure.** `review confirm` prints transaction counts and no amounts. `totals` gains its own line
+for transactions holding records confirmed as one event. Undo says that totals may rise.
+
+**Cost.** Confirmation is measured at 100 to 2,000 units before it is accepted. If it is materially
+slower than M2.2's rejection, the work stops and is reported. Matching is not changed to meet a
+target.
+
 ## Not yet decided
 
 From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend details

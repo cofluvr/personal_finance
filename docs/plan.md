@@ -149,7 +149,7 @@ the decision log records the database, parser and deduplication rules.
 
 ## M2 plan
 
-M2.1 and M2.2 are accepted. **M2.3 to M2.9 are provisional**:
+M2.1 and M2.2 are accepted, and M2.3 is approved (D-046). **M2.4 to M2.9 are provisional**:
 a direction, not approval to implement, and each needs its own approval. D-041 lists requirements
 they must meet.
 
@@ -157,7 +157,7 @@ they must meet.
 |---|---|---|
 | M2.1 | Review evidence: `review list` IDs, `review show`, revision tokens. Read-only, no migration | Accepted |
 | M2.2 | Decision core: stable-ID storage, precedence over automatic reconciliation, pair rejection and undo | Accepted |
-| M2.3 | Confirm, including part of a group | Provisional |
+| M2.3 | Confirm, including part of a group | Approved, in progress |
 | M2.4 | Separating machine-made merges | Provisional |
 | M2.5 | New evidence that touches a decided record, and superseding a decision | Provisional |
 | M2.6 | Correction overrides | Provisional |
@@ -251,6 +251,41 @@ removed. Direct links are recomputed only inside groups a constraint touches.
 | S21 | Evidence relevant to regrouping that changes after `review decision show` makes undo refuse |
 | S22 | Equivalent decisions made at different valid points in the import sequence give the same outcome |
 | S23 | A failing migration 0005 on a populated ledger leaves everything as it was |
+
+### M2.3 scope
+
+The rules are D-046. Migration 0006 adds `decision.kind` and `decision.supersedes_decision_id`.
+`review confirm` with partitions, superseding by confirmation, settling conflicts by confirmation,
+revision versions 3 and 2, and a `totals` line for confirmed transactions.
+
+Deferred: separating machine merges (M2.4), superseding because of new evidence (M2.5), external-ID
+and same-document items, several records from one document in a transaction.
+
+### M2.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| C1 | Confirming a two-member item joins it into one transaction and closes the item. Totals drop, and source evidence is byte-identical |
+| C2 | Confirming part of a group leaves the remaining pairs open |
+| C3 | The stored rows are exactly the stated partition: `same_event` within groups, `different_event` between them |
+| C4 | One group writes nothing about unnamed members |
+| C5 | Refused, with nothing changed: wrong account, wrong item, stale token, stale account, a transaction in two groups, a group not connected, two records from one document, a contradiction without `--supersedes`, an unsupported item, too many transactions, a decision stating nothing |
+| C6 | Two rows from one document and one from another: the partition separates them, and one group of all three is refused |
+| C7 | A confirmation survives repeat imports, `reconcile`, unrelated files and a rules change |
+| C8 | An automatic merge joins a confirmed unit when valid, and is withheld with a conflict when not |
+| C9 | Confirming a partition settles a withheld-match conflict and a changed-basis conflict. A rejection settles neither |
+| C10 | Superseding a rejection: every old pair is contradicted or kept, or it is refused. Kept pairs bind no new records |
+| C11 | Undoing a superseding decision restores the old one, or refuses on contradiction. A superseded decision cannot be undone |
+| C12 | Undoing a confirmation equals a ledger built without it, with and without imports since |
+| C13 | `totals` discloses confirmed transactions. `confirm` prints counts and no amounts |
+| C14 | A confirmation that would change more than the stated merges refuses atomically |
+| C15 | Property test: import order does not change the outcome for fixed confirmations and rejections |
+| C16 | Equivalent confirmations made at different valid points in the import sequence give the same outcome |
+| C17 | Tokens: versions pinned, a confirmation changes overlapping items' tokens, and a stale token of either kind refuses superseding |
+| C18 | Migration 0006 works on a populated ledger and is atomic on failure. Decision tables stay append-only |
+| C19 | Confirmation, its undo and a later import are measured on dense groups |
+| C20 | S1 to S23 still pass |
+| C21 | A confirmation keeps one public ID, and undo revives retired IDs with their `created_at` |
 
 ## Backlog benchmarks
 
