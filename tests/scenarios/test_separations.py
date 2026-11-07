@@ -626,3 +626,48 @@ class TestEscaping:  # P21
         assert "\x1b" not in out
         assert len(re.findall(r"^\s*Revision: ", out, re.MULTILINE)) == 1
         assert "CAFE\\nRevision" in out
+
+
+class TestPrivacy:  # P14, D-037
+    AMOUNT = "6.50"
+    TEXT = "SYNTHETIC CAFE"
+
+    def assert_clean(self, *texts):
+        for text in texts:
+            assert self.AMOUNT not in text
+            assert self.TEXT not in text
+
+    def test_merges_separate_decisions_and_undo_show_no_financial_data(self, ledger):
+        transaction, records = merged_two(ledger)
+        code, out, err = ledger.run("review", "merges")
+        assert code == 0
+        self.assert_clean(out, err)
+        code, out, err = ledger.separate(transaction, [records["a.csv"]], [records["b.csv"]])
+        assert code == 0
+        self.assert_clean(out, err)
+        decision = re.search(r"Decision (\S+) recorded", out)[1]
+        for command in (("review", "decisions"), ("review", "decision", "show", decision)):
+            code, out, err = ledger.run(*command)
+            assert code == 0
+            self.assert_clean(out, err)
+        code, out, err = ledger.undo(decision)
+        assert code == 0
+        self.assert_clean(out, err)
+
+    def test_refusals_show_no_financial_data(self, ledger):
+        transaction, records = merged_two(ledger)
+        a, b = records["a.csv"], records["b.csv"]
+        for result in (
+            ledger.separate(transaction, [a], [a]),
+            ledger.separate(transaction, [a, b]),
+            ledger.separate(transaction, [a], [b], revision="t1-0"),
+            ledger.separate("nope", [a], [b], revision="t1-0"),
+            ledger.run("review", "merge", "show", "nope"),
+        ):
+            assert result[0] == 2
+            self.assert_clean(*result[1:])
+
+    def test_merge_show_is_an_explicit_inspection(self, ledger):
+        transaction, _ = merged_two(ledger)
+        out = ledger.merge_show(transaction)
+        assert self.AMOUNT in out and self.TEXT in out
