@@ -25,6 +25,10 @@ from personal_finance.reconcile.apply import reconcile_account
 from personal_finance.reconcile.decisions import (
     CONFIRM_UNSUPPORTED,
     CONFIRMS_NOTHING,
+    DECISION_NOT_ACTIVE,
+    KEEP_UNKNOWN,
+    STALE_DECISION_REVISION,
+    SUPERSEDES_NOTHING,
     GROUP_NOT_CONNECTED,
     GROUP_OUTSIDE,
     GROUP_REPEATED,
@@ -40,16 +44,22 @@ from personal_finance.reconcile.decisions import (
 from personal_finance.reconcile.rules import DEFAULT_RULES
 
 
-def confirm(ledger, item, *groups, revision=None, account="A"):
+def confirm(ledger, item, *groups, revision=None, account="A", supersedes=None,
+            supersedes_revision=None, keep=()):
     words = ["review", "confirm", item, "--account", account,
              "--revision", revision or ledger.revision(item)]
     for group in groups:
         words += ["--group", *group]
+    if supersedes:
+        words += ["--supersedes", supersedes, "--supersedes-revision",
+                  supersedes_revision or ledger.decision_revision(supersedes)]
+    for number in keep:
+        words += ["--keep", str(number)]
     return ledger.run(*words)
 
 
-def confirm_ok(ledger, item, *groups):
-    code, out, err = confirm(ledger, item, *groups)
+def confirm_ok(ledger, item, *groups, **options):
+    code, out, err = confirm(ledger, item, *groups, **options)
     assert code == 0, err
     return re.search(r"Decision (\S+) recorded", out)[1]
 
@@ -530,3 +540,189 @@ class TestPrivacy:  # C13
         code, out, err = confirm(ledger, item, (one,), (two,))
         assert code == 2
         assert "6.50" not in out + err and "SYNTHETIC" not in out + err
+
+
+def state_of(ledger, decision):
+    out = ledger.run("review", "decision", "show", decision)[1]
+    return re.search(r"Status: (\S+)", out)[1]
+
+
+def four_of_them(ledger):
+    """Four lookalikes, so that rejecting a few pairs still leaves all four in the item."""
+    for name in ("a.csv", "b.csv", "c.csv", "d.csv"):
+        ledger.card(name, CAFE)
+    (item,) = ledger.items()
+    by_file = TestConfirm.by_file(ledger)
+    return item, *(by_file[name] for name in ("a.csv", "b.csv", "c.csv", "d.csv"))
+
+
+class TestSuperseding:  # C10, C11
+    def rejected(self, ledger, *pairs):
+        item, one, two, three = three_of_them(ledger)
+        named = {"one": one, "two": two, "three": three}
+        decision = ledger.reject_ok(item, *[(named[left], named[right]) for left, right in pairs])
+        return item, decision, one, two, three
+
+    def test_a_confirmation_replaces_a_rejection(self, ledger):
+        item, old, one, two, _ = self.rejected(ledger, ("one", "two"))
+        code, out, _ = confirm(ledger, item, (one, two), supersedes=old)
+        assert code == 0
+        assert f"Supersedes decision {old}: 1 of its pairs contradicted, 0 kept." in out
+        assert ledger.count() == 2
+        assert state_of(ledger, old) == "superseded"
+        shown = ledger.run("review", "decision", "show", old)[1]
+        assert "Superseded by decision" in shown and "Revision" not in shown
+
+    def test_the_result_equals_confirming_without_the_rejection(self, tmp_path, capsys):
+        views = []
+        for name, reject_first in (("one", True), ("two", False)):
+            folder = tmp_path / name
+            folder.mkdir()
+            ledger = Ledger(folder, capsys)
+            item, one, two, _ = three_of_them(ledger)
+            if reject_first:
+                old = ledger.reject_ok(item, (one, two))
+                confirm_ok(ledger, item, (one, two), supersedes=old)
+            else:
+                confirm_ok(ledger, item, (one, two))
+            views.append(ledger.view())
+        assert views[0] == views[1]
+
+    def test_every_old_pair_must_be_contradicted_or_kept(self, ledger):
+        item, one, two, three, _ = four_of_them(ledger)
+        old = ledger.reject_ok(item, (one, two), (one, three))
+        before = ledger.dump()
+        code, _, err = confirm(ledger, item, (one, two), supersedes=old)
+        assert code == 2 and "pair 2 of the superseded decision" in err and "--keep 2" in err
+        assert ledger.dump() == before
+
+    def test_a_kept_pair_is_copied_record_for_record(self, ledger):
+        item, one, two, three, _ = four_of_them(ledger)
+        old = ledger.reject_ok(item, (one, two), (one, three))
+        conn = ledger.conn()
+        old_rows = conn.execute(
+            """SELECT relation, left_record_id, right_record_id FROM decision_constraint
+               WHERE decision_id = ? AND pair_number = 2""",
+            (old,),
+        ).fetchall()
+        conn.close()
+        new = confirm_ok(ledger, item, (one, two), supersedes=old, keep=(2,))
+        conn = ledger.conn()
+        new_rows = conn.execute(
+            """SELECT relation, left_record_id, right_record_id FROM decision_constraint
+               WHERE decision_id = ? AND relation = 'different_event'""",
+            (new,),
+        ).fetchall()
+        conn.close()
+        assert new_rows == old_rows and len(new_rows) == 1
+        # The joined transaction stays apart from three, and both are undecided against four.
+        (remaining,) = ledger.items()
+        pairs = [set(pair) for pair in ledger.direct_pairs(remaining)]
+        assert len(pairs) == 2
+        assert not any(three in pair and pair & {one, two} for pair in pairs)
+
+    @pytest.mark.parametrize("keep, message", [((1,), "cannot be kept"), ((5,), KEEP_UNKNOWN)])
+    def test_a_bad_keep_is_refused(self, ledger, keep, message):
+        item, old, one, two, _ = self.rejected(ledger, ("one", "two"))
+        before = ledger.dump()
+        code, _, err = confirm(ledger, item, (one, two), supersedes=old, keep=keep)
+        assert code == 2 and message in err
+        assert ledger.dump() == before
+
+    def test_superseding_what_is_not_contradicted_is_refused(self, ledger):
+        item, old, one, two, _ = self.rejected(ledger, ("one", "three"))
+        before = ledger.dump()
+        code, _, err = confirm(ledger, item, (one, two), supersedes=old, keep=(1,))
+        assert code == 2 and SUPERSEDES_NOTHING in err
+        assert ledger.dump() == before
+
+    def test_only_the_named_decision_can_be_contradicted(self, ledger):
+        item, one, two, three, _ = four_of_them(ledger)
+        first = ledger.reject_ok(item, (one, two))
+        second = ledger.reject_ok(item, (two, three))
+        before = ledger.dump()
+        code, _, err = confirm(ledger, item, (one, two, three), supersedes=first)
+        assert code == 2 and "only the decision named with --supersedes" in err and second in err
+        assert ledger.dump() == before
+
+    @pytest.mark.parametrize("stale", ["item", "decision"])
+    def test_both_tokens_are_checked(self, ledger, stale):
+        item, old, one, two, _ = self.rejected(ledger, ("one", "two"))
+        before = ledger.dump()
+        if stale == "item":
+            result = confirm(ledger, item, (one, two), revision="r3-0000000000000000",
+                             supersedes=old)
+            message = STALE_REVISION
+        else:
+            result = confirm(ledger, item, (one, two), supersedes=old,
+                             supersedes_revision="d2-0000000000000000")
+            message = STALE_DECISION_REVISION
+        assert result[0] == 2 and message in result[2]
+        assert ledger.dump() == before
+
+    def test_an_undone_decision_cannot_be_superseded(self, ledger):
+        item, old, one, two, _ = self.rejected(ledger, ("one", "two"))
+        token = ledger.decision_revision(old)
+        assert ledger.undo(old)[0] == 0
+        (item,) = ledger.items()
+        code, _, err = confirm(ledger, item, (one, two), supersedes=old, supersedes_revision=token)
+        assert code == 2 and DECISION_NOT_ACTIVE in err
+
+    def test_the_two_options_go_together(self, ledger):
+        item, one, two = pair_up(ledger)
+        code, _, err = ledger.run("review", "confirm", item, "--account", "A", "--revision",
+                                  ledger.revision(item), "--group", one, two, "--keep", "1")
+        assert code == 2 and "--keep needs --supersedes" in err
+
+    def test_undo_restores_the_superseded_decision(self, ledger):
+        item, old, one, two, _ = self.rejected(ledger, ("one", "two"))
+        view = ledger.view()
+        new = confirm_ok(ledger, item, (one, two), supersedes=old)
+        assert "Restores decision" in ledger.run("review", "decision", "show", new)[1]
+        code, out, _ = ledger.undo(new)
+        assert code == 0 and f"Decision {old}, which it superseded, applies again." in out
+        assert state_of(ledger, old) == "active"
+        restored = ledger.view()
+        assert restored["constraints"] == view["constraints"]
+        assert restored["movement"] == view["movement"]
+
+    def test_a_superseded_decision_cannot_be_undone(self, ledger):
+        item, old, one, two, _ = self.rejected(ledger, ("one", "two"))
+        token = ledger.decision_revision(old)
+        new = confirm_ok(ledger, item, (one, two), supersedes=old)
+        before = ledger.dump()
+        code, _, err = ledger.undo(old, token)
+        assert code == 2 and new in err and "Undo that decision instead" in err
+        assert ledger.dump() == before
+
+    def test_undo_refuses_to_restore_a_contradiction(self, ledger):
+        item, old, one, two, _ = self.rejected(ledger, ("one", "two"))
+        new = confirm_ok(ledger, item, (one, two), supersedes=old)
+        (remaining,) = ledger.items()
+        later = confirm_ok(ledger, remaining, tuple(ledger.transactions(remaining)))
+        assert ledger.count() == 1
+        before = ledger.dump()
+        code, _, err = ledger.undo(new)
+        assert code == 2 and f"restore decision {old}" in err
+        assert ledger.dump() == before
+
+        assert ledger.undo(later)[0] == 0
+        assert ledger.undo(new)[0] == 0
+        assert ledger.count() == 3
+        assert state_of(ledger, old) == "active"
+
+    def test_a_rejection_that_closed_its_item_is_undone_then_confirmed(self, ledger):
+        item, one, two = pair_up(ledger)
+        old = ledger.reject_ok(item, (one, two))
+        assert ledger.items() == []
+        assert ledger.undo(old)[0] == 0
+        (reopened,) = ledger.items()
+        confirm_ok(ledger, reopened, tuple(ledger.transactions(reopened)))
+        assert ledger.count() == 1
+
+    def test_the_decision_list_shows_kinds_and_states(self, ledger):
+        item, old, one, two, _ = self.rejected(ledger, ("one", "two"))
+        new = confirm_ok(ledger, item, (one, two), supersedes=old)
+        out = ledger.run("review", "decisions")[1]
+        assert f"Decision {old}: superseded, reject, 1 pairs" in out
+        assert f"Decision {new}: active, confirm, 1 pairs" in out

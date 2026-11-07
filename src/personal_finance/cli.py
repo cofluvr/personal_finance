@@ -243,6 +243,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="transaction IDs that are one event. Repeat for each group: groups are different "
         "events, and transactions left out stay undecided",
     )
+    confirm.add_argument(
+        "--supersedes", metavar="DECISION_ID",
+        help="a decision these groups contradict, which this one replaces",
+    )
+    confirm.add_argument(
+        "--supersedes-revision", metavar="REVISION",
+        help="the revision from review decision show for the decision being replaced",
+    )
+    confirm.add_argument(
+        "--keep", type=int, action="append", default=[], metavar="N",
+        help="a pair number of the replaced decision to carry over. Repeat for each pair",
+    )
 
     decisions = command(
         "decisions", review_commands, handler=run_review_decisions, help="list stored decisions"
@@ -916,9 +928,22 @@ def run_review_reject(args) -> int:
 def run_review_confirm(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
-    result = confirm_groups(conn, account_id, args.item_id, args.revision, args.group)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    if args.keep and not args.supersedes:
+        raise CommandError("--keep needs --supersedes.")
+    result = confirm_groups(
+        conn, account_id, args.item_id, args.revision, args.group,
+        supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
+        keep=tuple(args.keep),
+    )
 
     print(f"Decision {result.decision_id} recorded: {result.groups} groups confirmed.")
+    if args.supersedes:
+        print(
+            f"  Supersedes decision {args.supersedes}: {result.contradicted_pairs} of its pairs "
+            f"contradicted, {result.kept_pairs} kept. It stays on record."
+        )
     print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
     print("  Transactions left out stay undecided. New records are not bound.")
     print(f"  {CONFIRM_NOTICE}")
@@ -980,6 +1005,8 @@ def run_review_decision_show(args) -> int:
         outlook = undo_outlook(conn, decision, DEFAULT_RULES)
         print(f"  Revision: {outlook.revision}")
         print("Undoing this decision now:")
+        if decision.supersedes_decision_id:
+            print(f"  Restores decision {decision.supersedes_decision_id}, which it superseded")
         print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
         print(f"  {UNDO_NOTICE}")
         if stale:
@@ -996,6 +1023,8 @@ def run_review_undo(args) -> int:
     result = undo_decision(conn, account_id, args.decision_id, args.revision)
 
     print(f"Decision {args.decision_id} undone. It stays on record and no longer applies.")
+    if result.restored:
+        print(f"  Decision {result.restored}, which it superseded, applies again.")
     print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
     print(f"  Source memberships changed: {result.moved_records}")
     print(f"  {UNDO_NOTICE}")
