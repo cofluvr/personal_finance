@@ -88,7 +88,7 @@ def show(db, capsys):
 
 
 def revision_of(text):
-    return re.search(r"Revision: (r2-[0-9a-f]{16})", text)[1]
+    return re.search(r"Revision: (r3-[0-9a-f]{16})", text)[1]
 
 
 def section_order(text, *labels):
@@ -117,7 +117,7 @@ class TestList:
         card("b.csv", CAFE, "01/20/2026,OTHER,1.00,")
         main(["review", "list", "--db", db])
         out = capsys.readouterr().out
-        assert "Revision" not in out and not re.search(r"\br2-", out)
+        assert "Revision" not in out and not re.search(r"\br\d+-", out)
 
 
 class TestSupportedItems:

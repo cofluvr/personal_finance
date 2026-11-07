@@ -23,12 +23,18 @@ def _record_keys(conn):
 
 
 def active_constraints(conn):
-    """Each active stated pair as two sets of stable record keys, in no particular order."""
+    """Each active stated pair as its relation and two sets of stable record keys, in no
+    particular order."""
     keys = _record_keys(conn)
     return sorted(
-        sorted(
-            (sorted(keys[record] for record in side) for side in (constraint.left, constraint.right))
-        )
+        [
+            constraint.relation,
+            constraint.confirmation,
+            sorted(
+                sorted(keys[record] for record in side)
+                for side in (constraint.left, constraint.right)
+            ),
+        ]
         for (account,) in conn.execute("SELECT id FROM account").fetchall()
         for constraint in load_constraints(conn, account)
     )

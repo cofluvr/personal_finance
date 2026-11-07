@@ -50,7 +50,7 @@ def document():
 
 def decided():
     return DecidedPair(
-        "decision", (DecidedRecord("a" * 64, "a.csv", 1),), (DecidedRecord("a" * 64, "a.csv", 2),)
+        "decision", "different_event", (DecidedRecord("a" * 64, "a.csv", 1),), (DecidedRecord("a" * 64, "a.csv", 2),)
     )
 
 
@@ -127,12 +127,12 @@ def test_moving_a_record_between_transactions_changes_the_revision():
 
 
 def test_the_definition_is_pinned_so_a_change_must_bump_the_version():
-    assert REVISION_VERSION == 2
-    assert review_revision(item()) == "r2-89838aeca64b1dec"
+    assert REVISION_VERSION == 3
+    assert review_revision(item()) == "r3-8f8c8b328e5b7256"
 
 
 def test_the_token_has_the_documented_form():
-    assert re.fullmatch(r"r2-[0-9a-f]{16}", review_revision(item()))
+    assert re.fullmatch(r"r3-[0-9a-f]{16}", review_revision(item()))
 
 
 def test_rows_sharing_a_document_ignores_documents_with_one_record():

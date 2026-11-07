@@ -35,6 +35,7 @@ from personal_finance.reconcile.cross_document import (
 )
 from personal_finance.reconcile.decisions import (
     DecisionRefused,
+    confirm_groups,
     reject_pairs,
     undecided_direct_pairs,
     undo_decision,
@@ -143,8 +144,14 @@ DUPLICATE_NOTICE = (
 
 
 CONFLICT_NOTICE = (
-    "The decision stands. These are not possible duplicates. To remove a decision, inspect it "
-    "with review decision show, then use review undo."
+    "The decision stands. These are not possible duplicates. To settle this, confirm which "
+    "transactions here are one event and which are different events with review confirm. To "
+    "remove a decision, inspect it with review decision show, then use review undo."
+)
+
+CONFIRM_NOTICE = (
+    "Transactions confirmed as one event are counted once, so totals can be lower than before. "
+    "Run totals to see them."
 )
 
 UNDO_NOTICE = (
@@ -222,6 +229,19 @@ def build_parser() -> argparse.ArgumentParser:
     reject.add_argument(
         "--pair", required=True, nargs=2, action="append", metavar=("T1", "T2"),
         help="two transaction IDs from review show. Repeat for several pairs in one decision",
+    )
+
+    confirm = command(
+        "confirm", review_commands, handler=run_review_confirm,
+        help="record which transactions in an item are one event, and which are different events",
+    )
+    confirm.add_argument("item_id", help="an item ID from review list")
+    confirm.add_argument("--account", required=True, help="account name or ID")
+    confirm.add_argument("--revision", required=True, help="the revision from review show")
+    confirm.add_argument(
+        "--group", required=True, nargs="+", action="append", metavar="T",
+        help="transaction IDs that are one event. Repeat for each group: groups are different "
+        "events, and transactions left out stay undecided",
     )
 
     decisions = command(
@@ -778,14 +798,21 @@ def notice_for(item) -> str:
     return CONFLICT_NOTICE if item.kind == "decision_conflict" else DUPLICATE_NOTICE
 
 
+DECIDED_HEADINGS = {
+    "different_event": ("Already decided, as different events:", "is a different event from"),
+    "same_event": ("Already decided, as one event:", "is the same event as"),
+}
+
+
 def print_decided_pairs(item) -> None:
-    if not item.decided:
-        return
-    print("Already decided, as different events:")
-    for pair in item.decided:
-        print(f"  Decision {pair.decision_id}:")
-        print(f"    {describe_side(pair.left)}")
-        print(f"    is a different event from {describe_side(pair.right)}")
+    for relation, (heading, verb) in DECIDED_HEADINGS.items():
+        pairs = [pair for pair in item.decided if pair.relation == relation]
+        if pairs:
+            print(heading)
+        for pair in pairs:
+            print(f"  Decision {pair.decision_id}:")
+            print(f"    {describe_side(pair.left)}")
+            print(f"    {verb} {describe_side(pair.right)}")
 
 
 def describe_side(records) -> str:
@@ -886,12 +913,31 @@ def run_review_reject(args) -> int:
     return 0
 
 
+def run_review_confirm(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = confirm_groups(conn, account_id, args.item_id, args.revision, args.group)
+
+    print(f"Decision {result.decision_id} recorded: {result.groups} groups confirmed.")
+    print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
+    print("  Transactions left out stay undecided. New records are not bound.")
+    print(f"  {CONFIRM_NOTICE}")
+    if result.item_still_open:
+        print(f"  Item {args.item_id} stays open: undecided relationships remain in it.")
+    else:
+        print(f"  Item {args.item_id} closed: nothing in it is left undecided.")
+    return 0
+
+
 def run_review_decisions(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
     rows = list_decisions(conn, account_id)
-    for decision_id, account, created_at, state, pairs in rows:
-        print(f"Decision {decision_id}: {state}, {pairs} pairs, {shown(account)}, {created_at}")
+    for decision_id, account, created_at, state, pairs, kind in rows:
+        print(
+            f"Decision {decision_id}: {state}, {kind}, {pairs} pairs, {shown(account)}, "
+            f"{created_at}"
+        )
     print(f"Decisions: {len(rows)}")
     if rows:
         print("To see what a decision binds, run review decision show.")
@@ -906,10 +952,18 @@ def run_review_decision_show(args) -> int:
 
     print(f"Decision {decision.decision_id}")
     print(f"  Account: {shown(decision.account_name)} ({decision.account_id})")
+    print(f"  Kind: {decision.kind}")
     print(f"  Status: {decision.state}")
     print(f"  Made: {decision.created_at}")
     if decision.undone_at:
         print(f"  Undone: {decision.undone_at}. It stays on record and no longer applies.")
+    if decision.superseded_by:
+        print(
+            f"  Superseded by decision {decision.superseded_by}. It stays on record and no "
+            "longer applies, unless that decision is undone."
+        )
+    if decision.supersedes_decision_id:
+        print(f"  Supersedes decision {decision.supersedes_decision_id}")
     print(f"  From review item: {decision.review_issue_id}")
 
     for number, pair in enumerate(decision.pairs, start=1):

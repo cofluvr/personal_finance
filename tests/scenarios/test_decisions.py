@@ -119,7 +119,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r2-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r3-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)
@@ -142,7 +142,7 @@ class Ledger:
 
     def decision_revision(self, decision):
         out = self.run("review", "decision", "show", decision)[1]
-        return re.search(r"Revision: (d1-[0-9a-f]{16})", out)[1]
+        return re.search(r"Revision: (d2-[0-9a-f]{16})", out)[1]
 
     def undo(self, decision, revision=None, account="A"):
         return self.run("review", "undo", decision, "--account", account,
@@ -432,9 +432,9 @@ class TestRefusals:  # S5
         self.refused(ledger, ledger.reject(item, (one, two), revision="r2-0000000000000000"),
                      STALE_REVISION)
 
-    def test_a_version_1_token_of_the_same_digest(self, ledger):
+    def test_a_version_2_token_of_the_same_digest(self, ledger):
         item, one, two = pair_up(ledger)
-        token = "r1-" + ledger.revision(item)[3:]
+        token = "r2-" + ledger.revision(item)[3:]
         self.refused(ledger, ledger.reject(item, (one, two), revision=token), STALE_REVISION)
 
     def test_a_pair_outside_the_item(self, ledger):
@@ -1004,7 +1004,7 @@ class TestUndoToken:  # S21
 
     def test_the_token_has_the_documented_form(self, ledger):
         _, token = self.decided(ledger)
-        assert re.fullmatch(r"d1-[0-9a-f]{16}", token)
+        assert re.fullmatch(r"d2-[0-9a-f]{16}", token)
 
 
 class TestConstraintsApplied:

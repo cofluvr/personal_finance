@@ -1,4 +1,4 @@
-"""Writing identity decisions. See decisions.md D-042, D-043 and D-045.
+"""Writing identity decisions. See decisions.md D-042, D-043, D-045 and D-046.
 
 Every command checks everything under one write lock and either commits the decision with
 its re-derivation or changes nothing. Refusals name no amounts or descriptions.
@@ -6,6 +6,7 @@ its re-derivation or changes nothing. Refusals name no amounts or descriptions.
 
 import sqlite3
 import uuid
+from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import combinations, product
@@ -16,7 +17,15 @@ from personal_finance.reconcile.apply import (
     load_evidence,
     reconcile_account,
 )
-from personal_finance.reconcile.cross_document import RULE_CANDIDATES, directly_linked
+from personal_finance.reconcile.cross_document import (
+    RELATION_DIFFERENT,
+    RELATION_SAME,
+    RULE_CANDIDATES,
+    RULE_DECISION,
+    _DisjointSet,
+    derive,
+    directly_linked,
+)
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reports.decision_evidence import (
     STATE_ACTIVE,
@@ -61,9 +70,49 @@ WOULD_CHANGE_LEDGER = (
 DECISION_NOT_FOUND = "decision not found. Run review decisions."
 DECISION_WRONG_ACCOUNT = "this decision belongs to another account. Nothing was changed."
 DECISION_NOT_ACTIVE = "this decision has already been undone. Nothing was changed."
+CONFIRM_UNSUPPORTED = (
+    "only cross-document candidate items and decision conflicts can be confirmed. Other kinds "
+    "stay open for later workflows. Nothing was changed."
+)
+GROUP_REPEATED = "a transaction was named more than once. Nothing was changed."
+GROUP_OUTSIDE = "a group names a transaction that is not in this item. Nothing was changed."
+STATES_NOTHING = (
+    "these groups state nothing: name at least two transactions, in one group or in two. "
+    "Nothing was changed."
+)
+CONFIRMS_NOTHING = (
+    "every group here holds one transaction, so this only keeps them apart. Nothing was "
+    "changed. Use review reject for direct pairs."
+)
+GROUP_SHARES_DOCUMENT = (
+    "a group would hold two records from one document, which one transaction cannot. Nothing "
+    "was changed. Put them in separate groups."
+)
+GROUP_NOT_CONNECTED = (
+    "a group holds a transaction that is not linked to the rest of it directly, or through one "
+    "withheld match. Nothing was changed. Run review show to see the direct pairs."
+)
+CONTRADICTS = (
+    "a group joins transactions that decision {decisions} keeps apart. Nothing was changed. "
+    "To replace that decision, inspect it with review decision show, then confirm again "
+    "naming it with --supersedes."
+)
+WOULD_CHANGE_MORE = (
+    "this confirmation would change more than the transactions it names, so it was not "
+    "recorded and nothing was changed."
+)
 STALE_DECISION_REVISION = (
     "this revision does not match the decision's current evidence, so undoing it could regroup "
     "records you have not seen. Nothing was changed. Run review decision show and check again."
+)
+
+
+# One confirmation names at most this many transactions (D-046).
+MAX_CONFIRMED = 50
+
+TOO_MANY = (
+    f"one confirmation can name at most {MAX_CONFIRMED} transactions. Nothing was changed. "
+    "Confirm part of the group, then review it again."
 )
 
 
@@ -76,6 +125,15 @@ class Rejection:
     decision_id: str
     pairs: int
     bound_record_pairs: int
+    item_still_open: bool
+
+
+@dataclass(frozen=True)
+class Confirmation:
+    decision_id: str
+    groups: int
+    transactions_before: int
+    transactions_after: int
     item_still_open: bool
 
 
@@ -103,7 +161,7 @@ def undecided_direct_pairs(
         for entry in item.transactions
     }
     decided = set()
-    for constraint in load_constraints(conn, item.account_id):
+    for constraint in _different(load_constraints(conn, item.account_id)):
         decided.update(frozenset(pair) for pair in product(constraint.left, constraint.right))
 
     pairs = combinations(sorted(members), 2) if among is None else map(sorted, among)
@@ -209,8 +267,177 @@ def _already_decided(conn, item, pair) -> bool:
     return any(
         (left & set(constraint.left) and right & set(constraint.right))
         or (left & set(constraint.right) and right & set(constraint.left))
-        for constraint in load_constraints(conn, item.account_id)
+        for constraint in _different(load_constraints(conn, item.account_id))
     )
+
+
+def _different(constraints):
+    return [item for item in constraints if item.relation == RELATION_DIFFERENT]
+
+
+def confirm_groups(
+    conn: sqlite3.Connection,
+    account_id: str,
+    item_id: str,
+    revision: str,
+    groups: list[list[str]],
+    rules: MatchingRules = DEFAULT_RULES,
+) -> Confirmation:
+    """Record an explicit partition of some of an item's transactions (D-046).
+
+    Within a group the transactions are one event, and between groups different events.
+    Nothing is implied about transactions left unnamed.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        result = _confirm(conn, account_id, item_id, revision, groups, rules)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    return result
+
+
+def _confirm(conn, account_id, item_id, revision, groups, rules) -> Confirmation:
+    if not is_current(conn, account_id, rules):
+        raise DecisionRefused(STALE_ACCOUNT)
+    item = load_review_evidence(conn, item_id)
+    if item is None:
+        raise DecisionRefused(ITEM_NOT_FOUND)
+    if item.account_id != account_id:
+        raise DecisionRefused(ITEM_WRONG_ACCOUNT)
+    if item.rule not in (RULE_CANDIDATES, RULE_DECISION):
+        raise DecisionRefused(CONFIRM_UNSUPPORTED)
+    if item.status != "open":
+        raise DecisionRefused(ITEM_NOT_OPEN)
+    if review_revision(item) != revision:
+        raise DecisionRefused(STALE_REVISION)
+    members = _check_groups(conn, item, groups, rules)
+    contradicted = _contradicted(conn, account_id, groups, members)
+    if contradicted:
+        raise DecisionRefused(CONTRADICTS.format(decisions=", ".join(sorted(contradicted))))
+
+    before = _memberships(conn, account_id)
+    expected = {
+        records for transaction_id, records in before.items()
+        if not any(transaction_id in group for group in groups)
+    }
+    expected.update(
+        frozenset(record for transaction_id in group for record in before[transaction_id])
+        for group in groups
+    )
+
+    decision_id = str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO decision (id, account_id, review_issue_id, item_revision, kind)
+           VALUES (?, ?, ?, ?, 'confirm')""",
+        (decision_id, account_id, item_id, revision),
+    )
+    _write_partition(conn, decision_id, groups, members)
+    _record_event(conn, decision_id, "made", rules)
+
+    reconcile_account(conn, account_id, rules, decision_id=decision_id)
+    after = _memberships(conn, account_id)
+    if set(after.values()) != expected:
+        raise DecisionRefused(WOULD_CHANGE_MORE)
+
+    still_open = conn.execute("SELECT 1 FROM review_issue WHERE id = ?", (item_id,)).fetchone()
+    return Confirmation(decision_id, len(groups), len(before), len(after), still_open is not None)
+
+
+def _check_groups(conn, item, groups, rules) -> dict[str, list]:
+    """Each named transaction's records, once every group is shown to be valid."""
+    present = {entry.transaction_id: entry for entry in item.transactions}
+    named = [transaction_id for group in groups for transaction_id in group]
+    if len(named) != len(set(named)):
+        raise DecisionRefused(GROUP_REPEATED)
+    if not set(named) <= present.keys():
+        raise DecisionRefused(GROUP_OUTSIDE)
+    if len(named) > MAX_CONFIRMED:
+        raise DecisionRefused(TOO_MANY)
+    if len(named) < 2:
+        raise DecisionRefused(STATES_NOTHING)
+    # Rejection is for direct pairs only (D-045). A conflict can be settled by keeping all apart.
+    if item.rule == RULE_CANDIDATES and all(len(group) == 1 for group in groups):
+        raise DecisionRefused(CONFIRMS_NOTHING)
+
+    documents, records, unresolved, _ = load_evidence(conn, item.account_id)
+    rows = {record.id: record for record in records}
+    members = {
+        transaction_id: [rows[record.record_id] for record in present[transaction_id].records]
+        for transaction_id in named
+    }
+    withheld = ()
+    if item.rule == RULE_DECISION:
+        constraints = load_constraints(conn, item.account_id)
+        withheld = derive(documents, records, unresolved, rules, constraints).withheld_merges
+
+    for group in groups:
+        held = [row for transaction_id in group for row in members[transaction_id]]
+        if len({row.document_id for row in held}) < len(held):
+            raise DecisionRefused(GROUP_SHARES_DOCUMENT)
+        if not _connected(group, members, documents, rules, withheld):
+            raise DecisionRefused(GROUP_NOT_CONNECTED)
+    return members
+
+
+def _connected(group, members, documents, rules, withheld) -> bool:
+    """Through direct links (D-045), or for a conflict through one withheld merge."""
+    if len(group) < 2:
+        return True
+    merge_of = {record: number for number, merge in enumerate(withheld) for record in merge}
+    joined = _DisjointSet(len(group))
+    for left, right in combinations(range(len(group)), 2):
+        one, other = members[group[left]], members[group[right]]
+        shared = {merge_of.get(row.id) for row in one} & {merge_of.get(row.id) for row in other}
+        if shared - {None} or directly_linked(one, other, documents, rules):
+            joined.union(left, right)
+    return len(joined.components()) == 1
+
+
+def _contradicted(conn, account_id, groups, members) -> set[str]:
+    """Active decisions keeping apart records that a group would join."""
+    found = set()
+    constraints = _different(load_constraints(conn, account_id))
+    for group in groups:
+        held = {row.id for transaction_id in group for row in members[transaction_id]}
+        for constraint in constraints:
+            if held.intersection(constraint.left) and held.intersection(constraint.right):
+                found.add(constraint.decision_id)
+    return found
+
+
+def _write_partition(conn, decision_id, groups, members) -> None:
+    """Every stated pair, written out: one event within a group, different events between."""
+    pairs = [
+        (RELATION_SAME, pair) for group in groups for pair in combinations(sorted(group), 2)
+    ]
+    pairs += [
+        (RELATION_DIFFERENT, tuple(sorted(pair)))
+        for one, other in combinations(groups, 2)
+        for pair in product(one, other)
+    ]
+    for number, (relation, (left, right)) in enumerate(sorted(pairs), start=1):
+        conn.executemany(
+            """INSERT INTO decision_constraint (decision_id, relation, pair_number,
+                                                left_transaction_id, right_transaction_id,
+                                                left_record_id, right_record_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (decision_id, relation, number, left, right, one.id, other.id)
+                for one, other in product(members[left], members[right])
+            ],
+        )
+
+
+def _memberships(conn, account_id) -> dict[str, frozenset[str]]:
+    found = defaultdict(set)
+    for transaction_id, record_id in conn.execute(
+        "SELECT transaction_id, source_record_id FROM transaction_source WHERE account_id = ?",
+        (account_id,),
+    ):
+        found[transaction_id].add(record_id)
+    return {key: frozenset(value) for key, value in found.items()}
 
 
 def _ledger_state(conn, account_id):

@@ -8,15 +8,18 @@ import json
 import sqlite3
 from dataclasses import asdict, dataclass
 
-from personal_finance.reconcile.apply import load_constraints, load_evidence
+from personal_finance.reconcile.apply import (
+    STATE_ACTIVE,
+    STATE_SUPERSEDED,
+    decision_states,
+    load_constraints,
+    load_evidence,
+)
 from personal_finance.reconcile.cross_document import derive
 from personal_finance.reconcile.rules import MatchingRules
 
 # Bump whenever the material below changes, so an old token can never appear current.
-DECISION_REVISION_VERSION = 1
-
-STATE_ACTIVE = "active"
-STATE_UNDONE = "undone"
+DECISION_REVISION_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,11 @@ class DecisionEvidence:
     state: str
     undone_at: str | None
     pairs: tuple[BoundPair, ...]
+    # reject or confirm (D-046).
+    kind: str = "reject"
+    supersedes_decision_id: str | None = None
+    # The active decision replacing this one, while it is superseded.
+    superseded_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -61,26 +69,32 @@ class UndoOutlook:
 
 
 def list_decisions(conn: sqlite3.Connection, account_id: str | None = None) -> list[tuple]:
-    """IDs, states and counts only, so that routine output holds no financial data."""
-    return conn.execute(
-        """SELECT decision.id, account.display_name, decision.created_at,
-                  CASE WHEN undone.id IS NULL THEN 'active' ELSE 'undone' END,
+    """IDs, kinds, states and counts only, so that routine output holds no financial data."""
+    rows = conn.execute(
+        """SELECT decision.id, account.display_name, decision.created_at, decision.account_id,
                   (SELECT COUNT(DISTINCT pair_number) FROM decision_constraint pair
-                   WHERE pair.decision_id = decision.id)
+                   WHERE pair.decision_id = decision.id),
+                  decision.kind
            FROM decision
            JOIN account ON account.id = decision.account_id
-           LEFT JOIN decision_event undone
-               ON undone.decision_id = decision.id AND undone.event = 'undone'
            WHERE :account IS NULL OR decision.account_id = :account
            ORDER BY decision.created_at, decision.id""",
         {"account": account_id},
     ).fetchall()
+    states = {}
+    for account in {row[3] for row in rows}:
+        states.update(decision_states(conn, account))
+    return [
+        (decision_id, name, created_at, states[decision_id], pairs, kind)
+        for decision_id, name, created_at, _, pairs, kind in rows
+    ]
 
 
 def load_decision(conn: sqlite3.Connection, decision_id: str) -> DecisionEvidence | None:
     row = conn.execute(
         """SELECT decision.account_id, account.display_name, decision.review_issue_id,
-                  decision.created_at, undone.created_at
+                  decision.created_at, undone.created_at, decision.kind,
+                  decision.supersedes_decision_id
            FROM decision
            JOIN account ON account.id = decision.account_id
            LEFT JOIN decision_event undone
@@ -90,7 +104,7 @@ def load_decision(conn: sqlite3.Connection, decision_id: str) -> DecisionEvidenc
     ).fetchone()
     if row is None:
         return None
-    account_id, account_name, issue, created_at, undone_at = row
+    account_id, account_name, issue, created_at, undone_at, kind, supersedes = row
 
     sides = {}
     for number, relation, left_transaction, right_transaction, left, right in conn.execute(
@@ -108,9 +122,18 @@ def load_decision(conn: sqlite3.Connection, decision_id: str) -> DecisionEvidenc
                   _bound_records(conn, left), _bound_records(conn, right))
         for _, (relation, left_transaction, right_transaction, left, right) in sorted(sides.items())
     )
-    state = STATE_UNDONE if undone_at else STATE_ACTIVE
+    states = decision_states(conn, account_id)
+    superseded_by = None
+    if states[decision_id] == STATE_SUPERSEDED:
+        (superseded_by,) = (
+            newer for (newer,) in conn.execute(
+                "SELECT id FROM decision WHERE supersedes_decision_id = ?", (decision_id,)
+            )
+            if states[newer] == STATE_ACTIVE
+        )
     return DecisionEvidence(
-        decision_id, account_id, account_name, issue, created_at, state, undone_at, pairs
+        decision_id, account_id, account_name, issue, created_at, states[decision_id], undone_at,
+        pairs, kind, supersedes, superseded_by,
     )
 
 
@@ -141,12 +164,13 @@ def undo_outlook(
 
     The token covers the decision's state and everything relevant to regrouping: what
     derivation gives with and without this decision, and the evidence of every record
-    that differs between the two or is bound by the decision. Evidence that cannot affect
-    the undo leaves it unchanged, so an unrelated file does not force another inspection.
+    that differs between the two or is bound by the decision. Without it means with any
+    decision it superseded restored (D-046). Evidence that cannot affect the undo leaves it
+    unchanged, so an unrelated file does not force another inspection.
     """
     documents, records, unresolved, _ = load_evidence(conn, decision.account_id)
     constraints = load_constraints(conn, decision.account_id)
-    others = tuple(item for item in constraints if item.decision_id != decision.decision_id)
+    others = load_constraints(conn, decision.account_id, without=decision.decision_id)
     now = derive(documents, records, unresolved, rules, constraints)
     after = derive(documents, records, unresolved, rules, others)
 
@@ -192,6 +216,8 @@ def undo_outlook(
 
     material = {
         "state": decision.state,
+        "kind": decision.kind,
+        "supersedes": decision.supersedes_decision_id is not None,
         "pairs": sorted(_pair_keys(pair) for pair in decision.pairs),
         "rules": rules.fingerprint(),
         "records": sorted(
@@ -205,7 +231,8 @@ def undo_outlook(
             key=repr,
         ),
         "other_decisions": sorted(
-            sorted((keyed(item.left), keyed(item.right)), key=repr)
+            [item.relation, item.confirmation,
+             sorted((keyed(item.left), keyed(item.right)), key=repr)]
             for item in others
             if scope.intersection((*item.left, *item.right))
         ),
@@ -222,10 +249,11 @@ def decision_revision(material: dict) -> str:
 
 
 def _pair_keys(pair: BoundPair) -> list:
-    return sorted(
+    sides = sorted(
         [[(record.content_sha256, record.row) for record in side]
          for side in (pair.left, pair.right)]
     )
+    return [pair.relation, *sides]
 
 
 def _without(fields: dict, *names: str) -> dict:

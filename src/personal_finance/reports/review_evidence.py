@@ -14,7 +14,7 @@ from personal_finance.reconcile.apply import load_constraints, stale_accounts
 from personal_finance.reconcile.rules import DEFAULT_RULES
 
 # Bump whenever the material evidence changes, so an old token can never appear current.
-REVISION_VERSION = 2
+REVISION_VERSION = 3
 
 # Fields left out of a revision. Random IDs and names say where evidence is stored or how
 # it is labelled, not what it says. Records are identified by document hash and row
@@ -99,6 +99,8 @@ class DecidedPair:
     """One stated pair of an active decision, as records on two sides."""
 
     decision_id: str
+    # different_event or same_event, from version 3 (D-046).
+    relation: str
     left: tuple[DecidedRecord, ...]
     right: tuple[DecidedRecord, ...]
 
@@ -209,6 +211,7 @@ def _decided_pairs(conn, account_id, held) -> tuple[DecidedPair, ...]:
     pairs = [
         DecidedPair(
             constraint.decision_id,
+            constraint.relation,
             _decided_records(conn, constraint.left),
             _decided_records(conn, constraint.right),
         )
@@ -241,11 +244,11 @@ def _decided_key(record: DecidedRecord) -> tuple[str, int]:
 def _ordered_sides(pair: DecidedPair) -> DecidedPair:
     """Which side is left depends on generated IDs, so a revision must not see it."""
     left, right = sorted((pair.left, pair.right), key=lambda side: list(map(_decided_key, side)))
-    return DecidedPair(pair.decision_id, left, right)
+    return DecidedPair(pair.decision_id, pair.relation, left, right)
 
 
 def _pair_key(pair: DecidedPair):
-    return [list(map(_decided_key, side)) for side in (pair.left, pair.right)]
+    return [pair.relation, *(list(map(_decided_key, side)) for side in (pair.left, pair.right))]
 
 
 def _record_key(record: RecordEvidence) -> tuple[str, int]:
