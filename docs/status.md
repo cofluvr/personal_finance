@@ -11,7 +11,7 @@ Last updated: 2026-11-07. Branch: `feature/m2-review`, local only, from `643e1b1
 | **M1 overall** | **Complete and accepted** |
 | M2.1: review evidence and revision tokens | Accepted |
 | M2.2: decision core, pair rejection and undo | Accepted |
-| M2.3: confirmation, partitions and superseding | Approved, in progress (D-046) |
+| M2.3: confirmation, partitions and superseding | Implemented, awaiting review (D-046) |
 | M2.4 to M2.9 | Provisional, not approved |
 | M3 to M8 | Not started |
 

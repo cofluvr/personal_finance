@@ -829,7 +829,7 @@ with M2.2 on 2026-11-07:
 - Link history names the decision for moves caused by withholding and by undo. Where several
   decisions withheld one group, the lowest ID is recorded.
 
-## D-046 Confirmation, partitions and superseding — Approved for M2.3
+## D-046 Confirmation, partitions and superseding — Approved, implemented in M2.3
 
 Approved by the owner on 2026-11-07 with the M2.3 plan. Builds on D-042 to D-045 and changes none
 of them.
