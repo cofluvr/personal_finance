@@ -29,8 +29,8 @@ Last updated: 2026-11-07. Branch: `feature/m2-review`, local only, from `643e1b1
   review items as a pure function of its stored evidence.
 - `personal_finance.reconcile.apply`: applies that result atomically with the import,
   recording every source movement.
-- `personal_finance.reconcile.decisions`: rejecting pairs and undoing decisions, each under one
-  write lock (D-043, D-045).
+- `personal_finance.reconcile.decisions`: rejecting pairs, confirming partitions, superseding and
+  undoing decisions, each under one write lock (D-043, D-045, D-046).
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement.
@@ -39,13 +39,14 @@ Last updated: 2026-11-07. Branch: `feature/m2-review`, local only, from `643e1b1
   revision token (D-040).
 - `personal_finance.reports.decision_evidence`: what a decision binds, and the undo token (D-045).
 - CLI: `init`, `migrate`, `account add`, `import`, `reconcile`, `documents`, `transactions`,
-  `trace`, `review list`, `review show`, `review reject`, `review decisions`,
+  `trace`, `review list`, `review show`, `review reject`, `review confirm`, `review decisions`,
   `review decision show`, `review undo`, `totals`, run through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
 
 No real institution layout is supported. **It must not be used with real financial
-data** (M5 gate). Only candidate pairs can be rejected. Nothing can be confirmed yet (M2.3).
+data** (M5 gate). Only candidate items and decision conflicts can be acted on. Machine-made merges
+cannot be separated yet (M2.4).
 
 ## Acceptance criteria progress
 
@@ -140,14 +141,49 @@ pair in the item. It now checks only the stated pairs. `review show` lists at mo
 same reason. These timings vary by up to about 2 times between runs here, and other work on the
 machine was not controlled. Pairs compared are exact.
 
+**Confirmation (C19),** measured 2026-11-07 on the same machine with
+`measure_reconciliation.py --confirmed`. Three unmerged documents, so that a confirmed transaction
+still links with the third and stays in the group, which is the worst shape. With only two
+documents a confirmed transaction holds both and links with nothing, which made confirmation look
+far cheaper than it is. That first run was discarded.
+
+| Units in the group | One rejection | One confirmation | One partition | Confirmations on 10% | Partitions on 10% |
+|---|---|---|---|---|---|
+| 100 | 0.006s | 0.001s | 0.006s | 0.001s | 0.004s |
+| 500 | 0.130s | 0.004s | 0.132s | 0.004s | 0.102s |
+| 1,000 | 0.576s | 0.009s | 0.563s | 0.008s | 0.443s |
+| 2,000 | 2.118s | 0.017s | 2.046s | 0.018s | 1.590s |
+| 4,000 | 8.573s | 0.034s | 8.333s | 0.032s | 6.277s |
+
+Derivation alone. A confirmation that only joins writes no `different_event` pair, so it touches no
+group and compares nothing again. A partition keeps its groups apart, which touches the group just
+as a rejection does, and costs the same. Confirmed units are fewer, so many confirmations compare
+slightly fewer pairs.
+
+| Transactions in the item | Decision | Whole decision command | Later import | Undo token and preview | Whole undo |
+|---|---|---|---|---|---|
+| 2,001 | Rejection | 2.189s | 2.118s | 2.145s | 2.129s |
+| 2,001 | Confirmation | 0.106s | 0.037s | 0.067s | 0.109s |
+| 2,001 | Partition | 2.247s | 2.181s | 2.174s | 2.250s |
+
+Through a real ledger, under the write lock. Smaller items scale the same way, and the full output
+is in `build/m2.3-bench/confirmed.txt`, which is ignored and may not survive. **Confirmation does
+not make the quadratic recomputation worse.** A partition costs what a rejection costs, within the
+variation of these runs, and a plain confirmation costs far less. Matching was not changed.
+
 ## Known limitations
 
-- Only `cross_document_candidates` items can be rejected, and nothing can be confirmed, so true
-  duplicates stay open and counted (M2.3).
+- Only `cross_document_candidates` items can be rejected, and only they and decision conflicts can
+  be confirmed. External-ID and same-document items stay open.
+- A group may hold one record per document, so two alike rows of one file are always separate
+  transactions (D-008).
+- Superseding needs an open item holding the transactions. A rejection that closed its item must be
+  undone first. Only one decision can be superseded at a time, and only by a confirmation.
 - A decision binds the records it names. A re-export raises the question again, so overlapping
   exports can bring repeat reviews.
 - Withholding can raise totals through new evidence, though it is disclosed. A decision conflict
-  has no action of its own: the only response today is `review undo`.
+  is settled by confirming a partition of all its transactions in one decision. A rejection never
+  settles one.
 - `review show` escapes file names in its decided section, but its older sections print them as
   typed, so a file name holding a newline can imitate a line there (noted below for all names).
 - Setup and both entry points have only been verified on this Mac with Python 3.12.6.

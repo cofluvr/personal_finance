@@ -23,8 +23,8 @@ from personal_finance.reconcile.cross_document import (
     RULE_CANDIDATES,
     RULE_DECISION,
     _DisjointSet,
-    derive,
     directly_linked,
+    joins_distinct_ids,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reports.decision_evidence import (
@@ -89,9 +89,13 @@ GROUP_SHARES_DOCUMENT = (
     "a group would hold two records from one document, which one transaction cannot. Nothing "
     "was changed. Put them in separate groups."
 )
+GROUP_DISTINCT_IDS = (
+    "a group would join two different IDs that the source guarantees unique, which proves "
+    "they are different events. Nothing was changed. Put them in separate groups."
+)
 GROUP_NOT_CONNECTED = (
-    "a group holds a transaction that is not linked to the rest of it directly, or through one "
-    "withheld match. Nothing was changed. Run review show to see the direct pairs."
+    "a group holds a transaction that is not linked directly to the rest of it. Nothing was "
+    "changed. Run review show to see the direct pairs."
 )
 CONTRADICTS = (
     "a group joins transactions that decision {decisions} keeps apart. Nothing was changed. "
@@ -472,36 +476,29 @@ def _check_groups(conn, item, groups, rules) -> dict[str, list]:
     if item.rule == RULE_CANDIDATES and all(len(group) == 1 for group in groups):
         raise DecisionRefused(CONFIRMS_NOTHING)
 
-    documents, records, unresolved, _ = load_evidence(conn, item.account_id)
+    documents, records, _, _ = load_evidence(conn, item.account_id)
     rows = {record.id: record for record in records}
     members = {
         transaction_id: [rows[record.record_id] for record in present[transaction_id].records]
         for transaction_id in named
     }
-    withheld = ()
-    if item.rule == RULE_DECISION:
-        constraints = load_constraints(conn, item.account_id)
-        withheld = derive(documents, records, unresolved, rules, constraints).withheld_merges
-
     for group in groups:
         held = [row for transaction_id in group for row in members[transaction_id]]
         if len({row.document_id for row in held}) < len(held):
             raise DecisionRefused(GROUP_SHARES_DOCUMENT)
-        if not _connected(group, members, documents, rules, withheld):
+        if joins_distinct_ids(held, {document.id: document for document in documents}):
+            raise DecisionRefused(GROUP_DISTINCT_IDS)
+        if not _connected(group, members, documents, rules):
             raise DecisionRefused(GROUP_NOT_CONNECTED)
     return members
 
 
-def _connected(group, members, documents, rules, withheld) -> bool:
-    """Through direct links (D-045), or for a conflict through one withheld merge."""
-    if len(group) < 2:
-        return True
-    merge_of = {record: number for number, merge in enumerate(withheld) for record in merge}
+def _connected(group, members, documents, rules) -> bool:
+    """Through direct links (D-045). The transactions of a withheld automatic match are always
+    linked directly, because it joins rows alike in amount, dates and description."""
     joined = _DisjointSet(len(group))
     for left, right in combinations(range(len(group)), 2):
-        one, other = members[group[left]], members[group[right]]
-        shared = {merge_of.get(row.id) for row in one} & {merge_of.get(row.id) for row in other}
-        if shared - {None} or directly_linked(one, other, documents, rules):
+        if directly_linked(members[group[left]], members[group[right]], documents, rules):
             joined.union(left, right)
     return len(joined.components()) == 1
 
@@ -620,12 +617,14 @@ def _undo(conn, account_id, decision_id, revision, rules) -> Undo:
 
 
 def _inconsistent(conn, account_id, without) -> bool:
-    """Whether the decisions left after undoing one would join records kept apart, or two
-    records of one document."""
+    """Whether the decisions left after undoing one would join records kept apart.
+
+    A restored decision adds no same_event pair, because superseding had to keep every one
+    of them (D-046), so only its different_event pairs can contradict.
+    """
     constraints = load_constraints(conn, account_id, without=without)
     _, records, _, _ = load_evidence(conn, account_id)
-    document = {record.id: record.document_id for record in records}
-    place = {record_id: index for index, record_id in enumerate(document)}
+    place = {record.id: index for index, record in enumerate(records)}
     joined = _DisjointSet(len(place))
     for constraint in constraints:
         if constraint.relation == RELATION_SAME:
@@ -633,11 +632,6 @@ def _inconsistent(conn, account_id, without) -> bool:
             for record in bound[1:]:
                 joined.union(bound[0], record)
     root = {record_id: joined.find(index) for record_id, index in place.items()}
-    seen = set()
-    for record_id, home in root.items():
-        if (home, document[record_id]) in seen:
-            return True
-        seen.add((home, document[record_id]))
     return any(
         {root[record] for record in constraint.left} & {root[record] for record in constraint.right}
         for constraint in _different(constraints)

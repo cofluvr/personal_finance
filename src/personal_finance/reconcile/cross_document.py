@@ -135,8 +135,6 @@ class Derivation:
     recomputed_pairs: int = 0
     # The decision that withheld a record from an automatic merge.
     withheld_by: dict[str, str] = field(default_factory=dict)
-    # The record IDs of each withheld automatic merge.
-    withheld_merges: tuple[tuple[str, ...], ...] = ()
 
 
 class _DisjointSet:
@@ -178,7 +176,7 @@ def derive(
     merges = [(merge, LINK_EXTERNAL_ID) for merge in id_merges]
     merges += [(merge, LINK_EXACT) for merge in exact_merges]
     withheld = _withheld_merges([merge for merge, _ in merges], different)
-    confirmed, absorbed = _confirmed_units(ordered, merges, withheld, constraints)
+    confirmed, absorbed = _confirmed_units(ordered, merges, withheld, constraints, by_id)
     held = [merges[position][0] for position in sorted(withheld)]
     withheld_by = {
         row.id: min(decisions)
@@ -203,8 +201,7 @@ def derive(
     items = [_id_item(_without_withheld(conflict, withheld_by)) for conflict in id_conflicts]
     items += _not_covered_by(found, held)
     items += _conflict_items([rows for rows, _ in units], held, constraints)
-    held_ids = tuple(tuple(sorted(row.id for row in merge)) for merge in held)
-    return Derivation(groups, tuple(items), separation, steps, recomputed, withheld_by, held_ids)
+    return Derivation(groups, tuple(items), separation, steps, recomputed, withheld_by)
 
 
 def _withheld_merges(merges, constraints):
@@ -223,11 +220,11 @@ def _withheld_merges(merges, constraints):
     return withheld
 
 
-def _confirmed_units(rows, merges, withheld, constraints):
+def _confirmed_units(rows, merges, withheld, constraints, documents):
     """Records confirmed as one event, each with any automatic merge that can join it (D-046).
 
-    A merge joins a confirmed unit only if the result keeps one record per document and holds
-    no pair a decision keeps apart. Otherwise every merge in that combination is withheld,
+    A merge joins a confirmed unit only if the result keeps one record per document, holds no
+    pair a decision keeps apart and joins no two IDs that prove records distinct. Otherwise every merge in that combination is withheld,
     because choosing which of them joins would be a guess. withheld is updated in place.
     Returns the units and the positions of merges they absorbed.
     """
@@ -269,10 +266,13 @@ def _confirmed_units(rows, merges, withheld, constraints):
         joined = dict(members)
         for position in positions:
             joined.update((row.id, row) for row in merges[position][0])
-        if _valid_unit(joined.values(), different):
+        if _valid_unit(joined.values(), different, documents):
             absorbed.update(positions)
-            members = joined
+            units.append((sorted(joined.values(), key=lambda row: place[row.id]), LINK_CONFIRMED))
         else:
+            # Each confirmed set stays a transaction of its own.
+            for node in kept:
+                units.append((sorted(sets[node], key=lambda row: place[row.id]), LINK_CONFIRMED))
             decisions = {decision for record in members for decision in behind[record]}
             decisions.update(
                 item.decision_id for item in different
@@ -280,19 +280,30 @@ def _confirmed_units(rows, merges, withheld, constraints):
             )
             for position in positions:
                 withheld[position].update(decisions)
-        units.append((sorted(members.values(), key=lambda row: place[row.id]), LINK_CONFIRMED))
     return units, absorbed
 
 
-def _valid_unit(rows, different) -> bool:
-    """One record per document, and no pair that a decision keeps apart."""
+def _valid_unit(rows, different, documents) -> bool:
+    """One record per document, no two distinct unique IDs, and no pair a decision keeps apart."""
     rows = list(rows)
-    if len({row.document_id for row in rows}) < len(rows):
+    if len({row.document_id for row in rows}) < len(rows) or joins_distinct_ids(rows, documents):
         return False
     present = {row.id for row in rows}
     return not any(
         present.intersection(item.left) and present.intersection(item.right) for item in different
     )
+
+
+def joins_distinct_ids(rows, documents) -> bool:
+    """Whether rows hold two different IDs of one namespace that guarantees them unique, which
+    proves the rows are different events (D-026)."""
+    seen = {}
+    for row in rows:
+        document = documents[row.document_id]
+        if _has_reliable_id(row, documents) and document.id_guarantee == GUARANTEE_STABLE_UNIQUE:
+            if seen.setdefault(document.id_namespace, row.external_id) != row.external_id:
+                return True
+    return False
 
 
 def _without_withheld(conflict, withheld_by):

@@ -381,7 +381,6 @@ class TestConfirmed:  # D-046
         result = outcome(documents, records, confirmed(["1"], ["2"]), rejected(["2"], ["3"], "r1"))
         assert groups(result) == {("1", "2"), ("3",)}
         assert members(result, RULE_DECISION) == {frozenset({("1", "2"), ("3",)})}
-        assert result.withheld_merges == (("1", "3"),)
         assert result.withheld_by == {"1": "c1", "3": "c1"}
 
     def test_a_merge_that_would_put_two_rows_of_one_document_together_is_withheld(self):
@@ -430,3 +429,17 @@ class TestConfirmed:  # D-046
         expected = outcome(self.documents, sorted(records, key=lambda one: one.id),
                            confirmed(["1"], ["2"]))
         assert outcome(self.documents, records, confirmed(["1"], ["2"])) == expected
+
+
+class TestConfirmedIds:  # D-026, D-046
+    def test_a_merge_never_joins_two_unique_ids_through_confirmed_units(self):
+        # 1 and 2 overlap by one day, so only the wide 3 joins them. Each is confirmed with a
+        # checking row, and the two checking rows carry different unique IDs.
+        ids = dict(id_namespace="ns", id_guarantee="stable_unique")
+        documents = [*NARROW, WIDE, doc("n1", **ids), doc("n2", **ids)]
+        records = [row("1", "a"), row("2", "b"), row("3", "c"),
+                   row("8", "n1", external_id="S-1"), row("9", "n2", external_id="S-2")]
+        result = outcome(documents, records, confirmed(["1"], ["8"]), confirmed(["2"], ["9"], "c2"))
+        assert groups(result) == {("1", "8"), ("2", "9"), ("3",)}
+        (conflict,) = [item for item in result.items if item.rule == RULE_DECISION]
+        assert conflict.reasons == (REASON_WITHHELD,)

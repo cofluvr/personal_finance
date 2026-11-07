@@ -848,7 +848,8 @@ when the two are not direct candidates, because the person stated it. Nothing is
 | Question | Rule |
 |---|---|
 | Items | `cross_document_candidates` and `decision_conflict` only. Others are refused |
-| A group | Connected through direct links (D-045), or for a conflict item through one withheld automatic merge |
+| A group | Connected through direct links (D-045). The transactions of a withheld automatic merge are always linked directly, so a conflict needs nothing more |
+| Unique IDs | A group may not join two different IDs of a namespace that guarantees them unique (D-026), even through a chain. Neither may an automatic merge joining confirmed units |
 | One document | A group may hold at most one record from any document. D-008 and `transaction_source` stay as they are |
 | Size | At most 50 transactions named in one decision |
 | Contradiction | A group holding both sides of an active `different_event` pair needs `--supersedes` |
@@ -856,10 +857,10 @@ when the two are not direct candidates, because the person stated it. Nothing is
 | Only one-transaction groups | Refused on a candidate item, because it only keeps transactions apart, which is `review reject` and limited to direct pairs (D-045). Allowed on a conflict, to settle it |
 
 **Derivation.** Records joined by active `same_event` constraints form fixed units. An automatic merge
-touching a confirmed unit joins it only if the result keeps one record per document and no
-`different_event` pair. Otherwise every automatic merge in that combination is withheld, its
-records stay separate or in their confirmed unit, and `automatic_match_withheld` is raised. A
-confirmed grouping survives repeat imports, rules changes and new files, and changes only by undo
+touching a confirmed unit joins it only if the result keeps one record per document, joins no two
+distinct unique IDs and holds no `different_event` pair. Otherwise every automatic merge in that
+combination is withheld, its records stay separate or in their confirmed unit, each confirmed unit
+stays a transaction of its own, and `automatic_match_withheld` is raised. A confirmed grouping survives repeat imports, rules changes and new files, and changes only by undo
 or superseding. Its records link with rule `confirmed_same_event`. With no `same_event` constraint,
 `derive()` is unchanged.
 

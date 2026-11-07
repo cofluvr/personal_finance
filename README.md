@@ -227,7 +227,7 @@ bin/pf review confirm --db "$DB" --account ACCOUNT ITEM_ID --revision REVISION -
 
 `review confirm` records which transactions in a `cross_document_candidates` or `decision_conflict` item are one event. Each `--group` is one event, different groups are different events, and transactions you leave out stay undecided, so you can confirm part of a group.
 
-- A group must be linked directly, or for a conflict through one withheld match, and may hold only one record from any document. Two alike rows of one file go in separate groups.
+- A group must be linked directly, may hold only one record from any document, and may not join two different IDs that the source guarantees unique. Two alike rows of one file go in separate groups.
 - Confirming joins each group into one transaction, so totals can go down. It changes nothing else, or it is refused. `totals` says how many transactions hold confirmed records.
 - On a candidate item, at least one group must hold two transactions. Keeping transactions apart is `review reject`.
 - A confirmation survives repeat imports, `reconcile`, new files and rules changes. A new automatic match joins a confirmed transaction only when that keeps one record per document and breaks no decision. Otherwise the match is withheld and raised as a conflict.

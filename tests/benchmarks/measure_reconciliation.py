@@ -4,7 +4,7 @@ Not part of the test suite. Run from the repository root:
 
     PYTHONPATH=src:tests/benchmarks .venv/bin/python tests/benchmarks/measure_reconciliation.py
     (add --worst for the stress shapes, --constrained for dense groups with decisions,
-    or rows per month such as 200 1000 4000)
+    --confirmed to compare confirmation with rejection, or rows per month such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
 one import_files call: reading and parsing the file, writing records, reconciling the
@@ -28,7 +28,7 @@ from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.reconcile.apply import load_evidence
 from personal_finance.reconcile.cross_document import Constraint, Document, Record, derive
-from personal_finance.reconcile.decisions import reject_pairs, undo_decision
+from personal_finance.reconcile.decisions import confirm_groups, reject_pairs, undo_decision
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reports.decision_evidence import load_decision, undo_outlook
 from personal_finance.reports.review_evidence import load_review_evidence, review_revision
@@ -176,12 +176,122 @@ def constrained() -> None:
         measure_reject(rows_per_file)
 
 
+def measure_derive_confirmed(units: int, confirmations: int, partition: bool) -> None:
+    """Derivation alone, with confirmations joining records of the first two of three documents.
+
+    The joined transaction can still link with the third document, so it stays in the group.
+    A partition also keeps it apart from a record of the third, which touches the group the
+    way a rejection does.
+    """
+    files, records = dense_group(units, documents=3)
+    bound = []
+    for number in range(confirmations):
+        left, right = str(3 * number), str(3 * number + 1)
+        bound.append(Constraint(f"c{number:05}", (left,), (right,), "same_event", True))
+        if partition:
+            bound.append(Constraint(f"c{number:05}", (left, right), (str(3 * number + 2),),
+                                    "different_event", True))
+    started = time.perf_counter()
+    result = derive(files, records, [], DEFAULT_RULES, tuple(bound))
+    seconds = time.perf_counter() - started
+    print(
+        f"derive units={units:6} confirmations={confirmations:5} partition={partition!s:5} "
+        f"seconds={seconds:7.3f} compared_pairs={result.recomputed_pairs:10} "
+        f"groups={len(result.groups)}",
+        flush=True,
+    )
+
+
+def measure_decision(rows_per_file: int, kind: str) -> None:
+    """One decision through a real ledger, then a later import, decision show and undo.
+
+    Three files, so that a confirmed transaction stays in the group through the third.
+    """
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        path = root / "ledger.db"
+        create_database(path)
+        conn = connect(path)
+        conn.execute(
+            "INSERT INTO account (id, display_name, account_type) VALUES ('acct', 'a', 'credit_card')"
+        )
+        header = "Date,Description,Debit,Credit\n"
+        for name, padding in (("a.csv", ""), ("b.csv", " "), ("c.csv", "  ")):
+            source = root / name
+            source.write_text(header + padding + "01/10/2026,SYNTHETIC CAFE,6.50,\n" * rows_per_file)
+            (result,) = import_files(conn, [source], account_id="acct", layout=SYNTHETIC_CARD_V1)
+            assert result.outcome == "imported", result
+
+        (issue,) = conn.execute("SELECT id FROM review_issue").fetchone()
+        started = time.perf_counter()
+        item = load_review_evidence(conn, issue)
+        token = review_revision(item)
+        inspect_seconds = time.perf_counter() - started
+        by_file = {"a.csv": [], "b.csv": [], "c.csv": []}
+        for entry in item.transactions:
+            by_file[entry.records[0].file_name].append(entry.transaction_id)
+        left, right, third = by_file["a.csv"][0], by_file["b.csv"][0], by_file["c.csv"][0]
+
+        started = time.perf_counter()
+        if kind == "reject":
+            decision_id = reject_pairs(conn, "acct", issue, token, [(left, right)]).decision_id
+        elif kind == "confirm":
+            decision_id = confirm_groups(conn, "acct", issue, token, [[left, right]]).decision_id
+        else:
+            decision_id = confirm_groups(
+                conn, "acct", issue, token, [[left, right], [third]]
+            ).decision_id
+        decide_seconds = time.perf_counter() - started
+
+        later = root / "later.csv"
+        later.write_text(header + "03/20/2026,SYNTHETIC GROCER,9.00,\n")
+        started = time.perf_counter()
+        import_files(conn, [later], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        later_seconds = time.perf_counter() - started
+
+        started = time.perf_counter()
+        revision = undo_outlook(conn, load_decision(conn, decision_id), DEFAULT_RULES).revision
+        outlook_seconds = time.perf_counter() - started
+
+        started = time.perf_counter()
+        undo_decision(conn, "acct", decision_id, revision)
+        undo_seconds = time.perf_counter() - started
+        print(
+            f"{kind:9} transactions={3 * rows_per_file:6} evidence={inspect_seconds:7.3f}s "
+            f"decide={decide_seconds:7.3f}s later_import={later_seconds:7.3f}s "
+            f"decision_show={outlook_seconds:7.3f}s undo={undo_seconds:7.3f}s",
+            flush=True,
+        )
+        conn.close()
+
+
+def confirmed() -> None:
+    for units in (100, 500, 1000, 2000, 4000):
+        files, records = dense_group(units, documents=3)
+        started = time.perf_counter()
+        result = derive(files, records, [], DEFAULT_RULES, (Constraint("d", ("0",), ("1",)),))
+        print(
+            f"derive units={units:6} rejection=    1 seconds={time.perf_counter() - started:7.3f} "
+            f"compared_pairs={result.recomputed_pairs:10}",
+            flush=True,
+        )
+        for confirmations, partition in ((1, False), (1, True), (units // 10, False),
+                                         (units // 10, True)):
+            measure_derive_confirmed(units, confirmations, partition)
+    for rows_per_file in (33, 167, 333, 667):
+        for kind in ("reject", "confirm", "partition"):
+            measure_decision(rows_per_file, kind)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--worst"]:
         worst_cases()
         return
     if sys.argv[1:] == ["--constrained"]:
         constrained()
+        return
+    if sys.argv[1:] == ["--confirmed"]:
+        confirmed()
         return
     sizes = [(24, 200), (24, 1000), (24, 4000)]
     if len(sys.argv) > 1:

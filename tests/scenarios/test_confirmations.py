@@ -26,9 +26,11 @@ from personal_finance.reconcile.decisions import (
     CONFIRM_UNSUPPORTED,
     CONFIRMS_NOTHING,
     DECISION_NOT_ACTIVE,
+    DECISION_WRONG_ACCOUNT,
     KEEP_UNKNOWN,
     STALE_DECISION_REVISION,
     SUPERSEDES_NOTHING,
+    GROUP_DISTINCT_IDS,
     GROUP_NOT_CONNECTED,
     GROUP_OUTSIDE,
     GROUP_REPEATED,
@@ -740,3 +742,92 @@ class TestTotals:  # C13
         decision = confirm_ok(ledger, item, (one, two))
         assert ledger.undo(decision)[0] == 0
         assert "confirmed as one event" not in ledger.totals()
+
+
+class TestMoreRefusals:
+    def test_an_item_that_is_not_open(self, ledger):
+        item, one, two = pair_up(ledger)
+        token = ledger.revision(item)
+        conn = ledger.conn()
+        conn.execute("UPDATE review_issue SET status = 'resolved', resolved_at = '2026-02-01'")
+        conn.close()
+        code, _, err = confirm(ledger, item, (one, two), revision=token)
+        assert code == 2 and "not open" in err
+
+    def test_superseding_another_accounts_decision(self, ledger):
+        item, one, two, _ = three_of_them(ledger)
+        old = ledger.reject_ok(item, (one, two))
+        token = ledger.decision_revision(old)
+        ledger.add_account("B")
+        ledger.card("x.csv", CAFE, account="B")
+        ledger.card("y.csv", CAFE, account="B")
+        (other,) = set(ledger.items()) - {item}
+        before = ledger.dump()
+        code, _, err = confirm(ledger, other, tuple(ledger.transactions(other)), account="B",
+                               supersedes=old, supersedes_revision=token)
+        assert code == 2 and DECISION_WRONG_ACCOUNT in err
+        assert ledger.dump() == before
+
+    def test_supersedes_needs_its_revision(self, ledger):
+        item, one, two, _ = three_of_them(ledger)
+        old = ledger.reject_ok(item, (one, two))
+        code, _, err = ledger.run("review", "confirm", item, "--account", "A", "--revision",
+                                  ledger.revision(item), "--group", one, two, "--supersedes", old)
+        assert code == 2 and "must be given together" in err
+
+    def test_the_undo_preview_counts_the_restored_decision(self, ledger):
+        item, one, two, _ = three_of_them(ledger)
+        old = ledger.reject_ok(item, (one, two))
+        new = confirm_ok(ledger, item, (one, two), supersedes=old)
+        out = ledger.run("review", "decision", "show", new)[1]
+        assert "Transactions: 2 now, 3 after" in out
+
+
+class TestUniqueIds:  # D-026
+    def test_a_chain_cannot_join_two_unique_ids(self, ledger):
+        ledger.checking("a.csv", "S-1,2026-01-09,2026-01-10,SYNTHETIC CAFE,-5.00,POSTED")
+        ledger.card("b.csv", "01/10/2026,SYNTHETIC CAFE,5.00,")
+        ledger.checking("c.csv", "S-2,2026-01-09,2026-01-10,SYNTHETIC CAFE,-5.00,POSTED")
+        (item,) = ledger.items()
+        before = ledger.dump()
+        code, _, err = confirm(ledger, item, tuple(ledger.transactions(item)))
+        assert code == 2 and GROUP_DISTINCT_IDS in err
+        assert ledger.dump() == before
+
+
+class TestSupersedingConfirmations:  # C10, C11
+    def test_a_confirmations_same_event_pair_must_be_kept(self, ledger):
+        item, one, two, three = three_of_them(ledger)
+        old = confirm_ok(ledger, item, (one, two), (three,))
+        conn = ledger.conn()
+        (joined,) = [row[0] for row in conn.execute("SELECT id FROM ledger_transaction")
+                     if row[0] in (one, two)]
+        conn.close()
+        assert ledger.undo(old)[0] == 0
+        (item,) = ledger.items()
+        old = confirm_ok(ledger, item, (one, two), (three,))
+        ledger.card("d.csv", CAFE)
+        (item,) = ledger.items()
+        before = ledger.dump()
+        code, _, err = confirm(ledger, item, (joined, three), supersedes=old)
+        # Pairs between groups are numbered first, so the same_event pair is the third.
+        assert code == 2 and "pair 3 of the superseded decision" in err
+        assert ledger.dump() == before
+        assert confirm(ledger, item, (joined, three), supersedes=old, keep=(3,))[0] == 0
+        assert ledger.count() == 2
+
+    def test_the_undo_preview_counts_a_withholding_restored(self, ledger):
+        # A and B are halves, x is a lookalike. Restoring A≠B withholds C's later match.
+        ledger.card("a.csv", CAFE, extra=FIRST_HALF)
+        ledger.card("b.csv", CAFE, extra=SECOND_HALF)
+        ledger.card("x.csv", CAFE)
+        (item,) = ledger.items()
+        by_file = TestConfirm.by_file(ledger)
+        old = ledger.reject_ok(item, (by_file["a.csv"], by_file["b.csv"]))
+        new = confirm_ok(ledger, item, (by_file["a.csv"], by_file["b.csv"]), supersedes=old)
+        ledger.card("c.csv", CAFE, extra=WHOLE_MONTH)
+        assert ledger.count() == 2
+        out = ledger.run("review", "decision", "show", new)[1]
+        assert "Transactions: 2 now, 4 after" in out
+        assert ledger.undo(new)[0] == 0
+        assert ledger.count() == 4

@@ -216,8 +216,6 @@ def undo_outlook(
 
     material = {
         "state": decision.state,
-        "kind": decision.kind,
-        "supersedes": decision.supersedes_decision_id is not None,
         "pairs": sorted(_pair_keys(pair) for pair in decision.pairs),
         "rules": rules.fingerprint(),
         "records": sorted(
@@ -249,11 +247,11 @@ def decision_revision(material: dict) -> str:
 
 
 def _pair_keys(pair: BoundPair) -> list:
-    sides = sorted(
+    """A stored pair's relation never changes, so it is not needed here."""
+    return sorted(
         [[(record.content_sha256, record.row) for record in side]
          for side in (pair.left, pair.right)]
     )
-    return [pair.relation, *sides]
 
 
 def _without(fields: dict, *names: str) -> dict:
