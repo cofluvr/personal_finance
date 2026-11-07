@@ -40,6 +40,9 @@ class BoundPair:
     right_transaction_id: str
     left: tuple[BoundRecord, ...]
     right: tuple[BoundRecord, ...]
+    # A separation's group numbers, since both sides started in one transaction (D-047).
+    left_part: int | None = None
+    right_part: int | None = None
 
 
 @dataclass(frozen=True)
@@ -71,13 +74,19 @@ class UndoOutlook:
     transactions_after: int
 
 
+def shown_kind(kind: str, target_kind: str) -> str:
+    """A separation is stored as a confirmation of a transaction's records (D-047)."""
+    return "separate" if target_kind == "transaction" else kind
+
+
 def list_decisions(conn: sqlite3.Connection, account_id: str | None = None) -> list[tuple]:
     """IDs, kinds, states and counts only, so that routine output holds no financial data."""
     rows = conn.execute(
         """SELECT decision.id, account.display_name, decision.created_at, decision.account_id,
                   (SELECT COUNT(DISTINCT pair_number) FROM decision_constraint pair
                    WHERE pair.decision_id = decision.id),
-                  decision.kind
+                  CASE WHEN decision.target_kind = 'transaction' THEN 'separate'
+                       ELSE decision.kind END
            FROM decision
            JOIN account ON account.id = decision.account_id
            WHERE :account IS NULL OR decision.account_id = :account
@@ -110,20 +119,25 @@ def load_decision(conn: sqlite3.Connection, decision_id: str) -> DecisionEvidenc
     account_id, account_name, target, created_at, undone_at, kind, supersedes, target_kind = row
 
     sides = {}
-    for number, relation, left_transaction, right_transaction, left, right in conn.execute(
+    for (number, relation, left_transaction, right_transaction, left, right, left_part,
+         right_part) in conn.execute(
         """SELECT pair_number, relation, left_transaction_id, right_transaction_id,
-                  left_record_id, right_record_id
+                  left_record_id, right_record_id, left_part, right_part
            FROM decision_constraint WHERE decision_id = ?""",
         (decision_id,),
     ):
-        entry = sides.setdefault(number, (relation, left_transaction, right_transaction, set(), set()))
+        entry = sides.setdefault(
+            number,
+            (relation, left_transaction, right_transaction, set(), set(), left_part, right_part),
+        )
         entry[3].add(left)
         entry[4].add(right)
 
     pairs = tuple(
         BoundPair(relation, left_transaction, right_transaction,
-                  _bound_records(conn, left), _bound_records(conn, right))
-        for _, (relation, left_transaction, right_transaction, left, right) in sorted(sides.items())
+                  _bound_records(conn, left), _bound_records(conn, right), left_part, right_part)
+        for _, (relation, left_transaction, right_transaction, left, right, left_part,
+                right_part) in sorted(sides.items())
     )
     states = decision_states(conn, account_id)
     superseded_by = None

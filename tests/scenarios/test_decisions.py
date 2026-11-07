@@ -79,7 +79,7 @@ class Ledger:
         self.capsys.readouterr()
         words = list(command)
         position = 2 if words[0] in ("account", "review") else 1
-        if words[:2] == ["review", "decision"]:
+        if words[:2] in (["review", "decision"], ["review", "merge"]):
             position = 3
         words[position:position] = ["--db", self.db]
         code = main(words)

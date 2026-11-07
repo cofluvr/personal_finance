@@ -35,8 +35,10 @@ from personal_finance.reports.decision_evidence import (
 )
 from personal_finance.reports.review_evidence import (
     ReviewEvidence,
+    load_merge_evidence,
     load_review_evidence,
     review_revision,
+    transaction_revision,
 )
 from personal_finance.reports.totals import account_movement
 
@@ -137,12 +139,53 @@ STALE_DECISION_REVISION = (
 )
 
 
+TRANSACTION_NOT_FOUND = (
+    "transaction not found. A later import or decision can retire one: run review merges"
+)
+TRANSACTION_WRONG_ACCOUNT = "this transaction belongs to another account. Nothing was changed."
+ONE_RECORD = "this transaction holds one record, so there is nothing to separate. Nothing was changed."
+NOTHING_AUTOMATIC = (
+    "every record here was confirmed as one event, so nothing in this transaction was joined "
+    "automatically. Nothing was changed. To separate it, undo that confirmation."
+)
+IN_CONFLICT = (
+    "this transaction is in an open decision conflict, which is settled through that item. "
+    "Nothing was changed. Run review list, then confirm a partition on the conflict."
+)
+STALE_TRANSACTION_REVISION = (
+    "this revision does not match the transaction's current evidence. Nothing was changed. "
+    "Run review merge show and check the evidence again."
+)
+RECORD_REPEATED = "a record was named more than once. Nothing was changed."
+RECORD_OUTSIDE = "a group names a record that is not in this transaction. Nothing was changed."
+RECORD_UNNAMED = (
+    "every record of this transaction must be in a group, so that nothing is separated without "
+    "being stated. Nothing was changed. Run review merge show to see its records."
+)
+ONE_GROUP = (
+    "a single group keeps every record together, which separates nothing. Nothing was changed. "
+    "Give at least two groups."
+)
+SPLITS_CONFIRMED = (
+    "a group boundary would separate records that decision {decisions} confirmed as one event. "
+    "Nothing was changed. Keep them in one group, or undo that confirmation first."
+)
+WOULD_SPLIT_MORE = (
+    "this separation would change more than the transaction it names, so it was not recorded "
+    "and nothing was changed."
+)
+
+
 # One confirmation names at most this many transactions (D-046).
 MAX_CONFIRMED = 50
 
 TOO_MANY = (
     f"one confirmation can name at most {MAX_CONFIRMED} transactions. Nothing was changed. "
     "Confirm part of the group, then review it again."
+)
+TOO_MANY_RECORDS = (
+    f"one separation can name at most {MAX_CONFIRMED} records, and this transaction holds more. "
+    "Nothing was changed."
 )
 
 
@@ -168,6 +211,16 @@ class Confirmation:
     # The pairs of a superseded decision that this one contradicts, and those it keeps.
     contradicted_pairs: int = 0
     kept_pairs: int = 0
+
+
+@dataclass(frozen=True)
+class Separation:
+    decision_id: str
+    groups: int
+    transactions_before: int
+    transactions_after: int
+    # The guarantee of an ID that records in different groups share, which this overrides.
+    overridden_id_guarantee: str | None = None
 
 
 @dataclass(frozen=True)
@@ -396,6 +449,189 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
         decision_id, len(groups), len(before), len(after), still_open is not None,
         len(overturned) if replaced else 0, len(kept),
     )
+
+
+def _same_event_roots(constraints) -> dict[str, str]:
+    """A representative for each record an active same_event pair binds. Records of a
+    transaction with more than one representative hold something joined automatically, a
+    record no pair binds being its own (D-047)."""
+    bound = sorted({
+        record
+        for constraint in constraints if constraint.relation == RELATION_SAME
+        for record in (*constraint.left, *constraint.right)
+    })
+    place = {record: index for index, record in enumerate(bound)}
+    joined = _DisjointSet(len(bound))
+    for constraint in constraints:
+        if constraint.relation == RELATION_SAME:
+            sides = [place[record] for record in (*constraint.left, *constraint.right)]
+            for record in sides[1:]:
+                joined.union(sides[0], record)
+    return {record: bound[joined.find(index)] for record, index in place.items()}
+
+
+def separable_transactions(conn: sqlite3.Connection, account_id: str) -> list[tuple]:
+    """Transactions holding records joined automatically, as ID, record count and link rules.
+
+    IDs and counts only, so that routine output holds no financial data.
+    """
+    root = _same_event_roots(load_constraints(conn, account_id))
+    members = defaultdict(list)
+    rules = defaultdict(set)
+    for transaction_id, record_id, link_rule in conn.execute(
+        """SELECT transaction_id, source_record_id, link_rule FROM transaction_source
+           WHERE account_id = ?""",
+        (account_id,),
+    ):
+        members[transaction_id].append(record_id)
+        rules[transaction_id].add(link_rule)
+    return [
+        (transaction_id, len(records), tuple(sorted(rules[transaction_id])))
+        for transaction_id, records in sorted(members.items())
+        if len({root.get(record, record) for record in records}) > 1
+    ]
+
+
+def separate_records(
+    conn: sqlite3.Connection,
+    account_id: str,
+    transaction_id: str,
+    revision: str,
+    groups: list[list[str]],
+    rules: MatchingRules = DEFAULT_RULES,
+) -> Separation:
+    """Record an explicit partition of every record of one transaction (D-047).
+
+    Records in one group are one event, and records in different groups different events.
+    Whole-group withholding then keeps the automatic merge apart.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        result = _separate(conn, account_id, transaction_id, revision, groups, rules)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    return result
+
+
+def _separate(conn, account_id, transaction_id, revision, groups, rules) -> Separation:
+    if not is_current(conn, account_id, rules):
+        raise DecisionRefused(STALE_ACCOUNT)
+    merge = load_merge_evidence(conn, transaction_id)
+    if merge is None:
+        raise DecisionRefused(TRANSACTION_NOT_FOUND)
+    if merge.account_id != account_id:
+        raise DecisionRefused(TRANSACTION_WRONG_ACCOUNT)
+    records = [record.record_id for record in merge.transaction.records]
+    if len(records) < 2:
+        raise DecisionRefused(ONE_RECORD)
+    root = _same_event_roots(load_constraints(conn, account_id))
+    if len({root.get(record, record) for record in records}) < 2:
+        raise DecisionRefused(NOTHING_AUTOMATIC)
+    if _in_open_conflict(conn, transaction_id):
+        raise DecisionRefused(IN_CONFLICT)
+    if transaction_revision(merge) != revision:
+        raise DecisionRefused(STALE_TRANSACTION_REVISION)
+    _check_record_groups(conn, account_id, records, groups)
+
+    before = _memberships(conn, account_id)
+    expected = {records for key, records in before.items() if key != transaction_id}
+    expected.update(frozenset(group) for group in groups)
+
+    decision_id = str(uuid.uuid4())
+    conn.execute(
+        """INSERT INTO decision (id, account_id, target_id, target_revision, kind, target_kind)
+           VALUES (?, ?, ?, ?, 'confirm', 'transaction')""",
+        (decision_id, account_id, transaction_id, revision),
+    )
+    _write_record_partition(conn, decision_id, transaction_id, groups)
+    _record_event(conn, decision_id, "made", rules)
+
+    reconcile_account(conn, account_id, rules, decision_id=decision_id)
+    after = _memberships(conn, account_id)
+    if set(after.values()) != expected or any(
+        _in_open_conflict(conn, key) for key, held in after.items() if held & set(records)
+    ):
+        raise DecisionRefused(WOULD_SPLIT_MORE)
+    return Separation(
+        decision_id, len(groups), len(before), len(after), _overridden_guarantee(merge, groups)
+    )
+
+
+def _check_record_groups(conn, account_id, records, groups) -> None:
+    named = [record for group in groups for record in group]
+    if len(named) != len(set(named)):
+        raise DecisionRefused(RECORD_REPEATED)
+    if not set(named) <= set(records):
+        raise DecisionRefused(RECORD_OUTSIDE)
+    if len(records) > MAX_CONFIRMED:
+        raise DecisionRefused(TOO_MANY_RECORDS)
+    if set(named) != set(records):
+        raise DecisionRefused(RECORD_UNNAMED)
+    if len(groups) < 2:
+        raise DecisionRefused(ONE_GROUP)
+    group_of = {record: number for number, group in enumerate(groups) for record in group}
+    split = {
+        constraint.decision_id
+        for constraint in load_constraints(conn, account_id)
+        if constraint.relation == RELATION_SAME
+        and len({group_of[record] for record in (*constraint.left, *constraint.right)
+                 if record in group_of}) > 1
+    }
+    if split:
+        raise DecisionRefused(SPLITS_CONFIRMED.format(decisions=", ".join(sorted(split))))
+
+
+def _in_open_conflict(conn, transaction_id) -> bool:
+    return conn.execute(
+        """SELECT 1 FROM review_issue issue
+           JOIN review_issue_subject subject ON subject.review_issue_id = issue.id
+           WHERE issue.kind = 'decision_conflict' AND issue.status = 'open'
+             AND subject.transaction_id = ?""",
+        (transaction_id,),
+    ).fetchone() is not None
+
+
+def _write_record_partition(conn, decision_id, transaction_id, groups) -> None:
+    """Every record pair, written out: one event within a group, different events between.
+
+    Both sides start in one transaction, so the group numbers tell them apart. The lower group
+    is always on the left.
+    """
+    part = {record: number for number, group in enumerate(groups, start=1) for record in group}
+    pairs = sorted(
+        tuple(sorted(pair, key=lambda record: (part[record], record)))
+        for pair in combinations(sorted(part), 2)
+    )
+    conn.executemany(
+        """INSERT INTO decision_constraint (decision_id, relation, pair_number,
+                                            left_transaction_id, right_transaction_id,
+                                            left_record_id, right_record_id, left_part,
+                                            right_part)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (decision_id, RELATION_SAME if part[left] == part[right] else RELATION_DIFFERENT,
+             number, transaction_id, transaction_id, left, right, part[left], part[right])
+            for number, (left, right) in enumerate(pairs, start=1)
+        ],
+    )
+
+
+def _overridden_guarantee(merge, groups) -> str | None:
+    """The guarantee of an ID shared by records that this puts in different groups, if any.
+
+    Ordered by namespace, ID and guarantee, so that the choice never depends on generated IDs.
+    """
+    documents = {document.content_sha256: document for document in merge.documents}
+    group_of = {record: number for number, group in enumerate(groups) for record in group}
+    found = defaultdict(set)
+    for record in merge.transaction.records:
+        document = documents[record.content_sha256]
+        if record.parsed.external_id and document.id_guarantee != "none":
+            key = (document.id_namespace, record.parsed.external_id, document.id_guarantee)
+            found[key].add(group_of[record.record_id])
+    return next((key[2] for key, numbers in sorted(found.items()) if len(numbers) > 1), None)
 
 
 def _replaced(conn, account_id, replacing, rules):

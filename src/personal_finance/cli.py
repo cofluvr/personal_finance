@@ -37,6 +37,8 @@ from personal_finance.reconcile.decisions import (
     DecisionRefused,
     confirm_groups,
     reject_pairs,
+    separable_transactions,
+    separate_records,
     undecided_direct_pairs,
     undo_decision,
 )
@@ -45,13 +47,16 @@ from personal_finance.reports.decision_evidence import (
     STATE_ACTIVE,
     list_decisions,
     load_decision,
+    shown_kind,
     undo_outlook,
 )
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.review_evidence import (
+    load_merge_evidence,
     load_review_evidence,
     review_revision,
     rows_sharing_a_document,
+    transaction_revision,
 )
 from personal_finance.reports.totals import account_movement
 
@@ -154,6 +159,16 @@ CONFIRM_NOTICE = (
     "Run totals to see them."
 )
 
+SEPARATE_NOTICE = (
+    "Records separated from an automatic match are counted as separate transactions, so totals "
+    "can be higher than before. Run totals to see them."
+)
+
+ID_OVERRIDE_NOTICE = (
+    "Records in different groups share an ID that the source declares reliable, with guarantee "
+    "{guarantee}. This decision overrides that match for these records only."
+)
+
 UNDO_NOTICE = (
     "This re-derives from the evidence held now, without this decision. It does not restore "
     "an earlier snapshot, so totals may differ from those before the decision if evidence "
@@ -254,6 +269,33 @@ def build_parser() -> argparse.ArgumentParser:
     confirm.add_argument(
         "--keep", type=int, action="append", default=[], metavar="N",
         help="a pair number of the replaced decision to carry over. Repeat for each pair",
+    )
+
+    merges = command(
+        "merges", review_commands, handler=run_review_merges,
+        help="list transactions holding records joined automatically",
+    )
+    merges.add_argument("--account", help="account name or ID (default: every account)")
+
+    merge = review_commands.add_parser("merge", help="inspect one merged transaction")
+    merge_commands = merge.add_subparsers(dest="merge_command", required=True)
+    merge_show = command(
+        "show", merge_commands, handler=run_review_merge_show,
+        help="show the evidence behind one transaction, including amounts and descriptions",
+    )
+    merge_show.add_argument("transaction_id", help="a transaction ID from review merges")
+
+    separate = command(
+        "separate", review_commands, handler=run_review_separate,
+        help="record which records of a merged transaction are one event, and which are different",
+    )
+    separate.add_argument("transaction_id", help="a transaction ID from review merges")
+    separate.add_argument("--account", required=True, help="account name or ID")
+    separate.add_argument("--revision", required=True, help="the revision from review merge show")
+    separate.add_argument(
+        "--group", required=True, nargs="+", action="append", metavar="R",
+        help="record IDs that are one event. Repeat for each group: groups are different events, "
+        "and every record of the transaction must be in one",
     )
 
     decisions = command(
@@ -954,6 +996,61 @@ def run_review_confirm(args) -> int:
     return 0
 
 
+def run_review_merges(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    if args.account:
+        accounts = [find_account(conn, args.account)]
+    else:
+        accounts = [row[0] for row in conn.execute("SELECT id FROM account ORDER BY id")]
+    found = 0
+    for account_id in accounts:
+        for transaction_id, records, rules in separable_transactions(conn, account_id):
+            print(f"Transaction {transaction_id}: {records} records, {', '.join(rules)}")
+            found += 1
+    print(f"Transactions holding records joined automatically: {found}")
+    if found:
+        print("To see one's evidence, including amounts and descriptions, run review merge show.")
+    return 0
+
+
+def run_review_merge_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    merge = load_merge_evidence(conn, args.transaction_id)
+    if merge is None:
+        raise CommandError("transaction not found. Run review merges.")
+
+    entry = merge.transaction
+    print(f"Transaction {entry.transaction_id}")
+    print(f"  Account: {shown(merge.account_name)} ({merge.account_id})")
+    print(f"  Records: {len(entry.records)}")
+    print(f"  Revision: {transaction_revision(merge)}")
+    print_decided_pairs(merge)
+    print_transaction_evidence(entry, {})
+    print("Coverage evidence:")
+    for document in merge.documents:
+        print_document_evidence(document)
+    if merge.account_stale:
+        print(
+            "This account has not been reconciled under the current matching rules, so this "
+            "evidence may be out of date. Run reconcile."
+        )
+    return 0
+
+
+def run_review_separate(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = separate_records(conn, account_id, args.transaction_id, args.revision, args.group)
+
+    print(f"Decision {result.decision_id} recorded: {result.groups} groups separated.")
+    print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
+    print("  New records are not bound, so a later file can raise the question again.")
+    if result.overridden_id_guarantee:
+        print(f"  {ID_OVERRIDE_NOTICE.format(guarantee=result.overridden_id_guarantee)}")
+    print(f"  {SEPARATE_NOTICE}")
+    return 0
+
+
 def run_review_decisions(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
@@ -977,7 +1074,7 @@ def run_review_decision_show(args) -> int:
 
     print(f"Decision {decision.decision_id}")
     print(f"  Account: {shown(decision.account_name)} ({decision.account_id})")
-    print(f"  Kind: {decision.kind}")
+    print(f"  Kind: {shown_kind(decision.kind, decision.target_kind)}")
     print(f"  Status: {decision.state}")
     print(f"  Made: {decision.created_at}")
     if decision.undone_at:
@@ -989,11 +1086,20 @@ def run_review_decision_show(args) -> int:
         )
     if decision.supersedes_decision_id:
         print(f"  Supersedes decision {decision.supersedes_decision_id}")
-    print(f"  From review item: {decision.target_id}")
+    if decision.target_kind == "transaction":
+        print(f"  From transaction: {decision.target_id}")
+    else:
+        print(f"  From review item: {decision.target_id}")
 
     for number, pair in enumerate(decision.pairs, start=1):
         print(f"Pair {number} of {len(decision.pairs)}: {pair.relation}")
-        print(f"  At decision time: {pair.left_transaction_id} and {pair.right_transaction_id}")
+        if pair.left_part is None:
+            print(f"  At decision time: {pair.left_transaction_id} and {pair.right_transaction_id}")
+        else:
+            print(
+                f"  At decision time: both in {pair.left_transaction_id}, groups "
+                f"{pair.left_part} and {pair.right_part}"
+            )
         for label, records in (("One side", pair.left), ("Other side", pair.right)):
             print(f"  {label}:")
             for record in records:
@@ -1068,6 +1174,11 @@ def run_totals(args) -> int:
         print(
             f"- {movement.transactions_confirmed} transactions hold records you confirmed as one "
             "event, and each is counted once. Undoing a confirmation can raise totals."
+        )
+    if movement.transactions_separated:
+        print(
+            f"- {movement.transactions_separated} transactions hold records you separated from an "
+            "automatic match, and each is counted. Undoing a separation can lower totals."
         )
     return 0
 
