@@ -22,6 +22,8 @@ class AccountMovement:
     transactions_in_decision_conflicts: int = 0
     transactions_with_withheld_match: int = 0
     transactions_with_changed_basis: int = 0
+    # Transactions holding records a person confirmed as one event (D-046).
+    transactions_confirmed: int = 0
 
 
 def account_movement(conn: sqlite3.Connection, account_id: str | None = None) -> AccountMovement:
@@ -75,6 +77,14 @@ def account_movement(conn: sqlite3.Connection, account_id: str | None = None) ->
         {"account": account_id},
     ).fetchone()
 
+    confirmed = conn.execute(
+        """SELECT COUNT(DISTINCT transaction_id) FROM transaction_source
+           WHERE link_rule = 'confirmed_same_event'
+             AND (:account IS NULL OR account_id = :account)""",
+        {"account": account_id},
+    ).fetchone()[0]
+
     return AccountMovement(
-        inflow, outflow, net, transactions, pending, unresolved, groups, members, *conflicts
+        inflow, outflow, net, transactions, pending, unresolved, groups, members, *conflicts,
+        confirmed,
     )

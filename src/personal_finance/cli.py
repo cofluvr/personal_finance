@@ -1064,6 +1064,11 @@ def run_totals(args) -> int:
         )
     for line in describe_conflicts(movement):
         print(f"- {line}")
+    if movement.transactions_confirmed:
+        print(
+            f"- {movement.transactions_confirmed} transactions hold records you confirmed as one "
+            "event, and each is counted once. Undoing a confirmation can raise totals."
+        )
     return 0
 
 

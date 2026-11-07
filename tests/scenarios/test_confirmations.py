@@ -726,3 +726,17 @@ class TestSuperseding:  # C10, C11
         out = ledger.run("review", "decisions")[1]
         assert f"Decision {old}: superseded, reject, 1 pairs" in out
         assert f"Decision {new}: active, confirm, 1 pairs" in out
+
+
+class TestTotals:  # C13
+    def test_totals_disclose_confirmed_transactions(self, ledger):
+        item, one, two, _ = three_of_them(ledger)
+        assert "confirmed as one event" not in ledger.totals()
+        confirm_ok(ledger, item, (one, two))
+        assert "- 1 transactions hold records you confirmed as one event" in ledger.totals()
+
+    def test_the_line_goes_with_undo(self, ledger):
+        item, one, two = pair_up(ledger)
+        decision = confirm_ok(ledger, item, (one, two))
+        assert ledger.undo(decision)[0] == 0
+        assert "confirmed as one event" not in ledger.totals()

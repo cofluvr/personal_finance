@@ -853,6 +853,7 @@ when the two are not direct candidates, because the person stated it. Nothing is
 | Size | At most 50 transactions named in one decision |
 | Contradiction | A group holding both sides of an active `different_event` pair needs `--supersedes` |
 | Totals | Only the stated merges may change memberships. Anything else refuses atomically |
+| Only one-transaction groups | Refused on a candidate item, because it only keeps transactions apart, which is `review reject` and limited to direct pairs (D-045). Allowed on a conflict, to settle it |
 
 **Derivation.** Records joined by active `same_event` constraints form fixed units. An automatic merge
 touching a confirmed unit joins it only if the result keeps one record per document and no
@@ -876,6 +877,9 @@ Superseding because of new evidence stays in M2.5.
   are copied record for record, so they bind no new records.
 - Undoing the superseding decision restores the old one, or refuses if that would contradict an
   active decision. Undoing a superseded decision is refused, naming the decision that replaced it.
+- Superseding is done from an open item holding the transactions. A rejection that closed its item
+  leaves nothing to confirm on, so it is undone first, which raises the item again. Found while
+  building M2.3.
 
 **Tokens.** Revision version 3 adds each decided pair's relation. Decision revision version 2 adds the
 decision's kind, its relation per pair, what it supersedes, and computes the outcome without it

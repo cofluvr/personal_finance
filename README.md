@@ -181,7 +181,7 @@ bin/pf trace --db "$DB" TRANSACTION_ID
 bin/pf reconcile --db "$DB"
 ```
 
-`transactions`, `trace` and `review show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review decisions`, `review decision show` and `review undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
+`transactions`, `trace` and `review show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review confirm`, `review decisions`, `review decision show` and `review undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
 
 ## Reading a Review Item
 
@@ -196,7 +196,7 @@ bin/pf review decision show --db "$DB" DECISION_ID
 bin/pf review undo --db "$DB" --account ACCOUNT DECISION_ID --revision REVISION
 ```
 
-`review reject` records that two transactions in a `cross_document_candidates` item are different events. Other kinds of item cannot be acted on yet, and possible duplicates cannot yet be confirmed, so true duplicates stay open and counted.
+`review reject` records that two transactions in a `cross_document_candidates` item are different events. Other kinds of item cannot be rejected.
 
 - Name a pair from the direct pairs listed by `review show`. Two transactions that only share an item through a third are refused. Repeat `--pair` to record several pairs as one decision.
 - The account, item and revision from `review show` are checked together, and any change to the evidence since you looked refuses the command. An account that is not current is refused: run `reconcile`, then look again.
@@ -218,6 +218,23 @@ bin/pf review undo --db "$DB" --account ACCOUNT DECISION_ID --revision REVISION
 | Revision | Identifies this evidence. It changes when any of it changes, and a repeat import that changes nothing leaves it alone |
 
 A value the source did not provide is shown as `missing`. Members of a possible-duplicate group are all counted in full, and no exact adjustment can be stated. See [D-040](docs/decisions.md).
+
+## Confirming Duplicates
+
+```sh
+bin/pf review confirm --db "$DB" --account ACCOUNT ITEM_ID --revision REVISION --group T1 T2 [--group T3]
+```
+
+`review confirm` records which transactions in a `cross_document_candidates` or `decision_conflict` item are one event. Each `--group` is one event, different groups are different events, and transactions you leave out stay undecided, so you can confirm part of a group.
+
+- A group must be linked directly, or for a conflict through one withheld match, and may hold only one record from any document. Two alike rows of one file go in separate groups.
+- Confirming joins each group into one transaction, so totals can go down. It changes nothing else, or it is refused. `totals` says how many transactions hold confirmed records.
+- On a candidate item, at least one group must hold two transactions. Keeping transactions apart is `review reject`.
+- A confirmation survives repeat imports, `reconcile`, new files and rules changes. A new automatic match joins a confirmed transaction only when that keeps one record per document and breaks no decision. Otherwise the match is withheld and raised as a conflict.
+- Confirming every transaction of a conflict, in one decision, settles it. A rejection never does.
+- At most 50 transactions can be named in one decision.
+
+To replace an earlier rejection that a group contradicts, add `--supersedes DECISION_ID --supersedes-revision REVISION`, with the revision from `review decision show`. Every pair of the old decision must be either contradicted by the groups or kept with `--keep N`, using the pair numbers that `review decision show` prints. Undoing the new decision restores the old one, unless decisions made since contradict it. A superseded decision cannot be undone directly. When the rejection closed its item, there is nothing to confirm on: undo it, which raises the item again, then confirm. See [D-046](docs/decisions.md).
 
 ## Reading an Import Summary
 
