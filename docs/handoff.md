@@ -1,11 +1,13 @@
-# Session Handoff: M2.3 Awaiting Review
+# Session Handoff: M2.3 Accepted, M2.4 Plan Awaiting Approval
 
 For a fresh session. Written 2026-11-07. **M1 is complete and accepted**, and its limitations and
 deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
 
-**M2.1 and M2.2 are accepted.** The owner accepted M2.2 as built on 2026-11-07, including the
-choices at the end of D-045, with no changes. **M2.3 is implemented and awaits the owner's review.
-Do not start M2.4.** M2.4 to M2.9 are provisional, and each needs its own approval. M2.1's decisions
+**M2.1, M2.2 and M2.3 are accepted.** The owner accepted M2.2 as built on 2026-11-07, including the
+choices at the end of D-045, with no changes. The owner accepted M2.3 as built on 2026-11-07,
+including the rules and limits recorded in D-046 and "M2.3 as built" below, with no changes. **A plan
+for M2.4 has been proposed to the owner and is not approved. Do not implement it.** M2.4 to M2.9 are
+provisional, and each needs its own approval. M2.1's decisions
 are D-040 and D-041, M2.2's rules are D-042 to D-045, with D-045 overriding the others where they
 differ, and M2.3's are D-046.
 
@@ -14,8 +16,8 @@ differ, and M2.3's are D-046.
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `feature/m2-review`, created from `643e1b1`. Local only, with no upstream |
-| Latest commit | Run `git log -1`: the commit recording this handoff, whose parent is `f9baed0`. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a` |
+| Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review`. See "Remote state" |
+| Latest commit | Run `git log -1`: the commit recording M2.3's acceptance, whose parent is `0d3b707`. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a` |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -26,9 +28,15 @@ differ, and M2.3's are D-046.
 of slice 1) on 2026-11-05, which set upstream tracking, and `643e1b1` (all of M1) on 2026-11-06
 at 00:27:10. The owner confirmed that the second push was theirs and intentional, and no
 investigation is needed. The 43 commits it added hold code, documentation and the three
-synthetic fixture CSVs. `feature/m2-review` has never been pushed. **Unverified:** the remote's
-live state and the repository's visibility, because GitHub was not contacted. Local tracking
-refs only record what was last pushed from here.
+synthetic fixture CSVs.
+
+The owner pushed `feature/m2-review` themselves, and reported at the M2.3 review that they did so
+after M2.3. The only push recorded in this clone is of `673c025`, the M2.2 handoff commit, on
+2026-11-07 at 15:48:44 -0500, which set upstream tracking. This clone's ref is therefore 8 commits
+behind `0d3b707`, which does not show an M2.3 push. A push from another clone would not appear here.
+Nothing was investigated and nothing was pushed from here. **Unverified:** the remote's live state
+and the repository's visibility, because GitHub was not contacted. Local tracking refs only record
+what was last pushed from here.
 
 Read first: this file, [decisions.md](decisions.md), [plan.md](plan.md),
 [layouts.md](layouts.md), [status.md](status.md), [m1-acceptance.md](m1-acceptance.md).
@@ -135,6 +143,7 @@ pass, and S1 to S23 still pass.
 
 | Check | Result |
 |---|---|
+| `.venv/bin/python -m pytest -q` at the start of the M2.3 review session, `0d3b707` | 1063 passed, exit code 0 |
 | `.venv/bin/python -m pytest` at the start of the M2.3 session, `673c025` | 970 passed, exit code 0 |
 | The same suite gating each M2.3 commit, last at `f9baed0` | 1063 passed, exit code 0 |
 | Targeted deliberate breaks, M2.3 | 62 breaks, all caught at `f9baed0`, each by a relevant test, with an unbroken control passing. The first run found 2 real bugs and 2 test gaps, removed 1 unreachable path and 2 immaterial token fields, and had 4 mislabelled breaks whose catch was credited to the wrong test. 2 breaks matched nothing after a code change and were corrected and rerun. Script and results in `build/m2.3-breaks/`, ignored and may not survive |
@@ -337,7 +346,8 @@ and were accepted with M2.2.
 
 ## M2.3 as built
 
-Scope and acceptance tests are in [plan.md](plan.md) (C1 to C21), and the rules in D-046. Tests are
+Accepted as built by the owner on 2026-11-07, with these limits. Scope and acceptance tests are in
+[plan.md](plan.md) (C1 to C21), and the rules in D-046. Tests are
 in `tests/scenarios/test_confirmations.py`, `test_confirmation_migration.py`,
 `test_decision_order.py` and `tests/unit/test_constraints.py`. The benchmark is
 `tests/benchmarks/measure_reconciliation.py --confirmed`.
@@ -385,10 +395,20 @@ in `tests/scenarios/test_confirmations.py`, `test_confirmation_migration.py`,
   and `build/tmp`. Harness-managed background task output went to the system temporary folder and
   was not opened.
 
+## Boundary notes from the M2.3 review session
+
+- The session read nothing outside this repository, and listed no parent or sibling directory.
+- Harness-managed, not the session's own action: the harness attached a user-level memory index to
+  the session's context, unasked. It was not acted on. Oversized outputs were saved under
+  `~/.claude`. Two of them were the session's own reads of this repository's files and were read
+  back. The rest were not opened.
+- pytest temporary files used `build/tmp`.
+
 ## Awaiting the owner
 
-- Review of M2.3.
-- Pushing. Not authorized. `feature/m2-review` is local only.
+- Approval of the M2.4 plan, which was proposed in the review session and is not recorded here
+  until approved.
+- Pushing. Not authorized from here. The owner's own push is described under "Remote state".
 
 ## Recommended M2 scope
 
@@ -400,10 +420,10 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for M2.2's review outcome and for M2.3 | **Must be renewed** for anything further |
+| Local commits on `feature/m2-review` | Approved for M2.2's review outcome, M2.3 and M2.3's review outcome | **Must be renewed** for anything further |
 | M2.2 | Accepted as built, 2026-11-07 | None |
-| M2.3 | Implemented. Stopped for review | Owner reviews |
-| M2.4 | Provisional, not approved | Needs its own plan and approval |
+| M2.3 | Accepted as built, 2026-11-07 | None |
+| M2.4 | Plan proposed, not approved | Owner approves or changes the plan |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -429,13 +449,11 @@ Read docs/handoff.md first, then the files it lists. Confirm the branch is featu
 the working tree is clean, and run the test suite with a real exit code before changing
 anything. Do not contact GitHub.
 
-M2.3 review outcome:
-[PASTE IT HERE: accepted, or the changes you want]
+M2.4 plan outcome:
+[PASTE IT HERE: approved, or the changes you want, with the plan itself]
 
-Task: record the review outcome, making any changes it asks for first as small gated commits.
-Do not reopen D-042 to D-046 unless you find a concrete contradiction. Then propose a plan for
-M2.4, separating machine-made merges, against D-029, D-042, D-045 and D-046, and wait for my
-approval before implementing it.
+Task: record the approved M2.4 plan as a decision, then implement it as small gated commits, and
+stop for review. Do not reopen D-042 to D-046 unless you find a concrete contradiction.
 
 Pushing needs my explicit approval each time. No network, no new dependencies, no security
 changes. Synthetic data only. Use build/ for walkthroughs, breaks and benchmarks, with TMPDIR set

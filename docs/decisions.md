@@ -829,10 +829,11 @@ with M2.2 on 2026-11-07:
 - Link history names the decision for moves caused by withholding and by undo. Where several
   decisions withheld one group, the lowest ID is recorded.
 
-## D-046 Confirmation, partitions and superseding — Approved, implemented in M2.3
+## D-046 Confirmation, partitions and superseding — Approved, implemented and accepted in M2.3
 
 Approved by the owner on 2026-11-07 with the M2.3 plan. Builds on D-042 to D-045 and changes none
-of them.
+of them. Accepted as built by the owner on 2026-11-07, with the limits in the handoff's "M2.3 as
+built".
 
 ```sh
 pf review confirm --db DB --account A ITEM_ID --revision R --group T1 T2 [--group T3] \
@@ -882,10 +883,16 @@ Superseding because of new evidence stays in M2.5.
   leaves nothing to confirm on, so it is undone first, which raises the item again. Found while
   building M2.3.
 
-**Tokens.** Revision version 3 adds each decided pair's relation. Decision revision version 2 adds the
-decision's kind, its relation per pair, what it supersedes, and computes the outcome without it
-with any superseded decision restored. Superseding needs the item's token and the old decision's
-token, both checked under the write lock.
+**Tokens.** Revision version 3 adds each decided pair's relation. Decision revision version 2
+computes the outcome without the decision with any superseded decision restored, and covers whether
+each other active decision touching the scope is a confirmation. Superseding needs the item's token
+and the old decision's token, both checked under the write lock.
+
+Corrected at acceptance, to match what was built and accepted: the plan said version 2 would also
+hold the decision's own kind, its relation per pair and what it supersedes. All three are fixed
+when the decision is written, so they cannot change between `review decision show` and `undo`, and
+their effect reaches the token through the outcomes with and without the decision. They were
+removed during M2.3 as immaterial, which the handoff records.
 
 **Disclosure.** `review confirm` prints transaction counts and no amounts. `totals` gains its own line
 for transactions holding records confirmed as one event. Undo says that totals may rise.
