@@ -149,7 +149,7 @@ the decision log records the database, parser and deduplication rules.
 
 ## M2 plan
 
-M2.1, M2.2 and M2.3 are accepted (D-046). **M2.4 to M2.9 are provisional**:
+M2.1, M2.2 and M2.3 are accepted (D-046). M2.4 is approved (D-047). **M2.5 to M2.9 are provisional**:
 a direction, not approval to implement, and each needs its own approval. D-041 lists requirements
 they must meet.
 
@@ -158,7 +158,7 @@ they must meet.
 | M2.1 | Review evidence: `review list` IDs, `review show`, revision tokens. Read-only, no migration | Accepted |
 | M2.2 | Decision core: stable-ID storage, precedence over automatic reconciliation, pair rejection and undo | Accepted |
 | M2.3 | Confirm, including part of a group | Accepted |
-| M2.4 | Separating machine-made merges | Provisional |
+| M2.4 | Separating machine-made merges | Approved (D-047), in progress |
 | M2.5 | New evidence that touches a decided record, and superseding a decision | Provisional |
 | M2.6 | Correction overrides | Provisional |
 | M2.7 | Resolving incomplete records | Provisional |
@@ -286,6 +286,41 @@ and same-document items, several records from one document in a transaction.
 | C19 | Confirmation, its undo and a later import are measured on dense groups |
 | C20 | S1 to S23 still pass |
 | C21 | A confirmation keeps one public ID, and undo revives retired IDs with their `created_at` |
+
+### M2.4 scope
+
+The rules are D-047. Migration 0007, `review merges`, `review merge show` with the transaction token,
+`review separate`, a `totals` line for separated transactions, and a benchmark with `--separated`.
+
+Deferred: superseding a confirmation by a separation (M2.5), transferring a separation to a
+re-export, external-ID and same-document items.
+
+### M2.4 acceptance criteria
+
+| ID | Test |
+|---|---|
+| P1 | Separating an exact merge into single records raises the transaction count. Source evidence is byte-identical |
+| P2 | The same for a reliable-ID merge, and the output names the ID override |
+| P3 | Three documents, keeping {A,B}: A and B are one confirmed unit, C alone, and the stored pairs are exactly that partition |
+| P4 | Refused, with nothing changed: wrong account, unknown transaction, stale token, a record unnamed, repeated or outside, one group, one record, nothing joined automatically, a split confirmed core, a transaction in an open conflict, too many records |
+| P5 | A stale account is not reconciled by the refused command |
+| P6 | A separation survives repeat imports, `reconcile`, unrelated files and a rules change |
+| P7 | A re-export that would rejoin the records raises an open withheld-match conflict |
+| P8 | The decision itself raises no conflict and no candidate item between its groups |
+| P9 | A separation that would change more than its own split refuses atomically |
+| P10 | Undo equals a ledger built without it, with and without imports since |
+| P11 | A later confirmation joining a group with a new record, then undoing the separation, follows D-046's joining rules |
+| P12 | A confirmation can supersede a separation, with every pair contradicted or kept |
+| P13 | One group keeps the public ID, and the others revive with their `created_at` |
+| P14 | `totals` discloses separated transactions. `review merges` and `review separate` print no amounts |
+| P15 | Tokens: `t1` pinned, equal across import orders, changed by material evidence, and a separation changes overlapping items' tokens |
+| P16 | Property test: import order does not change the outcome for fixed separations, confirmations and rejections |
+| P17 | Equivalent separations made at different valid points in the import sequence give the same outcome |
+| P18 | Migration 0007 works on a populated ledger and is atomic on failure. Decision tables stay append-only |
+| P19 | A separation, its undo and a later import are measured on dense groups that separated records still link into |
+| P20 | S1 to S23 and C1 to C21 still pass |
+| P21 | `review merge show` escapes descriptions and IDs |
+| P22 | `trace` and link history name the separation behind each move |
 
 ## Backlog benchmarks
 

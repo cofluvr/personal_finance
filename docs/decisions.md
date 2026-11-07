@@ -901,6 +901,77 @@ for transactions holding records confirmed as one event. Undo says that totals m
 slower than M2.2's rejection, the work stops and is reported. Matching is not changed to meet a
 target.
 
+## D-047 Separating machine-made merges — Approved
+
+Approved by the owner on 2026-11-07 with the M2.4 plan, taking every recommendation in it. Builds on
+D-029 and D-042 to D-046, and changes none of them.
+
+```sh
+pf review merges --db DB --account A
+pf review merge show --db DB TRANSACTION_ID
+pf review separate --db DB --account A TRANSACTION_ID --revision t1-… --group R1 R2 --group R3
+```
+
+**What it is.** A partition of one transaction's source records, stored as a confirmation (D-042
+puts partitions under confirmation) whose target is a transaction rather than a review item. Records
+in one group are `same_event`, records in different groups `different_event`, one stated pair per
+record pair. Whole-group withholding (D-042) then keeps the automatic merge apart, the `same_event`
+pairs keep each group of several records together as a confirmed unit, and the partition settles
+the conflict that withholding would otherwise raise (D-046). Undoing a machine merge is therefore a
+decision, and the next reconcile cannot merge the records again.
+
+| Question | Rule |
+|---|---|
+| What can be separated | A transaction holding records joined automatically, by `reliable_external_id` or `exact_coverage_pair`, including those a confirmed unit absorbed |
+| A reliable-ID merge | Allowed. The output says the decision overrides an ID the source calls unique (D-026) |
+| A confirmed unit | Its confirmed core counts as confirmed and its absorbed records as machine-made. No group boundary may cross an active `same_event` pair, which needs undo |
+| Refused | One record, nothing joined automatically, or the transaction in an open `decision_conflict`, which is settled through the conflict |
+| Groups | Every record named in exactly one group, at least two groups, at most 50 records. Unnamed records would be separated with no stated relation, an implied "all distinct" (D-042) |
+| Connection | Not D-046's direct links: the records were joined by this one automatic merge. Two records sharing a reliable ID can differ in description |
+| Unique IDs | D-046's check is not repeated: records of one machine merge share one ID or carry none |
+| Public IDs | The group holding the earliest-imported record keeps the ID, and the others revive theirs with their `created_at` (D-029) |
+| Totals | May rise. Memberships must become exactly the old ones with this transaction replaced by its groups, and no open conflict may hold its records, or the command refuses atomically |
+
+**Commands.** A confident merge raises no review item, and making every merge one would flood the
+queue. `review merges` lists separable transactions with record counts and link rules only.
+`review merge show` gives one transaction's evidence in `review show`'s sections and a `t1-…` token.
+`review separate` runs D-043's checks under one write lock. It is its own command: its target,
+connection rule and the direction its ledger check enforces all differ from `review confirm`, which
+it shares the partition writer with.
+
+**Conflicts.** A separation creates and settles none when made. Later evidence that would rejoin its
+records, such as a re-export carrying the same ID, raises `automatic_match_withheld`, open because
+the new record is undecided. `decision_basis_changed` cannot come from its pairs: each side is one
+record.
+
+**Superseding and undo.** A separation never supersedes: a live merge holds no `different_event`
+pair, and splitting a confirmed core is refused. It can be superseded by a confirmation under D-046,
+from an open item, though its groups raise none between themselves, so in practice it is undone
+first. Undo re-derives without it, so the merge returns or is withheld with a conflict under D-046's
+joining rules. Superseding a confirmation by a separation stays in M2.5.
+
+**Storage.** Migration 0007 renames `decision.review_issue_id` and `item_revision` to `target_id`
+and `target_revision`, adds `target_kind` (`item` or `transaction`), and rebuilds
+`decision_constraint` with `left_part` and `right_part`, because its check that the two transaction
+IDs differ cannot hold when both sides start in one transaction. Nothing references that table, so
+it is rebuilt directly, with its triggers and indexes recreated.
+
+**Tokens.** The transaction token is `t<version>-<16 hex characters>`, version 1: the transaction's
+values and primary source, each record's cells, parsed values and link rule, each document's
+interpretation, coverage and effective end, and the active decided pairs touching its records. IDs,
+file names and history are left out. Item revision version 3 and decision revision version 2 are
+unchanged, because a separation reaches them through fields they already cover, and its target is
+fixed when written, so immaterial.
+
+**Disclosure.** `review separate` prints transaction counts and no amounts, with a notice that totals
+can rise. `totals` gains a line for transactions holding records a separation keeps apart, and says
+undoing one can lower totals.
+
+**Cost.** A separation touches its candidate group as a partition does, and adds units to it. It is
+measured on a shape where separated records still link with many others: two documents with
+complete coverage that pair every row, and a third with unknown coverage holding the same rows. If
+it is materially slower than a partition on that shape, the work stops and is reported.
+
 ## Not yet decided
 
 From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend details
