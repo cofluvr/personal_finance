@@ -676,7 +676,7 @@ in [plan.md](plan.md) is provisional and not approved for implementation.
   overrides affect one merged transaction, including exactly which effective value totals use.
   "Neither chosen silently" is not sufficient on its own.
 
-## D-042 Rejection and the identity constraint model — Approved, implemented in M2.2
+## D-042 Rejection and the identity constraint model — Approved, implemented and accepted in M2.2
 
 Refines D-009 and resolves the first requirement of D-041.
 
@@ -715,7 +715,7 @@ other. Rejecting an already rejected pair is refused. Defined for M2.3: a new de
 the one it replaces and restate any pairs it keeps. Undoing it restores the old one, or refuses if
 that would contradict an active decision. Nothing is replaced implicitly.
 
-## D-043 Validating decision commands and undo — Approved, implemented in M2.2
+## D-043 Validating decision commands and undo — Approved, implemented and accepted in M2.2
 
 Applies the owner's qualifications on D-040.
 
@@ -741,7 +741,7 @@ A refusal changes nothing and exits with code 2.
 - The result of undo equals a ledger built without that decision. It is not necessarily the
   earlier totals, because evidence may have arrived since, and the output must say so.
 
-## D-044 Decision conflicts — Approved, implemented in M2.2
+## D-044 Decision conflicts — Approved, implemented and accepted in M2.2
 
 Decision-related conflicts are a separate classification, not a variety of possible duplicate.
 
@@ -759,7 +759,7 @@ Decision-related conflicts are a separate classification, not a variety of possi
 - Widening the kind needs `review_issue` rebuilt. Moving the `review_issue_subject` rows out and back
   in one transaction worked on a populated ledger. A plain rebuild fails its foreign keys at commit.
 
-## D-045 Owner's qualifications on M2.2 — Approved, implemented in M2.2
+## D-045 Owner's qualifications on M2.2 — Approved, implemented and accepted in M2.2
 
 Given by the owner on 2026-11-06 with the confirmation to start M2.2. They override anything in
 D-042 to D-044 or the plan that they change. Migration 0005 and the populated `review_issue`
@@ -809,8 +809,8 @@ semantics are not changed silently to meet a target.
 **Not approved:** confirmation, superseding, separating existing merges, corrections, later slices,
 network access, new dependencies, security changes and pushing.
 
-**How these were implemented,** where the rules above left a choice. All are defaults, open to
-change at review:
+**How these were implemented,** where the rules above left a choice. The owner accepted all of them
+with M2.2 on 2026-11-07:
 
 - A decision's pairs are stored one row per record pair, sharing a `pair_number`. The two sides of
   a stated pair are what `decision_basis_changed` compares.

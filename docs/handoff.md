@@ -1,10 +1,12 @@
-# Session Handoff: M2.2 Awaiting Review
+# Session Handoff: M2.2 Accepted
 
-For a fresh session. Written 2026-11-06. **M1 is complete and accepted**, and its limitations
-and deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
+For a fresh session. Written 2026-11-06, and updated 2026-11-07 when M2.2 was accepted. **M1 is
+complete and accepted**, and its limitations and deferred benchmarks still stand. See
+[m1-acceptance.md](m1-acceptance.md).
 
-**M2.1 is accepted. M2.2 is implemented and awaits the owner's review. Do not start M2.3.** M2.3 to
-M2.9 are provisional, and each needs its own approval. M2.1's decisions are D-040 and D-041, and
+**M2.1 and M2.2 are accepted.** The owner accepted M2.2 as built on 2026-11-07, including the
+choices at the end of D-045, with no changes. **Do not start M2.3 until the owner approves its
+plan.** M2.3 to M2.9 are provisional, and each needs its own approval. M2.1's decisions are D-040 and D-041, and
 M2.2's rules are D-042 to D-045, with D-045 overriding the others where they differ.
 
 ## Current state
@@ -13,7 +15,7 @@ M2.2's rules are D-042 to D-045, with D-045 overriding the others where they dif
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Local only, with no upstream |
-| Latest commit | Run `git log -1`: the commit recording this handoff, whose parent is `56e0adc`. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a` |
+| Latest commit | Run `git log -1`: the commit recording M2.2's acceptance, whose parent is `673c025`, or a later handoff commit. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a` |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -278,7 +280,7 @@ slices:
 Scope and acceptance tests are in [plan.md](plan.md) (S1 to S23). Tests are in
 `tests/scenarios/test_decisions.py`, `test_decision_order.py`, `test_decision_migration.py` and
 `tests/unit/test_constraints.py`. Choices made where the rules left one are at the end of D-045,
-and are open to change at review.
+and were accepted with M2.2.
 
 **Known limits of M2.2:**
 
@@ -315,9 +317,17 @@ and are open to change at review.
 - Benchmark and break temporary files used `build/tmp`. pytest's own temporary folders stay under the
   documented exception.
 
+## Boundary notes from the M2.2 review session
+
+- The session read nothing outside this repository, and listed no parent or sibling directory.
+- Harness-managed, not the session's own action: the harness attached a user-level memory index to
+  the session's context, unasked. It was not acted on. One oversized output was saved under
+  `~/.claude`, and was not opened.
+- pytest and break temporary files used `build/tmp`.
+
 ## Awaiting the owner
 
-- Review of M2.2.
+- Approval of the M2.3 plan, proposed in the review session and not yet recorded in the docs.
 - Pushing. Not authorized. `feature/m2-review` is local only.
 
 ## Recommended M2 scope
@@ -330,8 +340,8 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for M2.2 | **Must be renewed** for anything further |
-| M2.2 | Implemented. Stopped for review | Owner reviews |
+| Local commits on `feature/m2-review` | Approved for recording M2.2's review outcome | **Must be renewed** for anything further |
+| M2.2 | Accepted as built, 2026-11-07 | None |
 | M2.3 | Provisional, not approved | Needs its own plan and approval |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
