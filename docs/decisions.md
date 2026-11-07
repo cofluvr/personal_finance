@@ -207,6 +207,9 @@ and does not compare generated IDs or display order.
 
 ## D-009 Stable identity for decisions and corrections — Approved, implemented in M2
 
+Refined by D-042: identity decisions anchor on `source_record.id`.
+
+
 - Decisions and overrides reference internal `ledger_transaction.id` and
   `source_record.id` values. These are random, immutable and carry no meaning.
 - `raw_fingerprint` and `occurrence` are **supporting evidence only**. They can
@@ -290,7 +293,7 @@ until redacted samples exist and have tests.
 - All development data is synthetic.
 - The M5 real-data gate is mandatory before processing actual documents.
 - Local commits on the feature branch are approved. Every push needs the owner's
-  explicit approval. The owner's own push of `c75aee0` was intentional.
+  explicit approval. The owner's own pushes of `c75aee0` and `643e1b1` were intentional.
 
 Limits of these controls, as reviewed on 2026-11-05:
 
@@ -590,8 +593,12 @@ added to them or to each other.
 - No traceback or diagnostic dump is written to disk. The cost is that an unexpected error
   must be reproduced with synthetic data to be diagnosed.
 - Scope of the privacy rule: import summaries, `reconcile`, `documents`, `review list` and
-  error paths never show descriptions, amounts or raw rows. `transactions` and `trace` exist
-  to show selected data and are not leaks. `totals` shows only aggregate amounts.
+  error paths never show descriptions, amounts or raw rows. `transactions`, `trace` and
+  `review show` exist to show selected data and are not leaks. `totals` shows only aggregate
+  amounts.
+- Amended 2026-11-06 for M2.1: `review show` displays amounts, descriptions and original
+  cells for the one item explicitly requested, under the same terms as `trace`. Its refusals
+  repeat nothing they were given. See D-040.
 - File and account names are shown as the user typed them.
 - Tests allow the ledger, its SQLite support files and explicitly requested outputs, and
   fail on any other new file.
@@ -613,6 +620,214 @@ added to them or to each other.
 - External memory and scratchpad files are not read or written voluntarily. Files managed
   by the tool harness are distinct from the session's own actions, and any unavoidable
   boundary limitation is reported.
+
+## D-040 Review evidence and revision tokens — Approved
+
+`review show` presents one item. These stay visibly separate, and a missing value is shown
+as missing, never as blank or zero:
+
+- Original source cells, exactly as read.
+- Parsed source values, per record.
+- Current logical transaction values.
+- Primary-source selection (D-030), with what each alternative lost on.
+- Coverage evidence, keeping the claim apart from what matching relies on (D-027).
+- Machine-generated reasons.
+
+Ambiguous groups show no duplicate adjustment (D-006). Records sharing a document are
+identified. Descriptions and IDs are escaped, so a cell cannot imitate another section or
+send terminal controls. `review list` gives item IDs only.
+
+**Revision token.** Each item shows `r<version>-<16 hex characters>`: the start of a SHA-256
+of its material evidence, as canonical JSON. It covers all material evidence shown to the
+user, not membership alone, and exists so that a later decision can refuse evidence that
+changed after it was viewed.
+
+| Covered now | Not covered, because it does not change what the evidence says |
+|---|---|
+| Item kind, rule, status, reasons and date range | Item, transaction, record, account and decision IDs, and the account name. Records are identified by document hash and row |
+| Each transaction's current values and primary source | File names, which are labels. The document hash is covered |
+| Each record's original cells, parsed values and link rule | The stale-account warning. Whatever reconciling changes reaches the token through the evidence |
+| Each document's interpretation, coverage claim and effective end | Timestamps, which are not part of the evidence loaded |
+| Active decisions with a side in the item, from version 2 (D-043) | |
+
+- Equal evidence gives an equal token in any ledger and any import order. A repeat import
+  or a reconcile that changes nothing cannot change it, and A16 compares tokens.
+- Inputs that do not exist yet are not stubbed. Effective values from corrections, corrected
+  coverage and applicable decisions must join the token when they are introduced.
+- Any change to the inputs bumps `REVISION_VERSION`, and a test pins the definition. Tokens are
+  compared only with a fresh computation and are never stored as identity, so an old token
+  simply reads as changed.
+- It detects change and proves nothing else. It is derived from row contents, so it appears
+  only in `review show`, never in routine output.
+
+## D-041 Requirements for later M2 slices — Approved as requirements
+
+Recorded with the approval of M2.1. None of this is implemented, and the rest of the M2 plan
+in [plan.md](plan.md) is provisional and not approved for implementation.
+
+- Resolved by D-042. Before M2.2, define whether reject means a pairwise distinction or a complete partition.
+  Rejecting an ambiguous group must not be treated as permission to declare every member
+  distinct.
+- Corrections and coverage conflicts must stay distinguishable from possible duplicates in
+  classification and disclosures, even if they share review infrastructure.
+- Rejecting an unmerged candidate leaves totals unchanged. Separating an existing merge may
+  change them.
+- Before corrections are introduced, define deterministic behaviour when several active
+  overrides affect one merged transaction, including exactly which effective value totals use.
+  "Neither chosen silently" is not sufficient on its own.
+
+## D-042 Rejection and the identity constraint model — Approved, implemented in M2.2
+
+Refines D-009 and resolves the first requirement of D-041.
+
+Rejection is a pair-level assertion: these two transactions are different events. There is no
+"reject group" command, and rejecting anything never implies that every member of a group is
+distinct. A two-member item still names its pair. A partition is valid only when written out
+explicitly, and belongs to confirmation in M2.3.
+
+| Question | Rule |
+|---|---|
+| What it asserts | Between each stated pair of transactions, the records belong to different events. Nothing else, and not that either transaction is correct or complete |
+| What it binds | The cross-product of the source records in the two transactions at decision time. `source_record.id` is the anchor, because a merge deletes a retired transaction row |
+| What stays undecided | Any other pair in the group, new records (including an exact re-export of a bound row, under D-009), and whether either transaction holds the right records |
+
+Rejection and confirmation share one model: `different_event` and `same_event` are two relations
+on record pairs, with one set of rules for contradiction, supersession and undo. M2.2 writes only
+`different_event`. The schema allows `same_event` now, because its meaning is settled here and a
+later change would mean rebuilding an append-only table.
+
+How automatic reconciliation respects a constraint:
+
+- `derive()` takes an optional constraints input. With none, its output is identical to today.
+  It stays a pure function of evidence, active decisions and rules.
+- **Whole-group withholding:** if a reliable-ID or exact group would contain a constrained pair,
+  the whole group is withheld. Its records stay separate and counted, because choosing which side
+  a third record joins would be a guess. New evidence can therefore raise totals, and this is
+  disclosed (D-044).
+- Two transactions separated by a constraint are never linked directly as candidates. They can
+  share an item through an undecided third record, and `review show` lists the decided pair.
+- A new record that resembles decided records raises an ordinary candidate item, not a conflict.
+- Rejecting an unmerged pair moves no records and leaves totals unchanged. If it ever would move
+  one, the command rolls back. Separating an existing merge is M2.4, and may change totals.
+
+Superseding is not needed in M2.2, because `different_event` constraints cannot contradict each
+other. Rejecting an already rejected pair is refused. Defined for M2.3: a new decision must name
+the one it replaces and restate any pairs it keeps. Undoing it restores the old one, or refuses if
+that would contradict an active decision. Nothing is replaced implicitly.
+
+## D-043 Validating decision commands and undo — Approved, implemented in M2.2
+
+Applies the owner's qualifications on D-040.
+
+Every decision command runs its checks under one write lock, in this order:
+
+1. The account must be current (D-033). If not, the command refuses and says to run `reconcile`
+   and then `review show`. It never reconciles on the user's behalf, so changed evidence can
+   never be accepted against an old token.
+2. Evidence is recomputed inside the lock.
+3. Account, item ID, revision token and item status are checked together. A matching token alone
+   never identifies a target.
+4. Every pair must be two different transactions in that item.
+5. The decision is written, the account re-derived, and everything commits together.
+
+A refusal changes nothing and exits with code 2.
+
+- Revision version 2 adds the active decisions with a side in the item. A decision in one
+  overlapping item therefore changes the token of any other item touching those records.
+- `review decision show` gives a decision's own revision token, and `review undo` requires it with
+  the account, so undo meets the same conditions.
+- Undo appends an event and keeps the decision on record, then re-derives in the same transaction.
+  Source records and parsed values are never touched, and link history records every move.
+- The result of undo equals a ledger built without that decision. It is not necessarily the
+  earlier totals, because evidence may have arrived since, and the output must say so.
+
+## D-044 Decision conflicts — Approved, implemented in M2.2
+
+Decision-related conflicts are a separate classification, not a variety of possible duplicate.
+
+| Situation | Classification | Effect |
+|---|---|---|
+| Undecided pair | `possible_duplicate` | Unchanged |
+| An automatic match is withheld | `decision_conflict`, reason `automatic_match_withheld` | The decision stands, records stay separate, and this item replaces any candidate item covering the same records |
+| An automatic split divides a bound transaction | `decision_conflict`, reason `decision_basis_changed` | The decision stands, and the user is told its basis changed |
+| Stale token, wrong account or stale account | No item. The command refuses | Nothing changes |
+
+- `decision_conflict` is a `review_issue.kind`. Sharing `possible_duplicate` would make every query
+  on that kind count conflicts as candidates, against D-041.
+- `totals` and import summaries disclose conflicts on their own line, and they never join the
+  possible-duplicate counts.
+- Widening the kind needs `review_issue` rebuilt. Moving the `review_issue_subject` rows out and back
+  in one transaction worked on a populated ledger. A plain rebuild fails its foreign keys at commit.
+
+## D-045 Owner's qualifications on M2.2 — Approved, implemented in M2.2
+
+Given by the owner on 2026-11-06 with the confirmation to start M2.2. They override anything in
+D-042 to D-044 or the plan that they change. Migration 0005 and the populated `review_issue`
+rebuild are confirmed.
+
+**Closing an item (amends S4).** An item closes by removal: when no undecided candidate
+relationship remains, derivation stops producing it and the row goes, as for any item no longer
+warranted. The decision and its source-record constraints stay in append-only history. Undo may
+raise a new item with a new ID. Nothing is marked resolved in a way that suppresses candidates
+after undo.
+
+**Pair validation (amends D-043 step 4).** Each pair must be a direct, undecided candidate
+relationship, not merely two transactions in one connected group. It is checked under the same
+write lock as account, item, revision and status. In a chain A–B–C where A and C are not directly
+linked, A–C cannot be rejected. The cross-product of source records is bound at decision time, and
+new records are not bound automatically.
+
+**Withholding (confirms D-042).** Later evidence can split an existing automatic merge, raising
+the transaction count and account movements. This is tested and disclosed. Rejecting the displayed
+unmerged pair must itself leave totals and source memberships unchanged. If it would change them,
+the command refuses atomically and explains that separating an existing merge belongs to a later
+workflow. All source evidence and identity and link history are preserved. `same_event`, when built,
+must preserve explicit confirmed groupings unless superseded. Confirmation is not implemented here.
+
+**Conflict wording (extends D-044).** Each reason has its own wording, and nothing claims a merge
+was withheld when only the decision basis changed. A conflict with both reasons explains both.
+Distinct affected transactions are counted within each category. A transaction can appear in more
+than one category, so the counts are never presented as disjoint.
+
+**Undo token (extends D-043).** It covers active decision state and the current material evidence
+relevant to regrouping, not only the decision's own text. If that evidence changes after
+`review decision show`, undo refuses and asks for another inspection. Stale accounts are refused
+without reconciling. Undo re-derives from current evidence without that decision, and never restores
+an old financial snapshot.
+
+**Order independence.** Compared on equivalent active source-record constraints, grouping, totals
+and semantic review outcomes, using stable fixture evidence and never generated IDs or timestamps.
+This includes equivalent decisions made at different valid points in the import sequence.
+
+**Migration and history.** Populated migration is tested for success and for failure atomicity,
+preserving issues, subjects, foreign keys, indexes, source evidence and identity and link history.
+Decision, constraint and event history refuse update, delete and replacement.
+
+**Performance.** Dense constrained groups are measured and the cost documented. Approved matching
+semantics are not changed silently to meet a target.
+
+**Not approved:** confirmation, superseding, separating existing merges, corrections, later slices,
+network access, new dependencies, security changes and pushing.
+
+**How these were implemented,** where the rules above left a choice. All are defaults, open to
+change at review:
+
+- A decision's pairs are stored one row per record pair, sharing a `pair_number`. The two sides of
+  a stated pair are what `decision_basis_changed` compares.
+- A stated pair already touched by a constraint is refused as decided, even if a newer record in
+  one transaction is unbound. Such transactions are never direct candidates (D-042).
+- The undo token is `d<version>-<16 hex characters>`. It derives the account with and without the
+  decision and covers: state, pairs, rules fingerprint, the two results for every record they differ
+  on or the decision binds, those records' parsed values and documents, and other active decisions
+  touching them. An unrelated file leaves it unchanged. A rules change alters it.
+- A conflict item is one connected set of affected transactions. A per-reason count covers every
+  transaction in an item citing that reason, so an item with both reasons counts its transactions
+  under both, and the wording says "transactions in conflicts where...".
+- `review show` lists undecided direct pairs for candidate items, up to 50, and says when it stops.
+- `review decision show` shows document, row, transaction IDs and a preview of transaction counts.
+  It prints no amounts or descriptions, which is stricter than D-037 requires.
+- Link history names the decision for moves caused by withholding and by undo. Where several
+  decisions withheld one group, the lowest ID is recorded.
 
 ## Not yet decided
 

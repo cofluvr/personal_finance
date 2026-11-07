@@ -1,35 +1,39 @@
-# Session Handoff: After M1
+# Session Handoff: M2.2 Awaiting Review
 
-For a fresh session. Written 2026-11-06. **M1 is complete and accepted: the owner gave final
-sign-off on 2026-11-06.** Its limitations and deferred benchmarks still stand. Do not start
-M2 until the owner says so. See [m1-acceptance.md](m1-acceptance.md).
-Slice 4's design decisions are D-036 to D-039.
+For a fresh session. Written 2026-11-06. **M1 is complete and accepted**, and its limitations
+and deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
+
+**M2.1 is accepted. M2.2 is implemented and awaits the owner's review. Do not start M2.3.** M2.3 to
+M2.9 are provisional, and each needs its own approval. M2.1's decisions are D-040 and D-041, and
+M2.2's rules are D-042 to D-045, with D-045 overriding the others where they differ.
 
 ## Current state
 
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `feature/m1-foundation`. Partly pushed: see below |
-| Latest commit | Run `git log -1`. Slice 3 starts after `66fda56`, slice 4 after `cda368a` |
+| Branch | `feature/m2-review`, created from `643e1b1`. Local only, with no upstream |
+| Latest commit | Run `git log -1`: the commit recording this handoff, whose parent is `56e0adc`. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a` |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
 | Entry point | `bin/pf`, using this checkout's `.venv`. An installed `pf` script also works |
 | Data | Synthetic only. Keep databases outside the repository |
 
-**Remote state.** The owner intentionally pushed `c75aee0` (end of slice 1) to
-`origin/feature/m1-foundation` on 2026-11-05, which also set upstream tracking. The
-local reflog records this as the last push, and later commits are ahead of it
-locally. **Unverified:** the remote's current state and the repository's visibility,
-because GitHub was not contacted. Tracked content at that commit was documentation,
-code and tests, with no CSV, PDF or database files.
+**Remote state.** The owner intentionally pushed `feature/m1-foundation` twice: `c75aee0` (end
+of slice 1) on 2026-11-05, which set upstream tracking, and `643e1b1` (all of M1) on 2026-11-06
+at 00:27:10. The owner confirmed that the second push was theirs and intentional, and no
+investigation is needed. The 43 commits it added hold code, documentation and the three
+synthetic fixture CSVs. `feature/m2-review` has never been pushed. **Unverified:** the remote's
+live state and the repository's visibility, because GitHub was not contacted. Local tracking
+refs only record what was last pushed from here.
 
 Read first: this file, [decisions.md](decisions.md), [plan.md](plan.md),
 [layouts.md](layouts.md), [status.md](status.md), [m1-acceptance.md](m1-acceptance.md).
 Then the code in
 `src/personal_finance/ingest/pipeline.py`, `reconcile/cross_document.py`,
-`reconcile/apply.py` and `db/migrations/`.
+`reconcile/apply.py`, `reconcile/decisions.py`, `reports/review_evidence.py`,
+`reports/decision_evidence.py` and `db/migrations/`.
 
 ## Completed
 
@@ -74,10 +78,50 @@ which was wrong when a file split an earlier merge: one row took the ledger from
 Per-file group counts could not be added up, failed files showed invented zeros, and the
 first version of the boundary reported a closed pipe as an unexpected problem.
 
+**M2.1:** `review list` prints item IDs, and the read-only `review show` presents one item's
+evidence in separate sections (D-040). A new `reports/review_evidence.py` loads the evidence
+and computes a revision token over all material evidence. No migration. D-037 now places
+`review show` with `trace`.
+
+**Found while building M2.1:** `review list` printed no issue IDs, so nothing could refer to an
+item. A review item can keep its ID while its members change, which is why the token exists. A
+quoted CSV cell can hold a newline, so unescaped output could imitate a section. Planning
+probes also showed a pending 20.00 and posted 24.00 with no ID count as 44.00 with no review
+item at all, a silent double count that the M2.9 direction covers.
+
+**M2.2:** migration 0005, with append-only decision, constraint and event tables. Constraints in
+`derive()`, whole-group withholding and `decision_conflict` items. `review reject`, `review decisions`,
+`review decision show`, `review undo`. Revision version 2. A new `reconcile/decisions.py` and
+`reports/decision_evidence.py`. S1 to S23 pass.
+
+**Found while building M2.2:** `_settled_groups` would have blocked a resolved item from returning
+after undo, so closing is removal (D-045). Validation first listed every direct pair in an item,
+taking 19.6s at 2,000 transactions, and now checks only the stated pairs. `review show` would have
+printed about a million pair lines on a dense group, and now stops at 50. `review show` still prints
+file names as typed in its older sections, which is the existing documented limitation and was left
+alone as outside M2.2.
+
+A privacy test depended on random ID order and failed at random, hiding four surviving breaks until
+a rerun exposed them. Read which test caught a break, not only that one did.
+
 ## Tests actually executed
 
 | Check | Result |
 |---|---|
+| `.venv/bin/python -m pytest` at the M2.2 code commit, `56e0adc`, gating that commit | 970 passed, exit code 0 |
+| The same suite at the start of the M2.2 session, `1caeb52` | 816 passed, exit code 0 |
+| Targeted deliberate breaks, M2.2 | 79 breaks, all caught on a final run at `56e0adc`, after closing 7 test gaps and removing 1 redundant check. An earlier run reported 4 false catches, because a flaky test failed at random and took the credit. Script and results in `build/m2.2-breaks/`, ignored and may not survive |
+| `tests/scenarios` repeated 3 times at `56e0adc` | 431 passed each time, exit code 0 |
+| `tests/scenarios/test_decisions.py` repeated 5 times, after removing an ID-order dependence | 86 passed each time |
+| Order test, instrumented once | 150 examples actually compared, about 100 with differing orders or points. About 6% reached a conflict, so conflicts rely mainly on the exhaustive tests |
+| README example through `bin/pf`, ledger in `build/` | Exit code 0. Inflows 2530.00, outflows 256.05, net 2273.95, 10 transactions |
+| Partial rejection, conflict and undo walkthrough through `bin/pf`, ledger in `build/` | Totals 13.00, then 19.50, then 6.50 after undo. Stale tokens refused with exit code 2 |
+| Dense constrained measurements | See [status.md](status.md) |
+| `.venv/bin/python -m pytest` at the M2.1 code commit, `eea61e4`, gating that commit | 816 passed, exit code 0 |
+| Targeted deliberate breaks, M2.1 | 53 breaks, all caught on a final run, after closing 1 test gap and removing 1 unneeded sort key. Script and results in `build/m2.1-breaks/`, ignored and may not survive |
+| `tests/scenarios` repeated 3 times at `eea61e4` | 317 passed each time |
+| README flow with `review list` and `review show` through `bin/pf`, ledger in `build/` | Exit code 0, and 2 for an unknown item. Ledger file unchanged by both. Inflows 2530.00, outflows 256.05, net 2273.95, 10 transactions |
+| `.venv/bin/python -m pytest` at the start of the M2 planning session, `643e1b1` | 712 passed, exit code 0 |
 | Clean install at `6815e19`: fresh clone and environment, pinned dependencies, full suite | **712 passed**, exit code 0 |
 | README example at `6815e19`, through `bin/pf` and through the installed `pf` | Exit code 0 for both, identical output apart from IDs and paths |
 | Exit codes at `6815e19`, both entry points | 0, 1, 2 and 141 as documented |
@@ -113,8 +157,12 @@ may not survive.
 ## Known limitations
 
 - Only two invented layouts exist. It must not be used with real financial data.
-- Coverage cannot be changed after import (M2).
-- Users cannot undo merges or resolve review items (M2).
+- Coverage cannot be changed after import (M2.8, provisional).
+- Only candidate pairs can be rejected. See "Known limits of M2.2".
+- Users cannot confirm duplicates or separate machine-made merges yet.
+- A pending and a posted row with different amounts and no ID count twice with no flag.
+- The revision covers only inputs that exist today (D-040). Corrections must join it later.
+- Group recomputation is quadratic in a touched group. See [status.md](status.md).
 - Similarity has documented misses and false positives (D-032).
 - Identity timestamps from before migration 0004 can be fallback values (F2).
 - A39 acceptance covers the documented fixtures only, in which nothing merges (F3).
@@ -162,6 +210,17 @@ may not survive.
 | Logging | None in M1. The boundary prints a fixed message with exit code 2. Cancellation and a closed pipe are not errors. No dumps on disk | D-037 |
 | Entry point | `bin/pf` is verified. `project.scripts` is declared only. A shared-environment clone is a source-checkout check, not a clean install | D-038 |
 | Temporary files | pytest temp folders are allowed for synthetic artifacts. Walkthroughs, clones and breaks use `build/` | D-039 |
+| Review evidence | `review show` displays data for the one item requested, under `trace`'s terms. Routine output and errors stay clean. Six kinds of evidence stay separate, and missing stays missing | D-037, D-040 |
+| Revision token | All material evidence, not membership alone. Deterministic and documented. New inputs join it when they exist, with a version bump | D-040 |
+| Later M2 requirements | Corrections and coverage conflicts stay distinguishable. Several overrides on one transaction need a defined effective value | D-041 |
+| Rejection | A pair-level assertion. No "reject group", and never an implied "all distinct". Binds source records. Shares one model with confirmation | D-042 |
+| Whole-group withholding | An automatic group containing a constrained pair is withheld entirely, with its records separate and counted | D-042 |
+| Decision commands | Current account, then account, item ID and token together, under one write lock. Never reconciles for the user. Undo needs the same | D-043 |
+| Decision conflicts | Their own `decision_conflict` kind, disclosed on their own line | D-044 |
+| Closing an item | By removal. The decision stays in history, and undo can raise a new item | D-045 |
+| Rejectable pairs | Direct, undecided candidates only, not two transactions merely sharing a group | D-045 |
+| Rejection and the ledger | Must change no totals or memberships, or it refuses atomically | D-045 |
+| Undo token | Decision state and everything relevant to regrouping. Undo is never a snapshot restore | D-045 |
 
 ## Open follow-ups
 
@@ -202,32 +261,78 @@ or export presents legacy creation timestamps.**
 - zsh has no `PIPESTATUS`, and an unquoted `--include=*.py` fails there. Capture exit codes
   by writing to a file and reading `$?`.
 
+## Qualifications on M2.1, from its acceptance
+
+The owner approved M2.1's three additional choices with these conditions, which bind later
+slices:
+
+1. **Revision tokens:** future decision commands must validate account, item ID and revision
+   token together. A matching token alone does not identify a decision target.
+2. **Stale accounts:** before accepting a decision, the workflow must ensure the displayed
+   evidence is current. Never silently reconcile changed evidence and then accept an old token.
+3. **Output escaping:** keep the escaping, and the tests for embedded newlines and terminal
+   control characters.
+
+## M2.2 as built
+
+Scope and acceptance tests are in [plan.md](plan.md) (S1 to S23). Tests are in
+`tests/scenarios/test_decisions.py`, `test_decision_order.py`, `test_decision_migration.py` and
+`tests/unit/test_constraints.py`. Choices made where the rules left one are at the end of D-045,
+and are open to change at review.
+
+**Known limits of M2.2:**
+
+- Only `cross_document_candidates` items can be rejected. External-ID and same-document items stay
+  open.
+- With no confirm until M2.3, true duplicates stay open and counted. Two purchases in three exports
+  with unknown coverage stay at 39.00 against a true 13.00, and rejection cannot fix that.
+- Withholding can raise totals through new evidence, though it is disclosed.
+- A decision does not transfer to a re-export, so overlapping re-exports can raise repeat reviews.
+- Link recomputation is quadratic in the groups a constraint touches, and every later import of
+  that account pays it. Measured in [status.md](status.md).
+- A decision conflict has no action of its own. The only response today is `review undo`.
+- A stated pair already touched by a constraint is refused, even if a newer record in one
+  transaction is unbound.
+- No machine-made merge can be separated until M2.4.
+- `same_event` is allowed by the schema and written by nothing in M2.2.
+
+## Boundary notes from M2 planning and M2.1
+
+- The planning session's own lapses, before it read this file: it read one memory file under
+  `~/.claude`, and listed and searched the parent directory.
+- Harness-managed, not the session's own action: oversized outputs were saved under `~/.claude`.
+  They were not opened. Harness-managed artifacts are not permission to inspect external files.
+- The owner restated the rule: start every command from this repository, do not read external
+  memory, do not list or search parent or sibling directories, and do not write external
+  scratchpad files. The narrow exception for synthetic pytest temporary artifacts stays.
+
+## Boundary notes from M2.2
+
+- The session's own lapses, before it read this file: it read one memory file under `~/.claude`,
+  and listed the parent directory. Both were reported to the owner at the time.
+- Harness-managed, not the session's own action: oversized outputs were saved under `~/.claude`,
+  and background task output under the system temporary folder. They were not opened.
+- Benchmark and break temporary files used `build/tmp`. pytest's own temporary folders stay under the
+  documented exception.
+
 ## Awaiting the owner
 
-- Authorization to start M2. The owner will begin M2 planning in a fresh session.
-- Pushing. Not authorized. Nothing since `c75aee0` has been pushed.
+- Review of M2.2.
+- Pushing. Not authorized. `feature/m2-review` is local only.
 
 ## Recommended M2 scope
 
-Slices in this order, each stopping for review. Details stay in [plan.md](plan.md).
-
-1. **Decision storage and review queue:** stable-ID decisions (D-009), `review show`, and
-   confirm, reject and undo for possible-duplicate groups, including machine-made merges.
-2. **Survival across imports:** decisions take precedence over `derive()` (D-029), and survive
-   re-imports or are flagged. Undo restores totals.
-3. **Unresolved rows and corrections:** resolving unresolved records, and correction
-   overrides stored apart from base columns.
-4. **Coverage correction:** the history workflow promised by D-022.
-5. **Pending to posted:** matching under D-016, including tip and description changes.
-
-Open before M2: whether grouped review of long runs belongs here, and F2's stored marker if
-any new command shows legacy creation timestamps.
+See "M2 plan" in [plan.md](plan.md). M2.3 to M2.9 are provisional, and each needs approval.
+Still open: whether grouped review of long runs
+belongs in M2, and F2's stored marker if any new command shows legacy creation timestamps.
 
 ## Permission approvals to renew
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m1-foundation` | Approved by the owner, and remains approved | Confirm in the kickoff prompt |
+| Local commits on `feature/m2-review` | Approved for M2.2 | **Must be renewed** for anything further |
+| M2.2 | Implemented. Stopped for review | Owner reviews |
+| M2.3 | Provisional, not approved | Needs its own plan and approval |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -244,22 +349,24 @@ Never approved, and not to be assumed:
 ## Kickoff prompt
 
 ```text
-You are the lead engineer on personal_finance. Work only inside this repository.
+You are the lead engineer on personal_finance. Work only inside this repository, and start
+every command from it. Do not read external memory, list or search parent or sibling
+directories, or write external scratchpad files. Synthetic pytest temporary artifacts are the
+only exception.
 
-Read docs/handoff.md first, then the files it lists. Confirm the branch is
-feature/m1-foundation, the working tree is clean, and run the test suite with a
-real exit code before changing anything. Do not contact GitHub.
+Read docs/handoff.md first, then the files it lists. Confirm the branch is feature/m2-review,
+the working tree is clean, and run the test suite with a real exit code before changing
+anything. Do not contact GitHub.
 
-Task: plan M2 slice 1 only, following "Recommended M2 scope" in the handoff. Propose
-a short plan with a recommendation for each open point, identify only blocking
-questions, and wait for my approval before editing.
+M2.2 review outcome:
+[PASTE IT HERE]
 
-Local commits on feature/m1-foundation are approved after I authorize implementation.
-Pushing needs my explicit approval each time. No network, no new dependencies, no
-security changes, and no access outside this repository, including memory and
-scratchpad files. Synthetic data only. Use build/ for walkthroughs and breaks.
+Task: apply any changes from that review, then propose a plan for M2.3 (confirm, including part
+of a group) against D-041, D-042 and D-045. Cover how same_event preserves confirmed groupings
+unless superseded, and how confirmation treats a decision conflict. Do not implement M2.3 until I
+approve the plan.
 
-Gate commits on pytest's own exit code. Check new tests with targeted deliberate
-breaks. Keep unit-labelled counts distinct (D-036). Report actual results, and stop
-for review when the slice is complete.
+Pushing needs my explicit approval each time. No network, no new dependencies, no security
+changes. Synthetic data only. Use build/ for walkthroughs and breaks. Gate commits on pytest's own
+exit code, and a test that fails on unbroken code proves nothing about a deliberate break.
 ```

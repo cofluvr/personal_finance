@@ -1,7 +1,7 @@
 """Command line interface.
 
 Output goes to the terminal only. Nothing here writes a log, and only the
-commands that exist to show transactions print descriptions or raw rows (D-037).
+commands that exist to show selected data print descriptions or raw rows (D-037).
 """
 
 import argparse
@@ -10,6 +10,7 @@ import os
 import sqlite3
 import sys
 import uuid
+from itertools import islice
 from pathlib import Path
 
 from personal_finance.db.migrate import (
@@ -28,11 +29,29 @@ from personal_finance.money import format_cents
 from personal_finance.reconcile.apply import reconcile_account, stale_accounts
 from personal_finance.reconcile.cross_document import (
     PRIMARY_CRITERIA,
+    RULE_CANDIDATES,
     deciding_criterion,
     primary_rank,
 )
+from personal_finance.reconcile.decisions import (
+    DecisionRefused,
+    reject_pairs,
+    undecided_direct_pairs,
+    undo_decision,
+)
 from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reports.decision_evidence import (
+    STATE_ACTIVE,
+    list_decisions,
+    load_decision,
+    undo_outlook,
+)
 from personal_finance.reports.import_summary import summarize_run
+from personal_finance.reports.review_evidence import (
+    load_review_evidence,
+    review_revision,
+    rows_sharing_a_document,
+)
 from personal_finance.reports.totals import account_movement
 
 ACCOUNT_TYPES = ("checking", "savings", "credit_card", "loan", "investment", "retirement")
@@ -48,6 +67,9 @@ BUSY_EXPLANATION = (
 )
 
 BROKEN_PIPE_EXIT = 141
+
+# A dense group holds quadratically many pairs, so review show lists only the first few.
+DIRECT_PAIRS_SHOWN = 50
 
 UNEXPECTED_ERROR = (
     "an unexpected problem stopped this command, so it may not have finished. Anything not "
@@ -78,6 +100,58 @@ FAILURE_EXPLANATIONS = {
         "the history workflow planned for M2."
     ),
 }
+
+
+RULE_EXPLANATIONS = {
+    "cross_document_candidates": "Records in different documents look alike, without proof.",
+    "cross_document_external_id": "Records share a reliable ID but cannot be merged safely.",
+    "identity_decision": "New evidence disagrees with a stored decision.",
+    "same_document_repeated_external_id": "One external ID appears on several rows of a document.",
+    "same_document_pending_posted": (
+        "A pending row and a posted row of one document may be one event."
+    ),
+}
+
+REASON_EXPLANATIONS = {
+    "similar_description": "same amount, dates within the window, similar description",
+    "coverage_unknown": "a document's coverage is unknown",
+    "coverage_partial": "a document's coverage is partial",
+    "different_basis": "the documents state coverage on different date bases",
+    "date_outside_coverage": "the date falls outside a coverage claim",
+    "pending_not_covered": "a coverage claim says nothing about pending rows",
+    "boundary_date": "the date is too close to the end of what coverage supports",
+    "single_day_overlap": "the documents overlap by a single day",
+    "unresolved_row": "an unresolved row could affect the count",
+    "external_id_conflict": "records with this ID disagree on a material field",
+    "external_id_repeated": "this ID is repeated within a document",
+    "automatic_match_withheld": (
+        "an automatic match would have joined records a decision keeps apart, so the whole "
+        "match was withheld and its records stay separate and counted, which can raise totals"
+    ),
+    "decision_basis_changed": (
+        "a transaction a decision was based on has since been divided by an automatic split, "
+        "and the decision still applies to its records"
+    ),
+}
+
+UNRESOLVED_NOTICE = "This row created no transaction and is not included in totals."
+
+DUPLICATE_NOTICE = (
+    "These transactions stay separate and are all counted in full. Totals may be overstated, "
+    "and no exact adjustment can be stated."
+)
+
+
+CONFLICT_NOTICE = (
+    "The decision stands. These are not possible duplicates. To remove a decision, inspect it "
+    "with review decision show, then use review undo."
+)
+
+UNDO_NOTICE = (
+    "This re-derives from the evidence held now, without this decision. It does not restore "
+    "an earlier snapshot, so totals may differ from those before the decision if evidence "
+    "has arrived since."
+)
 
 
 class CommandError(Exception):
@@ -132,6 +206,44 @@ def build_parser() -> argparse.ArgumentParser:
     review = commands.add_parser("review", help="inspect the review queue")
     review_commands = review.add_subparsers(dest="review_command", required=True)
     command("list", review_commands, handler=run_review_list, help="list open review items")
+    show = command(
+        "show", review_commands, handler=run_review_show,
+        help="show the evidence behind one review item, including amounts and descriptions",
+    )
+    show.add_argument("item_id", help="an item ID from review list")
+
+    reject = command(
+        "reject", review_commands, handler=run_review_reject,
+        help="record that direct candidate pairs in an item are different events",
+    )
+    reject.add_argument("item_id", help="an item ID from review list")
+    reject.add_argument("--account", required=True, help="account name or ID")
+    reject.add_argument("--revision", required=True, help="the revision from review show")
+    reject.add_argument(
+        "--pair", required=True, nargs=2, action="append", metavar=("T1", "T2"),
+        help="two transaction IDs from review show. Repeat for several pairs in one decision",
+    )
+
+    decisions = command(
+        "decisions", review_commands, handler=run_review_decisions, help="list stored decisions"
+    )
+    decisions.add_argument("--account", help="account name or ID")
+
+    decision = review_commands.add_parser("decision", help="inspect one stored decision")
+    decision_commands = decision.add_subparsers(dest="decision_command", required=True)
+    decision_show = command(
+        "show", decision_commands, handler=run_review_decision_show,
+        help="show what a decision binds and what undoing it would do",
+    )
+    decision_show.add_argument("decision_id", help="a decision ID from review decisions")
+
+    undo = command(
+        "undo", review_commands, handler=run_review_undo,
+        help="re-derive from current evidence without a decision, keeping it on record",
+    )
+    undo.add_argument("decision_id", help="a decision ID from review decisions")
+    undo.add_argument("--account", required=True, help="account name or ID")
+    undo.add_argument("--revision", required=True, help="the revision from review decision show")
 
     totals = command("totals", handler=run_totals, help="show account movement")
     totals.add_argument("--account", help="account name or ID")
@@ -321,6 +433,8 @@ def print_run_summary(summary) -> None:
 def print_account_state(movement) -> None:
     print("This account after the run:")
     print(f"  {describe_open_groups(movement)}")
+    for line in describe_conflicts(movement):
+        print(f"  {line}")
     print(f"  Unresolved records, not included in totals: {movement.unresolved_records}")
 
 
@@ -329,6 +443,30 @@ def describe_open_groups(movement) -> str:
         f"Open review groups: {movement.candidate_groups}, covering "
         f"{movement.transactions_in_candidate_groups} distinct affected transactions."
     )
+
+
+def describe_conflicts(movement) -> list[str]:
+    """Conflicts on their own lines, and only while there are some (D-044, D-045)."""
+    if not movement.decision_conflicts:
+        return []
+    lines = [
+        f"Decision conflicts: {movement.decision_conflicts}, covering "
+        f"{movement.transactions_in_decision_conflicts} distinct affected transactions, all "
+        "counted in full. These are not possible duplicates. One transaction can appear in "
+        "several of these counts."
+    ]
+    if movement.transactions_with_withheld_match:
+        lines.append(
+            f"Transactions in conflicts where an automatic match was withheld: "
+            f"{movement.transactions_with_withheld_match}. Their records stay separate, which "
+            "can raise the transaction count and account movements."
+        )
+    if movement.transactions_with_changed_basis:
+        lines.append(
+            f"Transactions in conflicts where a decision's basis changed: "
+            f"{movement.transactions_with_changed_basis}."
+        )
+    return lines
 
 
 def run_reconcile(args) -> int:
@@ -347,7 +485,10 @@ def run_reconcile(args) -> int:
             conn.execute("ROLLBACK")
             raise
         print(f"Account {account_id}: source memberships changed: {result.moved_records}.")
-        print(describe_open_groups(account_movement(conn, account_id)))
+        movement = account_movement(conn, account_id)
+        print(describe_open_groups(movement))
+        for line in describe_conflicts(movement):
+            print(line)
     return 0
 
 
@@ -470,7 +611,7 @@ def print_history(conn, transaction_id) -> None:
     moves = conn.execute(
         """SELECT history.created_at, history.action, history.reason,
                   history.source_record_id, history.from_transaction_id,
-                  history.to_transaction_id
+                  history.to_transaction_id, history.decision_id
            FROM transaction_link_history history
            WHERE history.from_transaction_id = ?1 OR history.to_transaction_id = ?1
            ORDER BY history.id""",
@@ -478,8 +619,9 @@ def print_history(conn, transaction_id) -> None:
     ).fetchall()
     if moves:
         print("Historical moves (not current membership):")
-    for created_at, action, reason, record_id, source, target in moves:
-        print(f"  {created_at} {action}: record {record_id} moved from {source} to {target} ({reason})")
+    for created_at, action, reason, record_id, source, target, decision_id in moves:
+        cause = f"{reason}, decision {decision_id}" if decision_id else reason
+        print(f"  {created_at} {action}: record {record_id} moved from {source} to {target} ({cause})")
 
     events = conn.execute(
         """SELECT created_at, event, reason, transaction_created_at
@@ -546,9 +688,9 @@ def run_review_list(args) -> int:
     ).fetchall()
     for issue, kind, rule, evidence, members, file_name, index in rows:
         if kind == "unresolved_record":
-            print(f"{kind}: {rule}, {file_name} row {index}")
+            print(f"Item {issue}: {kind}: {rule}, {file_name} row {index}")
             continue
-        print(f"{kind}: {rule}, {members} transactions{describe_evidence(evidence)}")
+        print(f"Item {issue}: {kind}: {rule}, {members} transactions{describe_evidence(evidence)}")
         subjects = conn.execute(
             """SELECT transaction_id FROM review_issue_subject
                WHERE review_issue_id = ? ORDER BY transaction_id""",
@@ -557,6 +699,252 @@ def run_review_list(args) -> int:
         for (transaction_id,) in subjects:
             print(f"  Transaction {transaction_id}")
     print(f"Open review items: {len(rows)}")
+    conflicts = sum(row[1] == "decision_conflict" for row in rows)
+    if conflicts:
+        print(f"Of which decision conflicts, which are not possible duplicates: {conflicts}")
+    if rows:
+        print("To see an item's evidence, including amounts and descriptions, run review show.")
+    return 0
+
+
+def shown(value) -> str:
+    """A value as printed, or missing. Escapes keep a cell from imitating other output."""
+    if not value:
+        return "missing"
+    text = str(value)
+    return "".join(
+        char if char.isprintable() else char.encode("unicode_escape").decode() for char in text
+    )
+
+
+def shown_amount(cents: int | None) -> str:
+    return "missing" if cents is None else format_cents(cents)
+
+
+def run_review_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    item = load_review_evidence(conn, args.item_id)
+    if item is None:
+        raise CommandError("review item not found. A later import can replace one: run review list")
+
+    print(f"Review item {item.issue_id}")
+    print(f"  Account: {shown(item.account_name)} ({item.account_id})")
+    print(f"  Kind: {item.kind}")
+    print(f"  Rule: {item.rule}")
+    print(f"  Status: {item.status}")
+    print(f"  Revision: {review_revision(item)}")
+    print_machine_reasons(item)
+    print_decided_pairs(item)
+    if item.rule == RULE_CANDIDATES and item.status == "open":
+        print_direct_pairs(undecided_direct_pairs(conn, item))
+
+    shared = rows_sharing_a_document(item)
+    names = {document.content_sha256: document.file_name for document in item.documents}
+    if shared:
+        print("Records from the same document:")
+    for digest, rows in shared.items():
+        print(f"  {names[digest]}: rows {', '.join(map(str, rows))}")
+
+    for number, entry in enumerate(item.transactions, start=1):
+        print(f"Transaction {number} of {len(item.transactions)}: {entry.transaction_id}")
+        print_transaction_evidence(entry, shared)
+    for record in item.unresolved:
+        print_record_evidence(record, "unresolved, no transaction", shared)
+
+    print("Coverage evidence:")
+    for document in item.documents:
+        print_document_evidence(document)
+    if item.account_stale:
+        print(
+            "This account has not been reconciled under the current matching rules, so this "
+            "evidence may be out of date. Run reconcile."
+        )
+    return 0
+
+
+def print_machine_reasons(item) -> None:
+    print("Machine-generated reasons:")
+    print(f"  {RULE_EXPLANATIONS.get(item.rule, f'Unresolved row: {item.rule}.')}")
+    for reason in item.reasons:
+        print(f"  {reason}: {REASON_EXPLANATIONS.get(reason, 'no explanation recorded')}")
+    if item.date_start:
+        print(f"  Dates involved: {item.date_start} to {item.date_end}")
+    print(f"  {notice_for(item)}")
+
+
+def notice_for(item) -> str:
+    if item.unresolved:
+        return UNRESOLVED_NOTICE
+    return CONFLICT_NOTICE if item.kind == "decision_conflict" else DUPLICATE_NOTICE
+
+
+def print_decided_pairs(item) -> None:
+    if not item.decided:
+        return
+    print("Already decided, as different events:")
+    for pair in item.decided:
+        print(f"  Decision {pair.decision_id}:")
+        print(f"    {describe_side(pair.left)}")
+        print(f"    is a different event from {describe_side(pair.right)}")
+
+
+def describe_side(records) -> str:
+    return ", ".join(f"{shown(record.file_name)} row {record.row}" for record in records)
+
+
+def print_direct_pairs(pairs) -> None:
+    """Only these can be rejected. Sharing an item is not enough (D-045)."""
+    listed = list(islice(pairs, DIRECT_PAIRS_SHOWN + 1))
+    print("Direct candidate pairs, undecided:")
+    if not listed:
+        print("  None.")
+    for left, right in map(sorted, listed[:DIRECT_PAIRS_SHOWN]):
+        print(f"  {left} {right}")
+    if len(listed) > DIRECT_PAIRS_SHOWN:
+        print(f"  Only the first {DIRECT_PAIRS_SHOWN} are listed. Other pairs here may also be direct.")
+
+
+def print_transaction_evidence(entry, shared) -> None:
+    print("  Current logical transaction values:")
+    print(f"    Transaction date: {shown(entry.transaction_date)}")
+    print(f"    Posting date: {shown(entry.posting_date)}")
+    print(f"    Amount: {shown_amount(entry.amount_cents)}")
+    print(f"    Status: {entry.settlement_status}")
+    print(f"    Description: {shown(entry.description)}")
+    print(f"    External ID: {shown(entry.external_id)}")
+
+    ranks = {
+        record.record_id: primary_rank(
+            record.parsed.settlement_status, record.parsed.transaction_date,
+            record.parsed.posting_date, record.parsed.description, record.content_sha256,
+            record.row,
+        )
+        for record in entry.records
+    }
+    primary = next(
+        (record for record in entry.records
+         if (record.content_sha256, record.row) == entry.primary_source),
+        None,
+    )
+    primary_id = primary.record_id if primary else None
+    print("  Primary-source selection:")
+    if primary is None:
+        print("    Not recorded. Run reconcile to record it.")
+    else:
+        print(f"    {primary.file_name} row {primary.row} supplies the values above")
+    for record in entry.records:
+        print_record_evidence(record, describe_role(record.record_id, primary_id, ranks), shared)
+
+
+def print_record_evidence(record, role, shared) -> None:
+    parsed = record.parsed
+    print(f"  Source {record.file_name}, row {record.row}")
+    print(f"    Record: {record.record_id}")
+    print(f"    Role: {role}")
+    print(f"    Link rule: {record.link_rule or 'none'}")
+    if record.content_sha256 in shared:
+        print("    Shares its document with another record in this item")
+    print(f"    Original source cells: {list(record.cells)}")
+    print("    Parsed source values:")
+    print(f"      Result: {parsed.status}{f' ({parsed.reason_code})' if parsed.reason_code else ''}")
+    print(f"      Transaction date: {shown(parsed.transaction_date)}")
+    print(f"      Posting date: {shown(parsed.posting_date)}")
+    print(f"      Amount: {shown_amount(parsed.amount_cents)}")
+    print(f"      Status: {parsed.settlement_status}")
+    print(f"      Description: {shown(parsed.description)}")
+    print(f"      External ID: {shown(parsed.external_id)}")
+
+
+def print_document_evidence(document) -> None:
+    print(f"  {document.file_name}")
+    print(f"    Document SHA-256: {document.content_sha256}")
+    print(f"    Layout: {document.layout_id}, parser version {document.parser_version}")
+    print(f"    Coverage kind: {document.coverage_kind}")
+    print(f"    Claimed interval: {shown(document.coverage_start)} to {shown(document.coverage_end)}")
+    print(f"    Date basis: {shown(document.date_basis)}")
+    print(f"    Coverage evidence: {shown(document.coverage_evidence)}")
+    print(f"    Generated on: {shown(document.generated_on)}")
+    if document.effective_end is not None:
+        print(f"    Last date matching relies on: {document.effective_end}")
+        print(f"    Pending rows: {'included' if document.pending_covered else 'excluded'}")
+    print(f"    External ID guarantee: {document.id_guarantee}")
+
+
+def run_review_reject(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    pairs = [tuple(pair) for pair in args.pair]
+    result = reject_pairs(conn, account_id, args.item_id, args.revision, pairs)
+
+    print(f"Decision {result.decision_id} recorded: {result.pairs} pairs rejected.")
+    print(f"  Source-record pairs bound: {result.bound_record_pairs}. New records are not bound.")
+    print("  Totals and source memberships are unchanged, and these transactions stay counted.")
+    if result.item_still_open:
+        print(f"  Item {args.item_id} stays open: undecided candidates remain in it.")
+    else:
+        print(f"  Item {args.item_id} closed: no undecided candidate relationship remains in it.")
+    return 0
+
+
+def run_review_decisions(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_decisions(conn, account_id)
+    for decision_id, account, created_at, state, pairs in rows:
+        print(f"Decision {decision_id}: {state}, {pairs} pairs, {shown(account)}, {created_at}")
+    print(f"Decisions: {len(rows)}")
+    if rows:
+        print("To see what a decision binds, run review decision show.")
+    return 0
+
+
+def run_review_decision_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    decision = load_decision(conn, args.decision_id)
+    if decision is None:
+        raise CommandError("decision not found. Run review decisions.")
+
+    print(f"Decision {decision.decision_id}")
+    print(f"  Account: {shown(decision.account_name)} ({decision.account_id})")
+    print(f"  Status: {decision.state}")
+    print(f"  Made: {decision.created_at}")
+    if decision.undone_at:
+        print(f"  Undone: {decision.undone_at}. It stays on record and no longer applies.")
+    print(f"  From review item: {decision.review_issue_id}")
+
+    for number, pair in enumerate(decision.pairs, start=1):
+        print(f"Pair {number} of {len(decision.pairs)}: {pair.relation}")
+        print(f"  At decision time: {pair.left_transaction_id} and {pair.right_transaction_id}")
+        for label, records in (("One side", pair.left), ("Other side", pair.right)):
+            print(f"  {label}:")
+            for record in records:
+                where = record.transaction_id or "no transaction"
+                print(f"    {shown(record.file_name)} row {record.row}, now in {where}")
+
+    if decision.state == STATE_ACTIVE:
+        stale = bool(stale_accounts(conn, DEFAULT_RULES, decision.account_id))
+        outlook = undo_outlook(conn, decision, DEFAULT_RULES)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this decision now:")
+        print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
+        print(f"  {UNDO_NOTICE}")
+        if stale:
+            print(
+                "This account has not been reconciled under the current matching rules, so "
+                "undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
+def run_review_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_decision(conn, account_id, args.decision_id, args.revision)
+
+    print(f"Decision {args.decision_id} undone. It stays on record and no longer applies.")
+    print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
+    print(f"  Source memberships changed: {result.moved_records}")
+    print(f"  {UNDO_NOTICE}")
     return 0
 
 
@@ -591,6 +979,8 @@ def run_totals(args) -> int:
             "all counted in full. "
             "Totals may be overstated, and no exact adjustment can be stated."
         )
+    for line in describe_conflicts(movement):
+        print(f"- {line}")
     return 0
 
 
@@ -604,7 +994,7 @@ def main(argv: list[str] | None = None) -> int:
         # The reader went away, as in `pf transactions | head`. Nothing went wrong here.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return BROKEN_PIPE_EXIT
-    except CommandError as error:
+    except (CommandError, DecisionRefused) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 2
     except sqlite3.OperationalError as error:

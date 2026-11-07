@@ -3,7 +3,8 @@
 Not part of the test suite. Run from the repository root:
 
     PYTHONPATH=src:tests/benchmarks .venv/bin/python tests/benchmarks/measure_reconciliation.py
-    (add --worst for the stress shapes, or rows per month such as 200 1000 4000)
+    (add --worst for the stress shapes, --constrained for dense groups with decisions,
+    or rows per month such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
 one import_files call: reading and parsing the file, writing records, reconciling the
@@ -25,9 +26,12 @@ from synthetic_ledger import dense_rows, full_reexports, ordinary_rows, variant_
 from personal_finance.db.migrate import connect, create_database
 from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1
 from personal_finance.ingest.pipeline import import_files
-from personal_finance.reconcile.apply import _load_evidence
-from personal_finance.reconcile.cross_document import derive
+from personal_finance.reconcile.apply import load_evidence
+from personal_finance.reconcile.cross_document import Constraint, Document, Record, derive
+from personal_finance.reconcile.decisions import reject_pairs, undo_decision
 from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reports.decision_evidence import load_decision, undo_outlook
+from personal_finance.reports.review_evidence import load_review_evidence, review_revision
 
 SHAPES = {"ordinary": ordinary_rows, "dense": dense_rows, "variants": variant_rows}
 TARGET_ONE_IMPORT_SECONDS = 10
@@ -58,7 +62,7 @@ def run(shape: str, files: list[str]) -> None:
             import_seconds.append(time.perf_counter() - started)
             assert result.outcome == "imported", result
 
-        documents, records, unresolved, _ = _load_evidence(conn, "acct")
+        documents, records, unresolved, _ = load_evidence(conn, "acct")
         started = time.perf_counter()
         derivation = derive(documents, records, unresolved, DEFAULT_RULES)
         derive_seconds = time.perf_counter() - started
@@ -86,9 +90,98 @@ def worst_cases() -> None:
         run(f"spell{spellings}", with_overlap(variant_rows(24, 1000, spellings)))
 
 
+def dense_group(units: int, documents: int = 2):
+    """One candidate group: every record alike, spread evenly over unmerged documents."""
+    files = [
+        Document(id=str(number), content_sha256=str(number).ljust(64, "0"))
+        for number in range(documents)
+    ]
+    records = [
+        Record(str(index), str(index % documents), index + 1, -650,
+               posting_date="2026-01-10", description="SYNTHETIC CAFE", settlement_status="posted")
+        for index in range(units)
+    ]
+    return files, records
+
+
+def measure_derive(units: int, constraints: int) -> None:
+    """Derivation alone. Constraints bind one record of the first document to one of the next."""
+    files, records = dense_group(units)
+    bound = tuple(
+        Constraint(f"d{number}", (str(2 * number),), (str(2 * number + 1),))
+        for number in range(constraints)
+    )
+    started = time.perf_counter()
+    result = derive(files, records, [], DEFAULT_RULES, bound)
+    seconds = time.perf_counter() - started
+    print(
+        f"derive units={units:6} constraints={constraints:5} seconds={seconds:7.3f} "
+        f"compared_pairs={result.recomputed_pairs:10} items={len(result.items)}",
+        flush=True,
+    )
+
+
+def measure_reject(rows_per_file: int) -> None:
+    """A whole rejection through a real ledger, including the checks under the write lock."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        path = root / "ledger.db"
+        create_database(path)
+        conn = connect(path)
+        conn.execute(
+            "INSERT INTO account (id, display_name, account_type) VALUES ('acct', 'a', 'credit_card')"
+        )
+        header = "Date,Description,Debit,Credit\n"
+        for name, padding in (("a.csv", ""), ("b.csv", " ")):
+            source = root / name
+            source.write_text(header + padding + "01/10/2026,SYNTHETIC CAFE,6.50,\n" * rows_per_file)
+            (result,) = import_files(conn, [source], account_id="acct", layout=SYNTHETIC_CARD_V1)
+            assert result.outcome == "imported", result
+
+        (issue,) = conn.execute("SELECT id FROM review_issue").fetchone()
+        started = time.perf_counter()
+        item = load_review_evidence(conn, issue)
+        token = review_revision(item)
+        inspect_seconds = time.perf_counter() - started
+        left = next(entry for entry in item.transactions
+                    if entry.records[0].file_name == "a.csv").transaction_id
+        right = next(entry for entry in item.transactions
+                     if entry.records[0].file_name == "b.csv").transaction_id
+
+        started = time.perf_counter()
+        decision_id = reject_pairs(conn, "acct", issue, token, [(left, right)]).decision_id
+        reject_seconds = time.perf_counter() - started
+
+        started = time.perf_counter()
+        revision = undo_outlook(conn, load_decision(conn, decision_id), DEFAULT_RULES).revision
+        outlook_seconds = time.perf_counter() - started
+
+        started = time.perf_counter()
+        undo_decision(conn, "acct", decision_id, revision)
+        undo_seconds = time.perf_counter() - started
+        print(
+            f"reject transactions={2 * rows_per_file:6} evidence={inspect_seconds:7.3f}s "
+            f"reject={reject_seconds:7.3f}s decision_show={outlook_seconds:7.3f}s "
+            f"undo={undo_seconds:7.3f}s",
+            flush=True,
+        )
+        conn.close()
+
+
+def constrained() -> None:
+    for units in (100, 500, 1000, 2000, 4000):
+        for constraints in (0, 1, units // 10):
+            measure_derive(units, constraints)
+    for rows_per_file in (50, 250, 500, 1000):
+        measure_reject(rows_per_file)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--worst"]:
         worst_cases()
+        return
+    if sys.argv[1:] == ["--constrained"]:
+        constrained()
         return
     sizes = [(24, 200), (24, 1000), (24, 4000)]
     if len(sys.argv) > 1:

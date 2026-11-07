@@ -172,6 +172,7 @@ bin/pf import --db "$DB" --account "Synthetic Card" --layout synthetic_card_v1 \
 
 bin/pf documents --db "$DB"
 bin/pf review list --db "$DB"
+bin/pf review show --db "$DB" ITEM_ID
 bin/pf totals --db "$DB"
 bin/pf transactions --db "$DB"
 bin/pf trace --db "$DB" TRANSACTION_ID
@@ -180,7 +181,43 @@ bin/pf trace --db "$DB" TRANSACTION_ID
 bin/pf reconcile --db "$DB"
 ```
 
-`transactions` and `trace` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents` and `review list` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
+`transactions`, `trace` and `review show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review decisions`, `review decision show` and `review undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
+
+## Reading a Review Item
+
+`review list` gives each open item an ID, and `review show` displays one item's evidence.
+
+## Rejecting a Candidate Pair
+
+```sh
+bin/pf review reject --db "$DB" --account ACCOUNT ITEM_ID --revision REVISION --pair T1 T2
+bin/pf review decisions --db "$DB"
+bin/pf review decision show --db "$DB" DECISION_ID
+bin/pf review undo --db "$DB" --account ACCOUNT DECISION_ID --revision REVISION
+```
+
+`review reject` records that two transactions in a `cross_document_candidates` item are different events. Other kinds of item cannot be acted on yet, and possible duplicates cannot yet be confirmed, so true duplicates stay open and counted.
+
+- Name a pair from the direct pairs listed by `review show`. Two transactions that only share an item through a third are refused. Repeat `--pair` to record several pairs as one decision.
+- The account, item and revision from `review show` are checked together, and any change to the evidence since you looked refuses the command. An account that is not current is refused: run `reconcile`, then look again.
+- Rejecting changes no totals and moves no records. The decision covers the records in those two transactions now, not new records, so a re-export can raise the question again.
+- An item closes when nothing undecided remains in it.
+
+**Decision conflicts** are listed apart from possible duplicates. If a later file would automatically merge records you kept apart, the whole match is withheld and its records stay separate and counted, so later evidence can raise the transaction count and account movements, and can split an earlier automatic merge. If an automatic split divides a transaction a decision was based on, the decision stands and you are told its basis changed.
+
+`review undo` needs the revision from `review decision show`, and is refused if anything relevant to regrouping has changed since. It keeps the decision on record and re-derives from the evidence held now. It does not restore earlier totals: if files have arrived since, the result is what the ledger would be had the decision never been made.
+
+| Section | Meaning |
+|---|---|
+| Machine-generated reasons | Why the item exists. These are heuristics, not proof |
+| Current logical transaction values | What the ledger counts now |
+| Primary-source selection | Which record supplies those values, and why the others did not |
+| Original source cells | The row exactly as read |
+| Parsed source values | What the parser read from that row |
+| Coverage evidence | What each document claims, and the last date matching relies on |
+| Revision | Identifies this evidence. It changes when any of it changes, and a repeat import that changes nothing leaves it alone |
+
+A value the source did not provide is shown as `missing`. Members of a possible-duplicate group are all counted in full, and no exact adjustment can be stated. See [D-040](docs/decisions.md).
 
 ## Reading an Import Summary
 
@@ -195,6 +232,7 @@ Each count keeps its own unit, so do not add different lines together. A file's 
 | Net change in live logical transactions | The ledger's signed change. It can exceed the rows read, because a new file can split an earlier merge, and it can be zero |
 | Source memberships changed | Source records moved to a different transaction during reconciliation |
 | Open review groups | Possible duplicates awaiting review, with the distinct transactions they affect. Groups can overlap |
+| Decision conflicts | New evidence that disagrees with a stored decision, counted apart from possible duplicates. One transaction can appear in several of these counts |
 | Unresolved records | Rows that could not be read as a transaction. They are not in totals |
 
 A failed file never counts towards rows read. It shows either `Source rows: unavailable`, or a count of rows read and then rolled back, of which none were kept. See [D-036](docs/decisions.md).

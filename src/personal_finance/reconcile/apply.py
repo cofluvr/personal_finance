@@ -1,4 +1,4 @@
-"""Applies a derivation to one account. See decisions.md D-029 and D-033.
+"""Applies a derivation to one account. See decisions.md D-029, D-033 and D-042 to D-045.
 
 Every function here runs inside the caller's database transaction, so an import and
 its reconciliation commit together or not at all. Source evidence is only read.
@@ -14,7 +14,9 @@ from dataclasses import dataclass
 
 from personal_finance.reconcile.cross_document import (
     RULE_CANDIDATES,
+    RULE_DECISION,
     RULE_EXTERNAL_ID,
+    Constraint,
     Derivation,
     Document,
     Record,
@@ -23,7 +25,9 @@ from personal_finance.reconcile.cross_document import (
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES, RULES_VERSION, MatchingRules
 
-MANAGED_RULES = (RULE_CANDIDATES, RULE_EXTERNAL_ID)
+MANAGED_RULES = (RULE_CANDIDATES, RULE_EXTERNAL_ID, RULE_DECISION)
+KIND_DUPLICATE = "possible_duplicate"
+KIND_CONFLICT = "decision_conflict"
 
 
 @dataclass(frozen=True)
@@ -68,12 +72,18 @@ def reconcile_account(
     account_id: str,
     rules: MatchingRules = DEFAULT_RULES,
     trigger_document_id: str | None = None,
+    decision_id: str | None = None,
 ) -> ReconcileResult:
-    """Bring one account in line with its evidence. The caller holds the transaction."""
-    documents, records, unresolved, import_order = _load_evidence(conn, account_id)
-    derivation = derive(documents, records, unresolved, rules)
+    """Bring one account in line with its evidence. The caller holds the transaction.
 
-    state = _State(conn, account_id, records, derivation, import_order, rules, trigger_document_id)
+    decision_id names the decision being undone, when that is why this is running.
+    """
+    documents, records, unresolved, import_order = load_evidence(conn, account_id)
+    constraints = load_constraints(conn, account_id)
+    derivation = derive(documents, records, unresolved, rules, constraints)
+
+    state = _State(conn, account_id, records, derivation, import_order, rules, trigger_document_id,
+                   decision_id)
     state.write_transactions()
     moved = state.write_links(_last_fingerprint(conn, account_id))
     state.write_review_items()
@@ -104,7 +114,28 @@ def _write_marker(conn, account_id, rules) -> None:
     )
 
 
-def _load_evidence(conn, account_id):
+def load_constraints(conn, account_id) -> tuple[Constraint, ...]:
+    """The stated pairs of active decisions. Undone decisions stay on record, unused."""
+    sides = defaultdict(lambda: (set(), set()))
+    for decision_id, pair_number, left, right in conn.execute(
+        """SELECT pair.decision_id, pair.pair_number, pair.left_record_id, pair.right_record_id
+           FROM decision_constraint pair
+           JOIN decision ON decision.id = pair.decision_id
+           WHERE decision.account_id = ? AND pair.relation = 'different_event'
+             AND NOT EXISTS (SELECT 1 FROM decision_event undone
+                             WHERE undone.decision_id = decision.id
+                               AND undone.event = 'undone')""",
+        (account_id,),
+    ):
+        sides[decision_id, pair_number][0].add(left)
+        sides[decision_id, pair_number][1].add(right)
+    return tuple(
+        Constraint(decision_id, tuple(sorted(left)), tuple(sorted(right)))
+        for (decision_id, _), (left, right) in sorted(sides.items())
+    )
+
+
+def load_evidence(conn, account_id):
     """Read stored interpretation only, never the current Python layouts (D-026)."""
     documents, imported = [], {}
     for row in conn.execute(
@@ -154,12 +185,14 @@ def _load_evidence(conn, account_id):
 class _State:
     """The account as stored, and the changes that bring it in line."""
 
-    def __init__(self, conn, account_id, records, derivation, import_order, rules, trigger):
+    def __init__(self, conn, account_id, records, derivation, import_order, rules, trigger,
+                 decision_id):
         self.conn = conn
         self.account_id = account_id
         self.derivation = derivation
         self.rules = rules
         self.trigger_document_id = trigger
+        self.decision_id = decision_id
         # Why records moved into or out of a transaction, for its identity history.
         self.moved_in = {}
         self.moved_out = {}
@@ -285,10 +318,12 @@ class _State:
             self.conn.execute(
                 """INSERT INTO transaction_link_history (source_record_id, from_transaction_id,
                                                          to_transaction_id, action, reason,
-                                                         rules_fingerprint, trigger_document_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                                                         rules_fingerprint, trigger_document_id,
+                                                         decision_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (record_id, old_id, new_id, action, reason, self.rules.fingerprint(),
-                 self.trigger_document_id),
+                 self.trigger_document_id,
+                 self.decision_id or self.derivation.withheld_by.get(record_id)),
             )
 
         for record_id, link in self.links.items():
@@ -365,9 +400,9 @@ class _State:
                 FROM review_issue issue
                 JOIN review_issue_subject subject ON subject.review_issue_id = issue.id
                 JOIN ledger_transaction entry ON entry.id = subject.transaction_id
-                WHERE issue.kind = 'possible_duplicate' AND issue.status = ?
+                WHERE issue.kind IN (?, ?) AND issue.status = ?
                   AND issue.rule IN ({marks}) AND entry.account_id = ?""",
-            (status, *MANAGED_RULES, self.account_id),
+            (KIND_DUPLICATE, KIND_CONFLICT, status, *MANAGED_RULES, self.account_id),
         ):
             rules[issue] = rule
             records[issue].update(self.old_members[transaction_id])
@@ -386,9 +421,9 @@ class _State:
     def _insert_issue(self, item) -> None:
         issue = str(uuid.uuid4())
         self.conn.execute(
-            """INSERT INTO review_issue (id, kind, rule, evidence_json)
-               VALUES (?, 'possible_duplicate', ?, ?)""",
-            (issue, item.rule, _evidence(item)),
+            "INSERT INTO review_issue (id, kind, rule, evidence_json) VALUES (?, ?, ?, ?)",
+            (issue, KIND_CONFLICT if item.rule == RULE_DECISION else KIND_DUPLICATE, item.rule,
+             _evidence(item)),
         )
         self.conn.executemany(
             "INSERT INTO review_issue_subject (review_issue_id, transaction_id) VALUES (?, ?)",

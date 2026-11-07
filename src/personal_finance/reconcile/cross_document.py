@@ -1,19 +1,19 @@
 """Derives one account's logical transactions from its stored evidence.
 
 derive() is a pure function: it reads no database and depends only on the set of
-documents and the rules, ordered by content hash and row number, never by import
-order or generated ID. Import order therefore cannot change the outcome. Applying
-the result is a separate step. Rules are in decisions.md D-006, D-007 and D-026 to
-D-031.
+documents, any active decisions and the rules, ordered by content hash and row number,
+never by import order or generated ID. Import order therefore cannot change the outcome.
+Applying the result is a separate step. Rules are in decisions.md D-006, D-007, D-026 to
+D-031 and D-042 to D-045.
 
 Reliable-ID matching and ID-less matching run on separate rows and neither one
 feeds the other. Description similarity only ever creates review items.
 """
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
-from itertools import combinations
+from itertools import combinations, product
 
 from personal_finance.ingest.coverage import effective_end
 from personal_finance.reconcile.rules import MatchingRules
@@ -25,6 +25,10 @@ LINK_EXACT = "exact_coverage_pair"
 
 RULE_EXTERNAL_ID = "cross_document_external_id"
 RULE_CANDIDATES = "cross_document_candidates"
+RULE_DECISION = "identity_decision"
+
+REASON_WITHHELD = "automatic_match_withheld"
+REASON_BASIS_CHANGED = "decision_basis_changed"
 
 GUARANTEE_NONE = "none"
 GUARANTEE_STABLE_UNIQUE = "stable_unique"
@@ -79,6 +83,18 @@ class UnresolvedRecord:
 
 
 @dataclass(frozen=True)
+class Constraint:
+    """One stated pair of an active decision: these two sides are different events.
+
+    The sides are the records of the two transactions at decision time (D-042).
+    """
+
+    decision_id: str
+    left: tuple[str, ...]
+    right: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class TransactionGroup:
     """The records that form one logical transaction."""
 
@@ -89,7 +105,8 @@ class TransactionGroup:
 
 @dataclass(frozen=True)
 class ReviewItem:
-    """Possible duplicates. Each member is the record IDs of one transaction."""
+    """Possible duplicates or a decision conflict. Each member is the record IDs of one
+    transaction."""
 
     rule: str
     members: tuple[tuple[str, ...], ...]
@@ -106,6 +123,10 @@ class Derivation:
     separation_reasons: dict[str, str]
     # Work done finding candidates, so tests can measure it.
     candidate_steps: int = 0
+    # Unit pairs compared again in groups that a constraint touches, also for measuring.
+    recomputed_pairs: int = 0
+    # The decision that withheld a record from an automatic merge.
+    withheld_by: dict[str, str] = field(default_factory=dict)
 
 
 class _DisjointSet:
@@ -134,6 +155,7 @@ def derive(
     records: list[Record],
     unresolved: list[UnresolvedRecord],
     rules: MatchingRules,
+    constraints: tuple[Constraint, ...] = (),
 ) -> Derivation:
     by_id = {document.id: document for document in documents}
     ordered = sorted(records, key=lambda row: _record_key(row, by_id))
@@ -142,17 +164,101 @@ def derive(
     id_less = [row for row in ordered if not _has_reliable_id(row, by_id)]
     exact_merges, exact_reasons = _match_exact(id_less, by_id, unresolved, rules)
 
-    merged = {row.id for merge in id_merges + exact_merges for row in merge}
-    units = [(merge, LINK_EXTERNAL_ID) for merge in id_merges]
-    units += [(merge, LINK_EXACT) for merge in exact_merges]
+    merges = [(merge, LINK_EXTERNAL_ID) for merge in id_merges]
+    merges += [(merge, LINK_EXACT) for merge in exact_merges]
+    withheld = _withheld_merges([merge for merge, _ in merges], constraints)
+    held = [merges[position][0] for position in sorted(withheld)]
+    withheld_by = {
+        row.id: min(decisions)
+        for position, decisions in withheld.items()
+        for row in merges[position][0]
+    }
+    separation.update((record_id, REASON_WITHHELD) for record_id in withheld_by)
+
+    units = [unit for position, unit in enumerate(merges) if position not in withheld]
+    merged = {row.id for merge, _ in units for row in merge}
     units += [([row], LINK_NEW) for row in ordered if row.id not in merged]
 
     groups = tuple(_group(rows, rule, by_id) for rows, rule in units)
     candidates = [_Unit.of(rows, by_id) for rows, _ in units]
     joined, steps = _link_candidates(candidates, rules)
-    items = [_id_item(conflict) for conflict in id_conflicts]
-    items += _candidate_items(candidates, joined, exact_reasons, rules)
-    return Derivation(groups, tuple(items), separation, steps)
+    separated = _separated_units(candidates, constraints)
+    found, recomputed = _candidate_items(candidates, joined, exact_reasons, rules, separated)
+    items = [_id_item(_without_withheld(conflict, withheld_by)) for conflict in id_conflicts]
+    items += _not_covered_by(found, held)
+    items += _conflict_items([rows for rows, _ in units], held, constraints)
+    return Derivation(groups, tuple(items), separation, steps, recomputed, withheld_by)
+
+
+def _withheld_merges(merges, constraints):
+    """Merges holding both sides of a constraint, each with the decisions behind that.
+
+    The whole merge is withheld, because choosing which side a third record joins would
+    be a guess (D-042).
+    """
+    home = {row.id: position for position, merge in enumerate(merges) for row in merge}
+    withheld = defaultdict(set)
+    for constraint in constraints:
+        left = {home[record] for record in constraint.left if record in home}
+        right = {home[record] for record in constraint.right if record in home}
+        for position in left & right:
+            withheld[position].add(constraint.decision_id)
+    return withheld
+
+
+def _without_withheld(conflict, withheld_by):
+    units, reasons = conflict
+    kept = []
+    for unit in units:
+        kept.extend([[row] for row in unit] if unit[0].id in withheld_by else [unit])
+    return kept, reasons
+
+
+def _separated_units(units, constraints) -> set[frozenset[int]]:
+    """Pairs of units that a constraint keeps apart, as positions in units."""
+    home = {row.id: position for position, unit in enumerate(units) for row in unit.rows}
+    separated = set()
+    for constraint in constraints:
+        left = {home[record] for record in constraint.left if record in home}
+        right = {home[record] for record in constraint.right if record in home}
+        separated.update(frozenset(pair) for pair in product(left, right))
+    return separated
+
+
+def _not_covered_by(items, held) -> list["ReviewItem"]:
+    """A conflict replaces any candidate item covering only the same records (D-044)."""
+    home = {row.id: position for position, merge in enumerate(held) for row in merge}
+    return [
+        item for item in items
+        if None in (homes := {home.get(record) for member in item.members for record in member})
+        or len(homes) > 1
+    ]
+
+
+def _conflict_items(units, held, constraints) -> list["ReviewItem"]:
+    """One item per connected set of affected transactions, with every reason that applies."""
+    home = {row.id: position for position, rows in enumerate(units) for row in rows}
+    found = [({home[row.id] for row in merge}, REASON_WITHHELD) for merge in held]
+    for constraint in constraints:
+        for side in (constraint.left, constraint.right):
+            parts = {home[record] for record in side if record in home}
+            if len(parts) > 1:
+                found.append((parts, REASON_BASIS_CHANGED))
+
+    joined = _DisjointSet(len(found))
+    owners = {}
+    for index, (positions, _) in enumerate(found):
+        for position in positions:
+            joined.union(index, owners.setdefault(position, index))
+
+    items = []
+    for component in joined.components():
+        positions = {position for index in component for position in found[index][0]}
+        members = [units[position] for position in sorted(positions)]
+        rows = [row for member in members for row in member]
+        reasons = {found[index][1] for index in component}
+        items.append(_item(RULE_DECISION, members, reasons, _dates_of(rows)))
+    return items
 
 
 def _record_key(row: Record, documents) -> tuple[str, int]:
@@ -449,13 +555,23 @@ def _join_lanes(left, right, rules, joined) -> int:
     return steps
 
 
-def _candidate_items(units, joined, exact_reasons, rules) -> list[ReviewItem]:
+def _candidate_items(units, joined, exact_reasons, rules, separated):
+    touched = {
+        joined.find(left)
+        for left, right in map(sorted, (pair for pair in separated if len(pair) == 2))
+        if joined.find(left) == joined.find(right)
+    }
     items = []
+    recomputed = 0
     for component in joined.components():
         if len(component) < 2:
             continue
-        members = [units[index] for index in component]
-        for part in _bounded_parts(members, rules):
+        if joined.find(component[0]) in touched:
+            parts, compared = _undecided_parts(component, units, separated, rules)
+            recomputed += compared
+        else:
+            parts = _bounded_parts([units[index] for index in component], rules)
+        for part in parts:
             rows = [row for unit in part for row in unit.rows]
             reasons = {reason for row in rows for reason in exact_reasons.get(row.id, ())}
             items.append(
@@ -466,7 +582,66 @@ def _candidate_items(units, joined, exact_reasons, rules) -> list[ReviewItem]:
                     _dates_of(rows),
                 )
             )
-    return items
+    return items, recomputed
+
+
+def _undecided_parts(component, units, separated, rules):
+    """The parts of a group that still hold an undecided candidate relationship.
+
+    Discovery stores no pairs (D-031), so one link cannot be removed from a group. Direct
+    links are compared again here, only for groups a constraint touches. This is quadratic
+    in the units of those groups.
+    """
+    related = {}
+    links = [
+        (left, right)
+        for left, right in combinations(component, 2)
+        if frozenset((left, right)) not in separated
+        and _units_linked(units[left], units[right], rules, related)
+    ]
+    places = {index: place for place, index in enumerate(component)}
+    joined = _DisjointSet(len(component))
+    for left, right in links:
+        joined.union(places[left], places[right])
+
+    parts = []
+    for piece in joined.components():
+        if len(piece) < 2:
+            continue
+        for part in _bounded_parts([units[component[place]] for place in piece], rules):
+            held = {id(unit) for unit in part}
+            if any(id(units[left]) in held and id(units[right]) in held for left, right in links):
+                parts.append(part)
+    pairs = len(component) * (len(component) - 1) // 2
+    return parts, pairs
+
+
+def _units_linked(left, right, rules, related) -> bool:
+    """Whether discovery would link these two units directly. related remembers text pairs."""
+    if left.amount_cents != right.amount_cents or not _lanes_can_link(left.lane, right.lane):
+        return False
+    window = rules.date_window_days
+    if not any(abs(one - other) <= window for one, other in product(left.days, right.days)):
+        return False
+    return any(
+        _texts_related(one, other, rules, related)
+        for one, other in product(left.descriptions, right.descriptions)
+    )
+
+
+def _texts_related(one, other, rules, related) -> bool:
+    if one == other:
+        return True
+    key = (one, other) if one < other else (other, one)
+    if key not in related:
+        related[key] = similar(parse_description(one, rules), parse_description(other, rules), rules)
+    return related[key]
+
+
+def directly_linked(left_rows, right_rows, documents, rules) -> bool:
+    """Whether two transactions are a direct candidate relationship (D-045)."""
+    by_id = {document.id: document for document in documents}
+    return _units_linked(_Unit.of(left_rows, by_id), _Unit.of(right_rows, by_id), rules, {})
 
 
 def _bounded_parts(members, rules) -> list[list[_Unit]]:
