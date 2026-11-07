@@ -1025,16 +1025,18 @@ class TestConstraintsApplied:
         )
         return conn, account
 
-    def test_same_event_is_reserved_and_never_read_as_a_rejection(self, ledger):
+    def test_same_event_is_never_read_as_a_rejection(self, ledger):
         pair_up(ledger)
         conn, account = self.insert(ledger, "same_event")
-        assert load_constraints(conn, account) == ()
+        (constraint,) = load_constraints(conn, account)
+        assert constraint.relation == "same_event"
         conn.close()
 
     def test_a_different_event_row_is_read(self, ledger):
         pair_up(ledger)
         conn, account = self.insert(ledger, "different_event")
-        assert len(load_constraints(conn, account)) == 1
+        (constraint,) = load_constraints(conn, account)
+        assert constraint.relation == "different_event" and not constraint.confirmation
         conn.close()
 
     def test_another_accounts_decisions_are_not_read(self, ledger):

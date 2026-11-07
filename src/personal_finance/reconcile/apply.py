@@ -29,6 +29,10 @@ MANAGED_RULES = (RULE_CANDIDATES, RULE_EXTERNAL_ID, RULE_DECISION)
 KIND_DUPLICATE = "possible_duplicate"
 KIND_CONFLICT = "decision_conflict"
 
+STATE_ACTIVE = "active"
+STATE_UNDONE = "undone"
+STATE_SUPERSEDED = "superseded"
+
 
 @dataclass(frozen=True)
 class ReconcileResult:
@@ -76,7 +80,7 @@ def reconcile_account(
 ) -> ReconcileResult:
     """Bring one account in line with its evidence. The caller holds the transaction.
 
-    decision_id names the decision being undone, when that is why this is running.
+    decision_id names the decision being made or undone, when that is why this is running.
     """
     documents, records, unresolved, import_order = load_evidence(conn, account_id)
     constraints = load_constraints(conn, account_id)
@@ -114,24 +118,70 @@ def _write_marker(conn, account_id, rules) -> None:
     )
 
 
-def load_constraints(conn, account_id) -> tuple[Constraint, ...]:
-    """The stated pairs of active decisions. Undone decisions stay on record, unused."""
+def decision_states(conn, account_id, without: str | None = None) -> dict[str, str]:
+    """Every decision of an account as active, undone or superseded (D-046).
+
+    A decision is active unless it was undone, or an active decision supersedes it. without
+    is treated as undone, to see what undoing it would leave.
+    """
+    rows = conn.execute(
+        """SELECT decision.id, decision.supersedes_decision_id,
+                  EXISTS (SELECT 1 FROM decision_event undone
+                          WHERE undone.decision_id = decision.id AND undone.event = 'undone')
+           FROM decision WHERE decision.account_id = ?""",
+        (account_id,),
+    ).fetchall()
+    undone = {decision for decision, _, gone in rows if gone or decision == without}
+    replaced_by = defaultdict(list)
+    for decision, old, _ in rows:
+        if old is not None:
+            replaced_by[old].append(decision)
+
+    states = {}
+
+    def state_of(decision):
+        # A decision supersedes only an earlier one, so this always ends.
+        if decision not in states:
+            if decision in undone:
+                states[decision] = STATE_UNDONE
+            elif any(state_of(newer) == STATE_ACTIVE for newer in replaced_by[decision]):
+                states[decision] = STATE_SUPERSEDED
+            else:
+                states[decision] = STATE_ACTIVE
+        return states[decision]
+
+    for decision, _, _ in rows:
+        state_of(decision)
+    return states
+
+
+def load_constraints(conn, account_id, without: str | None = None) -> tuple[Constraint, ...]:
+    """The stated pairs of active decisions. Undone and superseded ones stay on record, unused.
+
+    without leaves one decision out as if undone, restoring anything it superseded.
+    """
+    active = {
+        decision for decision, state in decision_states(conn, account_id, without).items()
+        if state == STATE_ACTIVE
+    }
     sides = defaultdict(lambda: (set(), set()))
-    for decision_id, pair_number, left, right in conn.execute(
-        """SELECT pair.decision_id, pair.pair_number, pair.left_record_id, pair.right_record_id
+    kinds = {}
+    for decision_id, kind, pair_number, relation, left, right in conn.execute(
+        """SELECT pair.decision_id, decision.kind, pair.pair_number, pair.relation,
+                  pair.left_record_id, pair.right_record_id
            FROM decision_constraint pair
            JOIN decision ON decision.id = pair.decision_id
-           WHERE decision.account_id = ? AND pair.relation = 'different_event'
-             AND NOT EXISTS (SELECT 1 FROM decision_event undone
-                             WHERE undone.decision_id = decision.id
-                               AND undone.event = 'undone')""",
+           WHERE decision.account_id = ?""",
         (account_id,),
     ):
-        sides[decision_id, pair_number][0].add(left)
-        sides[decision_id, pair_number][1].add(right)
+        if decision_id in active:
+            sides[decision_id, pair_number][0].add(left)
+            sides[decision_id, pair_number][1].add(right)
+            kinds[decision_id, pair_number] = relation, kind == "confirm"
     return tuple(
-        Constraint(decision_id, tuple(sorted(left)), tuple(sorted(right)))
-        for (decision_id, _), (left, right) in sorted(sides.items())
+        Constraint(decision_id, tuple(sorted(left)), tuple(sorted(right)),
+                   *kinds[decision_id, number])
+        for (decision_id, number), (left, right) in sorted(sides.items())
     )
 
 

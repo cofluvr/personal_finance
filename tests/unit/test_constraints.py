@@ -324,3 +324,109 @@ def test_recomputed_links_match_union_find_components(rows):
             parts, _ = _undecided_parts(component, units, set(), rules)
             found.update(frozenset(units.index(unit) for unit in part) for part in parts)
     assert found == expected
+
+
+def confirmed(left, right, decision="c1"):
+    return Constraint(decision, tuple(left), tuple(right), "same_event", True)
+
+
+def partition_apart(left, right, decision="c1"):
+    """The different_event half of a confirmation's partition."""
+    return Constraint(decision, tuple(left), tuple(right), "different_event", True)
+
+
+def rule_of(result, record_id):
+    return next(group.link_rule for group in result.groups if record_id in group.record_ids)
+
+
+class TestConfirmed:  # D-046
+    documents = [doc("a"), doc("b"), doc("c")]
+
+    def test_confirmed_records_form_one_transaction_and_close_the_item(self):
+        records = [row("1", "a"), row("2", "b")]
+        result = outcome(self.documents, records, confirmed(["1"], ["2"]))
+        assert groups(result) == {("1", "2")}
+        assert rule_of(result, "1") == "confirmed_same_event"
+        assert result.items == ()
+
+    def test_part_of_a_group_leaves_the_rest_undecided(self):
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        result = outcome(self.documents, records, confirmed(["1"], ["2"]))
+        assert groups(result) == {("1", "2"), ("3",)}
+        assert members(result, RULE_CANDIDATES) == {frozenset({("1", "2"), ("3",)})}
+
+    def test_a_partition_closes_the_whole_item(self):
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        result = outcome(self.documents, records, confirmed(["1"], ["2"]),
+                         partition_apart(["1", "2"], ["3"]))
+        assert groups(result) == {("1", "2"), ("3",)}
+        assert result.items == ()
+
+    def test_an_automatic_merge_joins_a_confirmed_unit_when_valid(self):
+        # a and b overlap by one day, so only the wide c merges them, and the merge joins 1 and 2.
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        documents = [*NARROW, WIDE]
+        assert groups(outcome(documents, records)) == {("1", "2", "3")}
+        result = outcome(documents, records, confirmed(["1"], ["2"]))
+        assert groups(result) == {("1", "2", "3")}
+        assert rule_of(result, "3") == "confirmed_same_event"
+        assert result.items == ()
+
+    def test_a_merge_that_would_join_a_rejected_record_is_withheld(self):
+        # 1 and 2 are confirmed, 3 is rejected against 2, and the exact merge {1, 3} arrives.
+        documents = [doc("a", "2026-01-01", "2026-01-20"), doc("b"),
+                     doc("c", "2026-01-01", "2026-01-20")]
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        assert groups(outcome(documents, records)) == {("1", "3"), ("2",)}
+        result = outcome(documents, records, confirmed(["1"], ["2"]), rejected(["2"], ["3"], "r1"))
+        assert groups(result) == {("1", "2"), ("3",)}
+        assert members(result, RULE_DECISION) == {frozenset({("1", "2"), ("3",)})}
+        assert result.withheld_merges == (("1", "3"),)
+        assert result.withheld_by == {"1": "c1", "3": "c1"}
+
+    def test_a_merge_that_would_put_two_rows_of_one_document_together_is_withheld(self):
+        # Rows 1 and 8 of a are alike. 1 merges with 2 automatically, and 8 is confirmed with 2.
+        documents = [doc("a", "2026-01-01", "2026-01-20"), doc("b", "2026-01-01", "2026-01-20")]
+        records = [row("1", "a", 1), row("8", "a", 2), row("2", "b")]
+        assert groups(outcome(documents, records)) == {("1", "2"), ("8",)}
+        result = outcome(documents, records, confirmed(["8"], ["2"]))
+        assert groups(result) == {("2", "8"), ("1",)}
+        (conflict,) = [item for item in result.items if item.rule == RULE_DECISION]
+        assert conflict.reasons == (REASON_WITHHELD,)
+
+    def test_a_confirmation_partition_settles_a_withheld_match(self):
+        documents = [doc("a", "2026-01-01", "2026-01-20"), doc("b"),
+                     doc("c", "2026-01-01", "2026-01-20")]
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        result = outcome(documents, records, confirmed(["1"], ["2"]),
+                         partition_apart(["1", "2"], ["3"]))
+        assert groups(result) == {("1", "2"), ("3",)}
+        assert result.items == ()
+
+    def test_a_rejection_never_settles_a_withheld_match(self):
+        result = outcome([*NARROW, WIDE], [row("1", "a"), row("2", "b"), row("3", "c")],
+                         rejected(["1"], ["2"]), rejected(["1"], ["3"], "d2"),
+                         rejected(["2"], ["3"], "d3"))
+        assert groups(result) == {("1",), ("2",), ("3",)}
+        assert members(result, RULE_DECISION) == {frozenset({("1",), ("2",), ("3",)})}
+
+    def test_a_partition_by_one_decision_settles_and_by_two_does_not(self):
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        one = outcome([*NARROW, WIDE], records, partition_apart(["1"], ["2"]),
+                      partition_apart(["1"], ["3"]), partition_apart(["2"], ["3"]))
+        assert one.items == ()
+        two = outcome([*NARROW, WIDE], records, partition_apart(["1"], ["2"]),
+                      partition_apart(["1"], ["3"], "c2"), partition_apart(["2"], ["3"], "c2"))
+        assert members(two, RULE_DECISION) == {frozenset({("1",), ("2",), ("3",)})}
+
+    def test_a_confirmed_unit_is_not_a_candidate_for_its_own_documents(self):
+        records = [row("1", "a"), row("2", "b"), row("4", "a", 2)]
+        result = outcome(self.documents, records, confirmed(["1"], ["2"]))
+        assert members(result) == set()
+
+    @settings(max_examples=60, deadline=None)
+    @given(st.permutations([row("1", "a"), row("2", "b"), row("3", "c")]))
+    def test_record_order_never_matters(self, records):
+        expected = outcome(self.documents, sorted(records, key=lambda one: one.id),
+                           confirmed(["1"], ["2"]))
+        assert outcome(self.documents, records, confirmed(["1"], ["2"])) == expected
