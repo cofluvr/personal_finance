@@ -221,7 +221,7 @@ def history(tmp_path):
     )
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.execute(
-        """INSERT INTO decision (id, account_id, review_issue_id, item_revision)
+        """INSERT INTO decision (id, account_id, target_id, target_revision)
            VALUES ('d1', 'acct', 'issue', 'r2-0')"""
     )
     conn.execute(
@@ -239,7 +239,7 @@ def history(tmp_path):
 
 
 REPLACEMENTS = {
-    "decision": """INSERT OR REPLACE INTO decision (id, account_id, review_issue_id, item_revision)
+    "decision": """INSERT OR REPLACE INTO decision (id, account_id, target_id, target_revision)
                    VALUES ('d1', 'acct', 'other', 'r2-1')""",
     "decision_constraint": """INSERT OR REPLACE INTO decision_constraint (id, decision_id, relation,
                    pair_number, left_transaction_id, right_transaction_id, left_record_id,

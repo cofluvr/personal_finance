@@ -246,7 +246,7 @@ def _reject(conn, account_id, item_id, revision, pairs, rules) -> Rejection:
     before = _ledger_state(conn, account_id)
     decision_id = str(uuid.uuid4())
     conn.execute(
-        """INSERT INTO decision (id, account_id, review_issue_id, item_revision)
+        """INSERT INTO decision (id, account_id, target_id, target_revision)
            VALUES (?, ?, ?, ?)""",
         (decision_id, account_id, item_id, revision),
     )
@@ -376,7 +376,7 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
 
     decision_id = str(uuid.uuid4())
     conn.execute(
-        """INSERT INTO decision (id, account_id, review_issue_id, item_revision, kind,
+        """INSERT INTO decision (id, account_id, target_id, target_revision, kind,
                                  supersedes_decision_id)
            VALUES (?, ?, ?, ?, 'confirm', ?)""",
         (decision_id, account_id, item_id, revision, replaced and replaced.decision_id),
@@ -452,9 +452,10 @@ def _copy_pairs(conn, old_id, numbers, new_id, after) -> None:
         conn.execute(
             """INSERT INTO decision_constraint (decision_id, relation, pair_number,
                                                 left_transaction_id, right_transaction_id,
-                                                left_record_id, right_record_id)
+                                                left_record_id, right_record_id, left_part,
+                                                right_part)
                SELECT ?, relation, ?, left_transaction_id, right_transaction_id, left_record_id,
-                      right_record_id
+                      right_record_id, left_part, right_part
                FROM decision_constraint WHERE decision_id = ? AND pair_number = ?""",
             (new_id, offset, old_id, stored[number - 1]),
         )

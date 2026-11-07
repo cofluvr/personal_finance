@@ -47,7 +47,8 @@ class DecisionEvidence:
     decision_id: str
     account_id: str
     account_name: str
-    review_issue_id: str
+    # The review item or, for a separation, the transaction it was made on (D-047).
+    target_id: str
     created_at: str
     state: str
     undone_at: str | None
@@ -57,6 +58,8 @@ class DecisionEvidence:
     supersedes_decision_id: str | None = None
     # The active decision replacing this one, while it is superseded.
     superseded_by: str | None = None
+    # item or transaction.
+    target_kind: str = "item"
 
 
 @dataclass(frozen=True)
@@ -92,9 +95,9 @@ def list_decisions(conn: sqlite3.Connection, account_id: str | None = None) -> l
 
 def load_decision(conn: sqlite3.Connection, decision_id: str) -> DecisionEvidence | None:
     row = conn.execute(
-        """SELECT decision.account_id, account.display_name, decision.review_issue_id,
+        """SELECT decision.account_id, account.display_name, decision.target_id,
                   decision.created_at, undone.created_at, decision.kind,
-                  decision.supersedes_decision_id
+                  decision.supersedes_decision_id, decision.target_kind
            FROM decision
            JOIN account ON account.id = decision.account_id
            LEFT JOIN decision_event undone
@@ -104,7 +107,7 @@ def load_decision(conn: sqlite3.Connection, decision_id: str) -> DecisionEvidenc
     ).fetchone()
     if row is None:
         return None
-    account_id, account_name, issue, created_at, undone_at, kind, supersedes = row
+    account_id, account_name, target, created_at, undone_at, kind, supersedes, target_kind = row
 
     sides = {}
     for number, relation, left_transaction, right_transaction, left, right in conn.execute(
@@ -132,8 +135,8 @@ def load_decision(conn: sqlite3.Connection, decision_id: str) -> DecisionEvidenc
             if states[newer] == STATE_ACTIVE
         )
     return DecisionEvidence(
-        decision_id, account_id, account_name, issue, created_at, states[decision_id], undone_at,
-        pairs, kind, supersedes, superseded_by,
+        decision_id, account_id, account_name, target, created_at, states[decision_id], undone_at,
+        pairs, kind, supersedes, superseded_by, target_kind,
     )
 
 

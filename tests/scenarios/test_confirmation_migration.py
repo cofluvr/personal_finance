@@ -27,6 +27,18 @@ def tables(conn):
     ]
 
 
+# Columns of decision that migration 0007 renamed, as a current ledger names them (D-047).
+RENAMED = {"review_issue_id": "target_id", "item_revision": "target_revision"}
+
+
+def through_0006(folder: Path) -> Path:
+    """Migrations up to 0006 only, so that these tests check 0006 and nothing after it."""
+    folder.mkdir()
+    for migration in load_migrations()[:6]:
+        shutil.copy(migration.path, folder / migration.path.name)
+    return folder
+
+
 def dump(conn, leave_out=("kind", "supersedes_decision_id")):
     found = {}
     for table in tables(conn):
@@ -73,7 +85,9 @@ def populated(tmp_path, capsys):
     conn.execute("ATTACH DATABASE ? AS source", (str(source),))
     for table in tables(conn):
         names = ", ".join(columns(conn, table))
-        conn.execute(f"INSERT INTO main.{table} ({names}) SELECT {names} FROM source.{table}")
+        renamed = RENAMED if table == "decision" else {}
+        selected = ", ".join(renamed.get(name, name) for name in columns(conn, table))
+        conn.execute(f"INSERT INTO main.{table} ({names}) SELECT {selected} FROM source.{table}")
     conn.execute("DETACH DATABASE source")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.close()
@@ -91,10 +105,10 @@ class TestPopulatedMigration:
         assert len(dump(conn)["decision_constraint"]) == 1
         conn.close()
 
-    def test_everything_survives_and_old_decisions_are_rejections(self, populated):
+    def test_everything_survives_and_old_decisions_are_rejections(self, populated, tmp_path):
         conn = connect(populated)
         before = dump(conn)
-        assert migrate(conn) == len(load_migrations())
+        assert migrate(conn, through_0006(tmp_path / "to_0006")) == 6
         assert dump(conn) == before
         assert conn.execute(
             "SELECT kind, supersedes_decision_id FROM decision"
@@ -117,9 +131,9 @@ class TestPopulatedMigration:
         assert dump(conn)["transaction_source"] == links
         conn.close()
 
-    def test_kind_is_checked_and_superseding_stays_in_one_account(self, populated):
+    def test_kind_is_checked_and_superseding_stays_in_one_account(self, populated, tmp_path):
         conn = connect(populated)
-        migrate(conn)
+        migrate(conn, through_0006(tmp_path / "to_0006"))
         account = account_of(conn)
         (old,) = conn.execute("SELECT id FROM decision").fetchone()
         with pytest.raises(sqlite3.IntegrityError):

@@ -921,7 +921,7 @@ class TestUndoToken:  # S21
         ).fetchone()
         (account,) = conn.execute("SELECT id FROM account").fetchone()
         conn.execute(
-            """INSERT INTO decision (id, account_id, review_issue_id, item_revision)
+            """INSERT INTO decision (id, account_id, target_id, target_revision)
                VALUES ('other', ?, 'issue', 'r2-0')""",
             (account,),
         )
@@ -1013,7 +1013,7 @@ class TestConstraintsApplied:
         left, right = [row[0] for row in conn.execute("SELECT id FROM source_record")]
         (account,) = conn.execute("SELECT id FROM account WHERE display_name = 'A'").fetchone()
         conn.execute(
-            """INSERT INTO decision (id, account_id, review_issue_id, item_revision)
+            """INSERT INTO decision (id, account_id, target_id, target_revision)
                VALUES ('d', ?, 'issue', 'r2-0')""",
             (account,),
         )

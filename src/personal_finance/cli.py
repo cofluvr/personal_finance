@@ -989,7 +989,7 @@ def run_review_decision_show(args) -> int:
         )
     if decision.supersedes_decision_id:
         print(f"  Supersedes decision {decision.supersedes_decision_id}")
-    print(f"  From review item: {decision.review_issue_id}")
+    print(f"  From review item: {decision.target_id}")
 
     for number, pair in enumerate(decision.pairs, start=1):
         print(f"Pair {number} of {len(decision.pairs)}: {pair.relation}")
