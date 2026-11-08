@@ -1463,6 +1463,53 @@ with M2.9 on 2026-11-08, including the amendment of A34:
 - The `d5` pin moved from `d5-2a1e1dd2ac99de82` to `d5-ecb0f4cc0ef102ac` only because it covers the
   rules fingerprint, checked by computing it under rules version 1. Every other pin is unchanged.
 
+## D-053 Financial types — Proposed, awaiting the owner's approval
+
+Proposed for M3.1 on 2026-11-08. Nothing of it is built. Meets PRD §7 and §9's requirement that
+income, spending, transfers, debt principal and investment contributions stay distinct, and D-014,
+which puts financial type before categories. Builds on D-049, and changes none of D-042 to D-052.
+
+```sh
+pf review classify --db DB --account A TRANSACTION_ID --revision t5-… --type purchase \
+   [--supersedes CLASSIFICATION_ID --supersedes-revision f1-…]
+pf review classifications --db DB [--account A]
+pf review classification show --db DB CLASSIFICATION_ID
+pf review classification undo --db DB --account A CLASSIFICATION_ID --revision f1-…
+```
+
+**Recommendations, for the owner to approve or change:**
+
+1. **Types.** `purchase`, `refund`, `income`, `fee`, `interest`, `transfer`, `card_payment`,
+   `loan_payment` and `investment_contribution`, and `unclassified`, which every transaction is until
+   a person says otherwise. Each type allows one direction except `transfer`, which allows either:
+   a refund and income are money in, the others money out. A type against its direction is refused.
+2. **Only a person classifies in M3.1.** No layout states a type, and a description alone never
+   establishes one (D-011, D-032). Suggested types from rules belong to Phase 1B (D-014).
+3. **A classification is a correction of a field with no source value.** It binds the records of its
+   transaction when made, applies after derivation, is never read by matching, and follows D-049's
+   rules: agreeing classifications apply, disagreeing ones or one whose records split leave the
+   transaction `unclassified` and disclosed, chains follow D-048, and undo never refuses.
+   `review confirm` and `review separate` refuse to leave one unsettled, as for corrections.
+4. **Stored apart.** Migration 0013 adds append-only `type_classification`,
+   `type_classification_record` and `type_classification_event`, and a derived
+   `transaction_classification`. The correction tables are not widened, because changing their
+   checks would mean rebuilding tables that others reference. The effective-value and chain code of
+   D-049 is shared rather than copied.
+5. **Totals.** `totals` keeps account movement exactly as now (D-010), and adds one line per type
+   with its count and amount, and a line for unclassified transactions. Income, spending and
+   transfers as reports wait for M3.4, once transfers can be confirmed across accounts.
+6. **Tokens.** `r6` to `r7` and `t4` to `t5` add each transaction's classifications, left out while
+   empty so digests are kept. `d5` and `c1` gain them like corrections, versions bumped. `f1` is the
+   new classification undo token.
+7. **Privacy.** A type is not an amount or a description, so routine output may show it. The new
+   totals lines show aggregates only.
+
+**Acceptance tests,** F1 to F14, are in [plan.md](plan.md).
+
+**Open for M3.2, not decided here.** Transfers pair transactions of two accounts, and every rule so
+far reconciles one account at a time, including what makes an account current (D-033) and the order
+tests (A16). M3.2 needs its own decision on reconciling two accounts together.
+
 ## Not yet decided
 
 From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend details

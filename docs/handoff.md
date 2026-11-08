@@ -1,4 +1,4 @@
-# Session Handoff: M2 Complete and Accepted
+# Session Handoff: M2 Accepted, M3.1 Plan Proposed
 
 For a fresh session. Written 2026-11-08. **M1 is complete and accepted**, and its limitations and
 deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
@@ -14,8 +14,8 @@ the rules and implementation choices recorded in D-049 and the limits in "M2.6 a
 no changes. On 2026-11-08 the owner asked for M2.7, M2.8 and M2.9 to be built in turn with the lead
 engineer's recommendations, each recorded as its own decision before its code, and **accepted all
 three as built the same day**, including the amendment of A34, continuing past D-050's stop rule, and
-the limits in "M2.7 as built" to "M2.9 as built" below. **M2 is complete and accepted. Nothing after
-it is planned or approved.** M2.1's decisions are D-040 and
+the limits in "M2.7 as built" to "M2.9 as built" below. **M2 is complete and accepted.** A plan for M3.1,
+financial types, is proposed as D-053 and awaits the owner's approval. Nothing of M3 is built. M2.1's decisions are D-040 and
 D-041, M2.2's rules are D-042 to D-045, with D-045 overriding the others where they differ, M2.3's are
 D-046, M2.4's are D-047, M2.5's are D-048, M2.6's are D-049, and M2.7's are D-050. The owner
 approved implementing M2.7 on 2026-11-08 with the lead engineer's recommendations, which are
@@ -893,7 +893,7 @@ rules and the choices made where they left one in D-047. Tests are in
 
 ## Awaiting the owner
 
-- Approval of a plan for what comes after M2. Nothing of it is built.
+- Approval of the M3.1 plan, D-053, or the changes wanted. Nothing of M3 is built.
 - Pushing. Not authorized from here. The owner's own push is described under "Remote state".
 
 ## Recommended M2 scope
@@ -913,7 +913,8 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 | M2.5 | Accepted as built, 2026-11-08 | None |
 | M2.6 | Accepted as built, 2026-11-08 | None |
 | M2.7 | Accepted as built, 2026-11-08 | None |
-| Anything after M2.9 | Not planned or approved | Needs its own plan and approval |
+| M3.1 | Plan proposed as D-053, 2026-11-08. Not approved | Owner approves or changes it |
+| M3.2 to M3.4 | Provisional, not approved | Each needs its own plan and approval |
 | M2.8 and M2.9 | Accepted as built, 2026-11-08 | None |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
@@ -940,12 +941,12 @@ Read docs/handoff.md first, then the files it lists. Confirm the branch is featu
 the working tree is clean, and run the test suite with a real exit code before changing
 anything. Do not contact GitHub.
 
-Outcome of the plan for what comes after M2:
+M3.1 plan outcome (D-053, financial types):
 [PASTE IT HERE: approved, or the changes you want]
 
-Task: record the plan's outcome as its own decision, then implement it as approved, as small
-gated commits. Do not reopen D-042 to D-052 unless you find a concrete contradiction. Stop for
-review when it is built.
+Task: record the outcome in D-053, making it approved with any changes, then implement M3.1 as
+approved, as small gated commits. Do not reopen D-042 to D-052 unless you find a concrete
+contradiction. Stop for review when M3.1 is built. Do not start M3.2.
 
 Follow the working principles in docs/handoff.md. Pushing needs my explicit approval each time.
 No network, no new dependencies, no security changes. Synthetic data only. Use build/ for walkthroughs, breaks and benchmarks, with TMPDIR set

@@ -481,6 +481,37 @@ under unreliable IDs.
 | Q16 | S, C, P, N, V, U and K still pass |
 | Q17 | Many pending and posted rows of one description block, with changed amounts, are measured against a later import |
 
+## M3 plan
+
+Proposed on 2026-11-08, not approved. **Nothing of M3 is approved to build.** Each slice needs its
+own approval.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M3.1 | Financial types, stated by a person (D-053) | Proposed, awaiting approval |
+| M3.2 | Transfer candidates across accounts, and reconciling two accounts together | Provisional |
+| M3.3 | Card payments, one-sided transfers and coverage warnings (D-012) | Provisional |
+| M3.4 | Totals by financial type, with disclosures of unconfirmed candidates | Provisional |
+
+### M3.1 acceptance criteria, proposed
+
+| ID | Test |
+|---|---|
+| F1 | Every transaction is `unclassified` until classified, and account movement is unchanged by any classification |
+| F2 | Classifying a purchase adds it to that type's totals line by exactly its amount. Source evidence and `ledger_transaction` are byte-identical |
+| F3 | `derive()` output is identical with and without classifications |
+| F4 | Refused, with nothing changed: wrong account, unknown transaction, stale token of any kind, stale account, an unknown type, a type against the transaction's direction, a type it already has, a classified transaction without `--supersedes` |
+| F5 | A stale account is not reconciled by the refused command |
+| F6 | A classification survives repeat imports, `reconcile`, unrelated files and a rules change |
+| F7 | Agreeing classifications apply once. Disagreeing ones leave the transaction `unclassified`, disclosed apart from duplicates, conflicts and corrections |
+| F8 | An automatic split of a classified transaction leaves every part `unclassified`, disclosed |
+| F9 | `review confirm` joining disagreeing classifications and `review separate` splitting a classified transaction refuse atomically |
+| F10 | Chains: only the newest applies, undo steps back one link, and a superseded classification is refused naming the newest |
+| F11 | Tokens: versions pinned, digests kept on ledgers without classifications, `f1` pinned, an unrelated file leaves `f1` unchanged |
+| F12 | Equivalent classifications made at different valid points in the import sequence give the same outcome, exhaustively for four files |
+| F13 | Migration 0013 works on a populated ledger, makes no account stale and is atomic on failure. Classification tables are append-only |
+| F14 | S, C, P, N, V, U, K and Q still pass, and classifying is measured on many classified transactions against a later import |
+
 ## Backlog benchmarks
 
 Not scheduled, and not part of A39 acceptance.

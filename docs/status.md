@@ -19,6 +19,7 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.8: coverage correction with history | Accepted (D-051) |
 | M2.9: pending to posted | Accepted (D-052) |
 | **M2 overall** | **Complete and accepted** |
+| M3.1: financial types | Proposed, awaiting approval (D-053) |
 | M3 to M8 | Not started |
 
 ## What exists
