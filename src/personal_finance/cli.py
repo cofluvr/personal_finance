@@ -67,10 +67,17 @@ from personal_finance.reconcile.transfer_effects import (
     MATCH_BASIS_CHANGED,
     MATCH_CONFLICT,
     MATCH_TYPE_DIFFERS,
+    ONE_SIDED_COUNTERPART_COVERED,
+    ONE_SIDED_COUNTERPART_FOUND,
     TRANSFER_DATE_WINDOW_DAYS,
     transfer_candidates,
 )
-from personal_finance.reconcile.transfers import match_transfer, undo_transfer
+from personal_finance.reconcile.transfers import (
+    match_transfer,
+    state_one_sided,
+    undo_one_sided,
+    undo_transfer,
+)
 from personal_finance.reports.classification_evidence import (
     classification_undo_outlook,
     list_classifications,
@@ -109,8 +116,15 @@ from personal_finance.reports.review_evidence import (
     rows_sharing_a_document,
     transaction_revision,
 )
-from personal_finance.reports.totals import account_movement, transfer_summary
-from personal_finance.reports.transfer_evidence import list_matches, load_match, match_revision
+from personal_finance.reports.totals import account_movement, one_sided_summary, transfer_summary
+from personal_finance.reports.transfer_evidence import (
+    list_matches,
+    list_one_sided,
+    load_match,
+    load_one_sided,
+    match_revision,
+    one_sided_revision,
+)
 
 ACCOUNT_TYPES = ("checking", "savings", "credit_card", "loan", "investment", "retirement")
 
@@ -299,6 +313,39 @@ MATCH_STATE_EXPLANATIONS = {
     MATCH_TYPE_DIFFERS: (
         "a type stated on a side no longer fits a transfer between these accounts, so it does not "
         "apply. Undo it, or the classification"
+    ),
+}
+
+ONE_SIDED_NOTICE = (
+    "Account movement and type totals are unchanged. Its other side is not in the ledger, so totals "
+    "warn about the counterpart's coverage. If that side is imported later, the one-sided transfer "
+    "stops applying until you undo it and match the pair."
+)
+
+ONE_SIDED_UNDO_NOTICE = "The transaction counts as an unpaired transfer kind again."
+
+# What each outcome of a one-sided transfer means (D-055).
+ONE_SIDED_STATE_EXPLANATIONS = {
+    MATCH_APPLIED: "it moves money to or from the counterpart, whose side is not in the ledger",
+    MATCH_BASIS_CHANGED: (
+        "its bound records are now in several transactions, so it does not apply. Undo it, then "
+        "state it again"
+    ),
+    MATCH_CONFLICT: (
+        "its transaction holds records of another match or one-sided transfer, so neither "
+        "applies. Undo all but one"
+    ),
+    MATCH_TYPE_DIFFERS: (
+        "the type stated no longer fits a transfer to the counterpart, so it does not apply. Undo "
+        "it, or the classification"
+    ),
+    ONE_SIDED_COUNTERPART_FOUND: (
+        "a transaction of the counterpart may now be its other side, so it does not apply. Undo "
+        "it, then match the pair"
+    ),
+    ONE_SIDED_COUNTERPART_COVERED: (
+        "the counterpart's complete coverage now spans its dates, so its other side would be in "
+        "the ledger, and it does not apply. Undo it, or check that coverage"
     ),
 }
 
@@ -609,7 +656,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     transfers = command(
         "transfers", review_commands, handler=run_review_transfers,
-        help="list transfer candidates and stored transfer matches",
+        help="list transfer candidates, stored transfer matches and one-sided transfers",
     )
     transfers.add_argument("--account", help="account name or ID")
 
@@ -634,16 +681,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--counterpart-revision", required=True,
         help="the other transaction's revision from review transaction show",
     )
+    one_sided = command(
+        "one-sided", transfer_commands, handler=run_review_transfer_one_sided,
+        help="state that a transaction moves money to or from an account whose side is not "
+             "in the ledger",
+    )
+    one_sided.add_argument("transaction_id", help="a transaction ID from review transfers")
+    one_sided.add_argument("--account", required=True, help="its account name or ID")
+    one_sided.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    one_sided.add_argument(
+        "--counterpart-account", required=True,
+        help="the name or ID of the other account, registered with account add",
+    )
     transfer_show = command(
         "show", transfer_commands, handler=run_review_transfer_show,
-        help="show what a transfer match binds, and its undo revision",
+        help="show what a transfer match or one-sided transfer binds, and its undo revision",
     )
-    transfer_show.add_argument("match_id", help="a match ID from review transfers")
+    transfer_show.add_argument(
+        "transfer_id", help="a match or one-sided transfer ID from review transfers")
     transfer_undo = command(
         "undo", transfer_commands, handler=run_review_transfer_undo,
-        help="stop a transfer match applying, keeping it on record",
+        help="stop a transfer match or one-sided transfer applying, keeping it on record",
     )
-    transfer_undo.add_argument("match_id", help="a match ID from review transfers")
+    transfer_undo.add_argument(
+        "transfer_id", help="a match or one-sided transfer ID from review transfers")
     transfer_undo.add_argument("--account", required=True,
                                help="the name or ID of either of its accounts")
     transfer_undo.add_argument(
@@ -1585,6 +1648,11 @@ def print_transfers(entry) -> None:
         if transfer.counterpart_transaction_id:
             print(f"    Other side now: transaction {transfer.counterpart_transaction_id}")
         print(f"    Transfer: {MATCH_STATE_EXPLANATIONS[transfer.state]}")
+    for statement in entry.one_sided_transfers:
+        print(f"  One-sided transfer {statement.one_sided_transfer_id}, counterpart: "
+              f"{shown(statement.counterpart_account)}")
+        print(f"    Binding: {describe_side(statement.bound_records)}")
+        print(f"    Transfer: {ONE_SIDED_STATE_EXPLANATIONS[statement.state]}")
 
 
 def shown_corrected_value(field, value) -> str:
@@ -1993,9 +2061,9 @@ def run_review_correction_undo(args) -> int:
 def print_newly_unmatched(count) -> None:
     if count:
         print(
-            f"  Transfer matches that no longer apply, because a side's records split or reach "
-            f"another match, the amounts no longer offset or a type no longer fits: {count}. Run "
-            "review transfers."
+            f"  Transfer matches or one-sided transfers that no longer apply, because records split "
+            f"or reach another, amounts no longer offset, a type no longer fits, or a counterpart "
+            f"now shows or is covered: {count}. Run review transfers."
         )
 
 
@@ -2153,14 +2221,22 @@ def run_review_transfers(args) -> int:
             f"{shown(inflow_account)}, {created_at}"
         )
     print(f"Transfer matches: {len(rows)}")
+    one_sided_rows = list_one_sided(conn, account_id)
+    for statement_id, state, effect, own, counterpart, created_at in one_sided_rows:
+        outcome = f", {effect}" if effect else ""
+        print(
+            f"One-sided transfer {statement_id}: {state}{outcome}, {shown(own)} with "
+            f"{shown(counterpart)}, {created_at}"
+        )
+    print(f"One-sided transfers: {len(one_sided_rows)}")
     if candidates:
         print(
             "A candidate is a transfer kind on one side and the exactly opposite amount in another "
             f"account within {TRANSFER_DATE_WINDOW_DAYS} days. To see its evidence, including "
             "amounts, run review transaction show on each side."
         )
-    if rows:
-        print("To see what a match binds, run review transfer show.")
+    if rows or one_sided_rows:
+        print("To see what a match or one-sided transfer binds, run review transfer show.")
     return 0
 
 
@@ -2182,11 +2258,31 @@ def run_review_transfer_match(args) -> int:
     return 0
 
 
+def run_review_transfer_one_sided(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    counterpart_account_id = find_account(conn, args.counterpart_account)
+    result = state_one_sided(conn, account_id, args.transaction_id, args.revision,
+                             counterpart_account_id)
+
+    print(
+        f"One-sided transfer {result.one_sided_transfer_id} recorded: transaction "
+        f"{args.transaction_id} with {shown(args.counterpart_account)}, binding "
+        f"{result.record_count} records."
+    )
+    print(f"  {ONE_SIDED_NOTICE}")
+    return 0
+
+
 def run_review_transfer_show(args) -> int:
     conn = open_ledger(args.db, read_only=True)
-    match = load_match(conn, args.match_id)
+    match = load_match(conn, args.transfer_id)
     if match is None:
-        raise CommandError("transfer match not found. Run review transfers.")
+        statement = load_one_sided(conn, args.transfer_id)
+        if statement is None:
+            raise CommandError(
+                "transfer match or one-sided transfer not found. Run review transfers.")
+        return print_one_sided(conn, statement)
 
     print(f"Transfer match {match.match_id}")
     print(f"  Status: {match.state}")
@@ -2213,13 +2309,48 @@ def run_review_transfer_show(args) -> int:
     return 0
 
 
+def print_one_sided(conn, statement) -> int:
+    print(f"One-sided transfer {statement.one_sided_transfer_id}")
+    print(f"  Status: {statement.state}")
+    print(f"  Made: {statement.created_at}")
+    if statement.undone_at:
+        print(f"  Undone: {statement.undone_at}. It stays on record and no longer applies.")
+    print(f"  Account: {shown(statement.account_name)} ({statement.account_id})")
+    print(f"  Counterpart: {shown(statement.counterpart_account_name)} "
+          f"({statement.counterpart_account_id})")
+    print(f"  From transaction: {statement.target_transaction_id}")
+    for record in statement.bound_records:
+        where = record.transaction_id or "no transaction"
+        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
+    if statement.state == STATE_ACTIVE:
+        print(f"  Transfer: {ONE_SIDED_STATE_EXPLANATIONS[statement.effect]}")
+        print(f"  Revision: {one_sided_revision(conn, statement)}")
+        print(f"Undoing this one-sided transfer now: {ONE_SIDED_UNDO_NOTICE}")
+        if any(stale_accounts(conn, DEFAULT_RULES, account) for account in statement.account_ids):
+            print(
+                "An account of this one-sided transfer has not been reconciled under the current "
+                "matching rules, so undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
 def run_review_transfer_undo(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
-    undo_transfer(conn, account_id, args.match_id, args.revision)
+    if load_one_sided(conn, args.transfer_id) is not None:
+        newly_unsettled = undo_one_sided(conn, account_id, args.transfer_id, args.revision)
+        print(f"One-sided transfer {args.transfer_id} undone. It stays on record and no longer "
+              "applies.")
+        print(f"  {ONE_SIDED_UNDO_NOTICE}")
+        print_newly_unmatched(newly_unsettled)
+        return 0
+    if load_match(conn, args.transfer_id) is None:
+        raise CommandError("transfer match or one-sided transfer not found. Run review transfers.")
+    newly_unsettled = undo_transfer(conn, account_id, args.transfer_id, args.revision)
 
-    print(f"Match {args.match_id} undone. It stays on record and no longer applies.")
+    print(f"Match {args.transfer_id} undone. It stays on record and no longer applies.")
     print(f"  {MATCH_UNDO_NOTICE}")
+    print_newly_unmatched(newly_unsettled)
     return 0
 
 
@@ -2306,7 +2437,7 @@ def run_review_resolution_show(args) -> int:
         print("Undoing this resolution now:")
         print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
         if resolution.kind == "completed":
-            decisions, corrections, classifications, matches = binding_entries(
+            decisions, corrections, classifications, matches, one_sided = binding_entries(
                 conn, record.record_id)
             for decision in decisions:
                 print(f"  Refused while decision {decision} binds the record. Undo it first.")
@@ -2320,6 +2451,11 @@ def run_review_resolution_show(args) -> int:
             for match in matches:
                 print(
                     f"  Refused while transfer match {match} binds the record. Undo it first."
+                )
+            for statement in one_sided:
+                print(
+                    f"  Refused while one-sided transfer {statement} binds the record. Undo it "
+                    "first."
                 )
         print(f"  {RESOLUTION_UNDO_NOTICE}")
         if stale_accounts(conn, DEFAULT_RULES, resolution.account_id):
@@ -2456,9 +2592,14 @@ def run_totals(args) -> int:
     print("Transfers between your accounts, as you matched them:")
     print(f"  Matched: {transfers.matches} pairs, moving {format_cents(transfers.matched_cents)}")
     print(f"  In a candidate pair, not matched: {transfers.transactions_in_candidates} transactions")
+    one_sided = one_sided_summary(conn, account_id)
     print(
-        f"  Of a transfer kind with no match or candidate: {transfers.unpaired_transfer_kind} "
-        "transactions"
+        f"  One-sided, the other side not in the ledger: {one_sided.applied} transactions, "
+        f"{format_cents(one_sided.out_cents)} out and {format_cents(one_sided.in_cents)} in"
+    )
+    print(
+        f"  Of a transfer kind with no match, candidate or one-sided transfer: "
+        f"{transfers.unpaired_transfer_kind} transactions"
     )
     print("Disclosures:")
     print("- These are account movements. They include transfers and card payments.")
@@ -2498,7 +2639,7 @@ def run_totals(args) -> int:
         print(f"- {line}")
     for line in (*describe_resolutions(movement), *describe_declarations(movement),
                  *describe_pending(movement), *describe_classifications(movement),
-                 *describe_transfers(transfers)):
+                 *describe_transfers(transfers), *describe_one_sided(one_sided)):
         print(f"- {line}")
     return 0
 
@@ -2522,6 +2663,43 @@ def describe_transfers(transfers) -> list[str]:
             "accounts and are not matched. Each still counts as the type stated, or unclassified. "
             "Run review transfers."
         )
+    return lines
+
+
+def describe_one_sided(one_sided) -> list[str]:
+    """Coverage warnings for one-sided transfers, and those that no longer apply (D-012, D-055)."""
+    lines = []
+    if one_sided.applied:
+        lines.append(
+            f"{one_sided.applied} one-sided transfers rest on another account whose side is not in "
+            f"the ledger: {one_sided.counterpart_without_documents} where that account has no "
+            f"documents, {one_sided.counterpart_partly_covered} where its documents do not cover "
+            "every day within "
+            f"{TRANSFER_DATE_WINDOW_DAYS} days. Import its statements, or declare their coverage, "
+            "to check them."
+        )
+    if one_sided.card_payments_without_history:
+        lines.append(
+            f"{one_sided.card_payments_without_history} card payments, "
+            f"{format_cents(one_sided.card_payments_without_history_cents)}, go to a card whose "
+            "purchases for those dates are not in the ledger, so spending on that card is "
+            "understated."
+        )
+    lines += [
+        f"{count} one-sided transfers no longer apply, because {reason}. Their transactions count "
+        "as unpaired. Run review transfers."
+        for count, reason in (
+            (one_sided.basis_changed, "their bound records are now in several transactions"),
+            (one_sided.conflicts, "a transaction holds records of another match or one-sided "
+                                  "transfer"),
+            (one_sided.types_differ, "a type no longer fits a transfer to the counterpart"),
+            (one_sided.counterparts_found, "a transaction of the counterpart may be the other "
+                                           "side"),
+            (one_sided.counterparts_covered, "the counterpart's complete coverage spans their "
+                                             "dates"),
+        )
+        if count
+    ]
     return lines
 
 

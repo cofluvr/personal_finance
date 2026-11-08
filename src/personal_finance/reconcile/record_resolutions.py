@@ -17,7 +17,7 @@ from personal_finance.reconcile.apply import (
     reconcile_account,
 )
 from personal_finance.reconcile.classification_effects import unsettled_classifications
-from personal_finance.reconcile.transfer_effects import unsettled_matches
+from personal_finance.reconcile.transfer_effects import unsettled_transfers
 from personal_finance.reconcile.correction_effects import unsettled_correction_fields
 from personal_finance.reconcile.corrections import parsed_typed_value
 from personal_finance.reconcile.decisions import (
@@ -164,7 +164,7 @@ def _resolve(conn, account_id, item_id, revision, kind, supplied_text_by_field, 
     before = account_movement(conn, account_id).transactions
     unsettled_before = unsettled_correction_fields(conn, account_id)
     unclassified_before = unsettled_classifications(conn, account_id)
-    unmatched_before = unsettled_matches(conn)
+    unmatched_before = unsettled_transfers(conn)
     resolution_id = str(uuid.uuid4())
     conn.execute(
         """INSERT INTO record_resolution (id, account_id, source_record_id, kind,
@@ -190,7 +190,7 @@ def _resolve(conn, account_id, item_id, revision, kind, supplied_text_by_field, 
         before, account_movement(conn, account_id).transactions, result.moved_records,
         len(unsettled_correction_fields(conn, account_id) - unsettled_before),
         len(unsettled_classifications(conn, account_id) - unclassified_before),
-        len(unsettled_matches(conn) - unmatched_before),
+        len(unsettled_transfers(conn) - unmatched_before),
     )
 
 
@@ -242,19 +242,20 @@ def _undo(conn, account_id, resolution_id, revision, rules) -> ResolutionUndone:
     if resolution_undo_outlook(conn, resolution, rules).revision != revision:
         raise DecisionRefused(STALE_RESOLUTION_REVISION)
     if resolution.kind == RESOLUTION_COMPLETED:
-        decisions, corrections, classifications, matches = binding_entries(
+        decisions, corrections, classifications, matches, one_sided = binding_entries(
             conn, resolution.record.record_id)
         entries = [f"decision {entry}" for entry in decisions]
         entries += [f"correction {entry}" for entry in corrections]
         entries += [f"classification {entry}" for entry in classifications]
         entries += [f"transfer match {entry}" for entry in matches]
+        entries += [f"one-sided transfer {entry}" for entry in one_sided]
         if entries:
             raise DecisionRefused(COMPLETION_BOUND.format(entries=", ".join(entries)))
 
     before = account_movement(conn, account_id).transactions
     unsettled_before = unsettled_correction_fields(conn, account_id)
     unclassified_before = unsettled_classifications(conn, account_id)
-    unmatched_before = unsettled_matches(conn)
+    unmatched_before = unsettled_transfers(conn)
     _record_resolution_event(conn, resolution_id, "undone")
     (reason_code,) = conn.execute(
         """SELECT parse.reason_code FROM record_parse parse
@@ -272,7 +273,7 @@ def _undo(conn, account_id, resolution_id, revision, rules) -> ResolutionUndone:
         result.moved_records,
         len(unsettled_correction_fields(conn, account_id) - unsettled_before),
         len(unsettled_classifications(conn, account_id) - unclassified_before),
-        len(unsettled_matches(conn) - unmatched_before),
+        len(unsettled_transfers(conn) - unmatched_before),
     )
 
 

@@ -12,7 +12,7 @@ from personal_finance.ingest.coverage import UNKNOWN, Coverage, declare_complete
 from personal_finance.ingest.errors import ImportFailure
 from personal_finance.reconcile.apply import is_current, reconcile_account
 from personal_finance.reconcile.classification_effects import unsettled_classifications
-from personal_finance.reconcile.transfer_effects import unsettled_matches
+from personal_finance.reconcile.transfer_effects import unsettled_transfers
 from personal_finance.reconcile.correction_effects import unsettled_correction_fields
 from personal_finance.reconcile.decisions import STALE_ACCOUNT, DecisionRefused
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
@@ -159,7 +159,7 @@ def _rederived(conn, account_id, rules, change) -> CoverageChanged:
     before = account_movement(conn, account_id).transactions
     unsettled_before = unsettled_correction_fields(conn, account_id)
     unclassified_before = unsettled_classifications(conn, account_id)
-    unmatched_before = unsettled_matches(conn)
+    unmatched_before = unsettled_transfers(conn)
     declaration_id, other = change()
     result = reconcile_account(conn, account_id, rules)
     return CoverageChanged(
@@ -167,7 +167,7 @@ def _rederived(conn, account_id, rules, change) -> CoverageChanged:
         result.moved_records,
         len(unsettled_correction_fields(conn, account_id) - unsettled_before),
         len(unsettled_classifications(conn, account_id) - unclassified_before),
-        len(unsettled_matches(conn) - unmatched_before),
+        len(unsettled_transfers(conn) - unmatched_before),
     )
 
 

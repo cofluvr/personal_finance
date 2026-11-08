@@ -326,3 +326,32 @@ quadratic case, and the shape asserts that count.
 
 **Matches add linear work to every write, and candidates are quadratic only in one amount on nearby
 dates.**
+
+**One-sided transfers (O14),** measured 2026-11-08 on the same machine with
+`measure_reconciliation.py --one-sided`. Full output is in `build/m3.3-bench/one-sided.txt`, which
+is ignored and may not survive.
+
+A checking account of equal outflows on 01/10, each classified as a transfer and all but one stated
+one-sided, written directly, against a savings counterpart holding equal opposite inflows on 01/20,
+outside the window, and single-day documents of complete coverage outside the window. Each
+outcome then checks every opposite inflow as a pair and finds none, and reads every span. The shape
+asserts that the later import, into the counterpart, rewrites every statement once and that every
+one applies. "Show and state" rewrites twice, once to write and once to check that it applies.
+
+| One-sided | Opposite amounts | Spans | Rewrite | Totals | Show and state | Show and undo | Later import |
+|---|---|---|---|---|---|---|---|
+| 100 | 1 | 1 | 0.003s | 0.000s | 0.007s | 0.004s | 0.005s |
+| 1,000 | 1 | 1 | 0.025s | 0.002s | 0.057s | 0.034s | 0.029s |
+| 100 | 1,000 | 1 | 0.345s | 0.000s | 0.693s | 0.339s | 0.785s |
+| 1,000 | 1,000 | 1 | 3.449s | 0.002s | 6.981s | 3.465s | 3.911s |
+| 1,000 | 1 | 300 | 0.067s | 0.002s | 0.139s | 0.077s | 0.097s |
+| 1,000 | 1,000 | 300 | 3.526s | 0.002s | 7.059s | 3.550s | 4.042s |
+
+The M3.2 transfers shapes, rerun on M3.3's code (`build/m3.3-bench/transfers.txt`), are unchanged
+within noise up to 1,000 matches. At 4,000 the rewrite takes 0.147s against 0.103s, from bookkeeping
+both kinds share, and stays linear.
+
+**One-sided transfers cost every write their count times the equal opposite amounts in their
+counterparts.** Coverage spans add little, because they are read once per counterpart. Only many
+equal amounts in one counterpart make it quadratic, and a date filter on the search would remove
+that, if needed.

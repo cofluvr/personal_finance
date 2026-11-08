@@ -1,27 +1,28 @@
 """Migration 0014 on a populated ledger, and its append-only tables (X12, D-054).
 
-A ledger built at the latest version, with 0014's empty tables dropped and set back to version 13, is
-a version 13 ledger: 0014 creates tables and clears markers only. Migration stops at 14, so that only
-0014 is tested.
+A ledger built at the latest version, with the empty tables of 0014 and 0015 dropped and set back
+to version 13, is a version 13 ledger: 0014 creates tables and clears markers only. Migration stops
+at 14, so that only 0014 is tested.
 """
 
 import sqlite3
 
 import pytest
 from test_classifications import against_its_direction
-from test_decisions import ALL_TABLES, TRANSFER_TABLES
+from test_decisions import ALL_TABLES, ONE_SIDED_TABLES, TRANSFER_TABLES
 from test_supersession import holding
 from test_transfers import IN_ROW, OUT_ROW, TransferLedger, matched
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 
-VERSION_13_TABLES = tuple(table for table in ALL_TABLES if table not in TRANSFER_TABLES)
+VERSION_13_TABLES = tuple(table for table in ALL_TABLES
+                          if table not in (*TRANSFER_TABLES, *ONE_SIDED_TABLES))
 VERSION_13_KEPT = tuple(table for table in VERSION_13_TABLES if table != "account_reconciliation")
 
 
 def set_back_to_version_13(path) -> None:
     conn = connect(path)
-    for table in TRANSFER_TABLES:
+    for table in (*ONE_SIDED_TABLES, *TRANSFER_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
     conn.execute("PRAGMA user_version = 13")
@@ -81,6 +82,9 @@ class TestMigration:
             assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.close()
         assert populated.dump(VERSION_13_KEPT) == before
+        assert markers(populated) == ["A"]
+        # Commands refuse a ledger below the latest version, and later migrations clear no marker.
+        assert populated.run("migrate")[0] == 0
         assert markers(populated) == ["A"]
         assert "1 accounts have not been reconciled" in populated.totals()
 
@@ -148,7 +152,7 @@ class TestAppendOnly:
         "UPDATE transfer_match SET created_at = created_at",
         "DELETE FROM transfer_match",
         "INSERT INTO transfer_match SELECT * FROM transfer_match",
-        "UPDATE transfer_match_side SET target_revision = 't6-0'",
+        "UPDATE transfer_match_side SET target_revision = 't7-0'",
         "DELETE FROM transfer_match_side",
         "INSERT INTO transfer_match_side SELECT * FROM transfer_match_side",
         "UPDATE transfer_match_record SET source_record_id = source_record_id",
@@ -171,11 +175,11 @@ class TestAppendOnly:
     def new_match(self, conn, accounts, records, inflow_account="S"):
         conn.execute("INSERT INTO transfer_match (id) VALUES ('new')")
         conn.execute(
-            """INSERT INTO transfer_match_side VALUES ('new', 'outflow', ?, 't', 't6-0')""",
+            """INSERT INTO transfer_match_side VALUES ('new', 'outflow', ?, 't', 't7-0')""",
             (accounts["A"],),
         )
         conn.execute(
-            """INSERT INTO transfer_match_side VALUES ('new', 'inflow', ?, 't', 't6-0')""",
+            """INSERT INTO transfer_match_side VALUES ('new', 'inflow', ?, 't', 't7-0')""",
             (accounts[inflow_account],),
         )
 
@@ -183,12 +187,12 @@ class TestAppendOnly:
         conn = history.conn()
         accounts, _ = ids(conn)
         conn.execute("INSERT INTO transfer_match (id) VALUES ('new')")
-        conn.execute("INSERT INTO transfer_match_side VALUES ('new', 'outflow', ?, 't', 't6-0')",
+        conn.execute("INSERT INTO transfer_match_side VALUES ('new', 'outflow', ?, 't', 't7-0')",
                      (accounts["A"],))
         with pytest.raises(sqlite3.IntegrityError, match="joins two accounts"):
-            conn.execute("INSERT INTO transfer_match_side VALUES ('new', 'inflow', ?, 't', 't6-0')",
+            conn.execute("INSERT INTO transfer_match_side VALUES ('new', 'inflow', ?, 't', 't7-0')",
                          (accounts["A"],))
-        conn.execute("INSERT INTO transfer_match_side VALUES ('new', 'inflow', ?, 't', 't6-0')",
+        conn.execute("INSERT INTO transfer_match_side VALUES ('new', 'inflow', ?, 't', 't7-0')",
                      (accounts["S"],))
         conn.close()
 
@@ -207,7 +211,7 @@ class TestAppendOnly:
         conn = history.conn()
         accounts, _ = ids(conn)
         conn.execute("INSERT INTO transfer_match (id) VALUES ('new')")
-        insert = "INSERT INTO transfer_match_side VALUES ('new', ?, ?, 't', 't6-0')"
+        insert = "INSERT INTO transfer_match_side VALUES ('new', ?, ?, 't', 't7-0')"
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(insert, (side, accounts["A"]))
         conn.execute(insert, ("outflow", accounts["A"]))

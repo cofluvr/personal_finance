@@ -20,11 +20,12 @@ from personal_finance.reconcile.transfer_effects import INFLOW, OUTFLOW
 
 # Bump whenever the material evidence changes, so an old token can never appear current. Version
 # 4 adds corrections (D-049), version 5 completed values (D-050), version 6 declared coverage
-# (D-051), version 7 classifications (D-053), and version 8 transfer matches (D-054).
-REVISION_VERSION = 8
-# The same, for one transaction's evidence, which a separation, correction, classification or
-# transfer match names (D-047, D-049, D-050, D-051, D-053, D-054).
-TRANSACTION_REVISION_VERSION = 6
+# (D-051), version 7 classifications (D-053), version 8 transfer matches (D-054), and version 9
+# one-sided transfers (D-055).
+REVISION_VERSION = 9
+# The same, for one transaction's evidence, which a separation, correction, classification,
+# transfer match or one-sided transfer names (D-047, D-049, D-050, D-051, D-053, D-054, D-055).
+TRANSACTION_REVISION_VERSION = 7
 
 # Fields left out of a revision. Random IDs and names say where evidence is stored or how
 # it is labelled, not what it says. Records are identified by document hash and row
@@ -33,12 +34,12 @@ TRANSACTION_REVISION_VERSION = 6
 IMMATERIAL_FIELDS = frozenset(
     {"issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
      "account_name", "decision_id", "correction_id", "classification_id", "match_id",
-     "counterpart_transaction_id"}
+     "counterpart_transaction_id", "one_sided_transfer_id"}
 )
 # Fields left out while empty, so that evidence holding none keeps the digest it had before they
 # existed (D-049).
 OMITTED_WHILE_EMPTY = frozenset({"corrections", "completion", "declared", "classifications",
-                                 "transfers"})
+                                 "transfers", "one_sided_transfers"})
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,20 @@ class TransferEvidence:
 
 
 @dataclass(frozen=True)
+class OneSidedTransferEvidence:
+    """An active one-sided transfer binding a record of one transaction (D-055)."""
+
+    one_sided_transfer_id: str
+    # The counterpart by its name, which is unique, because account IDs are random and so
+    # immaterial. Another counterpart is another statement.
+    counterpart_account: str
+    # The outcome: applied, basis_changed, conflict, type_differs, counterpart_found or
+    # counterpart_covered.
+    state: str
+    bound_records: tuple[DecidedRecord, ...]
+
+
+@dataclass(frozen=True)
 class TransactionEvidence:
     """A logical transaction as it stands now, with every record supporting it.
 
@@ -145,6 +160,7 @@ class TransactionEvidence:
     corrections: tuple[CorrectionEvidence, ...] = ()
     classifications: tuple[ClassificationEvidence, ...] = ()
     transfers: tuple[TransferEvidence, ...] = ()
+    one_sided_transfers: tuple[OneSidedTransferEvidence, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -347,7 +363,8 @@ def load_review_evidence(conn: sqlite3.Connection, issue_id: str) -> ReviewEvide
         details.get("date_start"),
         details.get("date_end"),
         _transactions(conn, issue_id, linked, corrections_by_transaction,
-                      classifications_by_transaction, _transfers_by_transaction(conn, linked)),
+                      classifications_by_transaction, _transfers_by_transaction(conn, linked),
+                      _one_sided_by_transaction(conn, linked)),
         tuple(sorted(unresolved, key=_record_key)),
         _documents(conn, account_id, documents),
         bool(accounts & set(stale_accounts(conn, DEFAULT_RULES))),
@@ -377,7 +394,8 @@ def load_merge_evidence(conn: sqlite3.Connection, transaction_id: str) -> MergeE
                            _corrections_by_transaction(conn, account_id, linked_by_transaction),
                            _classifications_by_transaction(conn, account_id,
                                                            linked_by_transaction),
-                           _transfers_by_transaction(conn, linked_by_transaction)),
+                           _transfers_by_transaction(conn, linked_by_transaction),
+                           _one_sided_by_transaction(conn, linked_by_transaction)),
         _documents(conn, account_id, documents),
         account_id in stale_accounts(conn, DEFAULT_RULES, account_id),
         account_id,
@@ -465,11 +483,11 @@ _TRANSACTION = """
 
 
 def _transactions(conn, issue_id, linked, corrections_by_transaction,
-                  classifications_by_transaction,
-                  transfers_by_transaction) -> tuple[TransactionEvidence, ...]:
+                  classifications_by_transaction, transfers_by_transaction,
+                  one_sided_by_transaction) -> tuple[TransactionEvidence, ...]:
     entries = [
         _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
-                           transfers_by_transaction)
+                           transfers_by_transaction, one_sided_by_transaction)
         for row in conn.execute(
             _TRANSACTION + """
             JOIN review_issue_subject subject ON subject.transaction_id = entry.id
@@ -481,7 +499,7 @@ def _transactions(conn, issue_id, linked, corrections_by_transaction,
 
 
 def _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
-                       transfers_by_transaction) -> TransactionEvidence:
+                       transfers_by_transaction, one_sided_by_transaction) -> TransactionEvidence:
     transaction_id, *values, primary_id = row
     records = tuple(sorted(linked.get(transaction_id, ()), key=_record_key))
     primary = next(
@@ -490,7 +508,8 @@ def _transaction_entry(row, linked, corrections_by_transaction, classifications_
     return TransactionEvidence(transaction_id, *values, primary, records,
                                corrections_by_transaction.get(transaction_id, ()),
                                classifications_by_transaction.get(transaction_id, ()),
-                               transfers_by_transaction.get(transaction_id, ()))
+                               transfers_by_transaction.get(transaction_id, ()),
+                               one_sided_by_transaction.get(transaction_id, ()))
 
 
 def _corrections_by_transaction(conn, account_id, linked) -> dict[str, tuple]:
@@ -603,6 +622,51 @@ def _transfers_by_transaction(conn, linked) -> dict[str, tuple]:
             [_decided_key(record) for record in transfer.counterpart_bound_records],
         )))
         for transaction_id, transfers in found.items()
+    }
+
+
+def _one_sided_by_transaction(conn, linked) -> dict[str, tuple]:
+    """Active one-sided transfers binding each transaction's records, with their outcome."""
+    transaction_by_record_id = {
+        record.record_id: transaction_id
+        for transaction_id, records in linked.items() for record in records
+    }
+    counterpart_by_statement, record_ids_by_statement = {}, defaultdict(set)
+    for statement_id, counterpart, record_id in conn.execute(
+        """SELECT statement.id, counterpart.display_name, bound.source_record_id
+           FROM one_sided_transfer statement
+           JOIN account counterpart ON counterpart.id = statement.counterpart_account_id
+           JOIN one_sided_transfer_record bound ON bound.one_sided_transfer_id = statement.id
+           WHERE statement.id IN (
+                   SELECT mine.one_sided_transfer_id FROM one_sided_transfer_record mine
+                   JOIN transaction_source link ON link.source_record_id = mine.source_record_id
+                   WHERE link.transaction_id IN (SELECT value FROM json_each(?)))
+             AND NOT EXISTS (SELECT 1 FROM one_sided_transfer_event undone
+                             WHERE undone.one_sided_transfer_id = statement.id
+                               AND undone.event = 'undone')""",
+        (json.dumps(sorted(linked)),),
+    ):
+        counterpart_by_statement[statement_id] = counterpart
+        record_ids_by_statement[statement_id].add(record_id)
+    if not counterpart_by_statement:
+        return {}
+    state_by_statement = dict(conn.execute(
+        "SELECT one_sided_transfer_id, state FROM one_sided_transfer_effect"))
+    found = defaultdict(list)
+    for statement_id, record_ids in record_ids_by_statement.items():
+        evidence = OneSidedTransferEvidence(
+            statement_id, counterpart_by_statement[statement_id], state_by_statement[statement_id],
+            _decided_records(conn, record_ids),
+        )
+        for transaction_id in {transaction_by_record_id[record] for record in record_ids
+                               if record in transaction_by_record_id}:
+            found[transaction_id].append(evidence)
+    return {
+        transaction_id: tuple(sorted(statements, key=lambda statement: (
+            statement.counterpart_account,
+            [_decided_key(record) for record in statement.bound_records],
+        )))
+        for transaction_id, statements in found.items()
     }
 
 

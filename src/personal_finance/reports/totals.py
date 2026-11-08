@@ -203,7 +203,7 @@ class TransferSummary:
     matched_cents: int
     # Transactions in a candidate pair, the account's own only for one account.
     transactions_in_candidates: int
-    # Transactions of a transfer kind that are in neither a match nor a candidate pair.
+    # Transactions of a transfer kind in no match, candidate pair or one-sided transfer.
     unpaired_transfer_kind: int
     basis_changed: int
     conflicts: int
@@ -253,6 +253,15 @@ def transfer_summary(conn: sqlite3.Connection, account_id: str | None = None) ->
                       WHERE link.transaction_id = entry.id
                         AND NOT EXISTS (SELECT 1 FROM transfer_match_event undone
                                         WHERE undone.match_id = bound.match_id
+                                          AND undone.event = 'undone'))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM transaction_source link
+                      JOIN one_sided_transfer_record bound
+                          ON bound.source_record_id = link.source_record_id
+                      WHERE link.transaction_id = entry.id
+                        AND NOT EXISTS (SELECT 1 FROM one_sided_transfer_event undone
+                                        WHERE undone.one_sided_transfer_id
+                                                  = bound.one_sided_transfer_id
                                           AND undone.event = 'undone'))""",
             (*TRANSFER_TYPES, account_id, account_id),
         )
@@ -261,6 +270,65 @@ def transfer_summary(conn: sqlite3.Connection, account_id: str | None = None) ->
         states.get("applied", 0), matched_cents, len(in_candidates), unpaired,
         states.get("basis_changed", 0), states.get("conflict", 0),
         states.get("amounts_differ", 0), states.get("type_differs", 0),
+    )
+
+
+@dataclass(frozen=True)
+class OneSidedSummary:
+    """One-sided transfers, counted for the ledger or for those held in one account or naming it
+    (D-055). Account movement is unchanged by any of it."""
+
+    # Applied ones, and the amounts their transactions move out and in, each as a positive sum.
+    applied: int
+    out_cents: int
+    in_cents: int
+    # Of those applied, whose counterpart has no documents at all, and whose counterpart has
+    # documents whose complete coverage does not span the window.
+    counterpart_without_documents: int
+    counterpart_partly_covered: int
+    # Applied card payments to a credit card, whose purchases for those dates are not in the
+    # ledger, so spending on it is understated (D-012).
+    card_payments_without_history: int
+    card_payments_without_history_cents: int
+    # Active ones that do not apply, by state.
+    basis_changed: int
+    conflicts: int
+    types_differ: int
+    counterparts_found: int
+    counterparts_covered: int
+
+
+def one_sided_summary(conn: sqlite3.Connection, account_id: str | None = None) -> OneSidedSummary:
+    rows = conn.execute(
+        """SELECT effect.state, COALESCE(fix.corrected_amount_cents, entry.amount_cents),
+                  kind.financial_type, counterpart.account_type,
+                  EXISTS (SELECT 1 FROM document_coverage document
+                          WHERE document.account_id = statement.counterpart_account_id)
+           FROM one_sided_transfer_effect effect
+           JOIN one_sided_transfer statement ON statement.id = effect.one_sided_transfer_id
+           JOIN account counterpart ON counterpart.id = statement.counterpart_account_id
+           LEFT JOIN ledger_transaction entry ON entry.id = effect.transaction_id
+           LEFT JOIN transaction_correction fix
+               ON fix.transaction_id = entry.id AND fix.field = 'amount' AND fix.state = 'applied'
+           LEFT JOIN transaction_classification kind
+               ON kind.transaction_id = entry.id AND kind.state = 'applied'
+           WHERE :account IS NULL
+              OR :account IN (statement.account_id, statement.counterpart_account_id)""",
+        {"account": account_id},
+    ).fetchall()
+    applied = [row for row in rows if row[0] == "applied"]
+    card_payments = [amount for _, amount, kind, counterpart_type, _ in applied
+                     if kind == "card_payment" and counterpart_type == "credit_card"]
+    states = [row[0] for row in rows]
+    return OneSidedSummary(
+        len(applied),
+        sum(-amount for _, amount, *_ in applied if amount < 0),
+        sum(amount for _, amount, *_ in applied if amount > 0),
+        sum(not has_documents for *_, has_documents in applied),
+        sum(bool(has_documents) for *_, has_documents in applied),
+        len(card_payments), sum(abs(amount) for amount in card_payments),
+        states.count("basis_changed"), states.count("conflict"), states.count("type_differs"),
+        states.count("counterpart_found"), states.count("counterpart_covered"),
     )
 
 

@@ -10,19 +10,25 @@ import pytest
 from test_classifications import ClassificationLedger
 from test_confirmations import confirm_ok
 from test_coverage_declarations import MONTH
-from test_decisions import ALL_TABLES, CLASSIFICATION_TABLES, TRANSFER_TABLES, pair_up
+from test_decisions import (
+    ALL_TABLES,
+    CLASSIFICATION_TABLES,
+    ONE_SIDED_TABLES,
+    TRANSFER_TABLES,
+    pair_up,
+)
 from test_resolutions import CAFE_NO_AMOUNT
 from test_supersession import holding
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 
 VERSION_12_TABLES = tuple(table for table in ALL_TABLES
-                          if table not in (*CLASSIFICATION_TABLES, *TRANSFER_TABLES))
+                          if table not in (*CLASSIFICATION_TABLES, *TRANSFER_TABLES, *ONE_SIDED_TABLES))
 
 
 def set_back_to_version_12(path) -> None:
     conn = connect(path)
-    for table in (*TRANSFER_TABLES, *CLASSIFICATION_TABLES):
+    for table in (*ONE_SIDED_TABLES, *TRANSFER_TABLES, *CLASSIFICATION_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
     conn.execute("PRAGMA user_version = 12")
@@ -120,7 +126,7 @@ class TestAppendOnly:
     INSERT_CLASSIFICATION = """
         INSERT INTO type_classification (id, account_id, financial_type, target_transaction_id,
                                          target_revision, supersedes_classification_id)
-        VALUES (?, ?, ?, 't', 't6-0', (SELECT id FROM type_classification ORDER BY id LIMIT 1))"""
+        VALUES (?, ?, ?, 't', 't7-0', (SELECT id FROM type_classification ORDER BY id LIMIT 1))"""
 
     def own_account(self, conn):
         return conn.execute("SELECT id FROM account").fetchone()[0]

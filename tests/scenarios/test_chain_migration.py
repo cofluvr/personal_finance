@@ -17,6 +17,7 @@ from test_supersession import chain_of_three
 from test_decisions import (
     CLASSIFICATION_TABLES,
     DECLARATION_TABLES,
+    ONE_SIDED_TABLES,
     RESOLUTION_TABLES,
     TRANSFER_TABLES,
 )
@@ -34,7 +35,7 @@ def markers(conn):
 
 # Created by 0009 to 0011 and 0013, children first. Nothing in these ledgers corrects a value,
 # resolves a record, declares coverage or classifies a transaction.
-VERSION_9_TABLES = (*TRANSFER_TABLES, "transaction_correction", "value_correction_event", "value_correction_record",
+VERSION_9_TABLES = (*ONE_SIDED_TABLES, *TRANSFER_TABLES, "transaction_correction", "value_correction_event", "value_correction_record",
                     "value_correction", *RESOLUTION_TABLES, *DECLARATION_TABLES,
                     *CLASSIFICATION_TABLES)
 

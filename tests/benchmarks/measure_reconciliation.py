@@ -9,7 +9,8 @@ Not part of the test suite. Run from the repository root:
     confirmation with a partition, --corrected for value corrections, --resolved for completing
     and dismissing unresolved rows, --declared for coverage declared after import, --pending for
     pending rows posted at another amount, --classified for financial types, --transfers for
-    transfer matches across two accounts, or rows per month such as 200 1000 4000)
+    transfer matches across two accounts, --one-sided for one-sided transfers, or rows per month
+    such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
 one import_files call: reading and parsing the file, writing records, reconciling the
@@ -76,9 +77,19 @@ from personal_finance.reports.coverage_evidence import (
 )
 from personal_finance.reports.resolution_evidence import load_resolution, resolution_undo_outlook
 from personal_finance.reconcile.transfer_effects import transfer_candidates, write_transfer_effects
-from personal_finance.reconcile.transfers import match_transfer, undo_transfer
-from personal_finance.reports.totals import account_movement, transfer_summary
-from personal_finance.reports.transfer_evidence import load_match, match_revision
+from personal_finance.reconcile.transfers import (
+    match_transfer,
+    state_one_sided,
+    undo_one_sided,
+    undo_transfer,
+)
+from personal_finance.reports.totals import account_movement, one_sided_summary, transfer_summary
+from personal_finance.reports.transfer_evidence import (
+    load_match,
+    load_one_sided,
+    match_revision,
+    one_sided_revision,
+)
 from personal_finance.reports.review_evidence import (
     DecidedPair,
     DecidedRecord,
@@ -728,7 +739,7 @@ def measure_many_corrections(count: int) -> None:
             conn.execute(
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  target_transaction_id, target_revision)
-                   VALUES (?, 'acct', 'amount', -1, ?, 't6-0')""",
+                   VALUES (?, 'acct', 'amount', -1, ?, 't7-0')""",
                 (correction_id, transaction_id),
             )
             conn.execute("INSERT INTO value_correction_record VALUES (?, ?)", (correction_id, record_id))
@@ -781,7 +792,7 @@ def measure_correction_chain(length: int) -> None:
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  target_transaction_id, target_revision,
                                                  supersedes_correction_id)
-                   VALUES (?, 'acct', 'amount', ?, ?, 't6-0', ?)""",
+                   VALUES (?, 'acct', 'amount', ?, ?, 't7-0', ?)""",
                 (correction_id, -1 - number, transaction_id,
                  f"c{number - 1:06}" if number else None),
             )
@@ -906,7 +917,7 @@ def measure_many_classifications(count: int) -> None:
             conn.execute(
                 """INSERT INTO type_classification (id, account_id, financial_type,
                                                     target_transaction_id, target_revision)
-                   VALUES (?, 'acct', 'purchase', ?, 't6-0')""",
+                   VALUES (?, 'acct', 'purchase', ?, 't7-0')""",
                 (classification_id, transaction_id),
             )
             conn.execute("INSERT INTO type_classification_record VALUES (?, ?)",
@@ -971,7 +982,7 @@ def measure_classification_chain(length: int) -> None:
                 """INSERT INTO type_classification (id, account_id, financial_type,
                                                     target_transaction_id, target_revision,
                                                     supersedes_classification_id)
-                   VALUES (?, 'acct', ?, ?, 't6-0', ?)""",
+                   VALUES (?, 'acct', ?, ?, 't7-0', ?)""",
                 (classification_id, ("purchase", "fee")[number % 2], transaction_id,
                  f"f{number - 1:06}" if number else None),
             )
@@ -1242,7 +1253,7 @@ def transfer_ledger(root: Path, outflows: list[int], inflows: list[int], one_day
         conn.execute(
             """INSERT INTO type_classification (id, account_id, financial_type,
                                                 target_transaction_id, target_revision)
-               VALUES (?, 'out', 'transfer', ?, 't6-0')""",
+               VALUES (?, 'out', 'transfer', ?, 't7-0')""",
             (classification_id, transaction_id),
         )
         conn.execute("INSERT INTO type_classification_record VALUES (?, ?)",
@@ -1282,7 +1293,7 @@ def measure_many_matches(count: int) -> None:
             conn.execute("INSERT INTO transfer_match (id) VALUES (?)", (match_id,))
             for side, account, (transaction_id, record_id) in (
                     ("outflow", "out", outflows[-cents]), ("inflow", "in", inflows[cents])):
-                conn.execute("INSERT INTO transfer_match_side VALUES (?, ?, ?, ?, 't6-0')",
+                conn.execute("INSERT INTO transfer_match_side VALUES (?, ?, ?, ?, 't7-0')",
                              (match_id, side, account, transaction_id))
                 conn.execute("INSERT INTO transfer_match_record VALUES (?, ?, ?)",
                              (match_id, side, record_id))
@@ -1369,6 +1380,126 @@ def transfers() -> None:
         measure_candidates(count, equal=True)
 
 
+def one_sided_ledger(root: Path, statements: int, opposite: int, spans: int):
+    """statements + 1 equal outflows on 01/10 in a checking account, each classified as a
+    transfer, and a savings counterpart holding opposite equal inflows on 01/20, outside the
+    window, so that each statement's search for its other side checks every one of them and finds
+    none. The counterpart also has spans single-day documents of complete coverage, none in the
+    window, so that each coverage check reads every span. Every outflow but the last is stated
+    one-sided, written directly."""
+    path = root / "ledger.db"
+    create_database(path)
+    conn = connect(path)
+    conn.execute("INSERT INTO account (id, display_name, account_type) "
+                 "VALUES ('out', 'out', 'checking'), ('in', 'in', 'savings')")
+    header = "Date,Description,Debit,Credit\n"
+    (root / "out.csv").write_text(header + "".join(
+        f"01/10/2026,SYNTHETIC MOVE {number},5.00,\n" for number in range(statements + 1)))
+    import_files(conn, [root / "out.csv"], account_id="out", layout=SYNTHETIC_CARD_V1)
+    (root / "in.csv").write_text(header + "".join(
+        f"01/20/2026,SYNTHETIC MOVE IN {number},,5.00\n" for number in range(opposite)))
+    import_files(conn, [root / "in.csv"], account_id="in", layout=SYNTHETIC_CARD_V1)
+    for number in range(spans):
+        day = f"2025-{1 + number // 28:02}-{1 + number % 28:02}"
+        source = root / f"span{number}.csv"
+        source.write_text(header + f"{day[5:7]}/{day[8:]}/2025,SYNTHETIC GROCER,1.00,\n")
+        import_files(conn, [source], account_id="in", layout=SYNTHETIC_CARD_V1,
+                     declared_coverage=declare_complete(day, day, "posting"))
+    conn.execute("BEGIN")
+    links = conn.execute(
+        "SELECT transaction_id, source_record_id FROM transaction_source WHERE account_id = 'out' "
+        "ORDER BY source_record_id").fetchall()
+    for number, (transaction_id, record_id) in enumerate(links):
+        classification_id = f"f{number:06}"
+        conn.execute(
+            """INSERT INTO type_classification (id, account_id, financial_type,
+                                                target_transaction_id, target_revision)
+               VALUES (?, 'out', 'transfer', ?, 't7-0')""",
+            (classification_id, transaction_id),
+        )
+        conn.execute("INSERT INTO type_classification_record VALUES (?, ?)",
+                     (classification_id, record_id))
+        conn.execute("INSERT INTO type_classification_event (classification_id, event) "
+                     "VALUES (?, 'made')", (classification_id,))
+    write_classification_effects(conn, "out")
+    for number, (transaction_id, record_id) in enumerate(links[1:]):
+        statement_id = f"o{number:06}"
+        conn.execute(
+            """INSERT INTO one_sided_transfer (id, account_id, counterpart_account_id,
+                                               target_transaction_id, target_revision)
+               VALUES (?, 'out', 'in', ?, 't7-0')""",
+            (statement_id, transaction_id),
+        )
+        conn.execute("INSERT INTO one_sided_transfer_record VALUES (?, ?)",
+                     (statement_id, record_id))
+        conn.execute("INSERT INTO one_sided_transfer_event (one_sided_transfer_id, event) "
+                     "VALUES (?, 'made')", (statement_id,))
+    write_transfer_effects(conn)
+    conn.execute("COMMIT")
+    return conn, links[0][0]
+
+
+def measure_one_sided(statements: int, opposite: int, spans: int) -> None:
+    """Every import, decision, correction and classification in any account rewrites every
+    one-sided transfer's outcome, which checks opposite pairs and reads spans for each, so the
+    later import pays statements x (opposite + spans)."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        conn, unstated = one_sided_ledger(root, statements, opposite, spans)
+        assert conn.execute(
+            "SELECT COUNT(*) FROM document_coverage WHERE account_id = 'in' "
+            "AND coverage_kind = 'complete'").fetchone()[0] == spans
+        conn.execute("BEGIN")
+        started = time.perf_counter()
+        write_transfer_effects(conn)
+        effects_seconds = time.perf_counter() - started
+        conn.execute("COMMIT")
+        started = time.perf_counter()
+        summary = one_sided_summary(conn)
+        totals_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        stated = state_one_sided(conn, "out", unstated,
+                                 transaction_revision(load_merge_evidence(conn, unstated)), "in")
+        state_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        token = one_sided_revision(conn, load_one_sided(conn, stated.one_sided_transfer_id))
+        undo_one_sided(conn, "out", stated.one_sided_transfer_id, token)
+        undo_seconds = time.perf_counter() - started
+        later = root / "later.csv"
+        later.write_text("Date,Description,Debit,Credit\n03/20/2026,SYNTHETIC GROCER,9.00,\n")
+        # Count what the import rewrites, so that the timing is known to include every statement.
+        rewritten = []
+
+        def counted(connection):
+            rewritten.append(connection.execute(
+                "SELECT COUNT(*) FROM one_sided_transfer_effect").fetchone()[0])
+            write_transfer_effects(connection)
+
+        apply_module.write_transfer_effects = counted
+        started = time.perf_counter()
+        import_files(conn, [later], account_id="in", layout=SYNTHETIC_CARD_V1)
+        later_seconds = time.perf_counter() - started
+        apply_module.write_transfer_effects = write_transfer_effects
+        assert rewritten == [statements], rewritten
+        applied = conn.execute(
+            "SELECT COUNT(*) FROM one_sided_transfer_effect WHERE state = 'applied'").fetchone()[0]
+        assert summary.applied == statements and applied == statements, (summary, applied)
+        print(
+            f"one-sided={statements:5} opposite={opposite:5} spans={spans:4} "
+            f"rewrite={effects_seconds:7.3f}s totals={totals_seconds:7.3f}s "
+            f"show_and_state={state_seconds:7.3f}s show_and_undo={undo_seconds:7.3f}s "
+            f"later_import={later_seconds:7.3f}s applied={applied}",
+            flush=True,
+        )
+        conn.close()
+
+
+def one_sided() -> None:
+    for statements, opposite, spans in ((100, 1, 1), (1000, 1, 1), (100, 1000, 1),
+                                        (1000, 1000, 1), (1000, 1, 300), (1000, 1000, 300)):
+        measure_one_sided(statements, opposite, spans)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--worst"]:
         worst_cases()
@@ -1402,6 +1533,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--transfers"]:
         transfers()
+        return
+    if sys.argv[1:] == ["--one-sided"]:
+        one_sided()
         return
     sizes = [(24, 200), (24, 1000), (24, 4000)]
     if len(sys.argv) > 1:
