@@ -873,7 +873,8 @@ built in M2.2, where a withheld match whose pairs a rejection already covers sti
 **Superseding.** One decision at a time, and in M2.3 only for contradiction by a confirmation.
 Superseding because of new evidence stays in M2.5.
 
-- A decision is active unless it was undone, or an active decision supersedes it.
+- A decision is active unless it was undone, or an active decision supersedes it. Amended by D-048:
+  a decision stays superseded while anything superseding it has not been undone.
 - The new decision names the old one and its current undo token. Every old pair is either
   contradicted by the new partition or kept with `--keep N`, and anything else is refused. Kept pairs
   are copied record for record, so they bind no new records.
@@ -994,6 +995,62 @@ with M2.4 on 2026-11-07:
   columns when they copy rows from a current ledger. They assert nothing new.
 - The item token was checked unchanged by the shared loading code: a fixed ledger gives
   `r3-d41e2251fcd3a611` both at `3a765fe` and after, and a test pins it.
+
+## D-048 New evidence on decided records, and superseding chains — Approved
+
+Approved by the owner on 2026-11-07 with the M2.5 plan, taking every recommendation in it. Builds on
+D-042 to D-047. It amends one rule of D-046, the state of a superseded decision, because that rule
+contradicted D-046's own requirement that a confirmation contradict no active decision but the one
+it names (F4).
+
+```sh
+pf review separate --db DB --account A TRANSACTION_ID --revision t1-… --group R1 --group R2 \
+   [--supersedes D --supersedes-revision d3-… --keep N ...]
+```
+
+**Supersession chains (amends D-046).** A decision is superseded while any decision superseding it
+has not been undone, whether that one is active or superseded in turn. Only the newest decision of a
+chain is active, and only it can be undone. Each undo steps back one link: it restores the decision
+just before, or refuses if that would contradict an active decision. Refusing a superseded decision
+names the newest of its chain. D-046 said "an active decision supersedes it", so in a chain A ← B ← C
+the rejection A applied again once C superseded B, while C kept the very pair A keeps apart, and no
+conflict was raised. Migration 0008 clears the reconciliation marker of every account holding a
+chain of two or more, so that commands refuse it until `reconcile` re-derives it (D-035).
+
+**New evidence touching a decided record.** No decision transfers to a record that did not exist when
+it was made (D-042, D-009).
+
+| Situation | Outcome |
+|---|---|
+| A re-export that merges automatically with a bound record | Its unit is kept apart as the bound record is, and nothing is reviewed again. The decision still binds only the old record |
+| A re-export that does not merge (S11) | An ordinary candidate item. A person decides it with `review confirm` on that item |
+| A re-export carrying an ID shared by separated records (P7) | A withheld-match conflict, settled by a partition |
+| A record that would join a confirmed unit (C8) | Joins when valid, otherwise withheld with a conflict |
+| An automatic split under a decision (S12) | `decision_basis_changed`, settled by a partition |
+
+`review show` lists records in the item that are alike a decided record in every parsed value, with
+the decision that binds the other, and binds nothing. It reads only evidence the item token already
+covers, so the token is unchanged.
+
+**What can supersede what.** A confirmation supersedes a decision whose `different_event` pairs it
+joins (D-046). A separation supersedes a confirmation, a separation included, whose `same_event`
+pairs its groups split: every other pair of the old decision is kept with `--keep`, copied record for
+record. A rejection never supersedes: it adds `different_event` pairs between direct candidates, which
+cannot join or split anything. One decision is superseded at a time. Superseding several would need a
+link table in place of `supersedes_decision_id` and an undo that restores several at once, while undoing
+one and superseding the other already works.
+
+**Tokens.** Item `r3` and transaction `t1` are unchanged. The undo token becomes `d3`: its fields are the
+same, but "without this decision" now restores only the decision just before it, so a `d2` token from a
+chain ledger must never read as current.
+
+**Conflicts.** A separation that supersedes settles conflicts as any partition does, and refuses
+atomically if an open conflict would still hold its records. Undoing it may raise a withheld or
+changed-basis conflict under D-046's joining rules. Nothing new raises one.
+
+**Cost.** A superseding separation touches its group as a partition does. It is measured on three
+unmerged documents, where the confirmed unit still links with the third. If it is materially slower
+than a partition there, the work stops and is reported.
 
 ## Not yet decided
 

@@ -7,8 +7,9 @@ deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
 the choices at the end of D-045, with no changes. The owner accepted M2.3 as built on 2026-11-07,
 including the rules and limits recorded in D-046 and "M2.3 as built" below, with no changes. The owner
 accepted M2.4 as built on 2026-11-07, including the rules and implementation choices recorded in
-D-047 and the limits in "M2.4 as built" below, with no changes. **Do not start M2.5 until its plan
-is approved.** M2.5 to M2.9 are provisional, and each needs its own approval. M2.1's decisions are D-040 and D-041, M2.2's rules are D-042 to D-045, with D-045
+D-047 and the limits in "M2.4 as built" below, with no changes. **The owner approved the M2.5 plan
+on 2026-11-07, taking every recommendation in it (D-048). M2.5 is in progress.** M2.6 to M2.9 are
+provisional, and each needs its own approval. M2.1's decisions are D-040 and D-041, M2.2's rules are D-042 to D-045, with D-045
 overriding the others where they differ, M2.3's are D-046, and M2.4's are D-047.
 
 ## Current state
@@ -335,6 +336,13 @@ or export presents legacy creation timestamps.**
 
 **F3. Merge-heavy benchmark. Backlog.** See "Backlog benchmarks" in [plan.md](plan.md).
 
+**F4. Supersession chains revived a superseded decision. Found at the M2.4 review, fixed in M2.5.**
+In a chain A ← B ← C, where rejection A keeps X and Y apart, confirmation B joins them and supersedes
+A, and confirmation C supersedes B keeping its `same_event` pair, `review decisions` listed A as
+active once C was made. The ledger held X and Y together while A said they were different events,
+and no conflict was raised. `decision_states` followed D-046's wording, under which a decision is
+superseded only by an active one. Reproduced in `build/m2.5-probe/`. D-048 amends the rule.
+
 ## Commit hygiene
 
 - `bd095bf` is a broken intermediate commit: `tests/scenarios/test_overlapping_files.py`
@@ -499,7 +507,7 @@ rules and the choices made where they left one in D-047. Tests are in
 
 ## Awaiting the owner
 
-- Approval of the M2.5 plan.
+- Review of M2.5, once built.
 - Pushing. Not authorized from here. The owner's own push is described under "Remote state".
 
 ## Recommended M2 scope
@@ -512,11 +520,12 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for M2.2's review outcome, M2.3, M2.3's review outcome, M2.4 and M2.4's review outcome | **Must be renewed** for anything further |
+| Local commits on `feature/m2-review` | Approved for M2.2's review outcome, M2.3, M2.3's review outcome, M2.4, M2.4's review outcome and M2.5 | **Must be renewed** for anything further |
 | M2.2 | Accepted as built, 2026-11-07 | None |
 | M2.3 | Accepted as built, 2026-11-07 | None |
 | M2.4 | Accepted as built, 2026-11-07 | None |
-| M2.5 | Provisional, not approved | Needs its own plan and approval |
+| M2.5 | Plan approved, 2026-11-07 (D-048). In progress | Owner reviews when built |
+| M2.6 | Provisional, not approved | Needs its own plan and approval |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |

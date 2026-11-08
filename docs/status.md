@@ -13,7 +13,8 @@ Last updated: 2026-11-07. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.2: decision core, pair rejection and undo | Accepted |
 | M2.3: confirmation, partitions and superseding | Accepted (D-046) |
 | M2.4: separating machine-made merges | Accepted (D-047) |
-| M2.5 to M2.9 | Provisional, not approved |
+| M2.5: new evidence on decided records, and superseding chains | Approved, in progress (D-048) |
+| M2.6 to M2.9 | Provisional, not approved |
 | M3 to M8 | Not started |
 
 ## What exists
