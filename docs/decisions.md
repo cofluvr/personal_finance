@@ -74,7 +74,7 @@ index line.
 | D-052 | Pending to posted — Approved, implemented and accepted in M2.9 |
 | D-053 | Financial types — Approved, implemented and accepted in M3.1 |
 | D-054 | Transfers across accounts — Approved, implemented and accepted in M3.2 |
-| D-055 | Card payments, one-sided transfers and coverage warnings — Proposed for M3.3 |
+| D-055 | Card payments, one-sided transfers and coverage warnings — Approved, being implemented in M3.3 |
 
 ## Rules in brief
 
@@ -151,9 +151,10 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Transfer candidates | A person's transfer-kind type on one side, the exact opposite amount in another account, dates within 5 days. Never stored | D-054 |
 | Receiving accounts | Card, loan and investment payments may be money in on the account they pay | D-054 |
 
-## D-055 Card payments, one-sided transfers and coverage warnings — Proposed for M3.3
+## D-055 Card payments, one-sided transfers and coverage warnings — Approved, being implemented in M3.3
 
-Proposed for M3.3 on 2026-11-08, for the owner to approve or change before any of it is built.
+Proposed for M3.3 on 2026-11-08, and approved by the owner the same day with the lead engineer's
+recommendations, including the four points for the owner's decision, with no changes.
 Meets PRD §9's one-sided imported transfers and its warning for card payments without purchase
 history, D-012, and D-011's rule that a suspected transfer stays visibly unresolved. Builds on
 D-054, and extends its recommendations 3 and 4 only as recommendation 4 below says.
@@ -166,7 +167,7 @@ pf review transfer show --db DB ID              # a match or a one-sided transfe
 pf review transfer undo --db DB --account A ID --revision m1-…|o1-…
 ```
 
-**Recommendations, for the owner to approve or change:**
+**Recommendations:**
 
 1. **A one-sided transfer is a person's statement** that one transaction moves money between it and
    another owned account whose side is not in the ledger. It names that counterpart account, which
@@ -228,7 +229,7 @@ recommends planning them when a real layout or M3.4 shows the need.
 
 **Acceptance tests,** O1 to O14, are in [plan.md](plan.md).
 
-**For the owner's decision, found while planning M3.3:**
+**Decided with the plan, found while planning it:**
 
 - **The counterpart must be a registered account,** even one never imported. Naming none would be
   simpler, but then no warning could say which card's spending is understated, and a later import

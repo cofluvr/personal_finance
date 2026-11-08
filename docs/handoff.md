@@ -1,10 +1,10 @@
-# Session Handoff: M3.2 Accepted, M3.3 Plan Awaiting Approval
+# Session Handoff: M3.3 In Progress
 
 For a fresh session. Written 2026-11-08. **M1, M2, M3.1 and M3.2 are complete and accepted.** The
 owner accepted M3.2, transfers across accounts (D-054), on 2026-11-08 as built, with no changes,
 including the plan itself, the implementation choices and the points for review. **M3.3, card
-payments, one-sided transfers and coverage warnings, is proposed as D-055** and awaits the owner's
-approval. None of it is built.
+payments, one-sided transfers and coverage warnings, is approved as D-055** with the lead
+engineer's recommendations and no changes, on 2026-11-08, and is being built.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -48,7 +48,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 
 Then only what the task needs:
 
-- For M3.3, once approved: D-011, D-012 and D-054 in [decisions-d001-d052.md](decisions-d001-d052.md),
+- For M3.3: D-011, D-012 and D-054 in [decisions-d001-d052.md](decisions-d001-d052.md),
   `reconcile/transfer_effects.py`, `reconcile/transfers.py`, `reports/transfer_evidence.py`,
   `reports/totals.py`, `reconcile/apply.py`'s `declared_coverage`,
   `db/migrations/0014_transfer_matches.sql` and `tests/scenarios/test_transfers.py`.
@@ -157,17 +157,16 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Approval of D-055, the M3.3 plan, or the changes wanted, including its four points for the
-  owner's decision and the acceptance tests O1 to O14 in [plan.md](plan.md).
+- Nothing until M3.3 is built and recorded for review.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for recording M3.2's review outcome and proposing M3.3 | **Must be renewed** for M3.3 |
+| Local commits on `feature/m2-review` | Approved through M3.3 | **Must be renewed** for anything further |
 | M1, M2, M3.1 and M3.2 | Accepted as built | None |
-| M3.3 | Proposed as D-055, not approved | Owner approves or asks for changes |
+| M3.3 | Plan D-055 approved 2026-11-08. Being built | Owner reviews it as built |
 | M3.4 | Provisional, not approved | Needs its own plan and approval |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |

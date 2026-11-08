@@ -21,7 +21,7 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | **M2 overall** | **Complete and accepted** |
 | M3.1: financial types | Accepted (D-053) |
 | M3.2: transfers across accounts | Accepted (D-054) |
-| M3.3: card payments, one-sided transfers and coverage warnings | Proposed, awaiting approval (D-055) |
+| M3.3: card payments, one-sided transfers and coverage warnings | Approved, in progress (D-055) |
 | M3 to M8 | Not started |
 
 ## What exists
