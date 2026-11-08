@@ -6,7 +6,8 @@ Not part of the test suite. Run from the repository root:
     (add --worst for the stress shapes, --constrained for dense groups with decisions,
     --confirmed to compare confirmation with rejection, --separated to compare separating a
     merge with rejection and partition, --superseded to compare a separation superseding a
-    confirmation with a partition, or rows per month such as 200 1000 4000)
+    confirmation with a partition, --corrected for value corrections, or rows per month such as
+    200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
 one import_files call: reading and parsing the file, writing records, reconciling the
@@ -32,6 +33,12 @@ from personal_finance.ingest.coverage import declare_complete
 from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.reconcile.apply import decision_states, load_evidence
+from personal_finance.reconcile.correction_effects import (
+    correction_chain_states,
+    load_active_corrections,
+    write_correction_effects,
+)
+from personal_finance.reconcile.corrections import correct_value, undo_correction
 from personal_finance.reconcile.cross_document import Constraint, Document, Record, derive
 from personal_finance.reconcile.decisions import (
     confirm_groups,
@@ -40,7 +47,9 @@ from personal_finance.reconcile.decisions import (
     undo_decision,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reports.correction_evidence import correction_undo_outlook, load_correction
 from personal_finance.reports.decision_evidence import load_decision, undo_outlook
+from personal_finance.reports.totals import account_movement
 from personal_finance.reports.review_evidence import (
     DecidedPair,
     DecidedRecord,
@@ -605,6 +614,180 @@ def superseded() -> None:
         measure_alike(transactions)
 
 
+def new_ledger(root: Path):
+    path = root / "ledger.db"
+    create_database(path)
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO account (id, display_name, account_type) VALUES ('acct', 'a', 'credit_card')"
+    )
+    return conn
+
+
+def measure_correcting_dense(rows_per_file: int) -> None:
+    """A correction through a real ledger where derivation is quadratic: three unmerged files of
+    one dense group, with a partition touching it. A correction moves no record, so it must not
+    pay for derivation, which the later import does (D-049)."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        conn = new_ledger(root)
+        header = "Date,Description,Debit,Credit\n"
+        for name, padding in (("a.csv", ""), ("b.csv", " "), ("c.csv", "  ")):
+            source = root / name
+            source.write_text(header + padding + "01/10/2026,SYNTHETIC CAFE,6.50,\n" * rows_per_file)
+            (result,) = import_files(conn, [source], account_id="acct", layout=SYNTHETIC_CARD_V1)
+            assert result.outcome == "imported", result
+        (issue,) = conn.execute("SELECT id FROM review_issue").fetchone()
+        item = load_review_evidence(conn, issue)
+        by_file = {"a.csv": [], "b.csv": [], "c.csv": []}
+        for entry in item.transactions:
+            by_file[entry.records[0].file_name].append(entry.transaction_id)
+        left, right, third = by_file["a.csv"][0], by_file["b.csv"][0], by_file["c.csv"][0]
+        confirm_groups(conn, "acct", issue, review_revision(item), [[left, right], [third]])
+        (joined,) = conn.execute(
+            "SELECT transaction_id FROM transaction_source GROUP BY transaction_id "
+            "HAVING COUNT(*) = 2"
+        ).fetchone()
+        transactions = account_movement(conn, "acct").transactions
+
+        started = time.perf_counter()
+        token = transaction_revision(load_merge_evidence(conn, joined))
+        show_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        correction_id = correct_value(conn, "acct", joined, token, "amount", "-6.00").correction_id
+        correct_seconds = time.perf_counter() - started
+
+        later = root / "later.csv"
+        later.write_text(header + "03/20/2026,SYNTHETIC GROCER,9.00,\n")
+        started = time.perf_counter()
+        import_files(conn, [later], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        later_seconds = time.perf_counter() - started
+
+        started = time.perf_counter()
+        revision = correction_undo_outlook(conn, load_correction(conn, correction_id)).revision
+        outlook_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        undo_correction(conn, "acct", correction_id, revision)
+        undo_seconds = time.perf_counter() - started
+        print(
+            f"dense transactions={transactions:6} transaction_show={show_seconds:7.3f}s "
+            f"correct={correct_seconds:7.3f}s later_import={later_seconds:7.3f}s "
+            f"correction_show={outlook_seconds:7.3f}s undo={undo_seconds:7.3f}s",
+            flush=True,
+        )
+        conn.close()
+
+
+def measure_many_corrections(count: int) -> None:
+    """count transactions, each with an active amount correction, written directly. Rewriting the
+    derived rows is linear in corrections, and every correction and import pays it once."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        conn = new_ledger(root)
+        header = "Date,Description,Debit,Credit\n"
+        source = root / "a.csv"
+        source.write_text(header + "".join(
+            f"01/{1 + number % 28:02}/2026,SYNTHETIC SHOP {number},{1 + number}.00,\n"
+            for number in range(count)
+        ))
+        import_files(conn, [source], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        links = conn.execute("SELECT transaction_id, source_record_id FROM transaction_source "
+                             "ORDER BY source_record_id").fetchall()
+        conn.execute("BEGIN")
+        for number, (transaction_id, record_id) in enumerate(links[1:]):
+            correction_id = f"c{number:06}"
+            conn.execute(
+                """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
+                                                 target_transaction_id, target_revision)
+                   VALUES (?, 'acct', 'amount', -1, ?, 't2-0')""",
+                (correction_id, transaction_id),
+            )
+            conn.execute("INSERT INTO value_correction_record VALUES (?, ?)", (correction_id, record_id))
+            conn.execute("INSERT INTO value_correction_event (correction_id, event) VALUES (?, 'made')",
+                         (correction_id,))
+        write_correction_effects(conn, "acct")
+        conn.execute("COMMIT")
+
+        conn.execute("BEGIN")
+        started = time.perf_counter()
+        write_correction_effects(conn, "acct")
+        effects_seconds = time.perf_counter() - started
+        conn.execute("COMMIT")
+        started = time.perf_counter()
+        movement = account_movement(conn, "acct")
+        totals_seconds = time.perf_counter() - started
+        last = links[0][0]
+        started = time.perf_counter()
+        token = transaction_revision(load_merge_evidence(conn, last))
+        correct_value(conn, "acct", last, token, "amount", "-2.00")
+        correct_seconds = time.perf_counter() - started
+        later = root / "later.csv"
+        later.write_text(header + "03/20/2026,SYNTHETIC GROCER,9.00,\n")
+        started = time.perf_counter()
+        import_files(conn, [later], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        later_seconds = time.perf_counter() - started
+        print(
+            f"many corrections={count:6} rewrite={effects_seconds:7.3f}s "
+            f"totals={totals_seconds:7.3f}s show_and_correct={correct_seconds:7.3f}s "
+            f"later_import={later_seconds:7.3f}s corrected={movement.transactions_corrected}",
+            flush=True,
+        )
+        conn.close()
+
+
+def measure_correction_chain(length: int) -> None:
+    """One chain of corrections, each superseding the one before, written directly."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        conn = new_ledger(root)
+        source = root / "a.csv"
+        source.write_text("Date,Description,Debit,Credit\n01/10/2026,SYNTHETIC CAFE,6.50,\n")
+        import_files(conn, [source], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        transaction_id, record_id = conn.execute(
+            "SELECT transaction_id, source_record_id FROM transaction_source").fetchone()
+        conn.execute("BEGIN")
+        for number in range(length):
+            correction_id = f"c{number:06}"
+            conn.execute(
+                """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
+                                                 target_transaction_id, target_revision,
+                                                 supersedes_correction_id)
+                   VALUES (?, 'acct', 'amount', ?, ?, 't2-0', ?)""",
+                (correction_id, -1 - number, transaction_id,
+                 f"c{number - 1:06}" if number else None),
+            )
+            conn.execute("INSERT INTO value_correction_record VALUES (?, ?)", (correction_id, record_id))
+            conn.execute("INSERT INTO value_correction_event (correction_id, event) VALUES (?, 'made')",
+                         (correction_id,))
+        write_correction_effects(conn, "acct")
+        conn.execute("COMMIT")
+        started = time.perf_counter()
+        states, _ = correction_chain_states(conn, "acct")
+        states_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        active = load_active_corrections(conn, "acct")
+        load_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        correction_undo_outlook(conn, load_correction(conn, f"c{length - 1:06}"))
+        outlook_seconds = time.perf_counter() - started
+        print(
+            f"chain corrections={length:5} states={states_seconds:7.4f}s "
+            f"load_active={load_seconds:7.4f}s correction_show={outlook_seconds:7.4f}s "
+            f"active={len(active)}",
+            flush=True,
+        )
+        conn.close()
+
+
+def corrected() -> None:
+    for rows_per_file in (33, 167, 333, 667):
+        measure_correcting_dense(rows_per_file)
+    for count in (100, 500, 1000, 2000, 4000):
+        measure_many_corrections(count)
+    for length in (50, 2000):
+        measure_correction_chain(length)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--worst"]:
         worst_cases()
@@ -620,6 +803,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--superseded"]:
         superseded()
+        return
+    if sys.argv[1:] == ["--corrected"]:
+        corrected()
         return
     sizes = [(24, 200), (24, 1000), (24, 4000)]
     if len(sys.argv) > 1:
