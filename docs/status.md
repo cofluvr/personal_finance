@@ -20,7 +20,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.9: pending to posted | Accepted (D-052) |
 | **M2 overall** | **Complete and accepted** |
 | M3.1: financial types | Accepted (D-053) |
-| M3.2: transfers across accounts | Built, awaiting review (D-054) |
+| M3.2: transfers across accounts | Accepted (D-054) |
+| M3.3: card payments, one-sided transfers and coverage warnings | Proposed, awaiting approval (D-055) |
 | M3 to M8 | Not started |
 
 ## What exists
@@ -124,7 +125,8 @@ distinct spellings per block, and in the units of a group a decision touches.
 - Only a person matches a transfer, one pair at a time, and only a candidate: a transfer-kind type
   on one side, the exactly opposite amount in another account, and dates within 5 days. Fees apart
   from the amount transferred, a transfer split over several transactions, and one-sided transfers
-  are not matched (M3.3) (D-054).
+  are not matched. One-sided transfers are proposed for M3.3, and the others for later (D-054,
+  D-055).
 - A match binds the records of both transactions when made, so a re-export that does not merge is
   unmatched. A match is never superseded: undo it and match again.
 - A match whose side splits, that reaches a transaction another match reaches, whose amounts stop

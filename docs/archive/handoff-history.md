@@ -585,6 +585,34 @@ The benchmark is `tests/benchmarks/measure_reconciliation.py --resolved`.
   own file.
 - One record at a time.
 
+## M3.2 as built
+
+Built and accepted by the owner on 2026-11-08 as built, with no changes, including the plan itself,
+the implementation choices and points for review in D-054. Scope and acceptance tests are in
+[plan.md](../plan.md)
+(X1 to X14), the rules, implementation choices and points for review in D-054. Tests are in
+`tests/scenarios/test_transfers.py`, `test_transfer_order.py` and `test_transfer_migration.py`, and
+the receiving-account direction in `test_classifications.py`. The benchmark is
+`measure_reconciliation.py --transfers`. The full suite on the last M3.2 code, `7d62447`, passed 1625 tests with exit code 0, and again
+on `f19bd1d` at the start of the review session. Breaks and benchmark output are in
+`build/m3.2-breaks/` and `build/m3.2-bench/`.
+
+**Known limits of M3.2:**
+
+- Only a person matches, one pair at a time, and only a candidate, which needs a transfer-kind type
+  stated on one side first. An unclassified transfer raises nothing.
+- Matching does not classify the other side, so "By financial type" lists it as unclassified until
+  classified.
+- Exact offsetting amounts only. Fees apart from the principal, a transfer split over several
+  transactions, and one-sided transfers wait for M3.3.
+- A match binds the records of both transactions when made, and is never superseded. A match that
+  stops applying is settled only by undo.
+- An import summary does not report matches the import leaves unsettled. `totals` does.
+- `totals` lists matched transfers beside account movement. It is not income or spending, which wait
+  for M3.4.
+
+The full list of limitations is in [status.md](../status.md).
+
 ## M3.1 as built
 
 Built and accepted by the owner on 2026-11-08 as built, with no changes, including the implementation choices and points for review in D-053. Scope and acceptance tests are in [plan.md](../plan.md)
@@ -841,7 +869,7 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 
 ## Where each slice starts in git
 
-Run `git log -1`: the commit recording this handoff. M3.1 starts after `c25913f`, which records D-053's approval, itself after `08e4225`, which proposed it. M2.6's acceptance is recorded after `4aac5c3`. M2.6 starts after `8384fb6`, which records its plan's approval, itself after `0032c9c`, which records M2.5's acceptance. M2.5 starts after `d1feb30`, which records its plan's approval, itself after `7551e18`, which records M2.4's acceptance. M2.4 starts after `97f7296`, which records M2.3's acceptance. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a`
+Run `git log -1`: the commit recording this handoff. M3.2's acceptance is recorded after `f19bd1d`. M3.2 starts after `0a08cd5`, which proposes D-054, itself after `dd961a4`, which records M3.1's acceptance. M3.1 starts after `c25913f`, which records D-053's approval, itself after `08e4225`, which proposed it. M2.6's acceptance is recorded after `4aac5c3`. M2.6 starts after `8384fb6`, which records its plan's approval, itself after `0032c9c`, which records M2.5's acceptance. M2.5 starts after `d1feb30`, which records its plan's approval, itself after `7551e18`, which records M2.4's acceptance. M2.4 starts after `97f7296`, which records M2.3's acceptance. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a`
 
 ## Remote state, in full
 

@@ -1556,3 +1556,111 @@ M3.1:
 choices and the three points above. The owner asked for M3.2 to follow the lead engineer's
 recommendations, so direction on the receiving account is taken up there. Interest stays money out
 only. Later acceptance tests use letters no follow-up uses.
+
+## D-054 Transfers across accounts — Approved, implemented and accepted in M3.2
+
+Proposed for M3.2 on 2026-11-08. The owner asked for M3.2 to be built on the lead engineer's
+recommendations without a separate plan review, so these are approved in advance and open to change
+when M3.2 is reviewed. Meets PRD §9's cross-institution transfers, different posting dates, manual
+confirmation and reversal of incorrect matches, and D-011's rule that suspected transfers stay visibly
+unresolved. Builds on D-053, and changes none of D-042 to D-053 except recommendation 7, which D-053
+proposed for M3.2.
+
+```sh
+pf review transfers --db DB [--account A]
+pf review transfer match --db DB --account A TRANSACTION_ID --revision t6-… \
+   --counterpart COUNTERPART_ID --counterpart-account B --counterpart-revision t6-…
+pf review transfer show --db DB MATCH_ID
+pf review transfer undo --db DB --account A MATCH_ID --revision m1-…
+```
+
+**Recommendations:**
+
+1. **Two accounts together, without joint derivation.** Each account still reconciles alone: derive(),
+   what makes an account current (D-033) and the order tests are unchanged. A match is stated by a
+   person over two transactions already derived, and its outcome is computed afterwards from both
+   accounts' current state, so any order of imports and reconciles gives the same outcome. Matching
+   and undoing need both accounts current, check both tokens, and run under one write lock.
+2. **Candidates need a person's type.** Equal amounts are not proof (PRD §9, D-006), so a pair is a
+   candidate only when one side's applied type is `transfer`, `card_payment`, `loan_payment` or
+   `investment_contribution`, and: the other side is in another account, its effective amount is
+   exactly the opposite and not zero, some effective date of each side is within 5 days of the other,
+   neither side holds a record bound by an active match, and every applied type on either side fits
+   the pair. A type fits when it is one of those four, and a type other than `transfer` needs one of
+   the two accounts to be what it pays: a credit card, a loan, or an investment or retirement account.
+   Candidates are computed when listed and never stored. They change no total and authorize nothing.
+3. **Only a candidate can be matched.** A match binds the records of both transactions when made, as
+   a classification does, and names its outflow and inflow sides. It is not superseded: undo it and
+   match again. Undo never refuses for contradiction.
+4. **Outcome.** A match applies while each side's bound records sit in one transaction, no transaction
+   holds records of two active matches, the amounts still offset exactly, and every applied type
+   fits the pair. Otherwise its state, checked in this order, is `basis_changed`, `conflict`,
+   `amounts_differ` or `type_differs`, and it is disclosed. Migration 0014 adds append-only
+   `transfer_match`, `transfer_match_side`, `transfer_match_record` and `transfer_match_event`, and
+   a derived `transfer_match_effect`, rewritten for the whole ledger wherever classifications are.
+5. **Commands that would unsettle a match refuse.** `review confirm`, `review separate`,
+   `review correct` and `review classify` refuse to leave an applied match unsettled, as they refuse
+   for classifications. Undos, resolutions and coverage declarations never refuse for it, and report
+   the matches they newly leave unsettled. Undoing a completion waits for a match binding its record.
+6. **Totals.** Account movement and "By financial type" are unchanged. A new section gives matched
+   pairs and the amount they move, transactions in a candidate pair, transactions of a transfer type
+   with neither a match nor a candidate, and unsettled matches by state. Income and spending wait for
+   M3.4, and one-sided transfers and coverage warnings for M3.3.
+7. **Direction on the receiving account,** recommended in D-053. `card_payment` on a credit card,
+   `loan_payment` on a loan and `investment_contribution` on an investment or retirement account
+   also allow money in. Allowing more invalidates nothing stored. A transaction left unclassified as
+   against its direction may now fit, so migration 0014 marks as not current only the accounts of
+   those kinds holding one, and `reconcile` settles them.
+8. **Tokens.** `r7` to `r8` and `t5` to `t6` add each transaction's active matches, with their state
+   and both sides' bound records, left out while there are none, so digests are kept. `m1` is the
+   match undo token: the transaction tokens of every transaction holding its bound records. `d6`, `c2` and `f1` are unchanged: a match changes nothing a decision regroups, a
+   correction corrects or a classification states, the commands that would unsettle one refuse, and
+   the undos report it.
+9. **Privacy.** `review transfers` shows IDs, accounts, types and states, never amounts or
+   descriptions. `review transfer show` is the explicit inspection of one match. Totals show
+   aggregates only.
+
+**Not in M3.2:** one-sided transfers, card payments without card history and coverage warnings
+(M3.3), fees apart from transferred principal, a transfer split over several transactions, and income
+and spending reports (M3.4).
+
+**Acceptance tests,** X1 to X14, are in [plan.md](plan.md).
+
+**How these were implemented,** where the rules above left a choice, for the owner's review with
+M3.2:
+
+- A candidate reads each transaction's effective amount and dates, corrected where a correction
+  applies (D-049), and its applied type. A transaction with no date is never a candidate. The outflow
+  side is the one with money out, whichever is named first.
+- `transfer_match_effect` has one row per active match, naming its two transactions only while it
+  applies. Two unique indexes make "no transaction is a side of two applied matches" a schema rule,
+  and triggers keep a match to two accounts and each side to its own account's records.
+- `review transfer match` checks, in order: two different accounts, both current, each transaction
+  found, in its account and at its token, then the candidate rules, each refused with its own
+  message.
+- `t6` adds, for each active match binding a transaction's records, its side, the outcome and both
+  sides' bound records. The other side's transaction ID is immaterial, as IDs are. `r8` follows
+  because items show transactions. `m1` covers the `t6` of every transaction holding a bound record,
+  so a change to either side changes it. The outcome is in those tokens, so a deliberate break
+  showed it covered twice, and it was removed.
+- `review transfer undo` takes `--account` naming either of the match's accounts. Undoing a match
+  only ever settles others, so it reports nothing more.
+- For one account, `totals` counts the matches with a side there, the account's own transactions
+  in a candidate pair, and the amount on the inflow side.
+- Migration 0014 clears the marker of a card, loan, investment or retirement account holding any
+  transaction against its direction, not only one of the three types, because the stored row no
+  longer says which type it was.
+
+**For the owner's review, found while building M3.2:**
+
+- **A candidate needs a person's type first.** Without one, equal amounts on nearby dates raise
+  nothing, so an unclassified transfer is invisible here. Raising candidates from amounts and dates
+  alone would be easier to use and noisier, against D-006.
+- **Matching does not classify the other side.** It stays unclassified in "By financial type" unless
+  classified. M3.4 needs to decide whether a matched side counts as a transfer either way.
+- The 5-day window is a constant, not part of `MatchingRules`, because candidates are never stored
+  and so need no fingerprint (D-033).
+- An import summary does not report matches the import leaves unsettled. `totals` does.
+
+**Accepted** by the owner on 2026-11-08 as built, with no changes, including the plan itself,
+the implementation choices and the four points above.
