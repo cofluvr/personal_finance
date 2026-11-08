@@ -6,8 +6,8 @@ Not part of the test suite. Run from the repository root:
     (add --worst for the stress shapes, --constrained for dense groups with decisions,
     --confirmed to compare confirmation with rejection, --separated to compare separating a
     merge with rejection and partition, --superseded to compare a separation superseding a
-    confirmation with a partition, --corrected for value corrections, or rows per month such as
-    200 1000 4000)
+    confirmation with a partition, --corrected for value corrections, --resolved for completing
+    and dismissing unresolved rows, or rows per month such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
 one import_files call: reading and parsing the file, writing records, reconciling the
@@ -40,6 +40,11 @@ from personal_finance.reconcile.correction_effects import (
 )
 from personal_finance.reconcile.corrections import correct_value, undo_correction
 from personal_finance.reconcile.cross_document import Constraint, Document, Record, derive
+from personal_finance.reconcile.record_resolutions import (
+    complete_record,
+    dismiss_record,
+    undo_resolution,
+)
 from personal_finance.reconcile.decisions import (
     confirm_groups,
     reject_pairs,
@@ -49,6 +54,7 @@ from personal_finance.reconcile.decisions import (
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reports.correction_evidence import correction_undo_outlook, load_correction
 from personal_finance.reports.decision_evidence import load_decision, undo_outlook
+from personal_finance.reports.resolution_evidence import load_resolution, resolution_undo_outlook
 from personal_finance.reports.totals import account_movement
 from personal_finance.reports.review_evidence import (
     DecidedPair,
@@ -788,6 +794,75 @@ def corrected() -> None:
         measure_correction_chain(length)
 
 
+def measure_resolving(rows_per_file: int, kind: str) -> None:
+    """Two exports of the same rows_per_file purchases under complete coverage, with one row of a
+    that the parser cannot read. That row blocks every confident pair of a (D-024), so resolving it
+    without values that rule the purchases out pays for every merge it unblocks, and undoing it for
+    every split. The completion supplies a date outside the purchases' dates (D-050)."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        conn = new_ledger(root)
+        header = "Date,Description,Debit,Credit\n"
+        rows = "".join(
+            f"01/{1 + number % 28:02}/2026,SYNTHETIC SHOP {number},{1 + number}.00,\n"
+            for number in range(rows_per_file)
+        )
+        whole = declare_complete("2026-01-01", "2026-01-31", "posting")
+        for name, content in (("a.csv", header + rows + "not a row of this layout\n"),
+                              ("b.csv", header + " " + rows)):
+            source = root / name
+            source.write_text(content)
+            (result,) = import_files(conn, [source], account_id="acct", layout=SYNTHETIC_CARD_V1,
+                                     declared_coverage=whole)
+            assert result.outcome == "imported", result
+        before = account_movement(conn, "acct").transactions
+        assert before == 2 * rows_per_file, "the unreadable row must block every pair"
+        (issue,) = conn.execute(
+            "SELECT id FROM review_issue WHERE kind = 'unresolved_record'"
+        ).fetchone()
+
+        started = time.perf_counter()
+        token = review_revision(load_review_evidence(conn, issue))
+        show_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        if kind == "dismiss":
+            resolved = dismiss_record(conn, "acct", issue, token)
+        else:
+            resolved = complete_record(conn, "acct", issue, token,
+                                       {"amount": "-1.00", "posting_date": "2026-03-01"})
+        resolve_seconds = time.perf_counter() - started
+        assert resolved.transactions_after == rows_per_file + (kind == "complete"), resolved
+
+        later = root / "later.csv"
+        later.write_text(header + "03/20/2026,SYNTHETIC GROCER,9.00,\n")
+        started = time.perf_counter()
+        import_files(conn, [later], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        later_seconds = time.perf_counter() - started
+
+        resolution = load_resolution(conn, resolved.resolution_id)
+        started = time.perf_counter()
+        revision = resolution_undo_outlook(conn, resolution, DEFAULT_RULES).revision
+        outlook_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        undone = undo_resolution(conn, "acct", resolved.resolution_id, revision)
+        undo_seconds = time.perf_counter() - started
+        assert undone.transactions_after == 2 * rows_per_file + 1, undone
+        print(
+            f"{kind:8} pairs={rows_per_file:5} merged={resolved.moved_records:5} "
+            f"item_show={show_seconds:7.3f}s resolve={resolve_seconds:7.3f}s "
+            f"later_import={later_seconds:7.3f}s resolution_show={outlook_seconds:7.3f}s "
+            f"undo={undo_seconds:7.3f}s split={undone.moved_records:5}",
+            flush=True,
+        )
+        conn.close()
+
+
+def resolved() -> None:
+    for kind in ("dismiss", "complete"):
+        for rows_per_file in (500, 2000, 5000):
+            measure_resolving(rows_per_file, kind)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--worst"]:
         worst_cases()
@@ -806,6 +881,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--corrected"]:
         corrected()
+        return
+    if sys.argv[1:] == ["--resolved"]:
+        resolved()
         return
     sizes = [(24, 200), (24, 1000), (24, 4000)]
     if len(sys.argv) > 1:
