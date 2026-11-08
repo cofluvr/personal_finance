@@ -39,6 +39,10 @@ class AccountMovement:
     records_dismissed: int = 0
     # Documents whose coverage a person declared after import (D-051).
     documents_with_declared_coverage: int = 0
+    # Transactions counted at a posted amount other than their pending row's, and pending
+    # transactions left long after the account's latest date (D-052).
+    transactions_posted_at_changed_amount: int = 0
+    stale_pending_transactions: int = 0
 
 
 def account_movement(conn: sqlite3.Connection, account_id: str | None = None) -> AccountMovement:
@@ -137,8 +141,43 @@ def account_movement(conn: sqlite3.Connection, account_id: str | None = None) ->
     return AccountMovement(
         inflow, outflow, net, transactions, pending, unresolved, groups, members, *conflicts,
         confirmed, _separated(conn, account_id), *corrections, *resolutions,
-        _declared_documents(conn, account_id),
+        _declared_documents(conn, account_id), *_pending_disclosures(conn, account_id),
     )
+
+
+# A pending transaction this much older than its account's latest date is disclosed (D-016).
+STALE_PENDING_DAYS = 10
+
+
+def _pending_disclosures(conn, account_id) -> tuple[int, int]:
+    changed = conn.execute(
+        """SELECT COUNT(DISTINCT entry.id)
+           FROM ledger_transaction entry
+           JOIN transaction_source link ON link.transaction_id = entry.id
+           JOIN document_interpretation meaning
+               ON meaning.source_document_id = link.source_document_id
+           JOIN record_parse parse ON parse.source_record_id = link.source_record_id
+                                  AND parse.parser_version = meaning.parser_version
+           WHERE (:account IS NULL OR entry.account_id = :account)
+             AND entry.settlement_status <> 'pending' AND parse.settlement_status = 'pending'
+             AND parse.amount_cents <> entry.amount_cents""",
+        {"account": account_id},
+    ).fetchone()[0]
+    stale = conn.execute(
+        """SELECT COUNT(*)
+           FROM ledger_transaction entry
+           JOIN (SELECT account_id,
+                        MAX(MAX(COALESCE(transaction_date, '')), MAX(COALESCE(posting_date, '')))
+                            AS latest
+                 FROM ledger_transaction GROUP BY account_id) newest
+               ON newest.account_id = entry.account_id
+           WHERE (:account IS NULL OR entry.account_id = :account)
+             AND entry.settlement_status = 'pending'
+             AND julianday(newest.latest)
+                 - julianday(COALESCE(entry.posting_date, entry.transaction_date)) > :days""",
+        {"account": account_id, "days": STALE_PENDING_DAYS},
+    ).fetchone()[0]
+    return changed, stale
 
 
 def _declared_documents(conn, account_id) -> int:

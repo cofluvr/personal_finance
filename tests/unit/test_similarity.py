@@ -153,8 +153,8 @@ def test_similar_descriptions_always_share_a_block():
 
 def test_the_default_fingerprint_is_pinned():
     """If this fails, bump RULES_VERSION and update the value: see D-033."""
-    assert RULES_VERSION == 1
-    assert DEFAULT_RULES.fingerprint() == "0df28441bc67a7bac8cd422a7a10e148b8b84e4fcaaa8e090db0507a9f0bf4f6"
+    assert RULES_VERSION == 2
+    assert DEFAULT_RULES.fingerprint() == "e50fad61b8e96a795e16de14e8d25a30cfd346eef7931c273946b549308c044e"
 
 
 def test_any_override_changes_the_fingerprint():

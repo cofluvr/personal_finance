@@ -140,11 +140,13 @@ class TestTokens:  # N14
         assert decision_evidence.DECISION_REVISION_VERSION == 5
 
     def test_a_ledger_without_chains_keeps_its_digest(self, tmp_path, capsys):
-        """d2-2a1e1dd2ac99de82 was computed for this ledger at 7551e18, before version 3."""
+        """d2-2a1e1dd2ac99de82 was computed for this ledger at 7551e18, before version 3, and held to
+        d5 under rules version 1. Rules version 2 changed the rules fingerprint it covers."""
         ledger = Ledger(tmp_path, capsys)
         item, one, two = pair_up(ledger)
         decision = ledger.reject_ok(item, (one, two))
-        assert ledger.decision_revision(decision) == "d5-2a1e1dd2ac99de82"
+        # The digest covers the rules fingerprint, so it changed with rules version 2 (D-052).
+        assert ledger.decision_revision(decision) == "d5-ecb0f4cc0ef102ac"
 
     def test_the_transaction_token_is_unchanged(self, ledger):
         """Computed for this ledger at 7551e18, before M2.5."""

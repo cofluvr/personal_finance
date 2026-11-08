@@ -49,7 +49,7 @@ missing here or a named test does not exist. It does not judge whether a test is
 | A31 | Passed | `a_failure_at_any_step_leaves_no_partial_data`, `a_process_crash_mid_import_leaves_no_partial_data` | |
 | A32 | Passed | `a32_a_user_declared_end_date_is_confident` | |
 | A33 | Passed | `a33_a_metadata_end_date_is_not_assumed_complete`, `a33_contrast_a_passed_end_date_is_confident` | |
-| A34 | Passed | `a34_a_conflicting_date_or_status_is_flagged`, `a34_an_id_repeated_within_a_document_is_flagged` | |
+| A34 | Passed | `a34_a_conflicting_date_is_flagged_and_pending_to_posted_merges`, `a34_an_id_repeated_within_a_document_is_flagged` | Amended by D-052 in M2.9: status no longer conflicts for a pending and a posted row with one ID. Awaiting the owner's review |
 | A35 | Passed | `a35_an_unresolved_row_keeps_the_match_possible`, `a35_contrast_an_unrelated_unresolved_row_changes_nothing` | |
 | A36 | Passed | `a36_every_source_stays_linked_and_evidence_is_unchanged` | |
 | A37 | Passed | `a37_a_failure_at_any_stage_leaves_no_partial_state`, `a37_a_process_crash_during_matching_leaves_no_partial_state` | |

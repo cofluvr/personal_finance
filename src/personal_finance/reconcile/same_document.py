@@ -9,6 +9,7 @@ from datetime import date
 from personal_finance.ingest.layouts import ParsedRow
 
 PENDING_POSTED_WINDOW_DAYS = 3
+RULE_SAME_DOCUMENT_PENDING_POSTED = "same_document_pending_posted"
 
 
 def find_candidate_groups(rows: list[tuple[str, ParsedRow]]) -> list[tuple[str, list[str]]]:
@@ -46,7 +47,7 @@ def _pending_and_posted(rows):
             for item in (left, right)
         }
         if members:
-            groups.append(("same_document_pending_posted", sorted(members)))
+            groups.append((RULE_SAME_DOCUMENT_PENDING_POSTED, sorted(members)))
     return groups
 
 

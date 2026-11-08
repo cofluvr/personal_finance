@@ -101,16 +101,45 @@ class TestReliableIds:
         )
         assert merged(result) == {("1", "2")}
 
-    def test_pending_conflicts_with_posted_and_with_unknown(self):
+    def test_pending_merges_with_posted_and_with_unknown(self):
+        """D-052 amends D-006: one ID is one event, so only direction and date must agree."""
         for status in ("posted", "unknown"):
+            for amount in (-500, -600):
+                result = outcome(
+                    self.documents,
+                    [
+                        row("1", "a", external_id="X", settlement_status="pending",
+                            posting_date=None, transaction_date="2026-01-09"),
+                        row("2", "b", amount=amount, external_id="X", settlement_status=status,
+                            transaction_date="2026-01-09"),
+                    ],
+                )
+                assert merged(result) == {("1", "2")}
+                (group,) = result.groups
+                assert group.primary_record_id == "2"
+
+    def test_pending_and_posted_stay_apart_on_direction_or_transaction_date(self):
+        for amount, day in ((500, "2026-01-09"), (-500, "2026-01-08")):
             result = outcome(
                 self.documents,
                 [
-                    row("1", "a", external_id="X", settlement_status="pending"),
-                    row("2", "b", external_id="X", settlement_status=status),
+                    row("1", "a", external_id="X", settlement_status="pending",
+                        transaction_date="2026-01-09"),
+                    row("2", "b", amount=amount, external_id="X", transaction_date=day),
                 ],
             )
             assert merged(result) == set()
+            assert flagged(result)
+
+    def test_two_pending_rows_still_need_equal_amounts(self):
+        result = outcome(
+            self.documents,
+            [
+                row("1", "a", external_id="X", settlement_status="pending"),
+                row("2", "b", amount=-600, external_id="X", settlement_status="pending"),
+            ],
+        )
+        assert merged(result) == set()
 
     def test_unknown_does_not_conflict_with_posted(self):
         result = outcome(

@@ -10,8 +10,9 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 
-# Bump whenever matching behaviour changes in a way the settings below do not show.
-RULES_VERSION = 1
+# Bump whenever matching behaviour changes in a way the settings below do not show. Version 2
+# matches pending to posted rows (D-052).
+RULES_VERSION = 2
 
 
 @dataclass(frozen=True)

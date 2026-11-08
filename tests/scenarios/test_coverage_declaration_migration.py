@@ -1,7 +1,8 @@
 """Migration 0011 on a populated ledger, and its append-only tables (K13, D-051).
 
 A ledger built at the latest version, with 0011's empty tables dropped and set back to version 10,
-is a version 10 ledger: 0011 only creates tables.
+is a version 10 ledger as far as 0011 is concerned: 0011 only creates tables, and 0012 rebuilds a
+table 0011 does not touch. Migration stops at 11, so that only 0011 is tested here.
 """
 
 import sqlite3
@@ -40,10 +41,14 @@ def populated(tmp_path, capsys):
 
 
 class TestMigration:
-    def test_it_adds_empty_tables_and_changes_nothing_else(self, populated):
+    def test_it_adds_empty_tables_and_changes_nothing_else(self, populated, tmp_path):
         before = populated.dump(VERSION_10_TABLES)
         conn = connect(populated.path)
-        assert migrate(conn) == len(load_migrations()) == 11
+        folder = tmp_path / "eleven"
+        folder.mkdir()
+        for migration in load_migrations()[:11]:
+            (folder / migration.path.name).write_text(migration.path.read_text())
+        assert migrate(conn, folder) == 11
         for table in DECLARATION_TABLES:
             assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.close()

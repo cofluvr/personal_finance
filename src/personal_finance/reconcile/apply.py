@@ -26,6 +26,7 @@ from personal_finance.reconcile.cross_document import (
 )
 from personal_finance.reconcile.correction_effects import write_correction_effects
 from personal_finance.reconcile.rules import DEFAULT_RULES, RULES_VERSION, MatchingRules
+from personal_finance.reconcile.same_document import RULE_SAME_DOCUMENT_PENDING_POSTED
 from personal_finance.reconcile.supersession import (
     STATE_ACTIVE,
     STATE_SUPERSEDED,
@@ -673,6 +674,25 @@ class _State:
                    VALUES (?, ?)""",
                 [(issue, target) for target in targets],
             )
+        # Pending and posted rows of one document are settled while they are one transaction, and
+        # open again when split (D-052).
+        self.conn.execute(
+            """UPDATE review_issue
+               SET status = CASE WHEN (SELECT COUNT(*) FROM review_issue_subject subject
+                                       WHERE subject.review_issue_id = review_issue.id) < 2
+                                 THEN 'resolved' ELSE 'open' END,
+                   resolved_at = CASE WHEN (SELECT COUNT(*) FROM review_issue_subject subject
+                                            WHERE subject.review_issue_id = review_issue.id) < 2
+                                      THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END
+               WHERE rule = ? AND id IN (
+                   SELECT subject.review_issue_id FROM review_issue_subject subject
+                   JOIN ledger_transaction entry ON entry.id = subject.transaction_id
+                   WHERE entry.account_id = ?)
+                 AND status <> CASE WHEN (SELECT COUNT(*) FROM review_issue_subject subject
+                                          WHERE subject.review_issue_id = review_issue.id) < 2
+                                    THEN 'resolved' ELSE 'open' END""",
+            (RULE_SAME_DOCUMENT_PENDING_POSTED, self.account_id),
+        )
 
     def retire_unused_transactions(self) -> None:
         for transaction_id, created_at in self.stored_created_at.items():

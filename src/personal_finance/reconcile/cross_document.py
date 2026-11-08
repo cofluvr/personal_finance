@@ -4,7 +4,7 @@ derive() is a pure function: it reads no database and depends only on the set of
 documents, any active decisions and the rules, ordered by content hash and row number,
 never by import order or generated ID. Import order therefore cannot change the outcome.
 Applying the result is a separate step. Rules are in decisions.md D-006, D-007, D-026 to
-D-031, D-042 to D-045 and D-050.
+D-031, D-042 to D-045, D-050 and D-052.
 
 Reliable-ID matching and ID-less matching run on separate rows and neither one
 feeds the other. Description similarity only ever creates review items. A record completed by
@@ -35,6 +35,7 @@ REASON_BASIS_CHANGED = "decision_basis_changed"
 REASON_UNRESOLVED_ROW = "unresolved_row"
 REASON_COMPLETED_ROW = "completed_row"
 REASON_COMPLETED_SHARES_ID = "completed_record_shares_id"
+REASON_PENDING_AMOUNT_CHANGED = "pending_amount_changed"
 
 RELATION_DIFFERENT = "different_event"
 RELATION_SAME = "same_event"
@@ -210,9 +211,14 @@ def derive(
 
     groups = tuple(_group(rows, rule, by_id) for rows, rule in units)
     candidates = [_Unit.of(rows, by_id) for rows, _ in units]
-    joined, steps = _link_candidates(candidates, rules)
+    joined, steps, pending_pairs = _link_candidates(candidates, rules)
+    reasons_by_row = defaultdict(set, {row: set(found) for row, found in exact_reasons.items()})
+    for pair in pending_pairs:
+        for position in pair:
+            for row in candidates[position].rows:
+                reasons_by_row[row.id].add(REASON_PENDING_AMOUNT_CHANGED)
     separated = _separated_units(candidates, different)
-    found, recomputed = _candidate_items(candidates, joined, exact_reasons, rules, separated)
+    found, recomputed = _candidate_items(candidates, joined, reasons_by_row, rules, separated)
     items = [_id_item(_without_withheld(conflict, withheld_by)) for conflict in id_conflicts]
     items += _not_covered_by(found, held)
     items += _conflict_items([rows for rows, _ in units], held, constraints)
@@ -307,7 +313,7 @@ def _confirmed_units(rows, merges, withheld, constraints, documents):
         joined = dict(members)
         for position in positions:
             joined.update((row.id, row) for row in merges[position][0])
-        if _valid_unit(joined.values(), different, documents):
+        if _valid_unit(joined.values(), different, documents, members.keys()):
             absorbed.update(positions)
             units.append((sorted(joined.values(), key=lambda row: place[row.id]), LINK_CONFIRMED))
         else:
@@ -324,15 +330,36 @@ def _confirmed_units(rows, merges, withheld, constraints, documents):
     return units, absorbed
 
 
-def _valid_unit(rows, different, documents) -> bool:
-    """One record per document, no two distinct unique IDs, and no pair a decision keeps apart."""
+def _valid_unit(rows, different, documents, confirmed=()) -> bool:
+    """One record per document, no two distinct unique IDs, and no pair a decision keeps apart.
+
+    Two records of one document are allowed only as a pending and a posted row a person confirmed
+    as one event (D-052), so automatic matching never adds a second.
+    """
     rows = list(rows)
-    if len({row.document_id for row in rows}) < len(rows) or joins_distinct_ids(rows, documents):
+    if not _one_record_per_document(rows, confirmed) or joins_distinct_ids(rows, documents):
         return False
     present = {row.id for row in rows}
     return not any(
         present.intersection(item.left) and present.intersection(item.right) for item in different
     )
+
+
+def _one_record_per_document(rows, confirmed) -> bool:
+    by_document = defaultdict(list)
+    for row in rows:
+        by_document[row.document_id].append(row)
+    return all(
+        len(held) == 1 or (len(held) == 2 and is_pending_and_posted(*held)
+                           and all(row.id in confirmed for row in held))
+        for held in by_document.values()
+    )
+
+
+def is_pending_and_posted(left, right) -> bool:
+    """One pending row and one that is not, the only two records of a document that can be one
+    transaction, and only by confirmation (D-052)."""
+    return (left.settlement_status == "pending") != (right.settlement_status == "pending")
 
 
 def joins_distinct_ids(rows, documents) -> bool:
@@ -494,10 +521,18 @@ def _all_compatible(rows) -> bool:
 
 
 def _compatible(left: Record, right: Record) -> bool:
-    """Compare material fields (D-006). A date missing from one side is no conflict."""
+    """Compare material fields (D-006). A date missing from one side is no conflict.
+
+    A pending row and a posted row with one reliable ID are one event whose amount may have
+    changed, as with a tip, so only the direction and the transaction date must agree (D-052).
+    """
+    if _status_class(left) != _status_class(right):
+        return (
+            (left.amount_cents < 0) == (right.amount_cents < 0)
+            and _dates_agree(left.transaction_date, right.transaction_date)
+        )
     return (
         left.amount_cents == right.amount_cents
-        and _status_class(left) == _status_class(right)
         and _dates_agree(left.transaction_date, right.transaction_date)
         and _dates_agree(left.posting_date, right.posting_date)
     )
@@ -640,6 +675,9 @@ class _Unit:
     descriptions: frozenset[str]
     # Units in one lane can never be candidates for each other.
     lane: tuple[frozenset[str], frozenset[str]]
+    # Every row pending, or some row posted, for pending-to-posted candidates (D-052).
+    pending: bool = False
+    posted: bool = False
 
     @classmethod
     def of(cls, rows, documents):
@@ -656,6 +694,8 @@ class _Unit:
             tuple(sorted(days)),
             frozenset(text for text in map(fold, (row.description for row in rows)) if text),
             (frozenset(row.document_id for row in rows), frozenset(unique_namespaces)),
+            all(row.settlement_status == "pending" for row in rows),
+            any(row.settlement_status == "posted" for row in rows),
         )
 
 
@@ -680,6 +720,10 @@ def _link_candidates(units, rules):
 
     joined = _DisjointSet(len(units))
     steps = 0
+    pending_pairs = _pending_posted_pairs(units, rules)
+    for left, right in pending_pairs:
+        joined.union(left, right)
+    steps += len(pending_pairs)
     for descriptions in by_amount.values():
         sorted_lanes = {
             text: {lane: sorted(entries) for lane, entries in lanes.items()}
@@ -694,7 +738,49 @@ def _link_candidates(units, rules):
                 for right, right_entries in sorted_lanes[other].items():
                     if _lanes_can_link(left, right):
                         steps += _join_lanes(left_entries, right_entries, rules, joined)
-    return joined, steps
+    return joined, steps, pending_pairs
+
+
+def _pending_posted_pairs(units, rules) -> list[tuple[int, int]]:
+    """Pending and posted units alike but for their amount, as positions in units (D-052).
+
+    Equal amounts are linked by the ordinary path. Only posted units within the date window of a
+    pending unit are compared, so the cost follows pending rows, not every row.
+    """
+    window = rules.date_window_days
+    posted_by_day = defaultdict(list)
+    for index, unit in enumerate(units):
+        if unit.posted:
+            for day in unit.days:
+                posted_by_day[day].append(index)
+    related, pairs = {}, set()
+    for index, unit in enumerate(units):
+        if not unit.pending:
+            continue
+        nearby = {other for day in unit.days for offset in range(-window, window + 1)
+                  for other in posted_by_day.get(day + offset, ())}
+        for other in sorted(nearby):
+            if _pending_posted_linked(unit, units[other], rules, related):
+                pairs.add((index, other))
+    return sorted(pairs)
+
+
+def _pending_posted_linked(left, right, rules, related) -> bool:
+    """A pending and a posted unit of different amounts in the same direction, dates within the
+    window and descriptions related (D-052). Review only: it never merges."""
+    if left.posted and right.pending:
+        left, right = right, left
+    if not (left.pending and right.posted) or left.amount_cents == right.amount_cents:
+        return False
+    if (left.amount_cents < 0) != (right.amount_cents < 0) or not _lanes_can_link(left.lane, right.lane):
+        return False
+    window = rules.date_window_days
+    if not any(abs(one - other) <= window for one, other in product(left.days, right.days)):
+        return False
+    return any(
+        _texts_related(one, other, rules, related)
+        for one, other in product(left.descriptions, right.descriptions)
+    )
 
 
 def _similar_descriptions(texts, rules):
@@ -796,6 +882,8 @@ def _undecided_parts(component, units, separated, rules):
 
 def _units_linked(left, right, rules, related) -> bool:
     """Whether discovery would link these two units directly. related remembers text pairs."""
+    if _pending_posted_linked(left, right, rules, related):
+        return True
     if left.amount_cents != right.amount_cents or not _lanes_can_link(left.lane, right.lane):
         return False
     window = rules.date_window_days

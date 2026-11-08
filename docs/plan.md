@@ -105,7 +105,7 @@ it end to end.
 | A28 | Overlapping candidate groups | Summaries show no single exact adjustment figure | 3 |
 | A32 | ID-less match on the inclusive end date, both documents `user_declared`, shared coverage longer than one date | Confident, with no generation date needed | 3 |
 | A33 | Match on the end date of a `document_metadata` claim with no generation date, or generated that day | Possible duplicate: the end date is not assumed complete | 3 |
-| A34 | Same reliable external ID with a conflicting date or status, or repeated within a document | Flagged, never merged | 3 |
+| A34 | Same reliable external ID with a conflicting date, or repeated within a document. A conflicting status was flagged too until D-052 made a pending and a posted row with one ID one event | Flagged, never merged | 3 |
 | A35 | Exact match where an unresolved row could affect the count | Possible duplicate, with the unresolved disclosure kept | 3 |
 | A42 | Unrelated purchases with the same date and amount in different documents | No candidate and no review item | 3 |
 | A43 | Plausible merchant or description variations within the date window | Creates a review item, and never merges automatically | 3 |

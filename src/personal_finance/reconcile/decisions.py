@@ -27,8 +27,10 @@ from personal_finance.reconcile.cross_document import (
     RULE_DECISION,
     _DisjointSet,
     directly_linked,
+    is_pending_and_posted,
     joins_distinct_ids,
 )
+from personal_finance.reconcile.same_document import RULE_SAME_DOCUMENT_PENDING_POSTED
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reports.decision_evidence import (
     load_decision,
@@ -75,8 +77,12 @@ DECISION_NOT_FOUND = "decision not found. Run review decisions."
 DECISION_WRONG_ACCOUNT = "this decision belongs to another account. Nothing was changed."
 DECISION_NOT_ACTIVE = "this decision has already been undone. Nothing was changed."
 CONFIRM_UNSUPPORTED = (
-    "only cross-document candidate items and decision conflicts can be confirmed. Other kinds "
-    "stay open for later workflows. Nothing was changed."
+    "only cross-document candidate items, decision conflicts and pending and posted rows of one "
+    "document can be confirmed. Other kinds stay open for later workflows. Nothing was changed."
+)
+SAME_DOCUMENT_GROUP = (
+    "rows of one document can only be confirmed as one group of one pending and one posted "
+    "transaction, each a single row. Nothing was changed."
 )
 GROUP_REPEATED = "a transaction was named more than once. Nothing was changed."
 GROUP_OUTSIDE = "a group names a transaction that is not in this item. Nothing was changed."
@@ -425,7 +431,7 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
         raise DecisionRefused(ITEM_NOT_FOUND)
     if item.account_id != account_id:
         raise DecisionRefused(ITEM_WRONG_ACCOUNT)
-    if item.rule not in (RULE_CANDIDATES, RULE_DECISION):
+    if item.rule not in (RULE_CANDIDATES, RULE_DECISION, RULE_SAME_DOCUMENT_PENDING_POSTED):
         raise DecisionRefused(CONFIRM_UNSUPPORTED)
     if item.status != "open":
         raise DecisionRefused(ITEM_NOT_OPEN)
@@ -803,6 +809,8 @@ def _check_groups(conn, item, groups, rules) -> dict[str, list]:
         transaction_id: [rows[record.record_id] for record in present[transaction_id].records]
         for transaction_id in named
     }
+    if item.rule == RULE_SAME_DOCUMENT_PENDING_POSTED:
+        return _checked_same_document_pair(groups, members)
     for group in groups:
         held = [row for transaction_id in group for row in members[transaction_id]]
         if len({row.document_id for row in held}) < len(held):
@@ -811,6 +819,20 @@ def _check_groups(conn, item, groups, rules) -> dict[str, list]:
             raise DecisionRefused(GROUP_DISTINCT_IDS)
         if not _connected(group, members, documents, rules):
             raise DecisionRefused(GROUP_NOT_CONNECTED)
+    return members
+
+
+def _checked_same_document_pair(groups, members) -> dict[str, list]:
+    """The D-021 flag is the evidence that two rows of one document may be one event, so the only
+    statement allowed is that one pending and one posted row are (D-052)."""
+    if len(groups) != 1 or len(groups[0]) != 2:
+        raise DecisionRefused(SAME_DOCUMENT_GROUP)
+    rows = [members[transaction_id] for transaction_id in groups[0]]
+    if any(len(held) != 1 for held in rows):
+        raise DecisionRefused(SAME_DOCUMENT_GROUP)
+    (left,), (right,) = rows
+    if left.document_id != right.document_id or not is_pending_and_posted(left, right):
+        raise DecisionRefused(SAME_DOCUMENT_GROUP)
     return members
 
 

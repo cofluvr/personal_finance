@@ -162,6 +162,10 @@ REASON_EXPLANATIONS = {
         "a row completed by hand could affect the count, and its typed values never make a "
         "match confident"
     ),
+    "pending_amount_changed": (
+        "a pending row and a posted row look alike but for their amount, as when a tip is added. "
+        "Confirm them to count the posted amount once"
+    ),
     "completed_record_shares_id": (
         "a record completed by hand shares this reliable ID, and is never merged automatically"
     ),
@@ -751,7 +755,8 @@ def print_account_state(movement) -> None:
         print(f"  {line}")
     for line in describe_corrections(movement):
         print(f"  {line}")
-    for line in (*describe_resolutions(movement), *describe_declarations(movement)):
+    for line in (*describe_resolutions(movement), *describe_declarations(movement),
+                 *describe_pending(movement)):
         print(f"  {line}")
     print(f"  Unresolved records, not included in totals: {movement.unresolved_records}")
 
@@ -782,6 +787,23 @@ def describe_corrections(movement) -> list[str]:
             f"Transactions keeping a source value because a correction binds records now in "
             f"several transactions: {movement.transactions_with_correction_basis_changed}. Run "
             "review corrections."
+        )
+    return lines
+
+
+def describe_pending(movement) -> list[str]:
+    """Pending-to-posted outcomes on their own lines (D-052)."""
+    lines = []
+    if movement.transactions_posted_at_changed_amount:
+        lines.append(
+            f"Transactions posted at another amount than their pending row, such as with a tip: "
+            f"{movement.transactions_posted_at_changed_amount}. Each is counted once, at the "
+            "posted amount."
+        )
+    if movement.stale_pending_transactions:
+        lines.append(
+            f"Pending transactions more than 10 days older than the account's latest date: "
+            f"{movement.stale_pending_transactions}. They are counted, and none was removed."
         )
     return lines
 
@@ -1988,7 +2010,8 @@ def run_totals(args) -> int:
         )
     for line in describe_corrections(movement):
         print(f"- {line}")
-    for line in (*describe_resolutions(movement), *describe_declarations(movement)):
+    for line in (*describe_resolutions(movement), *describe_declarations(movement),
+                 *describe_pending(movement)):
         print(f"- {line}")
     return 0
 
