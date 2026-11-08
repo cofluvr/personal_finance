@@ -5,6 +5,7 @@ import re
 import pytest
 from test_confirmations import confirm, confirm_ok
 from test_coverage_declarations import CoverageLedger
+from test_decisions import CHECKING_HEADER
 
 from personal_finance.reconcile.decisions import GROUP_SHARES_DOCUMENT, SAME_DOCUMENT_GROUP
 
@@ -74,6 +75,28 @@ class TestWithoutIds:  # Q4, Q5, Q6
         assert "pending_amount_changed:" in shown
         assert "possible-duplicate groups" in ledger.totals()
 
+    def test_equal_amounts_are_an_ordinary_candidate(self, ledger):
+        ledger.checking("a.csv", PENDING)
+        ledger.checking("b.csv", POSTED.format(amount="-20.00"))
+        (item,) = ledger.items("cross_document_candidates")
+        shown = ledger.show(item)
+        assert "similar_description:" in shown and "pending_amount_changed" not in shown
+
+    def test_a_unit_holding_a_posted_row_is_not_pending(self, ledger):
+        """A pending and a posted row merged under one ID are posted, so a posted lookalike at
+        another amount is not raised as its posting (D-052)."""
+        ledger.checking("a.csv", PENDING_WITH_ID)
+        ledger.checking("b.csv", POSTED_WITH_ID.format(amount="-24.00"))
+        ledger.checking("c.csv", POSTED.format(amount="-30.00"))
+        assert ledger.items() == []
+
+    def test_a_changed_description_still_raises_it(self, ledger):
+        """Different texts in one description block, found through the block (D-032)."""
+        ledger.checking("a.csv", ",2026-01-09,,SQ *SYNTHETIC CAFE,-20.00,PENDING")
+        ledger.checking("b.csv", POSTED.format(amount="-24.00"))
+        (item,) = ledger.items("cross_document_candidates")
+        assert "pending_amount_changed:" in ledger.show(item)
+
     def test_confirming_counts_it_once_at_the_posted_amount_and_undo_restores_both(self, ledger):
         ledger.checking("a.csv", PENDING)
         ledger.checking("b.csv", POSTED.format(amount="-24.00"))
@@ -129,6 +152,37 @@ class TestSameDocument:  # Q7, Q8, Q12
         confirm_ok(ledger, item, (pending[0], posted))
         assert ledger.count() == 2
 
+    def test_rows_of_one_document_at_another_amount_raise_nothing(self, ledger):
+        ledger.checking("a.csv", PENDING, POSTED.format(amount="-24.00"))
+        assert ledger.items() == []
+
+    def test_a_merge_cannot_bring_a_second_row_of_a_confirmed_document(self, ledger):
+        """A declaration makes a.csv's posted row an exact pair with b.csv's, which a confirmation
+        joined to a.csv's pending row. The merge would put two rows of a.csv in one transaction
+        that nobody confirmed together, so it is withheld (D-046, D-052)."""
+        ledger.checking("a.csv", PENDING, ",2026-01-09,2026-01-10,SYNTHETIC CAFE,-24.00,POSTED")
+        ledger.load_path(ledger.write("b.csv", CHECKING_HEADER, [POSTED.format(amount="-24.00")]),
+                         "--declare-complete-coverage", "--coverage-start", "2026-01-01",
+                         "--coverage-end", "2026-01-31", "--coverage-basis", "transaction",
+                         layout="synthetic_checking_v1")
+        (item,) = ledger.items("cross_document_candidates")
+        confirm_ok(ledger, item, (ledger.holding("a.csv", "pending"), ledger.holding("b.csv", "posted")))
+        ledger.declare_ok("a.csv", start="2026-01-01", end="2026-01-31", basis="transaction")
+        conn = ledger.conn()
+        largest = conn.execute(
+            "SELECT MAX(held) FROM (SELECT COUNT(*) AS held FROM transaction_source GROUP BY transaction_id)"
+        ).fetchone()[0]
+        conn.close()
+        assert largest == 2
+        assert "Decision conflicts: 1" in ledger.totals()
+
+    def test_a_posted_row_merged_with_another_file_is_refused_not_failed(self, ledger):
+        ledger.checking("a.csv", PENDING, POSTED_WITH_ID.format(amount="-20.00"))
+        ledger.checking("b.csv", POSTED_WITH_ID.format(amount="-20.00"))
+        (item,) = ledger.items("same_document_pending_posted")
+        code, _, err = confirm(ledger, item, tuple(ledger.transactions(item)))
+        assert code == 2 and SAME_DOCUMENT_GROUP in err
+
     def test_automatic_matching_never_joins_rows_of_one_document(self, ledger):
         ledger.checking("a.csv", PENDING_WITH_ID, POSTED_WITH_ID.format(amount="-20.00"))
         assert ledger.count() == 2
@@ -163,6 +217,7 @@ class TestUpgrade:  # Q10
 class TestDisclosures:  # Q11, Q15
     def test_stale_pending_is_disclosed_and_left_unchanged(self, ledger):
         ledger.checking("a.csv", ",2026-01-01,,SYNTHETIC CAFE,-20.00,PENDING",
+                        ",2026-01-02,2026-01-03,SYNTHETIC SHOP,-4.00,POSTED",
                         ",2026-01-20,2026-01-21,SYNTHETIC GROCER,-9.00,POSTED")
         before = ledger.dump()
         totals = ledger.totals()

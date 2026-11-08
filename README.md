@@ -313,6 +313,16 @@ Coverage given at import can be changed later. `documents` lists each document's
 - Matching uses the declared coverage from then on, so rows can merge or split and totals can change. The output says how many transactions there were before and after.
 - Each declaration replaces the one before it. Undo restores that one, or the claim at import. A repeat import with a declaration is compared with the coverage in effect. See [D-051](docs/decisions.md).
 
+## Pending and Posted Rows
+
+A pending row and its posted version are one purchase, often at another amount, as when a tip is added.
+
+- With an ID the source declares reliable, they become one transaction automatically, counted once at the posted amount.
+- Without one, a pending and a posted row alike but for their amount are raised as a possible duplicate with reason `pending_amount_changed`. Confirm them with `review confirm` to count the posted amount once.
+- A pending and a posted row of one file, flagged as `same_document_pending_posted`, can be confirmed the same way, as one group of the two. This is the only way one transaction holds two rows of one file.
+- `totals` says how many transactions were posted at another amount than their pending row, and how many pending transactions are more than 10 days older than the account's latest date. Those are counted and never removed.
+- After upgrading to this version, run `reconcile`: matching changed, so every account reads as not current until then. See [D-052](docs/decisions.md).
+
 ## Reading an Import Summary
 
 Each count keeps its own unit, so do not add different lines together. A file's lines describe the moment it was imported. The run summary and the account lines read the ledger after the last file.
