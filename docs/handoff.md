@@ -12,6 +12,21 @@ D-047 and the limits in "M2.4 as built" below, with no changes. The owner approv
 review. Do not start M2.6.** M2.6 to M2.9 are provisional, and each needs its own approval. M2.1's decisions are D-040 and D-041, M2.2's rules are D-042 to D-045, with D-045
 overriding the others where they differ, M2.3's are D-046, M2.4's are D-047, and M2.5's are D-048.
 
+## Working principles
+
+Given by the owner on 2026-11-08, for the entirety of the project:
+
+1. Don't build it until you need it.
+2. Extract patterns after the second duplication, not before.
+3. Explicit errors beat silent failures: fail fast.
+4. Write the obvious solution, and optimize only if needed.
+5. Delete aggressively: less code means fewer bugs.
+6. Name variables, parameters and API endpoints semantically, with verbose, self-documenting names
+   that optimize for comprehension by both humans and LLMs, not brevity.
+
+Much existing code uses short names such as `held`, `bound` and `rows`. Principle 6 applies to new
+and changed code. Renaming existing code wholesale is a separate change for the owner to approve.
+
 ## Current state
 
 | Item | Value |
@@ -635,8 +650,8 @@ Do not reopen D-042 to D-048 unless you find a concrete contradiction. Then prop
 M2.6, correction overrides, meeting D-041's requirement for several overrides on one transaction,
 and wait for my approval before implementing it.
 
-Pushing needs my explicit approval each time. No network, no new dependencies, no security
-changes. Synthetic data only. Use build/ for walkthroughs, breaks and benchmarks, with TMPDIR set
+Follow the working principles in docs/handoff.md. Pushing needs my explicit approval each time.
+No network, no new dependencies, no security changes. Synthetic data only. Use build/ for walkthroughs, breaks and benchmarks, with TMPDIR set
 to build/tmp. Gate commits on pytest's own exit code, and a test that fails on unbroken code proves
 nothing about a deliberate break. Check which test caught each break, and that a benchmark shape
 can reach the cost it claims to measure.
