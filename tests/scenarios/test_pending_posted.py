@@ -7,7 +7,11 @@ from test_confirmations import confirm, confirm_ok
 from test_coverage_declarations import CoverageLedger
 from test_decisions import CHECKING_HEADER
 
-from personal_finance.reconcile.decisions import GROUP_SHARES_DOCUMENT, SAME_DOCUMENT_GROUP
+from personal_finance.reconcile.decisions import (
+    GROUP_NOT_CONNECTED,
+    GROUP_SHARES_DOCUMENT,
+    SAME_DOCUMENT_GROUP,
+)
 
 PENDING_WITH_ID = "S-1,2026-01-09,,SYNTHETIC CAFE,-20.00,PENDING"
 POSTED_WITH_ID = "S-1,2026-01-09,2026-01-10,SYNTHETIC CAFE,{amount},POSTED"
@@ -89,6 +93,28 @@ class TestWithoutIds:  # Q4, Q5, Q6
         ledger.checking("b.csv", POSTED_WITH_ID.format(amount="-24.00"))
         ledger.checking("c.csv", POSTED.format(amount="-30.00"))
         assert ledger.items() == []
+
+    @pytest.mark.parametrize(("pending", "middle", "far"), [
+        # The far posting is within the window of the middle one only.
+        (",2026-01-09,,SYNTHETIC CAFE,-20.00,PENDING",
+         ",2026-01-11,2026-01-12,SYNTHETIC CAFE,-24.00,POSTED",
+         ",2026-01-14,2026-01-15,SYNTHETIC CAFE,-24.00,POSTED"),
+        # The far description is alike the middle one's only.
+        (",2026-01-09,,SYNTHETIC CAFE,-20.00,PENDING",
+         ",2026-01-09,2026-01-10,SYNTHETIC CAFE EXPRESS,-24.00,POSTED",
+         ",2026-01-09,2026-01-10,SYNTHETIC EXPRESS,-24.00,POSTED"),
+    ])
+    def test_a_confirmation_needs_a_direct_pending_to_posted_link(self, ledger, pending, middle, far):
+        """Discovery only compares what could link, so the direct-link check is what a confirmation
+        relies on for a pending row and a posting it is not linked to (D-045, D-052)."""
+        ledger.checking("a.csv", pending)
+        ledger.checking("b.csv", middle)
+        ledger.checking("c.csv", far)
+        (item,) = ledger.items("cross_document_candidates")
+        assert len(ledger.transactions(item)) == 3
+        code, _, err = confirm(ledger, item, (ledger.holding("a.csv", "pending"),
+                                              ledger.holding("c.csv", "posted")))
+        assert code == 2 and GROUP_NOT_CONNECTED in err
 
     def test_a_changed_description_still_raises_it(self, ledger):
         """Different texts in one description block, found through the block (D-032)."""
