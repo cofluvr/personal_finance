@@ -149,17 +149,17 @@ the decision log records the database, parser and deduplication rules.
 
 ## M2 plan
 
-M2.1 is accepted. M2.2 is implemented and awaits review. **M2.3 to M2.9 are provisional**:
+M2.1, M2.2, M2.3 (D-046), M2.4 (D-047) and M2.5 (D-048) are accepted. **M2.6 to M2.9 are provisional**:
 a direction, not approval to implement, and each needs its own approval. D-041 lists requirements
 they must meet.
 
 | Slice | Scope | Status |
 |---|---|---|
 | M2.1 | Review evidence: `review list` IDs, `review show`, revision tokens. Read-only, no migration | Accepted |
-| M2.2 | Decision core: stable-ID storage, precedence over automatic reconciliation, pair rejection and undo | Implemented, awaiting review |
-| M2.3 | Confirm, including part of a group | Provisional |
-| M2.4 | Separating machine-made merges | Provisional |
-| M2.5 | New evidence that touches a decided record, and superseding a decision | Provisional |
+| M2.2 | Decision core: stable-ID storage, precedence over automatic reconciliation, pair rejection and undo | Accepted |
+| M2.3 | Confirm, including part of a group | Accepted |
+| M2.4 | Separating machine-made merges | Accepted (D-047) |
+| M2.5 | New evidence that touches a decided record, and superseding a decision | Accepted (D-048) |
 | M2.6 | Correction overrides | Provisional |
 | M2.7 | Resolving incomplete records | Provisional |
 | M2.8 | Coverage correction with history | Provisional |
@@ -251,6 +251,108 @@ removed. Direct links are recomputed only inside groups a constraint touches.
 | S21 | Evidence relevant to regrouping that changes after `review decision show` makes undo refuse |
 | S22 | Equivalent decisions made at different valid points in the import sequence give the same outcome |
 | S23 | A failing migration 0005 on a populated ledger leaves everything as it was |
+
+### M2.3 scope
+
+The rules are D-046. Migration 0006 adds `decision.kind` and `decision.supersedes_decision_id`.
+`review confirm` with partitions, superseding by confirmation, settling conflicts by confirmation,
+revision versions 3 and 2, and a `totals` line for confirmed transactions.
+
+Deferred: separating machine merges (M2.4), superseding because of new evidence (M2.5), external-ID
+and same-document items, several records from one document in a transaction.
+
+### M2.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| C1 | Confirming a two-member item joins it into one transaction and closes the item. Totals drop, and source evidence is byte-identical |
+| C2 | Confirming part of a group leaves the remaining pairs open |
+| C3 | The stored rows are exactly the stated partition: `same_event` within groups, `different_event` between them |
+| C4 | One group writes nothing about unnamed members |
+| C5 | Refused, with nothing changed: wrong account, wrong item, stale token, stale account, a transaction in two groups, a group not connected, two records from one document, a contradiction without `--supersedes`, an unsupported item, too many transactions, a decision stating nothing |
+| C6 | Two rows from one document and one from another: the partition separates them, and one group of all three is refused |
+| C7 | A confirmation survives repeat imports, `reconcile`, unrelated files and a rules change |
+| C8 | An automatic merge joins a confirmed unit when valid, and is withheld with a conflict when not |
+| C9 | Confirming a partition settles a withheld-match conflict and a changed-basis conflict. A rejection settles neither |
+| C10 | Superseding a rejection: every old pair is contradicted or kept, or it is refused. Kept pairs bind no new records |
+| C11 | Undoing a superseding decision restores the old one, or refuses on contradiction. A superseded decision cannot be undone |
+| C12 | Undoing a confirmation equals a ledger built without it, with and without imports since |
+| C13 | `totals` discloses confirmed transactions. `confirm` prints counts and no amounts |
+| C14 | A confirmation that would change more than the stated merges refuses atomically |
+| C15 | Property test: import order does not change the outcome for fixed confirmations and rejections |
+| C16 | Equivalent confirmations made at different valid points in the import sequence give the same outcome |
+| C17 | Tokens: versions pinned, a confirmation changes overlapping items' tokens, and a stale token of either kind refuses superseding |
+| C18 | Migration 0006 works on a populated ledger and is atomic on failure. Decision tables stay append-only |
+| C19 | Confirmation, its undo and a later import are measured on dense groups |
+| C20 | S1 to S23 still pass |
+| C21 | A confirmation keeps one public ID, and undo revives retired IDs with their `created_at` |
+
+### M2.4 scope
+
+The rules are D-047. Migration 0007, `review merges`, `review merge show` with the transaction token,
+`review separate`, a `totals` line for separated transactions, and a benchmark with `--separated`.
+
+Deferred: superseding a confirmation by a separation (M2.5), transferring a separation to a
+re-export, external-ID and same-document items.
+
+### M2.4 acceptance criteria
+
+| ID | Test |
+|---|---|
+| P1 | Separating an exact merge into single records raises the transaction count. Source evidence is byte-identical |
+| P2 | The same for a reliable-ID merge, and the output names the ID override |
+| P3 | Three documents, keeping {A,B}: A and B are one confirmed unit, C alone, and the stored pairs are exactly that partition |
+| P4 | Refused, with nothing changed: wrong account, unknown transaction, stale token, a record unnamed, repeated or outside, one group, one record, nothing joined automatically, a split confirmed core, a transaction in an open conflict, too many records |
+| P5 | A stale account is not reconciled by the refused command |
+| P6 | A separation survives repeat imports, `reconcile`, unrelated files and a rules change |
+| P7 | A re-export that would rejoin the records raises an open withheld-match conflict |
+| P8 | The decision itself raises no conflict and no candidate item between its groups |
+| P9 | A separation that would change more than its own split refuses atomically |
+| P10 | Undo equals a ledger built without it, with and without imports since |
+| P11 | A later confirmation joining a group with a new record, then undoing the separation, follows D-046's joining rules |
+| P12 | A confirmation can supersede a separation, with every pair contradicted or kept |
+| P13 | One group keeps the public ID, and the others revive with their `created_at` |
+| P14 | `totals` discloses separated transactions. `review merges` and `review separate` print no amounts |
+| P15 | Tokens: `t1` pinned, equal across import orders, changed by material evidence, and a separation changes overlapping items' tokens |
+| P16 | Property test: import order does not change the outcome for fixed separations, confirmations and rejections |
+| P17 | Equivalent separations made at different valid points in the import sequence give the same outcome |
+| P18 | Migration 0007 works on a populated ledger and is atomic on failure. Decision tables stay append-only |
+| P19 | A separation, its undo and a later import are measured on dense groups that separated records still link into |
+| P20 | S1 to S23 and C1 to C21 still pass |
+| P21 | `review merge show` escapes descriptions and IDs |
+| P22 | `trace` and link history name the separation behind each move |
+
+### M2.5 scope
+
+The rules are D-048. The fix for supersession chains (F4) and migration 0008, undo token version 3,
+`review separate --supersedes`, the alike-record listing in `review show`, and a benchmark with
+`--superseded`.
+
+Deferred: superseding several decisions at once, transferring a decision to new records, external-ID
+and same-document items.
+
+### M2.5 acceptance criteria
+
+| ID | Test |
+|---|---|
+| N1 | In a chain A ← B ← C, only C is active, and A stays superseded |
+| N2 | Undo walks a chain back one link at a time, each step restoring the decision before or refusing on contradiction |
+| N3 | Undoing a superseded decision is refused, naming the newest of its chain |
+| N4 | A separation superseding a confirmation splits its confirmed core. Every old pair is contradicted or kept, and kept pairs are copied record for record |
+| N5 | Refused, with nothing changed: a stale token of either kind, a pair neither contradicted nor kept, a kept pair it contradicts, splitting another decision's core, superseding what it does not split, a superseded or undone decision |
+| N6 | Undoing the superseding separation restores the confirmation, or refuses on contradiction |
+| N7 | A separation can supersede a separation by splitting its kept group |
+| N8 | A rejection cannot supersede anything |
+| N9 | S11 and P7 still hold: no decision transfers to a re-export |
+| N10 | A confirmation on the item a re-export raised binds it explicitly |
+| N11 | `review show` lists records alike a decided record, binds nothing, leaves tokens unchanged, and escapes file names |
+| N12 | Migration 0008 clears the marker only of accounts holding a chain, on a populated ledger, and is atomic on failure |
+| N13 | After 0008, the account is stale until `reconcile`, which gives the ledger of the corrected rule |
+| N14 | Tokens: `d3` pinned, a ledger without chains keeps its `d2` digest, and `r3` and `t1` keep their pinned values |
+| N15 | A chain gives the same record relations, grouping and totals as one decision equal to its newest |
+| N16 | Equivalent superseding separations made at different valid points in the import sequence give the same outcome |
+| N17 | S1 to S23, C1 to C21 and P1 to P22 still pass |
+| N18 | A superseding separation, its undo and a later import are measured on three unmerged documents |
 
 ## Backlog benchmarks
 

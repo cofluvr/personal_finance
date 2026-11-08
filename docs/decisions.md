@@ -676,7 +676,7 @@ in [plan.md](plan.md) is provisional and not approved for implementation.
   overrides affect one merged transaction, including exactly which effective value totals use.
   "Neither chosen silently" is not sufficient on its own.
 
-## D-042 Rejection and the identity constraint model — Approved, implemented in M2.2
+## D-042 Rejection and the identity constraint model — Approved, implemented and accepted in M2.2
 
 Refines D-009 and resolves the first requirement of D-041.
 
@@ -715,7 +715,7 @@ other. Rejecting an already rejected pair is refused. Defined for M2.3: a new de
 the one it replaces and restate any pairs it keeps. Undoing it restores the old one, or refuses if
 that would contradict an active decision. Nothing is replaced implicitly.
 
-## D-043 Validating decision commands and undo — Approved, implemented in M2.2
+## D-043 Validating decision commands and undo — Approved, implemented and accepted in M2.2
 
 Applies the owner's qualifications on D-040.
 
@@ -741,7 +741,7 @@ A refusal changes nothing and exits with code 2.
 - The result of undo equals a ledger built without that decision. It is not necessarily the
   earlier totals, because evidence may have arrived since, and the output must say so.
 
-## D-044 Decision conflicts — Approved, implemented in M2.2
+## D-044 Decision conflicts — Approved, implemented and accepted in M2.2
 
 Decision-related conflicts are a separate classification, not a variety of possible duplicate.
 
@@ -759,7 +759,7 @@ Decision-related conflicts are a separate classification, not a variety of possi
 - Widening the kind needs `review_issue` rebuilt. Moving the `review_issue_subject` rows out and back
   in one transaction worked on a populated ledger. A plain rebuild fails its foreign keys at commit.
 
-## D-045 Owner's qualifications on M2.2 — Approved, implemented in M2.2
+## D-045 Owner's qualifications on M2.2 — Approved, implemented and accepted in M2.2
 
 Given by the owner on 2026-11-06 with the confirmation to start M2.2. They override anything in
 D-042 to D-044 or the plan that they change. Migration 0005 and the populated `review_issue`
@@ -809,8 +809,8 @@ semantics are not changed silently to meet a target.
 **Not approved:** confirmation, superseding, separating existing merges, corrections, later slices,
 network access, new dependencies, security changes and pushing.
 
-**How these were implemented,** where the rules above left a choice. All are defaults, open to
-change at review:
+**How these were implemented,** where the rules above left a choice. The owner accepted all of them
+with M2.2 on 2026-11-07:
 
 - A decision's pairs are stored one row per record pair, sharing a `pair_number`. The two sides of
   a stated pair are what `decision_basis_changed` compares.
@@ -828,6 +828,250 @@ change at review:
   It prints no amounts or descriptions, which is stricter than D-037 requires.
 - Link history names the decision for moves caused by withholding and by undo. Where several
   decisions withheld one group, the lowest ID is recorded.
+
+## D-046 Confirmation, partitions and superseding — Approved, implemented and accepted in M2.3
+
+Approved by the owner on 2026-11-07 with the M2.3 plan. Builds on D-042 to D-045 and changes none
+of them. Accepted as built by the owner on 2026-11-07, with the limits in the handoff's "M2.3 as
+built".
+
+```sh
+pf review confirm --db DB --account A ITEM_ID --revision R --group T1 T2 [--group T3] \
+   [--supersedes D --supersedes-revision d2-… --keep N ...]
+```
+
+**Partitions.** Each named transaction is in exactly one `--group`. Unnamed transactions stay
+undecided. Within a group every pair of transactions is stored as `same_event`, binding the
+cross-product of their records. Between two groups the pair is stored as `different_event`, even
+when the two are not direct candidates, because the person stated it. Nothing is implied: one
+`--group A B` says nothing about C. A decision that states no pair at all is refused.
+
+| Question | Rule |
+|---|---|
+| Items | `cross_document_candidates` and `decision_conflict` only. Others are refused |
+| A group | Connected through direct links (D-045). The transactions of a withheld automatic merge are always linked directly, so a conflict needs nothing more |
+| Unique IDs | A group may not join two different IDs of a namespace that guarantees them unique (D-026), even through a chain. Neither may an automatic merge joining confirmed units |
+| One document | A group may hold at most one record from any document. D-008 and `transaction_source` stay as they are |
+| Size | At most 50 transactions named in one decision |
+| Contradiction | A group holding both sides of an active `different_event` pair needs `--supersedes` |
+| Totals | Only the stated merges may change memberships. Anything else refuses atomically |
+| Only one-transaction groups | Refused on a candidate item, because it only keeps transactions apart, which is `review reject` and limited to direct pairs (D-045). Allowed on a conflict, to settle it |
+
+**Derivation.** Records joined by active `same_event` constraints form fixed units. An automatic merge
+touching a confirmed unit joins it only if the result keeps one record per document, joins no two
+distinct unique IDs and holds no `different_event` pair. Otherwise every automatic merge in that
+combination is withheld, its records stay separate or in their confirmed unit, each confirmed unit
+stays a transaction of its own, and `automatic_match_withheld` is raised. A confirmed grouping survives repeat imports, rules changes and new files, and changes only by undo
+or superseding. Its records link with rule `confirmed_same_event`. With no `same_event` constraint,
+`derive()` is unchanged.
+
+**Conflicts.** There is no separate conflict command. A conflict is settled, and closes by removal,
+when one active confirmation's partition separates every pair of the transactions it affects, or
+when confirmation has joined them. A rejection never settles a conflict, so D-044 holds exactly as
+built in M2.2, where a withheld match whose pairs a rejection already covers still raises one.
+
+**Superseding.** One decision at a time, and in M2.3 only for contradiction by a confirmation.
+Superseding because of new evidence stays in M2.5.
+
+- A decision is active unless it was undone, or an active decision supersedes it. Amended by D-048:
+  a decision stays superseded while anything superseding it has not been undone.
+- The new decision names the old one and its current undo token. Every old pair is either
+  contradicted by the new partition or kept with `--keep N`, and anything else is refused. Kept pairs
+  are copied record for record, so they bind no new records.
+- Undoing the superseding decision restores the old one, or refuses if that would contradict an
+  active decision. Undoing a superseded decision is refused, naming the decision that replaced it.
+- Superseding is done from an open item holding the transactions. A rejection that closed its item
+  leaves nothing to confirm on, so it is undone first, which raises the item again. Found while
+  building M2.3.
+
+**Tokens.** Revision version 3 adds each decided pair's relation. Decision revision version 2
+computes the outcome without the decision with any superseded decision restored, and covers whether
+each other active decision touching the scope is a confirmation. Superseding needs the item's token
+and the old decision's token, both checked under the write lock.
+
+Corrected at acceptance, to match what was built and accepted: the plan said version 2 would also
+hold the decision's own kind, its relation per pair and what it supersedes. All three are fixed
+when the decision is written, so they cannot change between `review decision show` and `undo`, and
+their effect reaches the token through the outcomes with and without the decision. They were
+removed during M2.3 as immaterial, which the handoff records.
+
+**Disclosure.** `review confirm` prints transaction counts and no amounts. `totals` gains its own line
+for transactions holding records confirmed as one event. Undo says that totals may rise.
+
+**Cost.** Confirmation is measured at 100 to 2,000 units before it is accepted. If it is materially
+slower than M2.2's rejection, the work stops and is reported. Matching is not changed to meet a
+target.
+
+## D-047 Separating machine-made merges — Approved, implemented and accepted in M2.4
+
+Approved by the owner on 2026-11-07 with the M2.4 plan, taking every recommendation in it. Builds on
+D-029 and D-042 to D-046, and changes none of them. Accepted as built by the owner on 2026-11-07,
+including the implementation choices below, with the limits in the handoff's "M2.4 as built".
+
+```sh
+pf review merges --db DB --account A
+pf review merge show --db DB TRANSACTION_ID
+pf review separate --db DB --account A TRANSACTION_ID --revision t1-… --group R1 R2 --group R3
+```
+
+**What it is.** A partition of one transaction's source records, stored as a confirmation (D-042
+puts partitions under confirmation) whose target is a transaction rather than a review item. Records
+in one group are `same_event`, records in different groups `different_event`, one stated pair per
+record pair. Whole-group withholding (D-042) then keeps the automatic merge apart, the `same_event`
+pairs keep each group of several records together as a confirmed unit, and the partition settles
+the conflict that withholding would otherwise raise (D-046). Undoing a machine merge is therefore a
+decision, and the next reconcile cannot merge the records again.
+
+| Question | Rule |
+|---|---|
+| What can be separated | A transaction holding records joined automatically, by `reliable_external_id` or `exact_coverage_pair`, including those a confirmed unit absorbed |
+| A reliable-ID merge | Allowed. The output says the decision overrides an ID the source calls unique (D-026) |
+| A confirmed unit | Its confirmed core counts as confirmed and its absorbed records as machine-made. No group boundary may cross an active `same_event` pair, which needs undo |
+| Refused | One record, nothing joined automatically, or the transaction in an open `decision_conflict`, which is settled through the conflict |
+| Groups | Every record named in exactly one group, at least two groups, at most 50 records. Unnamed records would be separated with no stated relation, an implied "all distinct" (D-042) |
+| Connection | Not D-046's direct links: the records were joined by this one automatic merge. Two records sharing a reliable ID can differ in description |
+| Unique IDs | D-046's check is not repeated: records of one machine merge share one ID or carry none |
+| Public IDs | The group holding the earliest-imported record keeps the ID, and the others revive theirs with their `created_at` (D-029) |
+| Totals | May rise. Memberships must become exactly the old ones with this transaction replaced by its groups, and no open conflict may hold its records, or the command refuses atomically |
+
+**Commands.** A confident merge raises no review item, and making every merge one would flood the
+queue. `review merges` lists separable transactions with record counts and link rules only.
+`review merge show` gives one transaction's evidence in `review show`'s sections and a `t1-…` token.
+`review separate` runs D-043's checks under one write lock. It is its own command: its target,
+connection rule and the direction its ledger check enforces all differ from `review confirm`, which
+it shares the partition writer with.
+
+**Conflicts.** A separation creates and settles none when made. Later evidence that would rejoin its
+records, such as a re-export carrying the same ID, raises `automatic_match_withheld`, open because
+the new record is undecided. `decision_basis_changed` cannot come from its pairs: each side is one
+record.
+
+**Superseding and undo.** A separation never supersedes: a live merge holds no `different_event`
+pair, and splitting a confirmed core is refused. It can be superseded by a confirmation under D-046,
+from an open item, though its groups raise none between themselves, so in practice it is undone
+first. Undo re-derives without it, so the merge returns or is withheld with a conflict under D-046's
+joining rules. Superseding a confirmation by a separation stays in M2.5.
+
+**Storage.** Migration 0007 renames `decision.review_issue_id` and `item_revision` to `target_id`
+and `target_revision`, adds `target_kind` (`item` or `transaction`), and rebuilds
+`decision_constraint` with `left_part` and `right_part`, because its check that the two transaction
+IDs differ cannot hold when both sides start in one transaction. Nothing references that table, so
+it is rebuilt directly, with its triggers and indexes recreated.
+
+**Tokens.** The transaction token is `t<version>-<16 hex characters>`, version 1: the transaction's
+values and primary source, each record's cells, parsed values and link rule, each document's
+interpretation, coverage and effective end, and the active decided pairs touching its records. IDs,
+file names and history are left out. Item revision version 3 and decision revision version 2 are
+unchanged, because a separation reaches them through fields they already cover, and its target is
+fixed when written, so immaterial.
+
+**Disclosure.** `review separate` prints transaction counts and no amounts, with a notice that totals
+can rise. `totals` gains a line for transactions holding records a separation keeps apart, and says
+undoing one can lower totals.
+
+**Cost.** A separation touches its candidate group as a partition does, and adds units to it. It is
+measured on a shape where separated records still link with many others: two documents with
+complete coverage that pair every row, and a third with unknown coverage holding the same rows. If
+it is materially slower than a partition on that shape, the work stops and is reported.
+
+**How these were implemented,** where the rules above left a choice. The owner accepted all of them
+with M2.4 on 2026-11-07:
+
+- One stated pair per record pair, with the lower group on the left, so stored rows never depend on
+  which record ID sorts first. Pair numbers still follow record IDs, so `--keep` numbers are read
+  from `review decision show`.
+- `review merges` lists only transactions with something joined automatically: records forming
+  more than one confirmed core, a record no `same_event` pair binds counting as its own.
+- The override notice names the stored guarantee. No production layout declares plain `stable`,
+  so one message covers both rather than a second wording that could never be printed.
+- The `totals` line counts transactions holding a record of an active separation's
+  `different_event` pairs, so a kept group of several records is counted there and as confirmed.
+  The lines are never presented as disjoint (D-045).
+- Refusing a transaction in an open conflict, and the check after re-deriving that no open conflict
+  holds its records, are tested by inserting a conflict directly. A transaction can be in a conflict
+  when a confirmed unit has absorbed one automatic merge while a rejection withholds another merge
+  holding one of its records, which takes four documents and two layouts to build.
+- The tests of migrations 0005 and 0006 now migrate only to their own version, and map the renamed
+  columns when they copy rows from a current ledger. They assert nothing new.
+- The item token was checked unchanged by the shared loading code: a fixed ledger gives
+  `r3-d41e2251fcd3a611` both at `3a765fe` and after, and a test pins it.
+
+## D-048 New evidence on decided records, and superseding chains — Approved, implemented and accepted in M2.5
+
+Approved by the owner on 2026-11-07 with the M2.5 plan, taking every recommendation in it. Builds on
+D-042 to D-047. It amends one rule of D-046, the state of a superseded decision, because that rule
+contradicted D-046's own requirement that a confirmation contradict no active decision but the one
+it names (F4). Accepted as built by the owner on 2026-11-08, including the implementation choices
+below, with the limits in the handoff's "M2.5 as built".
+
+```sh
+pf review separate --db DB --account A TRANSACTION_ID --revision t1-… --group R1 --group R2 \
+   [--supersedes D --supersedes-revision d3-… --keep N ...]
+```
+
+**Supersession chains (amends D-046).** A decision is superseded while any decision superseding it
+has not been undone, whether that one is active or superseded in turn. Only the newest decision of a
+chain is active, and only it can be undone. Each undo steps back one link: it restores the decision
+just before, or refuses if that would contradict an active decision. Refusing a superseded decision
+names the newest of its chain. D-046 said "an active decision supersedes it", so in a chain A ← B ← C
+the rejection A applied again once C superseded B, while C kept the very pair A keeps apart, and no
+conflict was raised. Migration 0008 clears the reconciliation marker of every account holding a
+chain of two or more, so that commands refuse it until `reconcile` re-derives it (D-035).
+
+**New evidence touching a decided record.** No decision transfers to a record that did not exist when
+it was made (D-042, D-009).
+
+| Situation | Outcome |
+|---|---|
+| A re-export that merges automatically with a bound record | Its unit is kept apart as the bound record is, and nothing is reviewed again. The decision still binds only the old record |
+| A re-export that does not merge (S11) | An ordinary candidate item. A person decides it with `review confirm` on that item |
+| A re-export carrying an ID shared by separated records (P7) | A withheld-match conflict, settled by a partition |
+| A record that would join a confirmed unit (C8) | Joins when valid, otherwise withheld with a conflict |
+| An automatic split under a decision (S12) | `decision_basis_changed`, settled by a partition |
+
+`review show` lists records in the item that are alike a decided record in every parsed value, with
+the decision that binds the other, and binds nothing. It reads only evidence the item token already
+covers, so the token is unchanged.
+
+**What can supersede what.** A confirmation supersedes a decision whose `different_event` pairs it
+joins (D-046). A separation supersedes a confirmation, a separation included, whose `same_event`
+pairs its groups split: every other pair of the old decision is kept with `--keep`, copied record for
+record. A rejection never supersedes: it adds `different_event` pairs between direct candidates, which
+cannot join or split anything. One decision is superseded at a time. Superseding several would need a
+link table in place of `supersedes_decision_id` and an undo that restores several at once, while undoing
+one and superseding the other already works.
+
+**Tokens.** Item `r3` and transaction `t1` are unchanged. The undo token becomes `d3`: its fields are the
+same, but "without this decision" now restores only the decision just before it, so a `d2` token from a
+chain ledger must never read as current.
+
+**Conflicts.** A separation that supersedes settles conflicts as any partition does, and refuses
+atomically if an open conflict would still hold its records. Undoing it may raise a withheld or
+changed-basis conflict under D-046's joining rules. Nothing new raises one.
+
+**Cost.** A superseding separation touches its group as a partition does. It is measured on three
+unmerged documents, where the confirmed unit still links with the third. If it is materially slower
+than a partition there, the work stops and is reported.
+
+**How these were implemented,** where the rules above left a choice. The owner accepted all of them
+with M2.5 on 2026-11-08:
+
+- A decision is superseded exactly when a decision not undone names it, since only an active decision
+  can be superseded. `review decision show` names the immediate successor and, in a chain, the newest.
+  Refusing a decision whose successor is itself superseded has its own wording, naming both.
+- Migration 0008 deletes the marker of any account where a decision supersedes one that supersedes
+  another, whether or not its ledger differs. A `derive()` check showed one can: with the revived
+  rejection, an automatic merge into the confirmed unit was withheld with a conflict.
+- A superseding separation skips the check that something was joined automatically, so a confirmed
+  core alone can be split. Splitting another decision's core is refused, naming it. The old decision's
+  `different_event` pairs cannot be split, so they are always kept.
+- A transaction-target decision copies kept pairs as they were stored, including their group numbers,
+  which describe the old decision's transaction.
+- The alike listing compares parsed transaction date, posting date, amount, description, external ID
+  and status, across documents only, so two alike rows of one file are never offered as a re-export
+  (D-008). It is lazy and `review show` prints at most 50.
+- The `d3` digest is unchanged for a ledger without chains: `d2-2a1e1dd2ac99de82` became
+  `d3-2a1e1dd2ac99de82`, and a test pins it.
 
 ## Not yet decided
 

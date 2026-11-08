@@ -1,4 +1,4 @@
-"""Decisions and import order (S15, S22). Records are identified by document hash and row,
+"""Decisions and import order (S15, S22, C15, C16, P16, P17). Records are identified by document hash and row,
 never by generated IDs or timestamps, so ledgers built differently can be compared."""
 
 import hashlib
@@ -15,10 +15,20 @@ from personal_finance.db.migrate import connect, create_database
 from personal_finance.ingest.coverage import declare_complete
 from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1
 from personal_finance.ingest.pipeline import import_files
-from personal_finance.reconcile.decisions import reject_pairs, undo_decision
+from personal_finance.reconcile.decisions import (
+    confirm_groups,
+    reject_pairs,
+    separate_records,
+    undo_decision,
+)
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reports.decision_evidence import load_decision, undo_outlook
-from personal_finance.reports.review_evidence import load_review_evidence, review_revision
+from personal_finance.reports.review_evidence import (
+    load_merge_evidence,
+    load_review_evidence,
+    review_revision,
+    transaction_revision,
+)
 
 CAFE = "01/10/2026,SYNTHETIC CAFE,5.00,\n"
 
@@ -56,10 +66,10 @@ def transaction_of(conn, key) -> tuple[str, int] | None:
     ).fetchone()
 
 
-def reject_first_and_second(conn) -> str | None:
-    """Make the decision if it is valid now, binding just these two records."""
-    left = transaction_of(conn, key_of(FIRST))
-    right = transaction_of(conn, key_of(SECOND))
+def decide_on(conn, first, second, make) -> str | None:
+    """Make a decision on two single-record transactions if it is valid now."""
+    left = transaction_of(conn, key_of(first))
+    right = transaction_of(conn, key_of(second))
     if left is None or right is None or left[0] == right[0] or left[1] != 1 or right[1] != 1:
         return None
     for (issue,) in conn.execute(
@@ -68,12 +78,28 @@ def reject_first_and_second(conn) -> str | None:
     ).fetchall():
         item = load_review_evidence(conn, issue)
         if {left[0], right[0]} <= {entry.transaction_id for entry in item.transactions}:
-            result = reject_pairs(conn, "acct", issue, review_revision(item), [(left[0], right[0])])
-            return result.decision_id
+            return make(conn, issue, review_revision(item), left[0], right[0])
     return None
 
 
-def replay(files, decide_after=None, undo=False):
+def rejecting(conn, issue, revision, left, right):
+    return reject_pairs(conn, "acct", issue, revision, [(left, right)]).decision_id
+
+
+def confirming(conn, issue, revision, left, right):
+    return confirm_groups(conn, "acct", issue, revision, [[left, right]]).decision_id
+
+
+def reject_first_and_second(conn) -> str | None:
+    """Make the decision if it is valid now, binding just these two records."""
+    return decide_on(conn, FIRST, SECOND, rejecting)
+
+
+def confirm_first_and_second(conn) -> str | None:
+    return decide_on(conn, FIRST, SECOND, confirming)
+
+
+def replay(files, decide_after=None, undo=False, decide=reject_first_and_second):
     """The view after importing files, deciding once decide_after files are in.
 
     None means the decision was not valid at that point, as when a third file has already
@@ -91,7 +117,7 @@ def replay(files, decide_after=None, undo=False):
         try:
             for number, file in enumerate(files):
                 if number == decide_after:
-                    decision = reject_first_and_second(conn)
+                    decision = decide(conn)
                     if decision is None:
                         return None
                 source = root / f"{number}.csv"
@@ -102,7 +128,7 @@ def replay(files, decide_after=None, undo=False):
                 )
                 assert result.outcome != "failed", (result, file)
             if decide_after == len(files):
-                decision = reject_first_and_second(conn)
+                decision = decide(conn)
                 if decision is None:
                     return None
             if undo:
@@ -192,3 +218,183 @@ def test_the_view_identifies_constraints_by_evidence_not_ids():
         conn = connect(path)
         assert active_constraints(conn) == []
         conn.close()
+
+
+class TestConfirmationAtEveryOrderAndPoint:  # C16
+    def test_a_lookalike_arriving_before_or_after_the_confirmation(self):
+        files = [FIRST, SECOND, LOOKALIKE, UNRELATED]
+        views = outcomes(files, decide=confirm_first_and_second)
+        assert len(views) >= 12
+        assert all(view == views[0] for view in views)
+        assert views[0]["movement"].transactions == 3
+        assert views[0]["movement"].candidate_groups == 1
+
+    def test_a_later_file_that_would_join_them_anyway(self):
+        files = [FIRST, SECOND, WHOLE, UNRELATED]
+        views = outcomes(files, decide=confirm_first_and_second)
+        assert len(views) >= 6
+        assert all(view == views[0] for view in views)
+        assert views[0]["movement"].transactions == 3
+        assert views[0]["movement"].transactions_confirmed == 1
+
+    def test_undo_matches_never_confirming_at_every_point(self):
+        files = [FIRST, SECOND, LOOKALIKE]
+        views = outcomes(files, decide=confirm_first_and_second, undo=True)
+        assert len(views) >= 2
+        assert all(view == replay(files) for view in views)
+
+
+BOOKS = "01/12/2026,SYNTHETIC BOOKS,7.00,\n"
+BOOKS_FIRST = card(BOOKS, "2026-01-01", "2026-01-12", padding=3)
+BOOKS_SECOND = card(BOOKS, "2026-01-12", "2026-01-20", padding=4)
+
+
+def both_decisions(confirm_first):
+    """A confirmation and a rejection on unrelated records, made in either order."""
+    def decide(conn):
+        steps = [lambda: decide_on(conn, FIRST, SECOND, confirming),
+                 lambda: decide_on(conn, BOOKS_FIRST, BOOKS_SECOND, rejecting)]
+        made = [step() for step in (steps if confirm_first else steps[::-1])]
+        return None if None in made else made[0]
+    return decide
+
+
+def test_a_confirmation_and_a_rejection_in_either_order():  # C15
+    files = [FIRST, SECOND, BOOKS_FIRST, BOOKS_SECOND, UNRELATED]
+    views = [
+        view
+        for confirm_first in (True, False)
+        for order in (files, files[::-1], files[2:] + files[:2])
+        if (view := replay(order, len(order), decide=both_decisions(confirm_first))) is not None
+    ]
+    assert len(views) == 6
+    assert all(view == views[0] for view in views)
+    relations = sorted(constraint[0] for constraint in views[0]["constraints"])
+    assert relations == ["different_event", "same_event"]
+
+
+@settings(
+    max_examples=100,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
+)
+@given(cases())
+def test_equivalent_confirmations_give_the_same_outcome_in_any_order(case):  # C15, C16
+    one, one_point, other, other_point = case
+    first = replay(one, one_point, decide=confirm_first_and_second)
+    second = replay(other, other_point, decide=confirm_first_and_second)
+    assume(first is not None and second is not None)
+    assert first["constraints"] == second["constraints"]
+    assert first == second
+
+
+# Both complete over the whole month, so these two merge as an exact pair (D-047). Their row
+# is their own, so that the files above never join their merge.
+LAMP = "01/14/2026,SYNTHETIC LAMP,11.00,\n"
+MERGE_A = card(LAMP, "2026-01-01", "2026-01-20", padding=5)
+MERGE_B = card(LAMP, "2026-01-01", "2026-01-20", padding=6)
+MERGE_C = card(LAMP, "2026-01-01", "2026-01-20", padding=7)
+LAMP_LOOKALIKE = card(LAMP, padding=8)
+
+
+def separate_the_merge(conn) -> str | None:
+    """Separate MERGE_A from MERGE_B if they are merged with nothing else, else None."""
+    left = transaction_of(conn, key_of(MERGE_A))
+    right = transaction_of(conn, key_of(MERGE_B))
+    if left is None or right is None or left[0] != right[0] or left[1] != 2:
+        return None
+    merge = load_merge_evidence(conn, left[0])
+    records = {(record.content_sha256, record.row): record.record_id
+               for record in merge.transaction.records}
+    groups = [[records[key_of(MERGE_A)]], [records[key_of(MERGE_B)]]]
+    return separate_records(conn, "acct", left[0], transaction_revision(merge), groups).decision_id
+
+
+class TestSeparationAtEveryOrderAndPoint:  # P17
+    def test_a_lookalike_arriving_before_or_after_the_separation(self):
+        files = [MERGE_A, MERGE_B, LAMP_LOOKALIKE, UNRELATED]
+        views = outcomes(files, decide=separate_the_merge)
+        assert len(views) >= 12
+        assert all(view == views[0] for view in views)
+        assert views[0]["movement"].transactions == 4
+        assert views[0]["movement"].transactions_separated == 2
+        assert views[0]["movement"].decision_conflicts == 0
+
+    def test_a_later_file_that_would_rejoin_them(self):
+        files = [MERGE_A, MERGE_B, MERGE_C, UNRELATED]
+        views = outcomes(files, decide=separate_the_merge)
+        # MERGE_C must not be in yet, or the merge holds three records and this is not the same
+        # decision.
+        assert len(views) >= 6
+        assert all(view == views[0] for view in views)
+        assert views[0]["movement"].decision_conflicts == 1
+
+    def test_undo_matches_never_separating_at_every_point(self):
+        files = [MERGE_A, MERGE_B, LAMP_LOOKALIKE]
+        views = outcomes(files, decide=separate_the_merge, undo=True)
+        assert len(views) >= 2
+        assert all(view == replay(files) for view in views)
+
+
+def three_decisions(order):
+    """A separation, a confirmation and a rejection on unrelated records, in a given order."""
+    def decide(conn):
+        steps = {
+            "separate": lambda: separate_the_merge(conn),
+            "confirm": lambda: decide_on(conn, FIRST, SECOND, confirming),
+            "reject": lambda: decide_on(conn, BOOKS_FIRST, BOOKS_SECOND, rejecting),
+        }
+        made = [steps[name]() for name in order]
+        return None if None in made else made[0]
+    return decide
+
+
+def test_a_separation_confirmation_and_rejection_in_any_order():  # P16
+    files = [MERGE_A, MERGE_B, FIRST, SECOND, BOOKS_FIRST, BOOKS_SECOND]
+    views = [
+        view
+        for order in permutations(("separate", "confirm", "reject"))
+        for imports in (files, files[::-1])
+        if (view := replay(imports, len(imports), decide=three_decisions(order))) is not None
+    ]
+    assert len(views) == 12
+    assert all(view == views[0] for view in views)
+    relations = sorted(constraint[0] for constraint in views[0]["constraints"])
+    assert relations == ["different_event", "different_event", "same_event"]
+
+
+@st.composite
+def separation_cases(draw):
+    known_files = st.sampled_from((MERGE_C, LAMP_LOOKALIKE, WHOLE, UNRELATED))
+    extras = draw(
+        st.lists(st.one_of(known_files, focused_card_file(), focused_id_file()), max_size=3)
+    )
+    known = {MERGE_A.content, MERGE_B.content}
+    files = [MERGE_A, MERGE_B]
+    for extra in extras:
+        if extra.content not in known:
+            known.add(extra.content)
+            files.append(extra)
+    one = draw(st.permutations(files))
+    other = draw(st.permutations(files))
+    return one, draw(merged_points(one)), other, draw(merged_points(other))
+
+
+def merged_points(order):
+    """From the moment both records are in. A later file can still make a point invalid."""
+    return st.integers(max(order.index(MERGE_A), order.index(MERGE_B)) + 1, len(order))
+
+
+@settings(
+    max_examples=100,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
+)
+@given(separation_cases())
+def test_equivalent_separations_give_the_same_outcome_in_any_order(case):  # P16, P17
+    one, one_point, other, other_point = case
+    first = replay(one, one_point, decide=separate_the_merge)
+    second = replay(other, other_point, decide=separate_the_merge)
+    assume(first is not None and second is not None)
+    assert first["constraints"] == second["constraints"]
+    assert first == second

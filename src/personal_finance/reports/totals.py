@@ -7,6 +7,8 @@ transfers and card payments.
 import sqlite3
 from dataclasses import dataclass
 
+from personal_finance.reconcile.apply import STATE_ACTIVE, decision_states
+
 
 @dataclass(frozen=True)
 class AccountMovement:
@@ -22,6 +24,10 @@ class AccountMovement:
     transactions_in_decision_conflicts: int = 0
     transactions_with_withheld_match: int = 0
     transactions_with_changed_basis: int = 0
+    # Transactions holding records a person confirmed as one event (D-046).
+    transactions_confirmed: int = 0
+    # Transactions holding records a separation keeps apart from an automatic match (D-047).
+    transactions_separated: int = 0
 
 
 def account_movement(conn: sqlite3.Connection, account_id: str | None = None) -> AccountMovement:
@@ -75,6 +81,37 @@ def account_movement(conn: sqlite3.Connection, account_id: str | None = None) ->
         {"account": account_id},
     ).fetchone()
 
+    confirmed = conn.execute(
+        """SELECT COUNT(DISTINCT transaction_id) FROM transaction_source
+           WHERE link_rule = 'confirmed_same_event'
+             AND (:account IS NULL OR account_id = :account)""",
+        {"account": account_id},
+    ).fetchone()[0]
+
     return AccountMovement(
-        inflow, outflow, net, transactions, pending, unresolved, groups, members, *conflicts
+        inflow, outflow, net, transactions, pending, unresolved, groups, members, *conflicts,
+        confirmed, _separated(conn, account_id),
     )
+
+
+def _separated(conn, account_id) -> int:
+    separations = conn.execute(
+        """SELECT id, account_id FROM decision
+           WHERE target_kind = 'transaction' AND (:account IS NULL OR account_id = :account)""",
+        {"account": account_id},
+    ).fetchall()
+    states = {}
+    for account in {account for _, account in separations}:
+        states.update(decision_states(conn, account))
+    active = [decision for decision, _ in separations if states[decision] == STATE_ACTIVE]
+    if not active:
+        return 0
+    marks = ", ".join("?" for _ in active)
+    return conn.execute(
+        f"""SELECT COUNT(DISTINCT link.transaction_id)
+            FROM decision_constraint pair
+            JOIN transaction_source link
+                ON link.source_record_id IN (pair.left_record_id, pair.right_record_id)
+            WHERE pair.relation = 'different_event' AND pair.decision_id IN ({marks})""",
+        active,
+    ).fetchone()[0]

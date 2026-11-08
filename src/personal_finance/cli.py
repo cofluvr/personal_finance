@@ -26,7 +26,7 @@ from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import LAYOUTS
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.money import format_cents
-from personal_finance.reconcile.apply import reconcile_account, stale_accounts
+from personal_finance.reconcile.apply import STATE_ACTIVE, reconcile_account, stale_accounts
 from personal_finance.reconcile.cross_document import (
     PRIMARY_CRITERIA,
     RULE_CANDIDATES,
@@ -35,22 +35,28 @@ from personal_finance.reconcile.cross_document import (
 )
 from personal_finance.reconcile.decisions import (
     DecisionRefused,
+    confirm_groups,
     reject_pairs,
+    separable_transactions,
+    separate_records,
     undecided_direct_pairs,
     undo_decision,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reports.decision_evidence import (
-    STATE_ACTIVE,
     list_decisions,
     load_decision,
+    shown_kind,
     undo_outlook,
 )
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.review_evidence import (
+    alike_decided_records,
+    load_merge_evidence,
     load_review_evidence,
     review_revision,
     rows_sharing_a_document,
+    transaction_revision,
 )
 from personal_finance.reports.totals import account_movement
 
@@ -143,8 +149,24 @@ DUPLICATE_NOTICE = (
 
 
 CONFLICT_NOTICE = (
-    "The decision stands. These are not possible duplicates. To remove a decision, inspect it "
-    "with review decision show, then use review undo."
+    "The decision stands. These are not possible duplicates. To settle this, confirm which "
+    "transactions here are one event and which are different events with review confirm. To "
+    "remove a decision, inspect it with review decision show, then use review undo."
+)
+
+CONFIRM_NOTICE = (
+    "Transactions confirmed as one event are counted once, so totals can be lower than before. "
+    "Run totals to see them."
+)
+
+SEPARATE_NOTICE = (
+    "Records separated from an automatic match are counted as separate transactions, so totals "
+    "can be higher than before. Run totals to see them."
+)
+
+ID_OVERRIDE_NOTICE = (
+    "Records in different groups share an ID that the source declares reliable, with guarantee "
+    "{guarantee}. This decision overrides that match for these records only."
 )
 
 UNDO_NOTICE = (
@@ -222,6 +244,70 @@ def build_parser() -> argparse.ArgumentParser:
     reject.add_argument(
         "--pair", required=True, nargs=2, action="append", metavar=("T1", "T2"),
         help="two transaction IDs from review show. Repeat for several pairs in one decision",
+    )
+
+    confirm = command(
+        "confirm", review_commands, handler=run_review_confirm,
+        help="record which transactions in an item are one event, and which are different events",
+    )
+    confirm.add_argument("item_id", help="an item ID from review list")
+    confirm.add_argument("--account", required=True, help="account name or ID")
+    confirm.add_argument("--revision", required=True, help="the revision from review show")
+    confirm.add_argument(
+        "--group", required=True, nargs="+", action="append", metavar="T",
+        help="transaction IDs that are one event. Repeat for each group: groups are different "
+        "events, and transactions left out stay undecided",
+    )
+    confirm.add_argument(
+        "--supersedes", metavar="DECISION_ID",
+        help="a decision these groups contradict, which this one replaces",
+    )
+    confirm.add_argument(
+        "--supersedes-revision", metavar="REVISION",
+        help="the revision from review decision show for the decision being replaced",
+    )
+    confirm.add_argument(
+        "--keep", type=int, action="append", default=[], metavar="N",
+        help="a pair number of the replaced decision to carry over. Repeat for each pair",
+    )
+
+    merges = command(
+        "merges", review_commands, handler=run_review_merges,
+        help="list transactions holding records joined automatically",
+    )
+    merges.add_argument("--account", help="account name or ID (default: every account)")
+
+    merge = review_commands.add_parser("merge", help="inspect one merged transaction")
+    merge_commands = merge.add_subparsers(dest="merge_command", required=True)
+    merge_show = command(
+        "show", merge_commands, handler=run_review_merge_show,
+        help="show the evidence behind one transaction, including amounts and descriptions",
+    )
+    merge_show.add_argument("transaction_id", help="a transaction ID from review merges")
+
+    separate = command(
+        "separate", review_commands, handler=run_review_separate,
+        help="record which records of a merged transaction are one event, and which are different",
+    )
+    separate.add_argument("transaction_id", help="a transaction ID from review merges")
+    separate.add_argument("--account", required=True, help="account name or ID")
+    separate.add_argument("--revision", required=True, help="the revision from review merge show")
+    separate.add_argument(
+        "--group", required=True, nargs="+", action="append", metavar="R",
+        help="record IDs that are one event. Repeat for each group: groups are different events, "
+        "and every record of the transaction must be in one",
+    )
+    separate.add_argument(
+        "--supersedes", metavar="DECISION_ID",
+        help="a confirmation whose one-event records these groups split, which this one replaces",
+    )
+    separate.add_argument(
+        "--supersedes-revision", metavar="REVISION",
+        help="the revision from review decision show for the decision being replaced",
+    )
+    separate.add_argument(
+        "--keep", type=int, action="append", default=[], metavar="N",
+        help="a pair number of the replaced decision to carry over. Repeat for each pair",
     )
 
     decisions = command(
@@ -735,6 +821,7 @@ def run_review_show(args) -> int:
     print(f"  Revision: {review_revision(item)}")
     print_machine_reasons(item)
     print_decided_pairs(item)
+    print_alike_records(alike_decided_records(item))
     if item.rule == RULE_CANDIDATES and item.status == "open":
         print_direct_pairs(undecided_direct_pairs(conn, item))
 
@@ -778,14 +865,38 @@ def notice_for(item) -> str:
     return CONFLICT_NOTICE if item.kind == "decision_conflict" else DUPLICATE_NOTICE
 
 
+DECIDED_HEADINGS = {
+    "different_event": ("Already decided, as different events:", "is a different event from"),
+    "same_event": ("Already decided, as one event:", "is the same event as"),
+}
+
+
 def print_decided_pairs(item) -> None:
-    if not item.decided:
+    for relation, (heading, verb) in DECIDED_HEADINGS.items():
+        pairs = [pair for pair in item.decided if pair.relation == relation]
+        if pairs:
+            print(heading)
+        for pair in pairs:
+            print(f"  Decision {pair.decision_id}:")
+            print(f"    {describe_side(pair.left)}")
+            print(f"    {verb} {describe_side(pair.right)}")
+
+
+def print_alike_records(alike) -> None:
+    """Evidence that a record repeats a decided one. It binds nothing (D-048)."""
+    alike = list(islice(alike, DIRECT_PAIRS_SHOWN + 1))
+    if not alike:
         return
-    print("Already decided, as different events:")
-    for pair in item.decided:
-        print(f"  Decision {pair.decision_id}:")
-        print(f"    {describe_side(pair.left)}")
-        print(f"    is a different event from {describe_side(pair.right)}")
+    print("Alike a decided record, and not bound by any decision:")
+    for entry in alike[:DIRECT_PAIRS_SHOWN]:
+        print(
+            f"  {shown(entry.record.file_name)} row {entry.record.row} matches "
+            f"{shown(entry.decided.file_name)} row {entry.decided.row} in every parsed value, "
+            f"decided by {', '.join(entry.decision_ids)}"
+        )
+    if len(alike) > DIRECT_PAIRS_SHOWN:
+        print(f"  Only the first {DIRECT_PAIRS_SHOWN} are listed.")
+    print("  No decision transfers to a new record. To decide one, confirm a partition here.")
 
 
 def describe_side(records) -> str:
@@ -886,12 +997,113 @@ def run_review_reject(args) -> int:
     return 0
 
 
+def check_superseding(args) -> None:
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    if args.keep and not args.supersedes:
+        raise CommandError("--keep needs --supersedes.")
+
+
+def print_superseding(args, result) -> None:
+    if args.supersedes:
+        print(
+            f"  Supersedes decision {args.supersedes}: {result.contradicted_pairs} of its pairs "
+            f"contradicted, {result.kept_pairs} kept. It stays on record."
+        )
+
+
+def run_review_confirm(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    check_superseding(args)
+    result = confirm_groups(
+        conn, account_id, args.item_id, args.revision, args.group,
+        supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
+        keep=tuple(args.keep),
+    )
+
+    print(f"Decision {result.decision_id} recorded: {result.groups} groups confirmed.")
+    print_superseding(args, result)
+    print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
+    print("  Transactions left out stay undecided. New records are not bound.")
+    print(f"  {CONFIRM_NOTICE}")
+    if result.item_still_open:
+        print(f"  Item {args.item_id} stays open: undecided relationships remain in it.")
+    else:
+        print(f"  Item {args.item_id} closed: nothing in it is left undecided.")
+    return 0
+
+
+def run_review_merges(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    if args.account:
+        accounts = [find_account(conn, args.account)]
+    else:
+        accounts = [row[0] for row in conn.execute("SELECT id FROM account ORDER BY id")]
+    found = 0
+    for account_id in accounts:
+        for transaction_id, records, rules in separable_transactions(conn, account_id):
+            print(f"Transaction {transaction_id}: {records} records, {', '.join(rules)}")
+            found += 1
+    print(f"Transactions holding records joined automatically: {found}")
+    if found:
+        print("To see one's evidence, including amounts and descriptions, run review merge show.")
+    return 0
+
+
+def run_review_merge_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    merge = load_merge_evidence(conn, args.transaction_id)
+    if merge is None:
+        raise CommandError("transaction not found. Run review merges.")
+
+    entry = merge.transaction
+    print(f"Transaction {entry.transaction_id}")
+    print(f"  Account: {shown(merge.account_name)} ({merge.account_id})")
+    print(f"  Records: {len(entry.records)}")
+    print(f"  Revision: {transaction_revision(merge)}")
+    print_decided_pairs(merge)
+    print_transaction_evidence(entry, {})
+    print("Coverage evidence:")
+    for document in merge.documents:
+        print_document_evidence(document)
+    if merge.account_stale:
+        print(
+            "This account has not been reconciled under the current matching rules, so this "
+            "evidence may be out of date. Run reconcile."
+        )
+    return 0
+
+
+def run_review_separate(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    check_superseding(args)
+    result = separate_records(
+        conn, account_id, args.transaction_id, args.revision, args.group,
+        supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
+        keep=tuple(args.keep),
+    )
+
+    print(f"Decision {result.decision_id} recorded: {result.groups} groups separated.")
+    print_superseding(args, result)
+    print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
+    print("  New records are not bound, so a later file can raise the question again.")
+    if result.overridden_id_guarantee:
+        print(f"  {ID_OVERRIDE_NOTICE.format(guarantee=result.overridden_id_guarantee)}")
+    print(f"  {SEPARATE_NOTICE}")
+    return 0
+
+
 def run_review_decisions(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
     rows = list_decisions(conn, account_id)
-    for decision_id, account, created_at, state, pairs in rows:
-        print(f"Decision {decision_id}: {state}, {pairs} pairs, {shown(account)}, {created_at}")
+    for decision_id, account, created_at, state, pairs, kind in rows:
+        print(
+            f"Decision {decision_id}: {state}, {kind}, {pairs} pairs, {shown(account)}, "
+            f"{created_at}"
+        )
     print(f"Decisions: {len(rows)}")
     if rows:
         print("To see what a decision binds, run review decision show.")
@@ -906,15 +1118,39 @@ def run_review_decision_show(args) -> int:
 
     print(f"Decision {decision.decision_id}")
     print(f"  Account: {shown(decision.account_name)} ({decision.account_id})")
+    print(f"  Kind: {shown_kind(decision.kind, decision.target_kind)}")
     print(f"  Status: {decision.state}")
     print(f"  Made: {decision.created_at}")
     if decision.undone_at:
         print(f"  Undone: {decision.undone_at}. It stays on record and no longer applies.")
-    print(f"  From review item: {decision.review_issue_id}")
+    if decision.superseded_by:
+        print(
+            f"  Superseded by decision {decision.superseded_by}. It stays on record and no "
+            "longer applies, unless that decision is undone."
+        )
+    if decision.newest != decision.superseded_by:
+        print(
+            f"  Newest of its chain: decision {decision.newest}, the only one that can be "
+            "undone. Each undo restores the decision before it."
+        )
+    if decision.supersedes_decision_id:
+        print(f"  Supersedes decision {decision.supersedes_decision_id}")
+    if decision.target_kind == "transaction":
+        print(f"  From transaction: {decision.target_id}")
+    else:
+        print(f"  From review item: {decision.target_id}")
 
     for number, pair in enumerate(decision.pairs, start=1):
         print(f"Pair {number} of {len(decision.pairs)}: {pair.relation}")
-        print(f"  At decision time: {pair.left_transaction_id} and {pair.right_transaction_id}")
+        if pair.left_part is None:
+            print(f"  At decision time: {pair.left_transaction_id} and {pair.right_transaction_id}")
+        elif pair.left_part == pair.right_part:
+            print(f"  At decision time: both in {pair.left_transaction_id}, group {pair.left_part}")
+        else:
+            print(
+                f"  At decision time: both in {pair.left_transaction_id}, groups "
+                f"{pair.left_part} and {pair.right_part}"
+            )
         for label, records in (("One side", pair.left), ("Other side", pair.right)):
             print(f"  {label}:")
             for record in records:
@@ -926,6 +1162,8 @@ def run_review_decision_show(args) -> int:
         outlook = undo_outlook(conn, decision, DEFAULT_RULES)
         print(f"  Revision: {outlook.revision}")
         print("Undoing this decision now:")
+        if decision.supersedes_decision_id:
+            print(f"  Restores decision {decision.supersedes_decision_id}, which it superseded")
         print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
         print(f"  {UNDO_NOTICE}")
         if stale:
@@ -942,6 +1180,8 @@ def run_review_undo(args) -> int:
     result = undo_decision(conn, account_id, args.decision_id, args.revision)
 
     print(f"Decision {args.decision_id} undone. It stays on record and no longer applies.")
+    if result.restored:
+        print(f"  Decision {result.restored}, which it superseded, applies again.")
     print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
     print(f"  Source memberships changed: {result.moved_records}")
     print(f"  {UNDO_NOTICE}")
@@ -981,6 +1221,16 @@ def run_totals(args) -> int:
         )
     for line in describe_conflicts(movement):
         print(f"- {line}")
+    if movement.transactions_confirmed:
+        print(
+            f"- {movement.transactions_confirmed} transactions hold records you confirmed as one "
+            "event, and each is counted once. Undoing a confirmation can raise totals."
+        )
+    if movement.transactions_separated:
+        print(
+            f"- {movement.transactions_separated} transactions hold records you separated from an "
+            "automatic match, and each is counted. Undoing a separation can lower totals."
+        )
     return 0
 
 

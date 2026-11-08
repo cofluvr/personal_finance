@@ -22,6 +22,7 @@ from personal_finance.reconcile.similarity import block_key, fold, parse_descrip
 LINK_NEW = "new_record"
 LINK_EXTERNAL_ID = "reliable_external_id"
 LINK_EXACT = "exact_coverage_pair"
+LINK_CONFIRMED = "confirmed_same_event"
 
 RULE_EXTERNAL_ID = "cross_document_external_id"
 RULE_CANDIDATES = "cross_document_candidates"
@@ -29,6 +30,9 @@ RULE_DECISION = "identity_decision"
 
 REASON_WITHHELD = "automatic_match_withheld"
 REASON_BASIS_CHANGED = "decision_basis_changed"
+
+RELATION_DIFFERENT = "different_event"
+RELATION_SAME = "same_event"
 
 GUARANTEE_NONE = "none"
 GUARANTEE_STABLE_UNIQUE = "stable_unique"
@@ -84,14 +88,18 @@ class UnresolvedRecord:
 
 @dataclass(frozen=True)
 class Constraint:
-    """One stated pair of an active decision: these two sides are different events.
+    """One stated pair of an active decision: these two sides are different events, or the
+    same event.
 
-    The sides are the records of the two transactions at decision time (D-042).
+    The sides are the records of the two transactions at decision time (D-042). Only a
+    confirmation's partition can settle a conflict (D-046).
     """
 
     decision_id: str
     left: tuple[str, ...]
     right: tuple[str, ...]
+    relation: str = RELATION_DIFFERENT
+    confirmation: bool = False
 
 
 @dataclass(frozen=True)
@@ -159,6 +167,7 @@ def derive(
 ) -> Derivation:
     by_id = {document.id: document for document in documents}
     ordered = sorted(records, key=lambda row: _record_key(row, by_id))
+    different = tuple(item for item in constraints if item.relation == RELATION_DIFFERENT)
 
     id_merges, id_conflicts, separation = _match_reliable_ids(ordered, by_id)
     id_less = [row for row in ordered if not _has_reliable_id(row, by_id)]
@@ -166,7 +175,8 @@ def derive(
 
     merges = [(merge, LINK_EXTERNAL_ID) for merge in id_merges]
     merges += [(merge, LINK_EXACT) for merge in exact_merges]
-    withheld = _withheld_merges([merge for merge, _ in merges], constraints)
+    withheld = _withheld_merges([merge for merge, _ in merges], different)
+    confirmed, absorbed = _confirmed_units(ordered, merges, withheld, constraints, by_id)
     held = [merges[position][0] for position in sorted(withheld)]
     withheld_by = {
         row.id: min(decisions)
@@ -175,14 +185,18 @@ def derive(
     }
     separation.update((record_id, REASON_WITHHELD) for record_id in withheld_by)
 
-    units = [unit for position, unit in enumerate(merges) if position not in withheld]
+    units = [
+        unit for position, unit in enumerate(merges)
+        if position not in withheld and position not in absorbed
+    ]
+    units += confirmed
     merged = {row.id for merge, _ in units for row in merge}
     units += [([row], LINK_NEW) for row in ordered if row.id not in merged]
 
     groups = tuple(_group(rows, rule, by_id) for rows, rule in units)
     candidates = [_Unit.of(rows, by_id) for rows, _ in units]
     joined, steps = _link_candidates(candidates, rules)
-    separated = _separated_units(candidates, constraints)
+    separated = _separated_units(candidates, different)
     found, recomputed = _candidate_items(candidates, joined, exact_reasons, rules, separated)
     items = [_id_item(_without_withheld(conflict, withheld_by)) for conflict in id_conflicts]
     items += _not_covered_by(found, held)
@@ -204,6 +218,92 @@ def _withheld_merges(merges, constraints):
         for position in left & right:
             withheld[position].add(constraint.decision_id)
     return withheld
+
+
+def _confirmed_units(rows, merges, withheld, constraints, documents):
+    """Records confirmed as one event, each with any automatic merge that can join it (D-046).
+
+    A merge joins a confirmed unit only if the result keeps one record per document, holds no
+    pair a decision keeps apart and joins no two IDs that prove records distinct. Otherwise every merge in that combination is withheld,
+    because choosing which of them joins would be a guess. withheld is updated in place.
+    Returns the units and the positions of merges they absorbed.
+    """
+    same = [item for item in constraints if item.relation == RELATION_SAME]
+    if not same:
+        return [], set()
+    records = _DisjointSet(len(rows))
+    place = {row.id: index for index, row in enumerate(rows)}
+    behind = defaultdict(set)
+    for constraint in same:
+        bound = [place[record] for record in (*constraint.left, *constraint.right) if record in place]
+        for record in bound[1:]:
+            records.union(bound[0], record)
+        for record in bound:
+            behind[rows[record].id].add(constraint.decision_id)
+    sets = [
+        [rows[index] for index in component]
+        for component in records.components() if len(component) > 1
+    ]
+
+    # Nodes are confirmed sets, then the merges touching them. Disjoint merges never meet.
+    owner = {row.id: number for number, members in enumerate(sets) for row in members}
+    touching = [
+        position for position, (merge, _) in enumerate(merges)
+        if position not in withheld and any(row.id in owner for row in merge)
+    ]
+    nodes = _DisjointSet(len(sets) + len(touching))
+    for node, position in enumerate(touching, start=len(sets)):
+        for row in merges[position][0]:
+            if row.id in owner:
+                nodes.union(owner[row.id], node)
+
+    different = [item for item in constraints if item.relation == RELATION_DIFFERENT]
+    units, absorbed = [], set()
+    for component in nodes.components():
+        kept = [node for node in component if node < len(sets)]
+        positions = [touching[node - len(sets)] for node in component if node >= len(sets)]
+        members = {row.id: row for node in kept for row in sets[node]}
+        joined = dict(members)
+        for position in positions:
+            joined.update((row.id, row) for row in merges[position][0])
+        if _valid_unit(joined.values(), different, documents):
+            absorbed.update(positions)
+            units.append((sorted(joined.values(), key=lambda row: place[row.id]), LINK_CONFIRMED))
+        else:
+            # Each confirmed set stays a transaction of its own.
+            for node in kept:
+                units.append((sorted(sets[node], key=lambda row: place[row.id]), LINK_CONFIRMED))
+            decisions = {decision for record in members for decision in behind[record]}
+            decisions.update(
+                item.decision_id for item in different
+                if joined.keys() & set(item.left) and joined.keys() & set(item.right)
+            )
+            for position in positions:
+                withheld[position].update(decisions)
+    return units, absorbed
+
+
+def _valid_unit(rows, different, documents) -> bool:
+    """One record per document, no two distinct unique IDs, and no pair a decision keeps apart."""
+    rows = list(rows)
+    if len({row.document_id for row in rows}) < len(rows) or joins_distinct_ids(rows, documents):
+        return False
+    present = {row.id for row in rows}
+    return not any(
+        present.intersection(item.left) and present.intersection(item.right) for item in different
+    )
+
+
+def joins_distinct_ids(rows, documents) -> bool:
+    """Whether rows hold two different IDs of one namespace that guarantees them unique, which
+    proves the rows are different events (D-026)."""
+    seen = {}
+    for row in rows:
+        document = documents[row.document_id]
+        if _has_reliable_id(row, documents) and document.id_guarantee == GUARANTEE_STABLE_UNIQUE:
+            if seen.setdefault(document.id_namespace, row.external_id) != row.external_id:
+                return True
+    return False
 
 
 def _without_withheld(conflict, withheld_by):
@@ -236,14 +336,24 @@ def _not_covered_by(items, held) -> list["ReviewItem"]:
 
 
 def _conflict_items(units, held, constraints) -> list["ReviewItem"]:
-    """One item per connected set of affected transactions, with every reason that applies."""
+    """One item per connected set of affected transactions, with every reason that applies.
+
+    A set a confirmation has fully partitioned is settled and raises nothing (D-046).
+    """
     home = {row.id: position for position, rows in enumerate(units) for row in rows}
     found = [({home[row.id] for row in merge}, REASON_WITHHELD) for merge in held]
     for constraint in constraints:
+        if constraint.relation != RELATION_DIFFERENT:
+            continue
         for side in (constraint.left, constraint.right):
             parts = {home[record] for record in side if record in home}
             if len(parts) > 1:
                 found.append((parts, REASON_BASIS_CHANGED))
+    partitions = _confirmed_partitions(home, constraints)
+    found = [
+        (positions, reason) for positions, reason in found
+        if len(positions) > 1 and not _settled(positions, partitions)
+    ]
 
     joined = _DisjointSet(len(found))
     owners = {}
@@ -259,6 +369,24 @@ def _conflict_items(units, held, constraints) -> list["ReviewItem"]:
         reasons = {found[index][1] for index in component}
         items.append(_item(RULE_DECISION, members, reasons, _dates_of(rows)))
     return items
+
+
+def _confirmed_partitions(home, constraints) -> list[set[frozenset[int]]]:
+    """For each confirmation, the pairs of units its partition keeps apart."""
+    pairs = defaultdict(set)
+    for constraint in constraints:
+        if constraint.confirmation and constraint.relation == RELATION_DIFFERENT:
+            left = {home[record] for record in constraint.left if record in home}
+            right = {home[record] for record in constraint.right if record in home}
+            pairs[constraint.decision_id].update(
+                frozenset(pair) for pair in product(left, right) if pair[0] != pair[1]
+            )
+    return list(pairs.values())
+
+
+def _settled(positions, partitions) -> bool:
+    needed = {frozenset(pair) for pair in combinations(sorted(positions), 2)}
+    return any(needed <= pairs for pairs in partitions)
 
 
 def _record_key(row: Record, documents) -> tuple[str, int]:

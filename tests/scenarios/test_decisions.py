@@ -79,7 +79,7 @@ class Ledger:
         self.capsys.readouterr()
         words = list(command)
         position = 2 if words[0] in ("account", "review") else 1
-        if words[:2] == ["review", "decision"]:
+        if words[:2] in (["review", "decision"], ["review", "merge"]):
             position = 3
         words[position:position] = ["--db", self.db]
         code = main(words)
@@ -119,7 +119,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r2-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r3-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)
@@ -142,7 +142,7 @@ class Ledger:
 
     def decision_revision(self, decision):
         out = self.run("review", "decision", "show", decision)[1]
-        return re.search(r"Revision: (d1-[0-9a-f]{16})", out)[1]
+        return re.search(r"Revision: (d3-[0-9a-f]{16})", out)[1]
 
     def undo(self, decision, revision=None, account="A"):
         return self.run("review", "undo", decision, "--account", account,
@@ -432,9 +432,9 @@ class TestRefusals:  # S5
         self.refused(ledger, ledger.reject(item, (one, two), revision="r2-0000000000000000"),
                      STALE_REVISION)
 
-    def test_a_version_1_token_of_the_same_digest(self, ledger):
+    def test_a_version_2_token_of_the_same_digest(self, ledger):
         item, one, two = pair_up(ledger)
-        token = "r1-" + ledger.revision(item)[3:]
+        token = "r2-" + ledger.revision(item)[3:]
         self.refused(ledger, ledger.reject(item, (one, two), revision=token), STALE_REVISION)
 
     def test_a_pair_outside_the_item(self, ledger):
@@ -921,7 +921,7 @@ class TestUndoToken:  # S21
         ).fetchone()
         (account,) = conn.execute("SELECT id FROM account").fetchone()
         conn.execute(
-            """INSERT INTO decision (id, account_id, review_issue_id, item_revision)
+            """INSERT INTO decision (id, account_id, target_id, target_revision)
                VALUES ('other', ?, 'issue', 'r2-0')""",
             (account,),
         )
@@ -1004,7 +1004,7 @@ class TestUndoToken:  # S21
 
     def test_the_token_has_the_documented_form(self, ledger):
         _, token = self.decided(ledger)
-        assert re.fullmatch(r"d1-[0-9a-f]{16}", token)
+        assert re.fullmatch(r"d3-[0-9a-f]{16}", token)
 
 
 class TestConstraintsApplied:
@@ -1013,7 +1013,7 @@ class TestConstraintsApplied:
         left, right = [row[0] for row in conn.execute("SELECT id FROM source_record")]
         (account,) = conn.execute("SELECT id FROM account WHERE display_name = 'A'").fetchone()
         conn.execute(
-            """INSERT INTO decision (id, account_id, review_issue_id, item_revision)
+            """INSERT INTO decision (id, account_id, target_id, target_revision)
                VALUES ('d', ?, 'issue', 'r2-0')""",
             (account,),
         )
@@ -1025,16 +1025,18 @@ class TestConstraintsApplied:
         )
         return conn, account
 
-    def test_same_event_is_reserved_and_never_read_as_a_rejection(self, ledger):
+    def test_same_event_is_never_read_as_a_rejection(self, ledger):
         pair_up(ledger)
         conn, account = self.insert(ledger, "same_event")
-        assert load_constraints(conn, account) == ()
+        (constraint,) = load_constraints(conn, account)
+        assert constraint.relation == "same_event"
         conn.close()
 
     def test_a_different_event_row_is_read(self, ledger):
         pair_up(ledger)
         conn, account = self.insert(ledger, "different_event")
-        assert len(load_constraints(conn, account)) == 1
+        (constraint,) = load_constraints(conn, account)
+        assert constraint.relation == "different_event" and not constraint.confirmation
         conn.close()
 
     def test_another_accounts_decisions_are_not_read(self, ledger):

@@ -7,6 +7,9 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from personal_finance.reconcile.cross_document import (
+    LINK_CONFIRMED,
+    LINK_EXACT,
+    LINK_EXTERNAL_ID,
     LINK_NEW,
     REASON_BASIS_CHANGED,
     REASON_WITHHELD,
@@ -324,3 +327,214 @@ def test_recomputed_links_match_union_find_components(rows):
             parts, _ = _undecided_parts(component, units, set(), rules)
             found.update(frozenset(units.index(unit) for unit in part) for part in parts)
     assert found == expected
+
+
+def confirmed(left, right, decision="c1"):
+    return Constraint(decision, tuple(left), tuple(right), "same_event", True)
+
+
+def partition_apart(left, right, decision="c1"):
+    """The different_event half of a confirmation's partition."""
+    return Constraint(decision, tuple(left), tuple(right), "different_event", True)
+
+
+def rule_of(result, record_id):
+    return next(group.link_rule for group in result.groups if record_id in group.record_ids)
+
+
+class TestConfirmed:  # D-046
+    documents = [doc("a"), doc("b"), doc("c")]
+
+    def test_confirmed_records_form_one_transaction_and_close_the_item(self):
+        records = [row("1", "a"), row("2", "b")]
+        result = outcome(self.documents, records, confirmed(["1"], ["2"]))
+        assert groups(result) == {("1", "2")}
+        assert rule_of(result, "1") == "confirmed_same_event"
+        assert result.items == ()
+
+    def test_part_of_a_group_leaves_the_rest_undecided(self):
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        result = outcome(self.documents, records, confirmed(["1"], ["2"]))
+        assert groups(result) == {("1", "2"), ("3",)}
+        assert members(result, RULE_CANDIDATES) == {frozenset({("1", "2"), ("3",)})}
+
+    def test_a_partition_closes_the_whole_item(self):
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        result = outcome(self.documents, records, confirmed(["1"], ["2"]),
+                         partition_apart(["1", "2"], ["3"]))
+        assert groups(result) == {("1", "2"), ("3",)}
+        assert result.items == ()
+
+    def test_an_automatic_merge_joins_a_confirmed_unit_when_valid(self):
+        # a and b overlap by one day, so only the wide c merges them, and the merge joins 1 and 2.
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        documents = [*NARROW, WIDE]
+        assert groups(outcome(documents, records)) == {("1", "2", "3")}
+        result = outcome(documents, records, confirmed(["1"], ["2"]))
+        assert groups(result) == {("1", "2", "3")}
+        assert rule_of(result, "3") == "confirmed_same_event"
+        assert result.items == ()
+
+    def test_a_merge_that_would_join_a_rejected_record_is_withheld(self):
+        # 1 and 2 are confirmed, 3 is rejected against 2, and the exact merge {1, 3} arrives.
+        documents = [doc("a", "2026-01-01", "2026-01-20"), doc("b"),
+                     doc("c", "2026-01-01", "2026-01-20")]
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        assert groups(outcome(documents, records)) == {("1", "3"), ("2",)}
+        result = outcome(documents, records, confirmed(["1"], ["2"]), rejected(["2"], ["3"], "r1"))
+        assert groups(result) == {("1", "2"), ("3",)}
+        assert members(result, RULE_DECISION) == {frozenset({("1", "2"), ("3",)})}
+        assert result.withheld_by == {"1": "c1", "3": "c1"}
+
+    def test_a_merge_that_would_put_two_rows_of_one_document_together_is_withheld(self):
+        # Rows 1 and 8 of a are alike. 1 merges with 2 automatically, and 8 is confirmed with 2.
+        documents = [doc("a", "2026-01-01", "2026-01-20"), doc("b", "2026-01-01", "2026-01-20")]
+        records = [row("1", "a", 1), row("8", "a", 2), row("2", "b")]
+        assert groups(outcome(documents, records)) == {("1", "2"), ("8",)}
+        result = outcome(documents, records, confirmed(["8"], ["2"]))
+        assert groups(result) == {("2", "8"), ("1",)}
+        (conflict,) = [item for item in result.items if item.rule == RULE_DECISION]
+        assert conflict.reasons == (REASON_WITHHELD,)
+
+    def test_a_confirmation_partition_settles_a_withheld_match(self):
+        documents = [doc("a", "2026-01-01", "2026-01-20"), doc("b"),
+                     doc("c", "2026-01-01", "2026-01-20")]
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        result = outcome(documents, records, confirmed(["1"], ["2"]),
+                         partition_apart(["1", "2"], ["3"]))
+        assert groups(result) == {("1", "2"), ("3",)}
+        assert result.items == ()
+
+    def test_a_rejection_never_settles_a_withheld_match(self):
+        result = outcome([*NARROW, WIDE], [row("1", "a"), row("2", "b"), row("3", "c")],
+                         rejected(["1"], ["2"]), rejected(["1"], ["3"], "d2"),
+                         rejected(["2"], ["3"], "d3"))
+        assert groups(result) == {("1",), ("2",), ("3",)}
+        assert members(result, RULE_DECISION) == {frozenset({("1",), ("2",), ("3",)})}
+
+    def test_a_partition_by_one_decision_settles_and_by_two_does_not(self):
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        one = outcome([*NARROW, WIDE], records, partition_apart(["1"], ["2"]),
+                      partition_apart(["1"], ["3"]), partition_apart(["2"], ["3"]))
+        assert one.items == ()
+        two = outcome([*NARROW, WIDE], records, partition_apart(["1"], ["2"]),
+                      partition_apart(["1"], ["3"], "c2"), partition_apart(["2"], ["3"], "c2"))
+        assert members(two, RULE_DECISION) == {frozenset({("1",), ("2",), ("3",)})}
+
+    def test_a_confirmed_unit_is_not_a_candidate_for_its_own_documents(self):
+        records = [row("1", "a"), row("2", "b"), row("4", "a", 2)]
+        result = outcome(self.documents, records, confirmed(["1"], ["2"]))
+        assert members(result) == set()
+
+    @settings(max_examples=60, deadline=None)
+    @given(st.permutations([row("1", "a"), row("2", "b"), row("3", "c")]))
+    def test_record_order_never_matters(self, records):
+        expected = outcome(self.documents, sorted(records, key=lambda one: one.id),
+                           confirmed(["1"], ["2"]))
+        assert outcome(self.documents, records, confirmed(["1"], ["2"])) == expected
+
+
+class TestConfirmedIds:  # D-026, D-046
+    def test_a_merge_never_joins_two_unique_ids_through_confirmed_units(self):
+        # 1 and 2 overlap by one day, so only the wide 3 joins them. Each is confirmed with a
+        # checking row, and the two checking rows carry different unique IDs.
+        ids = dict(id_namespace="ns", id_guarantee="stable_unique")
+        documents = [*NARROW, WIDE, doc("n1", **ids), doc("n2", **ids)]
+        records = [row("1", "a"), row("2", "b"), row("3", "c"),
+                   row("8", "n1", external_id="S-1"), row("9", "n2", external_id="S-2")]
+        result = outcome(documents, records, confirmed(["1"], ["8"]), confirmed(["2"], ["9"], "c2"))
+        assert groups(result) == {("1", "8"), ("2", "9"), ("3",)}
+        (conflict,) = [item for item in result.items if item.rule == RULE_DECISION]
+        assert conflict.reasons == (REASON_WITHHELD,)
+
+
+def separated(groups, decision="s1"):
+    """A separation's stated pairs: one per record pair, as review separate writes them (D-047)."""
+    part = {record: number for number, group in enumerate(groups) for record in group}
+    return tuple(
+        Constraint(decision, (left,), (right,),
+                   "same_event" if part[left] == part[right] else "different_event", True)
+        for position, left in enumerate(sorted(part))
+        for right in sorted(part)[position + 1:]
+    )
+
+
+class TestSeparated:  # D-047
+    documents = [doc(name, "2026-01-01", "2026-01-20") for name in "abc"]
+    id_documents = [doc(name, id_namespace="bank", id_guarantee="stable_unique") for name in "ab"]
+
+    def test_an_exact_merge_without_a_decision(self):
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        assert groups(outcome(self.documents, records)) == {("1", "2", "3")}
+
+    def test_separating_into_single_records_raises_nothing(self):
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        result = outcome(self.documents, records, *separated([["1"], ["2"], ["3"]]))
+        assert groups(result) == {("1",), ("2",), ("3",)}
+        assert result.items == ()
+        assert set(result.withheld_by.values()) == {"s1"}
+
+    def test_a_group_of_several_records_becomes_a_confirmed_unit(self):
+        records = [row("1", "a"), row("2", "b"), row("3", "c")]
+        result = outcome(self.documents, records, *separated([["1", "2"], ["3"]]))
+        assert groups(result) == {("1", "2"), ("3",)}
+        assert rule_of(result, "1") == rule_of(result, "2") == LINK_CONFIRMED
+        assert rule_of(result, "3") == LINK_NEW
+        assert result.items == ()
+
+    def test_a_reliable_id_merge(self):
+        records = [row("1", "a", external_id="X"), row("2", "b", external_id="X")]
+        assert groups(outcome(self.id_documents, records)) == {("1", "2")}
+        result = outcome(self.id_documents, records, *separated([["1"], ["2"]]))
+        assert groups(result) == {("1",), ("2",)}
+        assert result.items == ()
+
+    def test_a_record_that_would_rejoin_them_raises_an_open_conflict(self):
+        documents = [*self.id_documents, doc("c", id_namespace="bank", id_guarantee="stable_unique")]
+        records = [row(name, document, external_id="X") for name, document in
+                   (("1", "a"), ("2", "b"), ("3", "c"))]
+        result = outcome(documents, records, *separated([["1"], ["2"]]))
+        assert groups(result) == {("1",), ("2",), ("3",)}
+        (item,) = result.items
+        assert item.rule == RULE_DECISION and item.reasons == (REASON_WITHHELD,)
+
+    def test_the_same_pairs_without_the_partition_flag_leave_a_conflict(self):
+        """The flag is what settles the conflict, as for a confirmation (D-046)."""
+        records = [row("1", "a"), row("2", "b")]
+        plain = tuple(replace(item, confirmation=False) for item in separated([["1"], ["2"]]))
+        (item,) = outcome(self.documents, records, *plain).items
+        assert item.reasons == (REASON_WITHHELD,)
+
+
+# IDs are a set per document, as a valid export has them, so that a shared ID merges. Rows of
+# the two documents without IDs can pair exactly.
+id_cases = st.tuples(
+    st.sets(st.integers(0, 3)),
+    st.sets(st.integers(0, 3)),
+    st.lists(st.tuples(st.integers(2, 3), st.integers(0, 1)), max_size=6),
+)
+
+
+@settings(max_examples=200, deadline=None)
+@given(id_cases)
+def test_records_of_one_automatic_merge_share_one_id_or_carry_none(case):
+    """Why review separate needs no unique-ID check of its own (D-047)."""
+    first, second, plain = case
+    documents = [
+        doc(name, "2026-01-01", "2026-01-20", id_namespace="bank", id_guarantee="stable_unique")
+        if name in "ab" else doc(name, "2026-01-01", "2026-01-20")
+        for name in "abcd"
+    ]
+    entries = [(0, f"S-{number}", number % 2) for number in sorted(first)]
+    entries += [(1, f"S-{number}", number % 2) for number in sorted(second)]
+    entries += [(document, None, day) for document, day in plain]
+    records = [
+        row(str(number), "abcd"[document], number + 1, day=f"2026-01-1{day}",
+            external_id=identifier)
+        for number, (document, identifier, day) in enumerate(entries)
+    ]
+    by_id = {record.id: record for record in records}
+    for group in outcome(documents, records).groups:
+        if group.link_rule in (LINK_EXACT, LINK_EXTERNAL_ID):
+            ids = {by_id[record].external_id for record in group.record_ids}
+            assert len(ids) == 1
