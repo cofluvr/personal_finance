@@ -1,7 +1,7 @@
 """Migration 0012, the D-008 migration, on populated data (Q9, D-008, D-052).
 
 The ledger is built from the first 11 migrations and populated through the import API, which works
-on either form of transaction_source.
+on either form of transaction_source. Migration stops at 12, so that only 0012 is tested here.
 """
 
 import sqlite3
@@ -75,7 +75,7 @@ def insert_link(conn, record, document, transaction, rule):
     )
 
 
-def test_every_link_is_kept_and_only_confirmed_links_are_exempt(at_version_11):
+def test_every_link_is_kept_and_only_confirmed_links_are_exempt(at_version_11, tmp_path):
     conn, _ = at_version_11
     before = links(conn)
     # Five valid rows. a.csv's unreadable row keeps its exact pair from being confident (D-024).
@@ -86,7 +86,7 @@ def test_every_link_is_kept_and_only_confirmed_links_are_exempt(at_version_11):
         insert_link(conn, record, document, transaction, "confirmed_same_event")
     conn.execute("ROLLBACK")
 
-    assert migrate(conn) == len(load_migrations()) == 12
+    assert migrate(conn, migrations_up_to(tmp_path / "twelve", 12)) == 12
     assert links(conn) == before
     conn.execute("BEGIN")
     with pytest.raises(sqlite3.IntegrityError):
@@ -96,9 +96,9 @@ def test_every_link_is_kept_and_only_confirmed_links_are_exempt(at_version_11):
     assert links(conn) == before
 
 
-def test_the_other_constraints_still_hold(at_version_11):
+def test_the_other_constraints_still_hold(at_version_11, tmp_path):
     conn, _ = at_version_11
-    migrate(conn)
+    assert migrate(conn, migrations_up_to(tmp_path / "twelve", 12)) == 12
     (record, document, transaction) = conn.execute(
         "SELECT source_record_id, source_document_id, transaction_id FROM transaction_source LIMIT 1"
     ).fetchone()

@@ -1,7 +1,7 @@
 """Migration 0010 on a populated ledger, and its append-only tables (U15, D-050).
 
-A ledger built at the latest version, with the empty tables of 0010 and 0011 dropped and set back
-to version 9, is a version 9 ledger: they only create tables. Migration stops at 10, so that only 0010
+A ledger built at the latest version, with the empty tables of 0010, 0011 and 0013 dropped and set
+back to version 9, is a version 9 ledger: they only create tables. Migration stops at 10, so that only 0010
 is tested here.
 """
 
@@ -9,13 +9,21 @@ import sqlite3
 
 import pytest
 from test_confirmations import confirm_ok
-from test_decisions import ALL_TABLES, CAFE, DECLARATION_TABLES, RESOLUTION_TABLES, pair_up
+from test_decisions import (
+    ALL_TABLES,
+    CAFE,
+    CLASSIFICATION_TABLES,
+    DECLARATION_TABLES,
+    RESOLUTION_TABLES,
+    pair_up,
+)
 from test_resolutions import CAFE_NO_AMOUNT, ResolutionLedger, one_unresolved
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 
 VERSION_9_TABLES = tuple(table for table in ALL_TABLES
-                         if table not in (*RESOLUTION_TABLES, *DECLARATION_TABLES))
+                         if table not in (*RESOLUTION_TABLES, *DECLARATION_TABLES,
+                                          *CLASSIFICATION_TABLES))
 
 
 def up_to_version_10(folder):
@@ -27,7 +35,7 @@ def up_to_version_10(folder):
 
 def set_back_to_version_9(path) -> None:
     conn = connect(path)
-    for table in (*DECLARATION_TABLES, *RESOLUTION_TABLES):
+    for table in (*CLASSIFICATION_TABLES, *DECLARATION_TABLES, *RESOLUTION_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
     conn.execute("PRAGMA user_version = 9")

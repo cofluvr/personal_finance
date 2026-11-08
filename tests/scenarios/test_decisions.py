@@ -50,10 +50,14 @@ ALL_TABLES = (*SOURCE_TABLES, "ledger_transaction", "transaction_source", "revie
               "decision", "decision_constraint", "decision_event", "account_reconciliation",
               "value_correction", "value_correction_record", "value_correction_event",
               "transaction_correction", "record_resolution", "record_resolution_event",
-              "coverage_declaration", "coverage_declaration_event")
-# Created by 0010 and 0011, children first (D-050, D-051).
+              "coverage_declaration", "coverage_declaration_event", "type_classification",
+              "type_classification_record", "type_classification_event",
+              "transaction_classification")
+# Created by 0010, 0011 and 0013, children first (D-050, D-051, D-053).
 RESOLUTION_TABLES = ("record_resolution_event", "record_resolution")
 DECLARATION_TABLES = ("coverage_declaration_event", "coverage_declaration")
+CLASSIFICATION_TABLES = ("transaction_classification", "type_classification_event",
+                         "type_classification_record", "type_classification")
 
 
 def declared(start, end):

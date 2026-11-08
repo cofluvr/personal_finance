@@ -1,8 +1,8 @@
 """Migration 0011 on a populated ledger, and its append-only tables (K13, D-051).
 
-A ledger built at the latest version, with 0011's empty tables dropped and set back to version 10,
-is a version 10 ledger as far as 0011 is concerned: 0011 only creates tables, and 0012 rebuilds a
-table 0011 does not touch. Migration stops at 11, so that only 0011 is tested here.
+A ledger built at the latest version, with the empty tables of 0011 and 0013 dropped and set back to
+version 10, is a version 10 ledger as far as 0011 is concerned: both only create tables, and 0012
+rebuilds a table 0011 does not touch. Migration stops at 11, so that only 0011 is tested here.
 """
 
 import sqlite3
@@ -10,17 +10,18 @@ import sqlite3
 import pytest
 from test_confirmations import confirm_ok
 from test_coverage_declarations import MONTH, CoverageLedger, unknown_beside_complete
-from test_decisions import ALL_TABLES, DECLARATION_TABLES, pair_up
+from test_decisions import ALL_TABLES, CLASSIFICATION_TABLES, DECLARATION_TABLES, pair_up
 from test_resolutions import CAFE_NO_AMOUNT
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 
-VERSION_10_TABLES = tuple(table for table in ALL_TABLES if table not in DECLARATION_TABLES)
+VERSION_10_TABLES = tuple(table for table in ALL_TABLES
+                          if table not in (*DECLARATION_TABLES, *CLASSIFICATION_TABLES))
 
 
 def set_back_to_version_10(path) -> None:
     conn = connect(path)
-    for table in DECLARATION_TABLES:
+    for table in (*CLASSIFICATION_TABLES, *DECLARATION_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
     conn.execute("PRAGMA user_version = 10")

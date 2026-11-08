@@ -23,7 +23,8 @@ LEDGER_TABLES = (
     "account_reconciliation", "decision", "decision_constraint", "decision_event",
     "value_correction", "value_correction_record", "value_correction_event",
     "transaction_correction", "record_resolution", "record_resolution_event",
-    "coverage_declaration", "coverage_declaration_event",
+    "coverage_declaration", "coverage_declaration_event", "type_classification",
+    "type_classification_record", "type_classification_event", "transaction_classification",
 )
 
 
