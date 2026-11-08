@@ -53,14 +53,18 @@ ALL_TABLES = (*SOURCE_TABLES, "ledger_transaction", "transaction_source", "revie
               "coverage_declaration", "coverage_declaration_event", "type_classification",
               "type_classification_record", "type_classification_event",
               "transaction_classification", "transfer_match", "transfer_match_side",
-              "transfer_match_record", "transfer_match_event", "transfer_match_effect")
-# Created by 0010, 0011, 0013 and 0014, children first (D-050, D-051, D-053, D-054).
+              "transfer_match_record", "transfer_match_event", "transfer_match_effect",
+              "one_sided_transfer", "one_sided_transfer_record", "one_sided_transfer_event",
+              "one_sided_transfer_effect")
+# Created by 0010, 0011, 0013, 0014 and 0015, children first (D-050, D-051, D-053, D-054, D-055).
 RESOLUTION_TABLES = ("record_resolution_event", "record_resolution")
 DECLARATION_TABLES = ("coverage_declaration_event", "coverage_declaration")
 CLASSIFICATION_TABLES = ("transaction_classification", "type_classification_event",
                          "type_classification_record", "type_classification")
 TRANSFER_TABLES = ("transfer_match_effect", "transfer_match_event", "transfer_match_record",
                    "transfer_match_side", "transfer_match")
+ONE_SIDED_TABLES = ("one_sided_transfer_effect", "one_sided_transfer_event",
+                    "one_sided_transfer_record", "one_sided_transfer")
 
 
 def declared(start, end):

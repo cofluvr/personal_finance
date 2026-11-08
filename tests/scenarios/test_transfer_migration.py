@@ -1,27 +1,28 @@
 """Migration 0014 on a populated ledger, and its append-only tables (X12, D-054).
 
-A ledger built at the latest version, with 0014's empty tables dropped and set back to version 13, is
-a version 13 ledger: 0014 creates tables and clears markers only. Migration stops at 14, so that only
-0014 is tested.
+A ledger built at the latest version, with the empty tables of 0014 and 0015 dropped and set back
+to version 13, is a version 13 ledger: 0014 creates tables and clears markers only. Migration stops
+at 14, so that only 0014 is tested.
 """
 
 import sqlite3
 
 import pytest
 from test_classifications import against_its_direction
-from test_decisions import ALL_TABLES, TRANSFER_TABLES
+from test_decisions import ALL_TABLES, ONE_SIDED_TABLES, TRANSFER_TABLES
 from test_supersession import holding
 from test_transfers import IN_ROW, OUT_ROW, TransferLedger, matched
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 
-VERSION_13_TABLES = tuple(table for table in ALL_TABLES if table not in TRANSFER_TABLES)
+VERSION_13_TABLES = tuple(table for table in ALL_TABLES
+                          if table not in (*TRANSFER_TABLES, *ONE_SIDED_TABLES))
 VERSION_13_KEPT = tuple(table for table in VERSION_13_TABLES if table != "account_reconciliation")
 
 
 def set_back_to_version_13(path) -> None:
     conn = connect(path)
-    for table in TRANSFER_TABLES:
+    for table in (*ONE_SIDED_TABLES, *TRANSFER_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
     conn.execute("PRAGMA user_version = 13")
@@ -81,6 +82,9 @@ class TestMigration:
             assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.close()
         assert populated.dump(VERSION_13_KEPT) == before
+        assert markers(populated) == ["A"]
+        # Commands refuse a ledger below the latest version, and later migrations clear no marker.
+        assert populated.run("migrate")[0] == 0
         assert markers(populated) == ["A"]
         assert "1 accounts have not been reconciled" in populated.totals()
 

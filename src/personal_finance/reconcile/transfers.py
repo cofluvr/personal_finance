@@ -24,7 +24,7 @@ from personal_finance.reconcile.transfer_effects import (
     PAIR_SAME_ACCOUNT,
     PAIR_TYPE_DOES_NOT_FIT,
     TRANSFER_DATE_WINDOW_DAYS,
-    current_match_effects,
+    current_transfer_effects,
     pair_refusal,
     transaction_facts,
     write_transfer_effects,
@@ -163,7 +163,7 @@ def _match(conn, named_sides, rules) -> TransferMatched:
     _record_match_event(conn, match_id, "made")
     write_transfer_effects(conn)
     # A candidate always applies once matched. Anything else is a fault here, never stored.
-    if current_match_effects(conn)[match_id].state != MATCH_APPLIED:
+    if current_transfer_effects(conn)[0][match_id].state != MATCH_APPLIED:
         raise AssertionError("a matched candidate did not apply")
     return TransferMatched(
         match_id, outflow.transaction_id, inflow.transaction_id,

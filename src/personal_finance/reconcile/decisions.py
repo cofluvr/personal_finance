@@ -20,7 +20,7 @@ from personal_finance.reconcile.apply import (
     reconcile_account,
 )
 from personal_finance.reconcile.classification_effects import unsettled_classifications
-from personal_finance.reconcile.transfer_effects import unsettled_matches
+from personal_finance.reconcile.transfer_effects import unsettled_transfers
 from personal_finance.reconcile.correction_effects import unsettled_correction_fields
 from personal_finance.reconcile.cross_document import (
     RELATION_DIFFERENT,
@@ -470,7 +470,7 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
     before = _memberships(conn, account_id)
     unsettled_before = unsettled_correction_fields(conn, account_id)
     unclassified_before = unsettled_classifications(conn, account_id)
-    unmatched_before = unsettled_matches(conn)
+    unmatched_before = unsettled_transfers(conn)
     expected = {
         records for transaction_id, records in before.items()
         if not any(transaction_id in group for group in groups)
@@ -500,7 +500,7 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
         raise DecisionRefused(JOINS_DISAGREEING_CORRECTIONS)
     if unsettled_classifications(conn, account_id) - unclassified_before:
         raise DecisionRefused(LEAVES_CLASSIFICATION_UNSETTLED)
-    if unsettled_matches(conn) - unmatched_before:
+    if unsettled_transfers(conn) - unmatched_before:
         raise DecisionRefused(LEAVES_TRANSFER_UNSETTLED)
 
     still_open = conn.execute("SELECT 1 FROM review_issue WHERE id = ?", (item_id,)).fetchone()
@@ -615,7 +615,7 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules, replaci
     before = _memberships(conn, account_id)
     unsettled_before = unsettled_correction_fields(conn, account_id)
     unclassified_before = unsettled_classifications(conn, account_id)
-    unmatched_before = unsettled_matches(conn)
+    unmatched_before = unsettled_transfers(conn)
     expected = {records for key, records in before.items() if key != transaction_id}
     expected.update(frozenset(group) for group in groups)
 
@@ -641,7 +641,7 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules, replaci
         raise DecisionRefused(SPLITS_CORRECTED_RECORDS)
     if unsettled_classifications(conn, account_id) - unclassified_before:
         raise DecisionRefused(LEAVES_CLASSIFICATION_UNSETTLED)
-    if unsettled_matches(conn) - unmatched_before:
+    if unsettled_transfers(conn) - unmatched_before:
         raise DecisionRefused(LEAVES_TRANSFER_UNSETTLED)
     return Separation(
         decision_id, len(groups), len(before), len(after), _overridden_guarantee(merge, groups),
@@ -981,14 +981,14 @@ def _undo(conn, account_id, decision_id, revision, rules) -> Undo:
     before = account_movement(conn, account_id).transactions
     unsettled_before = unsettled_correction_fields(conn, account_id)
     unclassified_before = unsettled_classifications(conn, account_id)
-    unmatched_before = unsettled_matches(conn)
+    unmatched_before = unsettled_transfers(conn)
     _record_event(conn, decision_id, "undone", rules)
     result = reconcile_account(conn, account_id, rules, decision_id=decision_id)
     after = account_movement(conn, account_id).transactions
     newly_unsettled = unsettled_correction_fields(conn, account_id) - unsettled_before
     newly_unclassified = unsettled_classifications(conn, account_id) - unclassified_before
     return Undo(before, after, result.moved_records, restored, len(newly_unsettled),
-                len(newly_unclassified), len(unsettled_matches(conn) - unmatched_before))
+                len(newly_unclassified), len(unsettled_transfers(conn) - unmatched_before))
 
 
 def _inconsistent(conn, account_id, without) -> bool:

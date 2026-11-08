@@ -15,6 +15,7 @@ from test_decisions import (
     CAFE,
     CLASSIFICATION_TABLES,
     DECLARATION_TABLES,
+    ONE_SIDED_TABLES,
     RESOLUTION_TABLES,
     TRANSFER_TABLES,
     pair_up,
@@ -25,7 +26,7 @@ from personal_finance.db.migrate import connect, load_migrations, migrate, schem
 VERSION_8_TABLES = tuple(table for table in ALL_TABLES
                          if table not in (*CORRECTION_TABLES, *RESOLUTION_TABLES,
                                           *DECLARATION_TABLES, *CLASSIFICATION_TABLES,
-                                          *TRANSFER_TABLES))
+                                          *TRANSFER_TABLES, *ONE_SIDED_TABLES))
 
 
 def up_to_version_9(folder):
@@ -37,7 +38,7 @@ def up_to_version_9(folder):
 
 def set_back_to_version_8(path) -> None:
     conn = connect(path)
-    for table in (*TRANSFER_TABLES, *CLASSIFICATION_TABLES, *DECLARATION_TABLES,
+    for table in (*ONE_SIDED_TABLES, *TRANSFER_TABLES, *CLASSIFICATION_TABLES, *DECLARATION_TABLES,
                   *RESOLUTION_TABLES, "transaction_correction",
                   "value_correction_event",
                   "value_correction_record", "value_correction"):

@@ -26,6 +26,12 @@ from personal_finance.reconcile.cross_document import (
 )
 from personal_finance.reconcile.classification_effects import write_classification_effects
 from personal_finance.reconcile.correction_effects import write_correction_effects
+# Imported from here by callers older than coverage_in_effect.
+from personal_finance.reconcile.coverage_in_effect import (
+    DeclaredCoverage,
+    coverage_declaration_states,
+    declared_coverage,
+)
 from personal_finance.reconcile.rules import DEFAULT_RULES, RULES_VERSION, MatchingRules
 from personal_finance.reconcile.same_document import RULE_SAME_DOCUMENT_PENDING_POSTED
 from personal_finance.reconcile.transfer_effects import write_transfer_effects
@@ -190,51 +196,6 @@ def load_constraints(conn, account_id, without: str | None = None) -> tuple[Cons
                    *kinds[decision_id, number])
         for (decision_id, number), (left, right) in sorted(sides.items())
     )
-
-
-@dataclass(frozen=True)
-class DeclaredCoverage:
-    """A person's coverage for one document, declared after import (D-051)."""
-
-    declaration_id: str
-    kind: str
-    start: str | None
-    end: str | None
-    date_basis: str | None
-
-    @property
-    def evidence(self) -> str | None:
-        return "user_declared" if self.kind == "complete" else None
-
-
-def coverage_declaration_states(conn, account_id, treated_as_undone: str | None = None):
-    """Each declaration's state, and each superseded one's successor, under D-048's rule."""
-    rows = conn.execute(
-        """SELECT declaration.id, declaration.supersedes_declaration_id,
-                  EXISTS (SELECT 1 FROM coverage_declaration_event undone
-                          WHERE undone.declaration_id = declaration.id
-                            AND undone.event = 'undone')
-           FROM coverage_declaration declaration WHERE declaration.account_id = ?""",
-        (account_id,),
-    ).fetchall()
-    return supersession_chain_states(rows, treated_as_undone)
-
-
-def declared_coverage(conn, account_id, treated_as_undone: str | None = None
-                      ) -> dict[str, DeclaredCoverage]:
-    """The declaration in effect for each document that has one. Each declaration supersedes the
-    one in effect, so at most one per document is active (D-051)."""
-    states, _ = coverage_declaration_states(conn, account_id, treated_as_undone)
-    return {
-        document_id: DeclaredCoverage(declaration_id, *values)
-        for declaration_id, document_id, *values in conn.execute(
-            """SELECT id, source_document_id, coverage_kind, coverage_start, coverage_end,
-                      date_basis
-               FROM coverage_declaration WHERE account_id = ?""",
-            (account_id,),
-        )
-        if states[declaration_id] == STATE_ACTIVE
-    }
 
 
 def active_resolutions(conn, account_id, treated_as_undone: str | None = None) -> dict[str, tuple]:

@@ -31,7 +31,10 @@ from personal_finance.reconcile.decisions import (
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reconcile.supersession import STATE_ACTIVE, STATE_SUPERSEDED
-from personal_finance.reconcile.transfer_effects import unsettled_matches, write_transfer_effects
+from personal_finance.reconcile.transfer_effects import (
+    unsettled_transfers,
+    write_transfer_effects,
+)
 from personal_finance.reports.correction_evidence import correction_undo_outlook, load_correction
 from personal_finance.reports.review_evidence import load_merge_evidence, transaction_revision
 
@@ -235,14 +238,14 @@ def _correct(conn, account_id, transaction_id, revision, field, value_text, rule
         [(correction_id, record_id) for record_id in sorted(record_ids)],
     )
     unclassified_before = unsettled_classifications(conn, account_id)
-    unmatched_before = unsettled_matches(conn)
+    unmatched_before = unsettled_transfers(conn)
     _record_correction_event(conn, correction_id, "made")
     write_correction_effects(conn, account_id)
     write_classification_effects(conn, account_id)
     write_transfer_effects(conn)
     if unsettled_classifications(conn, account_id) - unclassified_before:
         raise DecisionRefused(AGAINST_CLASSIFIED_DIRECTION)
-    if unsettled_matches(conn) - unmatched_before:
+    if unsettled_transfers(conn) - unmatched_before:
         raise DecisionRefused(LEAVES_TRANSFER_UNSETTLED)
     return CorrectionMade(correction_id, field, len(record_ids))
 
@@ -300,7 +303,7 @@ def _undo_correction(conn, account_id, correction_id, revision, rules) -> Correc
     correction = _checked_for_replacing(conn, account_id, correction_id, revision)
     unsettled_before = unsettled_correction_fields(conn, account_id)
     unclassified_before = unsettled_classifications(conn, account_id)
-    unmatched_before = unsettled_matches(conn)
+    unmatched_before = unsettled_transfers(conn)
     _record_correction_event(conn, correction_id, "undone")
     write_correction_effects(conn, account_id)
     write_classification_effects(conn, account_id)
@@ -308,7 +311,7 @@ def _undo_correction(conn, account_id, correction_id, revision, rules) -> Correc
     newly_unsettled = unsettled_correction_fields(conn, account_id) - unsettled_before
     newly_unclassified = unsettled_classifications(conn, account_id) - unclassified_before
     return CorrectionUndone(correction.supersedes_correction_id, len(newly_unsettled),
-                            len(newly_unclassified), len(unsettled_matches(conn) - unmatched_before))
+                            len(newly_unclassified), len(unsettled_transfers(conn) - unmatched_before))
 
 
 def _record_correction_event(conn, correction_id, event) -> None:

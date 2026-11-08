@@ -1,18 +1,22 @@
-"""Which transfer matches apply, and which pairs are candidates. See decisions.md D-054.
+"""Which transfer matches and one-sided transfers apply, and which pairs are candidates. See
+decisions.md D-054 and D-055.
 
 Each account derives alone, and matching never reads anything here. A match is stated by a person
-over two transactions of two accounts, and its outcome is computed afterwards from both accounts'
-memberships, effective amounts and applied types. It is written to the derived
-transfer_match_effect table for the whole ledger, in the caller's database transaction, wherever
-classifications are written.
+over two transactions of two accounts, and a one-sided transfer over one transaction and a
+counterpart account. Their outcomes are computed afterwards from the accounts' memberships,
+effective amounts, applied types and, for a one-sided transfer, the counterpart's transactions and
+coverage. They are written to the derived transfer_match_effect and one_sided_transfer_effect
+tables for the whole ledger, in the caller's database transaction, wherever classifications are
+written.
 """
 
 import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from personal_finance.reconcile.classification_effects import PAID_ACCOUNT_TYPES_BY_TYPE
+from personal_finance.reconcile.coverage_in_effect import complete_coverage_by_basis
 
 # The types a person states for a movement between their own accounts (D-054).
 TRANSFER_TYPES = ("transfer", "card_payment", "loan_payment", "investment_contribution")
@@ -28,6 +32,10 @@ MATCH_BASIS_CHANGED = "basis_changed"
 MATCH_CONFLICT = "conflict"
 MATCH_AMOUNTS_DIFFER = "amounts_differ"
 MATCH_TYPE_DIFFERS = "type_differs"
+# A one-sided transfer shares applied, basis_changed, conflict and type_differs, and adds these
+# two (D-055).
+ONE_SIDED_COUNTERPART_FOUND = "counterpart_found"
+ONE_SIDED_COUNTERPART_COVERED = "counterpart_covered"
 
 # Why a pair is not a candidate, in the order checked.
 PAIR_SAME_ACCOUNT = "same_account"
@@ -46,11 +54,26 @@ class ActiveMatch:
 
 
 @dataclass(frozen=True)
+class ActiveOneSided:
+    one_sided_transfer_id: str
+    account_id: str
+    counterpart_account_id: str
+    record_ids: frozenset[str]
+
+
+@dataclass(frozen=True)
 class MatchEffect:
     state: str
     # The two transactions it joins while it applies, else None.
     outflow_transaction_id: str | None
     inflow_transaction_id: str | None
+
+
+@dataclass(frozen=True)
+class OneSidedEffect:
+    state: str
+    # Its transaction while it applies, else None.
+    transaction_id: str | None
 
 
 @dataclass(frozen=True)
@@ -152,6 +175,33 @@ def transaction_facts(conn: sqlite3.Connection, transaction_ids) -> dict[str, Tr
         _facts_of, conn.execute(_FACTS + f" WHERE entry.id IN ({marks})", wanted))}
 
 
+_ACTIVE_ONE_SIDED_BOUND = """
+    SELECT statement.id, statement.account_id, statement.counterpart_account_id,
+           bound.source_record_id
+    FROM one_sided_transfer statement
+    JOIN one_sided_transfer_record bound ON bound.one_sided_transfer_id = statement.id
+    WHERE NOT EXISTS (SELECT 1 FROM one_sided_transfer_event undone
+                      WHERE undone.one_sided_transfer_id = statement.id
+                        AND undone.event = 'undone')"""
+
+
+def load_active_one_sided(
+    conn: sqlite3.Connection, treated_as_undone: str | None = None
+) -> tuple[ActiveOneSided, ...]:
+    """Every active one-sided transfer of the ledger, with the records it binds."""
+    accounts_by_statement, record_ids_by_statement = {}, defaultdict(set)
+    for statement_id, account_id, counterpart_id, record_id in conn.execute(
+            _ACTIVE_ONE_SIDED_BOUND):
+        if statement_id != treated_as_undone:
+            accounts_by_statement[statement_id] = (account_id, counterpart_id)
+            record_ids_by_statement[statement_id].add(record_id)
+    return tuple(
+        ActiveOneSided(statement_id, *accounts_by_statement[statement_id],
+                       frozenset(record_ids_by_statement[statement_id]))
+        for statement_id in sorted(accounts_by_statement)
+    )
+
+
 def load_active_matches(
     conn: sqlite3.Connection, treated_as_undone: str | None = None
 ) -> tuple[ActiveMatch, ...]:
@@ -167,29 +217,42 @@ def load_active_matches(
     )
 
 
-def effective_matches(active_matches, transaction_by_record_id,
-                      facts_by_transaction) -> dict[str, MatchEffect]:
+def statements_by_transaction(active_matches, active_one_sided,
+                              transaction_by_record_id) -> dict[str, set[str]]:
+    """The active matches and one-sided transfers holding records of each transaction."""
+    holders = defaultdict(set)
+    for match in active_matches:
+        for record in match.outflow_record_ids | match.inflow_record_ids:
+            if record in transaction_by_record_id:
+                holders[transaction_by_record_id[record]].add(match.match_id)
+    for statement in active_one_sided:
+        for record in statement.record_ids:
+            if record in transaction_by_record_id:
+                holders[transaction_by_record_id[record]].add(statement.one_sided_transfer_id)
+    return holders
+
+
+def effective_matches(active_matches, transaction_by_record_id, facts_by_transaction,
+                      holders_by_transaction) -> dict[str, MatchEffect]:
     """The outcome of every active match, keyed by match.
 
     A side's records must sit in one transaction, no transaction may hold records of two active
-    matches, the amounts must still offset exactly with money leaving the outflow side, and every
-    applied type must fit the pair. The first rule broken names the state (D-054).
+    statements, matches or one-sided transfers, the amounts must still offset exactly with money
+    leaving the outflow side, and every applied type must fit the pair. The first rule broken names
+    the state (D-054, D-055).
     """
-    holding_by_match = {}
-    matches_by_transaction = defaultdict(set)
-    for match in active_matches:
-        sides = tuple({transaction_by_record_id.get(record) for record in record_ids}
-                      for record_ids in (match.outflow_record_ids, match.inflow_record_ids))
-        holding_by_match[match.match_id] = sides
-        for transaction in set().union(*sides) - {None}:
-            matches_by_transaction[transaction].add(match.match_id)
+    holding_by_match = {
+        match.match_id: tuple({transaction_by_record_id.get(record) for record in record_ids}
+                              for record_ids in (match.outflow_record_ids, match.inflow_record_ids))
+        for match in active_matches
+    }
 
     outcome = {}
     for match_id, (outflow, inflow) in holding_by_match.items():
         if len(outflow) != 1 or len(inflow) != 1 or None in outflow | inflow:
             outcome[match_id] = MatchEffect(MATCH_BASIS_CHANGED, None, None)
             continue
-        if any(len(matches_by_transaction[transaction]) > 1 for transaction in outflow | inflow):
+        if any(len(holders_by_transaction[transaction]) > 1 for transaction in outflow | inflow):
             outcome[match_id] = MatchEffect(MATCH_CONFLICT, None, None)
             continue
         (outflow_id,), (inflow_id,) = outflow, inflow
@@ -204,41 +267,138 @@ def effective_matches(active_matches, transaction_by_record_id,
     return outcome
 
 
+def window_days(dates) -> frozenset[date]:
+    """Every day within TRANSFER_DATE_WINDOW_DAYS of any of the dates (D-055)."""
+    return frozenset(
+        day + timedelta(days=offset) for day in dates
+        for offset in range(-TRANSFER_DATE_WINDOW_DAYS, TRANSFER_DATE_WINDOW_DAYS + 1)
+    )
+
+
+def coverage_spans_window(dates, spans_by_basis) -> bool:
+    """Whether every day of the window lies inside complete coverage on one date basis. A
+    transaction with no date has no window, so nothing spans it."""
+    days = window_days(dates)
+    return bool(days) and any(
+        all(any(first <= day <= last for first, last in spans) for day in days)
+        for spans in spans_by_basis.values()
+    )
+
+
+def opposite_facts(conn: sqlite3.Connection, account_id: str,
+                   amount_cents: int) -> list[TransactionFacts]:
+    """The live transactions of an account whose effective amount is exactly the opposite."""
+    return [_facts_of(row) for row in conn.execute(
+        _FACTS + """ WHERE entry.account_id = ?
+                       AND COALESCE(amount_fix.corrected_amount_cents, entry.amount_cents) = ?""",
+        (account_id, -amount_cents),
+    )]
+
+
+def counterpart_found(conn: sqlite3.Connection, facts: TransactionFacts,
+                      counterpart_account_id: str) -> bool:
+    """Whether a candidate pairs the transaction with one of the counterpart account's."""
+    return any(pair_refusal(facts, other) is None
+               for other in opposite_facts(conn, counterpart_account_id, facts.amount_cents))
+
+
+def one_sided_type_fits(facts: TransactionFacts, counterpart_account_type: str) -> bool:
+    """A transfer kind applies, fitting the transaction's account and the counterpart (D-055)."""
+    return facts.financial_type in TRANSFER_TYPES and types_fit_pair(
+        (facts.financial_type,), (facts.account_type, counterpart_account_type))
+
+
+def effective_one_sided(conn, active_one_sided, transaction_by_record_id, facts_by_transaction,
+                        holders_by_transaction) -> dict[str, OneSidedEffect]:
+    """The outcome of every active one-sided transfer, keyed by its ID.
+
+    Its records must sit in one transaction that no other active statement holds, a fitting
+    transfer kind must apply there, no candidate may pair it with the counterpart account, and the
+    counterpart's complete coverage must not span its window. The first rule broken names the
+    state (D-055).
+    """
+    account_type_by_id = dict(conn.execute("SELECT id, account_type FROM account"))
+    spans_by_account = {}
+    outcome = {}
+    for statement in active_one_sided:
+        statement_id = statement.one_sided_transfer_id
+        holding = {transaction_by_record_id.get(record) for record in statement.record_ids}
+        if len(holding) != 1 or None in holding:
+            outcome[statement_id] = OneSidedEffect(MATCH_BASIS_CHANGED, None)
+            continue
+        (transaction_id,) = holding
+        if len(holders_by_transaction[transaction_id]) > 1:
+            outcome[statement_id] = OneSidedEffect(MATCH_CONFLICT, None)
+            continue
+        facts = facts_by_transaction[transaction_id]
+        counterpart = statement.counterpart_account_id
+        if not one_sided_type_fits(facts, account_type_by_id[counterpart]):
+            outcome[statement_id] = OneSidedEffect(MATCH_TYPE_DIFFERS, None)
+            continue
+        if counterpart_found(conn, facts, counterpart):
+            outcome[statement_id] = OneSidedEffect(ONE_SIDED_COUNTERPART_FOUND, None)
+            continue
+        if counterpart not in spans_by_account:
+            spans_by_account[counterpart] = complete_coverage_by_basis(conn, counterpart)
+        if coverage_spans_window(facts.dates, spans_by_account[counterpart]):
+            outcome[statement_id] = OneSidedEffect(ONE_SIDED_COUNTERPART_COVERED, None)
+            continue
+        outcome[statement_id] = OneSidedEffect(MATCH_APPLIED, transaction_id)
+    return outcome
+
+
 def bound_transaction_by_record_id(conn: sqlite3.Connection) -> dict[str, str]:
-    """The transaction holding each record bound by any match."""
+    """The transaction holding each record bound by any match or one-sided transfer."""
     return dict(conn.execute(
         """SELECT DISTINCT link.source_record_id, link.transaction_id
-           FROM transfer_match_record bound
+           FROM (SELECT source_record_id FROM transfer_match_record
+                 UNION SELECT source_record_id FROM one_sided_transfer_record) bound
            JOIN transaction_source link ON link.source_record_id = bound.source_record_id"""
     ))
 
 
-def current_match_effects(
+def current_transfer_effects(
     conn: sqlite3.Connection, treated_as_undone: str | None = None
-) -> dict[str, MatchEffect]:
+) -> tuple[dict[str, MatchEffect], dict[str, OneSidedEffect]]:
+    """The outcome of every active match and one-sided transfer. treated_as_undone leaves one of
+    either kind out, to see what undoing it would leave."""
     membership = bound_transaction_by_record_id(conn)
-    return effective_matches(load_active_matches(conn, treated_as_undone), membership,
-                             transaction_facts(conn, membership.values()))
+    matches = load_active_matches(conn, treated_as_undone)
+    one_sided = load_active_one_sided(conn, treated_as_undone)
+    facts = transaction_facts(conn, membership.values())
+    holders = statements_by_transaction(matches, one_sided, membership)
+    return (effective_matches(matches, membership, facts, holders),
+            effective_one_sided(conn, one_sided, membership, facts, holders))
 
 
 def write_transfer_effects(conn: sqlite3.Connection) -> None:
-    """Rewrite the ledger's derived rows from current memberships, corrections and
-    classifications. The caller holds the transaction, and all three must already be final."""
-    effects = current_match_effects(conn)
+    """Rewrite the ledger's derived rows from current memberships, corrections, classifications
+    and coverage. The caller holds the transaction, and all of them must already be final."""
+    match_effects, one_sided_effects = current_transfer_effects(conn)
     conn.execute("DELETE FROM transfer_match_effect")
     conn.executemany(
         """INSERT INTO transfer_match_effect (match_id, state, outflow_transaction_id,
                                               inflow_transaction_id)
            VALUES (?, ?, ?, ?)""",
         [(match_id, effect.state, effect.outflow_transaction_id, effect.inflow_transaction_id)
-         for match_id, effect in sorted(effects.items())],
+         for match_id, effect in sorted(match_effects.items())],
+    )
+    conn.execute("DELETE FROM one_sided_transfer_effect")
+    conn.executemany(
+        """INSERT INTO one_sided_transfer_effect (one_sided_transfer_id, state, transaction_id)
+           VALUES (?, ?, ?)""",
+        [(statement_id, effect.state, effect.transaction_id)
+         for statement_id, effect in sorted(one_sided_effects.items())],
     )
 
 
-def unsettled_matches(conn: sqlite3.Connection) -> frozenset:
-    """Active matches that do not apply, with their state. Match IDs are stable, so they serve."""
+def unsettled_transfers(conn: sqlite3.Connection) -> frozenset:
+    """Active matches and one-sided transfers that do not apply, with their state. Their IDs are
+    stable and never shared, so they serve."""
     return frozenset(conn.execute(
-        "SELECT match_id, state FROM transfer_match_effect WHERE state <> 'applied'"
+        """SELECT match_id, state FROM transfer_match_effect WHERE state <> 'applied'
+           UNION SELECT one_sided_transfer_id, state FROM one_sided_transfer_effect
+                 WHERE state <> 'applied'"""
     ))
 
 
