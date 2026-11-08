@@ -6,7 +6,7 @@ Everything here reads the ledger and nothing writes to it.
 import hashlib
 import json
 import sqlite3
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
 from personal_finance.reconcile.apply import load_evidence
 from personal_finance.reconcile.correction_effects import (
@@ -120,15 +120,15 @@ def correction_undo_outlook(
 ) -> CorrectionUndoOutlook:
     """The undo token, and this field's state either side of an undo (D-049).
 
-    Covers the correction's state, field and value, the evidence of the records it binds, the
-    transactions holding them, the other corrections of that field there, and the outcome with
-    and without it, with anything it superseded restored. Grouping is not recomputed: undoing a
-    correction moves no record. An unrelated file leaves it unchanged.
+    Only an active correction has one, so its state is not covered. Covers its field and value, the transactions holding the records it binds,
+    and this field's outcome there with and without it, with anything it superseded restored. The
+    bound records and their documents are immutable, and another correction of the field reaching
+    those transactions changes the outcomes, so neither is covered separately. Grouping is not
+    recomputed: undoing a correction moves no record. An unrelated file leaves it unchanged.
     """
     account_id = correction.account_id
     documents, records, _, _ = load_evidence(conn, account_id)
     document_by_id = {document.id: document for document in documents}
-    record_by_id = {record.id: record for record in records}
     key_by_record_id = {
         record.id: (document_by_id[record.document_id].content_sha256, record.row_index)
         for record in records
@@ -141,7 +141,6 @@ def correction_undo_outlook(
     for record_id, transaction in membership.items():
         if transaction in records_by_transaction:
             records_by_transaction[transaction].add(record_id)
-    nearby_record_ids = set().union(*records_by_transaction.values())
 
     with_it = load_active_corrections(conn, account_id)
     without_it = load_active_corrections(conn, account_id, correction.correction_id)
@@ -155,36 +154,14 @@ def correction_undo_outlook(
         effect = effects.get((transaction, correction.field))
         return None if effect is None else [effect.state, effect.applied_value]
 
-    other_corrections = {
-        (other.corrected_value, tuple(keyed(other.bound_record_ids)))
-        for other in (*with_it, *without_it)
-        if other.correction_id != correction.correction_id
-        and other.field == correction.field
-        and other.bound_record_ids & nearby_record_ids
-    }
     material = {
-        "state": correction.state,
         "field": correction.field,
         "value": correction.corrected_value,
-        "records": sorted(
-            [key_by_record_id[record_id],
-             _without(asdict(record_by_id[record_id]), "id", "document_id")]
-            for record_id in bound_record_ids
-        ),
-        "documents": sorted(
-            (_without(asdict(document_by_id[document_id]), "id")
-             for document_id in {record_by_id[record_id].document_id
-                                 for record_id in bound_record_ids}),
-            key=repr,
-        ),
         "transactions": sorted(
             [keyed(records_by_transaction[transaction]),
              effect_view(effects_with_it, transaction),
              effect_view(effects_without_it, transaction)]
             for transaction in holding_transactions
-        ),
-        "other_corrections": sorted(
-            [value, list(bound_keys)] for value, bound_keys in other_corrections
         ),
     }
     field_state_by_transaction = tuple(sorted(
@@ -201,7 +178,3 @@ def correction_revision(material: dict) -> str:
     text = json.dumps(material, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
     return f"c{CORRECTION_REVISION_VERSION}-{digest}"
-
-
-def _without(fields: dict, *names: str) -> dict:
-    return {key: value for key, value in fields.items() if key not in names}

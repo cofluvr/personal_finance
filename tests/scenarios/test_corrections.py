@@ -249,6 +249,7 @@ class TestRefusals:  # V3
         ("amount", "six", AMOUNT_INVALID),
         ("amount", "", AMOUNT_INVALID),
         ("transaction_date", "01/10/2026", DATE_INVALID),
+        ("transaction_date", "20260110", DATE_INVALID),
         ("posting_date", "2026-02-30", DATE_INVALID),
         ("posting_date", "", DATE_INVALID),
         ("description", "   ", DESCRIPTION_BLANK),
@@ -331,6 +332,19 @@ class TestRefusals:  # V3
         )
         self.nothing_changes(ledger, lambda: ledger.correct(transaction, "amount", "-4.00"),
                              FIELD_UNSETTLED.split("{")[0])
+
+    def test_superseding_one_of_two_agreeing_corrections(self, ledger):
+        item, one, two = pair_up(ledger)
+        first = ledger.correct_ok(one, "amount", "-6.00")
+        ledger.correct_ok(two, "amount", "-6.00")
+        (item,) = ledger.items()
+        confirm_ok(ledger, item, (one, two))
+        assert ledger.field_states() == [(("a.csv", "b.csv"), "amount", "applied")]
+        transaction = holding(ledger, "a.csv")
+        self.nothing_changes(
+            ledger, lambda: ledger.correct(transaction, "amount", "-4.00", supersedes=first),
+            FIELD_UNSETTLED.split("{")[0],
+        )
 
     def test_supersedes_needs_its_revision(self, ledger):
         transaction = single(ledger)
@@ -670,8 +684,26 @@ class TestTokens:  # V13
         assert ledger.correction_revision(one) != token
 
 
-# Set from the first run of test_the_correction_token_is_pinned at M2.6, on unchanged code since.
-PINNED_CORRECTION_REVISION = "c1-9393c2d7e502a39d"
+    def test_undoing_an_agreeing_correction_changes_what_undo_would_leave(self, ledger):
+        """Both apply the same value, so only the outcome after this one's undo differs."""
+        item, one, two = pair_up(ledger)
+        first = ledger.correct_ok(one, "amount", "-6.00")
+        second = ledger.correct_ok(two, "amount", "-6.00")
+        (item,) = ledger.items()
+        confirm_ok(ledger, item, (one, two))
+        token = ledger.correction_revision(first)
+        assert "corrected now, corrected after" in ledger.correction_show(first)
+        assert ledger.undo_correction(second)[0] == 0
+        assert ledger.field_states() == [(("a.csv", "b.csv"), "amount", "applied")]
+        assert ledger.correction_revision(first) != token
+        assert "corrected now, source value, uncorrected after" in ledger.correction_show(first)
+        before = ledger.dump()
+        code, _, err = ledger.undo_correction(first, token)
+        assert code == 2 and STALE_CORRECTION_REVISION in err
+        assert ledger.dump() == before
+
+# Set when M2.6 was built, after its immaterial inputs were removed (D-049).
+PINNED_CORRECTION_REVISION = "c1-e2235f95e29f164e"
 
 
 class TestPrivacy:  # V16
