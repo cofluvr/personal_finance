@@ -278,6 +278,24 @@ class TestCoverageWindow:  # O6
             assert code == 0, err
             assert ledger.one_sided_states() == [("applied", ("out.csv",))]
 
+    @pytest.mark.parametrize(("generated_on", "spans"), [("2026-01-16", True),
+                                                          ("2026-01-15", False)])
+    def test_metadata_coverage_ends_where_it_supports_matching(self, ledger, generated_on,
+                                                               spans):
+        """A claim to 01/15 generated on 01/15 cannot vouch for that day (D-027)."""
+        transaction = outflow(ledger)
+        preamble = (f"# generated-on: {generated_on}\n# coverage-kind: complete\n"
+                    "# coverage-start: 2026-01-01\n# coverage-end: 2026-01-15\n"
+                    "# coverage-basis: posting\n")
+        ledger.load_path(ledger.write("s.csv", preamble + CHECKING_HEADER,
+                                      ["S-9,2026-01-02,2026-01-02,SYNTHETIC GROCER,-9.00,POSTED"]),
+                         account="S", layout="synthetic_checking_v1")
+        code, _, err = ledger.one_sided(transaction)
+        if spans:
+            assert code == 2 and ONE_SIDED_COUNTERPART_COVERED in err
+        else:
+            assert code == 0, err
+
     def test_two_documents_together_can_span_it(self, ledger):
         transaction = outflow(ledger)
         ledger.card("s1.csv", "01/02/2026,SYNTHETIC GROCER,9.00,", account="S",
@@ -611,13 +629,16 @@ class TestTotals:  # O10
         ledger.add_account("T", "savings")
         ledger.card("t.csv", UNRELATED_ROW, account="T")
         ledger.one_sided_ok(holding(ledger, "in.csv"), "T")
+        ledger.card("more.csv", "03/10/2026,SYNTHETIC MOVE OUT,7.00,")
+        ledger.classify_ok(holding(ledger, "more.csv"), "transfer")
+        ledger.one_sided_ok(holding(ledger, "more.csv"))
         assert ledger.transfers_section() == (
             "  Matched: 0 pairs, moving 0.00\n"
             "  In a candidate pair, not matched: 0 transactions\n"
-            "  One-sided, the other side not in the ledger: 2 transactions, 50.00 out and 20.00 in\n"
+            "  One-sided, the other side not in the ledger: 3 transactions, 57.00 out and 20.00 in\n"
             "  Of a transfer kind with no match, candidate or one-sided transfer: 0 transactions\n"
         )
-        assert "2 one-sided transfers rest on another account whose side is not in the ledger: 1 " \
+        assert "3 one-sided transfers rest on another account whose side is not in the ledger: 2 " \
                "where that account has no documents, 1 where its documents do not cover every " \
                "day within 5 days." in ledger.totals()
         assert "spending on that card is understated" not in ledger.totals()
