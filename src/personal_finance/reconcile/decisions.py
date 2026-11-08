@@ -19,6 +19,7 @@ from personal_finance.reconcile.apply import (
     load_evidence,
     reconcile_account,
 )
+from personal_finance.reconcile.classification_effects import unsettled_classifications
 from personal_finance.reconcile.correction_effects import unsettled_correction_fields
 from personal_finance.reconcile.cross_document import (
     RELATION_DIFFERENT,
@@ -27,8 +28,10 @@ from personal_finance.reconcile.cross_document import (
     RULE_DECISION,
     _DisjointSet,
     directly_linked,
+    is_pending_and_posted,
     joins_distinct_ids,
 )
+from personal_finance.reconcile.same_document import RULE_SAME_DOCUMENT_PENDING_POSTED
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reports.decision_evidence import (
     load_decision,
@@ -75,8 +78,12 @@ DECISION_NOT_FOUND = "decision not found. Run review decisions."
 DECISION_WRONG_ACCOUNT = "this decision belongs to another account. Nothing was changed."
 DECISION_NOT_ACTIVE = "this decision has already been undone. Nothing was changed."
 CONFIRM_UNSUPPORTED = (
-    "only cross-document candidate items and decision conflicts can be confirmed. Other kinds "
-    "stay open for later workflows. Nothing was changed."
+    "only cross-document candidate items, decision conflicts and pending and posted rows of one "
+    "document can be confirmed. Other kinds stay open for later workflows. Nothing was changed."
+)
+SAME_DOCUMENT_GROUP = (
+    "rows of one document can only be confirmed as one group of one pending and one posted "
+    "transaction, each a single row. Nothing was changed."
 )
 GROUP_REPEATED = "a transaction was named more than once. Nothing was changed."
 GROUP_OUTSIDE = "a group names a transaction that is not in this item. Nothing was changed."
@@ -191,6 +198,11 @@ SPLITS_CORRECTED_RECORDS = (
     "that disagree, so their source values would be used. It was not recorded and nothing was "
     "changed. Undo that correction first, then correct each part."
 )
+LEAVES_CLASSIFICATION_UNSETTLED = (
+    "this decision would leave a classified transaction unclassified, because classifications "
+    "would disagree, lose their basis or no longer fit its direction. It was not recorded and "
+    "nothing was changed. Undo the classification first, then classify the result."
+)
 WOULD_SPLIT_MORE = (
     "this separation would change more than the transaction it names, so it was not recorded "
     "and nothing was changed."
@@ -256,6 +268,8 @@ class Undo:
     restored: str | None = None
     # Fields of transactions left on their source value by this undo, and not before (D-049).
     newly_unsettled_correction_fields: int = 0
+    # Transactions left unclassified by this undo for a disagreement, and not before (D-053).
+    newly_unclassified_transactions: int = 0
 
 
 def undecided_direct_pairs(
@@ -425,7 +439,7 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
         raise DecisionRefused(ITEM_NOT_FOUND)
     if item.account_id != account_id:
         raise DecisionRefused(ITEM_WRONG_ACCOUNT)
-    if item.rule not in (RULE_CANDIDATES, RULE_DECISION):
+    if item.rule not in (RULE_CANDIDATES, RULE_DECISION, RULE_SAME_DOCUMENT_PENDING_POSTED):
         raise DecisionRefused(CONFIRM_UNSUPPORTED)
     if item.status != "open":
         raise DecisionRefused(ITEM_NOT_OPEN)
@@ -446,6 +460,7 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
 
     before = _memberships(conn, account_id)
     unsettled_before = unsettled_correction_fields(conn, account_id)
+    unclassified_before = unsettled_classifications(conn, account_id)
     expected = {
         records for transaction_id, records in before.items()
         if not any(transaction_id in group for group in groups)
@@ -473,6 +488,8 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
         raise DecisionRefused(WOULD_CHANGE_MORE)
     if unsettled_correction_fields(conn, account_id) - unsettled_before:
         raise DecisionRefused(JOINS_DISAGREEING_CORRECTIONS)
+    if unsettled_classifications(conn, account_id) - unclassified_before:
+        raise DecisionRefused(LEAVES_CLASSIFICATION_UNSETTLED)
 
     still_open = conn.execute("SELECT 1 FROM review_issue WHERE id = ?", (item_id,)).fetchone()
     return Confirmation(
@@ -585,6 +602,7 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules, replaci
 
     before = _memberships(conn, account_id)
     unsettled_before = unsettled_correction_fields(conn, account_id)
+    unclassified_before = unsettled_classifications(conn, account_id)
     expected = {records for key, records in before.items() if key != transaction_id}
     expected.update(frozenset(group) for group in groups)
 
@@ -608,6 +626,8 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules, replaci
         raise DecisionRefused(WOULD_SPLIT_MORE)
     if unsettled_correction_fields(conn, account_id) - unsettled_before:
         raise DecisionRefused(SPLITS_CORRECTED_RECORDS)
+    if unsettled_classifications(conn, account_id) - unclassified_before:
+        raise DecisionRefused(LEAVES_CLASSIFICATION_UNSETTLED)
     return Separation(
         decision_id, len(groups), len(before), len(after), _overridden_guarantee(merge, groups),
         len(overturned), len(kept),
@@ -803,6 +823,8 @@ def _check_groups(conn, item, groups, rules) -> dict[str, list]:
         transaction_id: [rows[record.record_id] for record in present[transaction_id].records]
         for transaction_id in named
     }
+    if item.rule == RULE_SAME_DOCUMENT_PENDING_POSTED:
+        return _checked_same_document_pair(groups, members)
     for group in groups:
         held = [row for transaction_id in group for row in members[transaction_id]]
         if len({row.document_id for row in held}) < len(held):
@@ -811,6 +833,20 @@ def _check_groups(conn, item, groups, rules) -> dict[str, list]:
             raise DecisionRefused(GROUP_DISTINCT_IDS)
         if not _connected(group, members, documents, rules):
             raise DecisionRefused(GROUP_NOT_CONNECTED)
+    return members
+
+
+def _checked_same_document_pair(groups, members) -> dict[str, list]:
+    """The D-021 flag is the evidence that two rows of one document may be one event, so the only
+    statement allowed is that one pending and one posted row are (D-052)."""
+    if len(groups) != 1 or len(groups[0]) != 2:
+        raise DecisionRefused(SAME_DOCUMENT_GROUP)
+    rows = [members[transaction_id] for transaction_id in groups[0]]
+    if any(len(held) != 1 for held in rows):
+        raise DecisionRefused(SAME_DOCUMENT_GROUP)
+    (left,), (right,) = rows
+    if left.document_id != right.document_id or not is_pending_and_posted(left, right):
+        raise DecisionRefused(SAME_DOCUMENT_GROUP)
     return members
 
 
@@ -929,11 +965,14 @@ def _undo(conn, account_id, decision_id, revision, rules) -> Undo:
 
     before = account_movement(conn, account_id).transactions
     unsettled_before = unsettled_correction_fields(conn, account_id)
+    unclassified_before = unsettled_classifications(conn, account_id)
     _record_event(conn, decision_id, "undone", rules)
     result = reconcile_account(conn, account_id, rules, decision_id=decision_id)
     after = account_movement(conn, account_id).transactions
     newly_unsettled = unsettled_correction_fields(conn, account_id) - unsettled_before
-    return Undo(before, after, result.moved_records, restored, len(newly_unsettled))
+    newly_unclassified = unsettled_classifications(conn, account_id) - unclassified_before
+    return Undo(before, after, result.moved_records, restored, len(newly_unsettled),
+                len(newly_unclassified))
 
 
 def _inconsistent(conn, account_id, without) -> bool:

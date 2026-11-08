@@ -298,12 +298,14 @@ class TestPossibleDuplicates:
         checking("b.csv", row, "S-9,,2026-01-01,X,-1.00,", metadata=metadata)
         assert transactions(conn) == 2
 
-    def test_a34_a_conflicting_date_or_status_is_flagged(self, conn, checking):
+    def test_a34_a_conflicting_date_is_flagged_and_pending_to_posted_merges(self, conn, checking):
+        """A34 as amended by D-052: a pending row and a posted row sharing a reliable ID are one
+        event, so status no longer conflicts. A conflicting date still does."""
         checking("a.csv", "S-1,,2026-01-10,A CAFE,-5.00,POSTED", "S-2,2026-01-11,,B CAFE,-5.00,PENDING")
         checking("b.csv", "S-1,,2026-01-12,A CAFE,-5.00,POSTED", "S-2,2026-01-11,2026-01-12,B CAFE,-5.00,POSTED")
-        assert transactions(conn) == 4
+        assert transactions(conn) == 3
         rules = sorted(rule for rule, _, _ in open_items(conn))
-        assert rules.count("cross_document_external_id") == 2
+        assert rules.count("cross_document_external_id") == 1
 
     def test_a34_an_id_repeated_within_a_document_is_flagged(self, conn, checking):
         row = "S-1,,2026-01-10,SYNTHETIC CAFE,-5.00,POSTED"

@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PLAN = (ROOT / "docs" / "plan.md").read_text()
+PLAN = (ROOT / "docs" / "archive" / "plan-m1-m2.md").read_text()
 MATRIX = (ROOT / "docs" / "m1-acceptance.md").read_text()
 
 ROW = re.compile(r"^\| (A\d+[ab]?) \| ([A-Za-z]+) \| (.*?) \|", re.MULTILINE)

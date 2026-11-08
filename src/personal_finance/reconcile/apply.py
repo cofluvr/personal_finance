@@ -1,4 +1,5 @@
-"""Applies a derivation to one account. See decisions.md D-029, D-033 and D-042 to D-045.
+"""Applies a derivation to one account. See decisions.md D-029, D-033, D-042 to D-045, D-050 and
+D-051.
 
 Every function here runs inside the caller's database transaction, so an import and
 its reconciliation commit together or not at all. Source evidence is only read.
@@ -23,8 +24,10 @@ from personal_finance.reconcile.cross_document import (
     UnresolvedRecord,
     derive,
 )
+from personal_finance.reconcile.classification_effects import write_classification_effects
 from personal_finance.reconcile.correction_effects import write_correction_effects
 from personal_finance.reconcile.rules import DEFAULT_RULES, RULES_VERSION, MatchingRules
+from personal_finance.reconcile.same_document import RULE_SAME_DOCUMENT_PENDING_POSTED
 from personal_finance.reconcile.supersession import (
     STATE_ACTIVE,
     STATE_SUPERSEDED,
@@ -36,6 +39,11 @@ MANAGED_RULES = (RULE_CANDIDATES, RULE_EXTERNAL_ID, RULE_DECISION)
 KIND_DUPLICATE = "possible_duplicate"
 KIND_CONFLICT = "decision_conflict"
 
+RESOLUTION_COMPLETED = "completed"
+RESOLUTION_DISMISSED = "dismissed"
+# Why a transaction appeared or went when a record entered or left the evidence (D-050).
+REASON_RECORD_COMPLETED = "record_completed"
+REASON_COMPLETION_UNDONE = "record_completion_undone"
 
 
 @dataclass(frozen=True)
@@ -97,8 +105,10 @@ def reconcile_account(
     state.write_review_items()
     state.repoint_other_issues()
     state.retire_unused_transactions()
-    # After memberships are final, since corrections follow their records (D-049).
+    # After memberships are final, since corrections follow their records (D-049), and
+    # classifications after corrections, since a corrected amount gives the direction (D-053).
     write_correction_effects(conn, account_id)
+    write_classification_effects(conn, account_id)
     _write_marker(conn, account_id, rules)
     return ReconcileResult(derivation, moved)
 
@@ -179,8 +189,88 @@ def load_constraints(conn, account_id, without: str | None = None) -> tuple[Cons
     )
 
 
-def load_evidence(conn, account_id):
-    """Read stored interpretation only, never the current Python layouts (D-026)."""
+@dataclass(frozen=True)
+class DeclaredCoverage:
+    """A person's coverage for one document, declared after import (D-051)."""
+
+    declaration_id: str
+    kind: str
+    start: str | None
+    end: str | None
+    date_basis: str | None
+
+    @property
+    def evidence(self) -> str | None:
+        return "user_declared" if self.kind == "complete" else None
+
+
+def coverage_declaration_states(conn, account_id, treated_as_undone: str | None = None):
+    """Each declaration's state, and each superseded one's successor, under D-048's rule."""
+    rows = conn.execute(
+        """SELECT declaration.id, declaration.supersedes_declaration_id,
+                  EXISTS (SELECT 1 FROM coverage_declaration_event undone
+                          WHERE undone.declaration_id = declaration.id
+                            AND undone.event = 'undone')
+           FROM coverage_declaration declaration WHERE declaration.account_id = ?""",
+        (account_id,),
+    ).fetchall()
+    return supersession_chain_states(rows, treated_as_undone)
+
+
+def declared_coverage(conn, account_id, treated_as_undone: str | None = None
+                      ) -> dict[str, DeclaredCoverage]:
+    """The declaration in effect for each document that has one. Each declaration supersedes the
+    one in effect, so at most one per document is active (D-051)."""
+    states, _ = coverage_declaration_states(conn, account_id, treated_as_undone)
+    return {
+        document_id: DeclaredCoverage(declaration_id, *values)
+        for declaration_id, document_id, *values in conn.execute(
+            """SELECT id, source_document_id, coverage_kind, coverage_start, coverage_end,
+                      date_basis
+               FROM coverage_declaration WHERE account_id = ?""",
+            (account_id,),
+        )
+        if states[declaration_id] == STATE_ACTIVE
+    }
+
+
+def active_resolutions(conn, account_id, treated_as_undone: str | None = None) -> dict[str, tuple]:
+    """Each resolved record's resolution: its ID, kind and completed values (D-050).
+
+    treated_as_undone leaves one resolution out, to see what undoing it would leave.
+    """
+    return {
+        record_id: (resolution_id, kind, values)
+        for resolution_id, record_id, kind, *values in conn.execute(
+            """SELECT resolution.id, resolution.source_record_id, resolution.kind,
+                      resolution.completed_amount_cents, resolution.completed_transaction_date,
+                      resolution.completed_posting_date, resolution.completed_description
+               FROM record_resolution resolution
+               WHERE resolution.account_id = ?
+                 AND NOT EXISTS (SELECT 1 FROM record_resolution_event undone
+                                 WHERE undone.resolution_id = resolution.id
+                                   AND undone.event = 'undone')""",
+            (account_id,),
+        )
+        if resolution_id != treated_as_undone
+    }
+
+
+def completed_values(parsed_values, completion) -> tuple:
+    """A completed record's amount, dates and description: parsed where read, else supplied."""
+    return tuple(parsed if parsed is not None else supplied
+                 for parsed, supplied in zip(parsed_values, completion))
+
+
+def load_evidence(conn, account_id, without_resolution: str | None = None,
+                  without_declaration: str | None = None):
+    """Read stored interpretation only, never the current Python layouts (D-026).
+
+    A completed record is a record with its completed values, and a dismissed one is neither a
+    record nor a blocker (D-050). A document's coverage is the declaration in effect, else the claim
+    at import (D-051). without_resolution and without_declaration leave one out, as if undone.
+    """
+    declared = declared_coverage(conn, account_id, without_declaration)
     documents, imported = [], {}
     for row in conn.execute(
         """SELECT document.id, document.content_sha256, document.generated_on,
@@ -196,6 +286,11 @@ def load_evidence(conn, account_id):
     ):
         (document_id, digest, generated_on, imported_at, kind, start, end, basis, evidence,
          namespace, guarantee, pending_transaction, pending_posting) = row
+        declaration = declared.get(document_id)
+        if declaration is not None:
+            kind, start, end, basis, evidence = (declaration.kind, declaration.start,
+                                                 declaration.end, declaration.date_basis,
+                                                 declaration.evidence)
         pending = pending_transaction if basis == "transaction" else pending_posting
         documents.append(
             Document(document_id, digest, kind, start, end, basis, evidence, generated_on,
@@ -203,6 +298,7 @@ def load_evidence(conn, account_id):
         )
         imported[document_id] = (imported_at, digest)
 
+    resolutions = active_resolutions(conn, account_id, without_resolution)
     records, unresolved, import_order = [], [], {}
     for row in conn.execute(
         """SELECT record.id, record.source_document_id, record.record_index, parse.status,
@@ -218,11 +314,17 @@ def load_evidence(conn, account_id):
         (account_id,),
     ):
         record_id, document_id, index, status, *values = row
+        resolution = resolutions.get(record_id)
         if status == "parsed":
             records.append(Record(record_id, document_id, index, *values))
             import_order[record_id] = (*imported[document_id], index)
-        else:
+        elif resolution is None:
             unresolved.append(UnresolvedRecord(document_id, *values[:4]))
+        elif resolution[1] == RESOLUTION_COMPLETED:
+            records.append(Record(record_id, document_id, index,
+                                  *completed_values(values[:4], resolution[2]), *values[4:],
+                                  completed_by_hand=True))
+            import_order[record_id] = (*imported[document_id], index)
     return documents, records, unresolved, import_order
 
 
@@ -262,6 +364,14 @@ class _State:
             )
         )
 
+        # A completed record enters the ledger after its import, and gets its origin then (D-050).
+        self.new_origins = {
+            record_id: str(uuid.uuid4())
+            for group in derivation.groups for record_id in group.record_ids
+            if record_id not in origins
+        }
+        origins.update(self.new_origins)
+
         self.target = {}
         self.target_rule = {}
         self.new_members = {}
@@ -288,6 +398,11 @@ class _State:
             )
         }
         self.stored_created_at = {key: value[-1] for key, value in stored.items()}
+        self.conn.executemany(
+            """INSERT INTO source_record_origin (source_record_id, original_transaction_id)
+               VALUES (?, ?)""",
+            sorted(self.new_origins.items()),
+        )
         self.revived = {}
         for transaction_id, record in self.primary.items():
             values = (record.external_id, record.transaction_date, record.posting_date,
@@ -295,14 +410,16 @@ class _State:
                       record.id)
             if transaction_id not in stored:
                 created_at = self._created_at_of_retired(transaction_id)
-                self.revived[transaction_id] = created_at
+                if created_at is not None:
+                    self.revived[transaction_id] = created_at
                 self.conn.execute(
                     """INSERT INTO ledger_transaction (id, account_id, external_id,
                                                        transaction_date, posting_date,
                                                        amount_cents, description,
                                                        settlement_status,
                                                        primary_source_record_id, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+                               COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))""",
                     (transaction_id, self.account_id, *values, created_at),
                 )
             elif stored[transaction_id][:-1] != values:
@@ -315,15 +432,19 @@ class _State:
                     (*values, transaction_id),
                 )
 
-    def _created_at_of_retired(self, transaction_id) -> str:
+    def _created_at_of_retired(self, transaction_id) -> str | None:
         """The retired row's timestamp, or for a row retired before migration 0004, when
-        its first record was linked, which is the same import."""
+        its first record was linked, which is the same import. None for a transaction that
+        never existed, which only a completed record's first entry creates (D-050)."""
         row = self.conn.execute(
             """SELECT transaction_created_at FROM transaction_identity_history
                WHERE transaction_id = ? AND event = 'retired' ORDER BY id DESC LIMIT 1""",
             (transaction_id,),
         ).fetchone()
-        return row[0] if row else self.links[self.first_record[transaction_id]][3]
+        if row:
+            return row[0]
+        first_link = self.links.get(self.first_record[transaction_id])
+        return first_link[3] if first_link else None
 
     def _record_identity_event(self, transaction_id, event, created_at, reason) -> None:
         self.conn.execute(
@@ -336,9 +457,29 @@ class _State:
         )
 
     def write_links(self, last_fingerprint) -> int:
+        # A record leaves the evidence only when its completion is undone, and enters it only when
+        # completed. Neither is a move between transactions, so neither is in the link history.
+        departed = [record_id for record_id in self.links if record_id not in self.target]
+        self.conn.executemany(
+            "DELETE FROM transaction_source WHERE source_record_id = ?",
+            [(record_id,) for record_id in departed],
+        )
+        for record_id in departed:
+            self.moved_out.setdefault(self.links[record_id][0], REASON_COMPLETION_UNDONE)
+        for record_id, transaction_id in sorted(self.target.items()):
+            if record_id not in self.links:
+                self.conn.execute(
+                    """INSERT INTO transaction_source (transaction_id, source_record_id,
+                                                       source_document_id, account_id, link_rule)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (transaction_id, record_id, self.records[record_id].document_id,
+                     self.account_id, self.target_rule[record_id]),
+                )
+                self.moved_in.setdefault(transaction_id, REASON_RECORD_COMPLETED)
+
         moved = [
             record_id for record_id, link in self.links.items()
-            if self.target[record_id] != link[0]
+            if record_id in self.target and self.target[record_id] != link[0]
         ]
         # Removing first lets records swap places without breaking the per-document rule.
         self.conn.executemany(
@@ -371,7 +512,7 @@ class _State:
             )
 
         for record_id, link in self.links.items():
-            if self.target[record_id] == link[0] and self.target_rule[record_id] != link[1]:
+            if self.target.get(record_id) == link[0] and self.target_rule[record_id] != link[1]:
                 self.conn.execute(
                     "UPDATE transaction_source SET link_rule = ? WHERE source_record_id = ?",
                     (self.target_rule[record_id], record_id),
@@ -522,7 +663,8 @@ class _State:
             targets = {
                 self.target[record_id]
                 for record_id in self.old_members[transaction_id]
-                if document_id is None or self.links[record_id][2] == document_id
+                if record_id in self.target
+                and (document_id is None or self.links[record_id][2] == document_id)
             }
             if targets == {transaction_id}:
                 continue
@@ -535,6 +677,25 @@ class _State:
                    VALUES (?, ?)""",
                 [(issue, target) for target in targets],
             )
+        # Pending and posted rows of one document are settled while they are one transaction, and
+        # open again when split (D-052).
+        self.conn.execute(
+            """UPDATE review_issue
+               SET status = CASE WHEN (SELECT COUNT(*) FROM review_issue_subject subject
+                                       WHERE subject.review_issue_id = review_issue.id) < 2
+                                 THEN 'resolved' ELSE 'open' END,
+                   resolved_at = CASE WHEN (SELECT COUNT(*) FROM review_issue_subject subject
+                                            WHERE subject.review_issue_id = review_issue.id) < 2
+                                      THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END
+               WHERE rule = ? AND id IN (
+                   SELECT subject.review_issue_id FROM review_issue_subject subject
+                   JOIN ledger_transaction entry ON entry.id = subject.transaction_id
+                   WHERE entry.account_id = ?)
+                 AND status <> CASE WHEN (SELECT COUNT(*) FROM review_issue_subject subject
+                                          WHERE subject.review_issue_id = review_issue.id) < 2
+                                    THEN 'resolved' ELSE 'open' END""",
+            (RULE_SAME_DOCUMENT_PENDING_POSTED, self.account_id),
+        )
 
     def retire_unused_transactions(self) -> None:
         for transaction_id, created_at in self.stored_created_at.items():

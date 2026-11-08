@@ -1,7 +1,8 @@
 """Migration 0009 on a populated ledger, and its append-only tables (V15, D-049).
 
-A ledger built at the latest version, with 0009's empty tables dropped and set back to version 8,
-is a version 8 ledger: 0009 only creates tables.
+A ledger built at the latest version, with the empty tables of 0009 to 0011 and 0013 dropped and set
+back to version 8, is a version 8 ledger: they only create tables. Migration stops at 9, so that only 0009 is
+tested here.
 """
 
 import sqlite3
@@ -9,17 +10,35 @@ import sqlite3
 import pytest
 from test_confirmations import confirm_ok
 from test_corrections import CORRECTION_TABLES, CorrectionLedger, single
-from test_decisions import ALL_TABLES, CAFE, pair_up
+from test_decisions import (
+    ALL_TABLES,
+    CAFE,
+    CLASSIFICATION_TABLES,
+    DECLARATION_TABLES,
+    RESOLUTION_TABLES,
+    pair_up,
+)
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 
-VERSION_8_TABLES = tuple(table for table in ALL_TABLES if table not in CORRECTION_TABLES)
+VERSION_8_TABLES = tuple(table for table in ALL_TABLES
+                         if table not in (*CORRECTION_TABLES, *RESOLUTION_TABLES,
+                                          *DECLARATION_TABLES, *CLASSIFICATION_TABLES))
+
+
+def up_to_version_9(folder):
+    folder.mkdir()
+    for migration in load_migrations()[:9]:
+        (folder / migration.path.name).write_text(migration.path.read_text())
+    return folder
 
 
 def set_back_to_version_8(path) -> None:
     conn = connect(path)
-    for table in ("transaction_correction", "value_correction_event", "value_correction_record",
-                  "value_correction"):
+    for table in (*CLASSIFICATION_TABLES, *DECLARATION_TABLES, *RESOLUTION_TABLES,
+                  "transaction_correction",
+                  "value_correction_event",
+                  "value_correction_record", "value_correction"):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
     conn.execute("PRAGMA user_version = 8")
@@ -39,10 +58,10 @@ def populated(tmp_path, capsys):
 
 
 class TestMigration:
-    def test_it_adds_empty_tables_and_changes_nothing_else(self, populated):
+    def test_it_adds_empty_tables_and_changes_nothing_else(self, populated, tmp_path):
         before = populated.dump(VERSION_8_TABLES)
         conn = connect(populated.path)
-        assert migrate(conn) == len(load_migrations()) == 9
+        assert migrate(conn, up_to_version_9(tmp_path / "nine")) == 9
         for table in CORRECTION_TABLES:
             assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.close()
@@ -120,7 +139,7 @@ class TestAppendOnly:
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  corrected_text, target_transaction_id,
                                                  target_revision)
-                   VALUES ('x', (SELECT id FROM account), ?, ?, ?, 't', 't2-0')""",
+                   VALUES ('x', (SELECT id FROM account), ?, ?, ?, 't', 't5-0')""",
                 (field, amount, text),
             )
         conn.close()
@@ -133,7 +152,7 @@ class TestAppendOnly:
                 """INSERT INTO value_correction (id, account_id, field, corrected_text,
                                                  target_transaction_id, target_revision,
                                                  supersedes_correction_id)
-                   VALUES ('x', (SELECT id FROM account), 'description', 'CAFE', 't', 't2-0', ?)""",
+                   VALUES ('x', (SELECT id FROM account), 'description', 'CAFE', 't', 't5-0', ?)""",
                 (correction,),
             )
         conn.close()

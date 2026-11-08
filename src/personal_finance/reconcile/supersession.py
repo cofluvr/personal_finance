@@ -32,3 +32,14 @@ def supersession_chain_states(
         else:
             states_by_id[entry_id] = STATE_ACTIVE
     return states_by_id, successor_by_superseded_id
+
+
+def successor_and_newest(
+    successor_by_superseded_id: dict[str, str], entry_id: str
+) -> tuple[str | None, str | None]:
+    """The entry superseding this one now, and the newest of its chain, or None for both while
+    nothing supersedes it (D-048)."""
+    successor = newest = successor_by_superseded_id.get(entry_id)
+    while newest in successor_by_superseded_id:
+        newest = successor_by_superseded_id[newest]
+    return successor, newest

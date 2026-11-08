@@ -6,8 +6,10 @@ Not part of the test suite. Run from the repository root:
     (add --worst for the stress shapes, --constrained for dense groups with decisions,
     --confirmed to compare confirmation with rejection, --separated to compare separating a
     merge with rejection and partition, --superseded to compare a separation superseding a
-    confirmation with a partition, --corrected for value corrections, or rows per month such as
-    200 1000 4000)
+    confirmation with a partition, --corrected for value corrections, --resolved for completing
+    and dismissing unresolved rows, --declared for coverage declared after import, --pending for
+    pending rows posted at another amount, --classified for financial types, or rows per month such
+    as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
 one import_files call: reading and parsing the file, writing records, reconciling the
@@ -30,9 +32,15 @@ from synthetic_ledger import dense_rows, full_reexports, ordinary_rows, variant_
 from personal_finance.db.migrate import connect, create_database
 from personal_finance.cli import DIRECT_PAIRS_SHOWN
 from personal_finance.ingest.coverage import declare_complete
-from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1
+from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1, SYNTHETIC_CHECKING_V1
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.reconcile.apply import decision_states, load_evidence
+from personal_finance.reconcile.classification_effects import (
+    classification_chain_states,
+    load_active_classifications,
+    write_classification_effects,
+)
+from personal_finance.reconcile.classifications import classify_transaction, undo_classification
 from personal_finance.reconcile.correction_effects import (
     correction_chain_states,
     load_active_corrections,
@@ -40,6 +48,12 @@ from personal_finance.reconcile.correction_effects import (
 )
 from personal_finance.reconcile.corrections import correct_value, undo_correction
 from personal_finance.reconcile.cross_document import Constraint, Document, Record, derive
+from personal_finance.reconcile.coverage_declarations import declare_coverage, undo_declaration
+from personal_finance.reconcile.record_resolutions import (
+    complete_record,
+    dismiss_record,
+    undo_resolution,
+)
 from personal_finance.reconcile.decisions import (
     confirm_groups,
     reject_pairs,
@@ -47,8 +61,19 @@ from personal_finance.reconcile.decisions import (
     undo_decision,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reports.classification_evidence import (
+    classification_undo_outlook,
+    load_classification,
+)
 from personal_finance.reports.correction_evidence import correction_undo_outlook, load_correction
 from personal_finance.reports.decision_evidence import load_decision, undo_outlook
+from personal_finance.reports.coverage_evidence import (
+    declaration_undo_outlook,
+    document_coverage_revision,
+    load_declaration,
+    load_document_coverage,
+)
+from personal_finance.reports.resolution_evidence import load_resolution, resolution_undo_outlook
 from personal_finance.reports.totals import account_movement
 from personal_finance.reports.review_evidence import (
     DecidedPair,
@@ -699,7 +724,7 @@ def measure_many_corrections(count: int) -> None:
             conn.execute(
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  target_transaction_id, target_revision)
-                   VALUES (?, 'acct', 'amount', -1, ?, 't2-0')""",
+                   VALUES (?, 'acct', 'amount', -1, ?, 't5-0')""",
                 (correction_id, transaction_id),
             )
             conn.execute("INSERT INTO value_correction_record VALUES (?, ?)", (correction_id, record_id))
@@ -752,7 +777,7 @@ def measure_correction_chain(length: int) -> None:
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  target_transaction_id, target_revision,
                                                  supersedes_correction_id)
-                   VALUES (?, 'acct', 'amount', ?, ?, 't2-0', ?)""",
+                   VALUES (?, 'acct', 'amount', ?, ?, 't5-0', ?)""",
                 (correction_id, -1 - number, transaction_id,
                  f"c{number - 1:06}" if number else None),
             )
@@ -788,6 +813,402 @@ def corrected() -> None:
         measure_correction_chain(length)
 
 
+def measure_classifying_dense(rows_per_file: int) -> None:
+    """A classification through a real ledger where derivation is quadratic, as for corrections. A
+    classification moves no record, so it must not pay for derivation, which the later import
+    does. The partition's undo token is measured before and after, since it then covers the
+    classification under both derivations (D-053)."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        conn = new_ledger(root)
+        header = "Date,Description,Debit,Credit\n"
+        for name, padding in (("a.csv", ""), ("b.csv", " "), ("c.csv", "  ")):
+            source = root / name
+            source.write_text(header + padding + "01/10/2026,SYNTHETIC CAFE,6.50,\n" * rows_per_file)
+            (result,) = import_files(conn, [source], account_id="acct", layout=SYNTHETIC_CARD_V1)
+            assert result.outcome == "imported", result
+        (issue,) = conn.execute("SELECT id FROM review_issue").fetchone()
+        item = load_review_evidence(conn, issue)
+        by_file = {"a.csv": [], "b.csv": [], "c.csv": []}
+        for entry in item.transactions:
+            by_file[entry.records[0].file_name].append(entry.transaction_id)
+        left, right, third = by_file["a.csv"][0], by_file["b.csv"][0], by_file["c.csv"][0]
+        decision_id = confirm_groups(conn, "acct", issue, review_revision(item),
+                                     [[left, right], [third]]).decision_id
+        (joined,) = conn.execute(
+            "SELECT transaction_id FROM transaction_source GROUP BY transaction_id "
+            "HAVING COUNT(*) = 2"
+        ).fetchone()
+        transactions = account_movement(conn, "acct").transactions
+
+        started = time.perf_counter()
+        undo_outlook(conn, load_decision(conn, decision_id), DEFAULT_RULES)
+        decision_before_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        token = transaction_revision(load_merge_evidence(conn, joined))
+        show_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        classification_id = classify_transaction(conn, "acct", joined, token,
+                                                 "purchase").classification_id
+        classify_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        outlook = undo_outlook(conn, load_decision(conn, decision_id), DEFAULT_RULES)
+        decision_after_seconds = time.perf_counter() - started
+        assert outlook.changes_classifications
+
+        later = root / "later.csv"
+        later.write_text(header + "03/20/2026,SYNTHETIC GROCER,9.00,\n")
+        started = time.perf_counter()
+        import_files(conn, [later], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        later_seconds = time.perf_counter() - started
+
+        started = time.perf_counter()
+        revision = classification_undo_outlook(
+            conn, load_classification(conn, classification_id)).revision
+        outlook_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        undo_classification(conn, "acct", classification_id, revision)
+        undo_seconds = time.perf_counter() - started
+        print(
+            f"dense transactions={transactions:6} transaction_show={show_seconds:7.3f}s "
+            f"classify={classify_seconds:7.3f}s later_import={later_seconds:7.3f}s "
+            f"classification_show={outlook_seconds:7.3f}s undo={undo_seconds:7.3f}s "
+            f"decision_show before={decision_before_seconds:7.3f}s "
+            f"after={decision_after_seconds:7.3f}s",
+            flush=True,
+        )
+        conn.close()
+
+
+def measure_many_classifications(count: int) -> None:
+    """count transactions, each with an active classification, written directly. Rewriting the
+    derived rows is linear in classifications and transactions, and every import, correction and
+    classification pays it once."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        conn = new_ledger(root)
+        header = "Date,Description,Debit,Credit\n"
+        source = root / "a.csv"
+        source.write_text(header + "".join(
+            f"01/{1 + number % 28:02}/2026,SYNTHETIC SHOP {number},{1 + number}.00,\n"
+            for number in range(count)
+        ))
+        import_files(conn, [source], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        links = conn.execute("SELECT transaction_id, source_record_id FROM transaction_source "
+                             "ORDER BY source_record_id").fetchall()
+        conn.execute("BEGIN")
+        for number, (transaction_id, record_id) in enumerate(links[1:]):
+            classification_id = f"f{number:06}"
+            conn.execute(
+                """INSERT INTO type_classification (id, account_id, financial_type,
+                                                    target_transaction_id, target_revision)
+                   VALUES (?, 'acct', 'purchase', ?, 't5-0')""",
+                (classification_id, transaction_id),
+            )
+            conn.execute("INSERT INTO type_classification_record VALUES (?, ?)",
+                         (classification_id, record_id))
+            conn.execute("INSERT INTO type_classification_event (classification_id, event) "
+                         "VALUES (?, 'made')", (classification_id,))
+        write_classification_effects(conn, "acct")
+        conn.execute("COMMIT")
+
+        conn.execute("BEGIN")
+        started = time.perf_counter()
+        write_classification_effects(conn, "acct")
+        effects_seconds = time.perf_counter() - started
+        conn.execute("COMMIT")
+        started = time.perf_counter()
+        movement = account_movement(conn, "acct")
+        totals_seconds = time.perf_counter() - started
+        last = links[0][0]
+        started = time.perf_counter()
+        token = transaction_revision(load_merge_evidence(conn, last))
+        classify_transaction(conn, "acct", last, token, "fee")
+        classify_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        token = transaction_revision(load_merge_evidence(conn, last))
+        correct_value(conn, "acct", last, token, "amount", "-2.00")
+        correct_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        classification_undo_outlook(conn, load_classification(conn, "f000000"))
+        outlook_seconds = time.perf_counter() - started
+        later = root / "later.csv"
+        later.write_text(header + "03/20/2026,SYNTHETIC GROCER,9.00,\n")
+        started = time.perf_counter()
+        import_files(conn, [later], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        later_seconds = time.perf_counter() - started
+        (purchases,) = [entry[1] for entry in movement.financial_types if entry[0] == "purchase"]
+        assert purchases == count - 1, movement.financial_types
+        print(
+            f"many classifications={count:6} rewrite={effects_seconds:7.3f}s "
+            f"totals={totals_seconds:7.3f}s show_and_classify={classify_seconds:7.3f}s "
+            f"show_and_correct={correct_seconds:7.3f}s "
+            f"classification_show={outlook_seconds:7.3f}s later_import={later_seconds:7.3f}s "
+            f"applied={purchases}",
+            flush=True,
+        )
+        conn.close()
+
+
+def measure_classification_chain(length: int) -> None:
+    """One chain of classifications, each superseding the one before, written directly."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        conn = new_ledger(root)
+        source = root / "a.csv"
+        source.write_text("Date,Description,Debit,Credit\n01/10/2026,SYNTHETIC CAFE,6.50,\n")
+        import_files(conn, [source], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        transaction_id, record_id = conn.execute(
+            "SELECT transaction_id, source_record_id FROM transaction_source").fetchone()
+        conn.execute("BEGIN")
+        for number in range(length):
+            classification_id = f"f{number:06}"
+            conn.execute(
+                """INSERT INTO type_classification (id, account_id, financial_type,
+                                                    target_transaction_id, target_revision,
+                                                    supersedes_classification_id)
+                   VALUES (?, 'acct', ?, ?, 't5-0', ?)""",
+                (classification_id, ("purchase", "fee")[number % 2], transaction_id,
+                 f"f{number - 1:06}" if number else None),
+            )
+            conn.execute("INSERT INTO type_classification_record VALUES (?, ?)",
+                         (classification_id, record_id))
+            conn.execute("INSERT INTO type_classification_event (classification_id, event) "
+                         "VALUES (?, 'made')", (classification_id,))
+        write_classification_effects(conn, "acct")
+        conn.execute("COMMIT")
+        started = time.perf_counter()
+        classification_chain_states(conn, "acct")
+        states_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        active = load_active_classifications(conn, "acct")
+        load_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        classification_undo_outlook(conn, load_classification(conn, f"f{length - 1:06}"))
+        outlook_seconds = time.perf_counter() - started
+        print(
+            f"chain classifications={length:5} states={states_seconds:7.4f}s "
+            f"load_active={load_seconds:7.4f}s classification_show={outlook_seconds:7.4f}s "
+            f"active={len(active)}",
+            flush=True,
+        )
+        conn.close()
+
+
+def classified() -> None:
+    for rows_per_file in (33, 167, 333, 667):
+        measure_classifying_dense(rows_per_file)
+    for count in (100, 500, 1000, 2000, 4000):
+        measure_many_classifications(count)
+    for length in (50, 2000):
+        measure_classification_chain(length)
+
+
+def measure_resolving(rows_per_file: int, kind: str) -> None:
+    """Two exports of the same rows_per_file purchases under complete coverage, with one row of a
+    that the parser cannot read. That row blocks every confident pair of a (D-024), so resolving it
+    without values that rule the purchases out pays for every merge it unblocks, and undoing it for
+    every split. The completion supplies a date outside the purchases' dates (D-050)."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        conn = new_ledger(root)
+        header = "Date,Description,Debit,Credit\n"
+        rows = "".join(
+            f"01/{1 + number % 28:02}/2026,SYNTHETIC SHOP {number},{1 + number}.00,\n"
+            for number in range(rows_per_file)
+        )
+        whole = declare_complete("2026-01-01", "2026-01-31", "posting")
+        for name, content in (("a.csv", header + rows + "not a row of this layout\n"),
+                              ("b.csv", header + " " + rows)):
+            source = root / name
+            source.write_text(content)
+            (result,) = import_files(conn, [source], account_id="acct", layout=SYNTHETIC_CARD_V1,
+                                     declared_coverage=whole)
+            assert result.outcome == "imported", result
+        before = account_movement(conn, "acct").transactions
+        assert before == 2 * rows_per_file, "the unreadable row must block every pair"
+        (issue,) = conn.execute(
+            "SELECT id FROM review_issue WHERE kind = 'unresolved_record'"
+        ).fetchone()
+
+        started = time.perf_counter()
+        token = review_revision(load_review_evidence(conn, issue))
+        show_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        if kind == "dismiss":
+            resolved = dismiss_record(conn, "acct", issue, token)
+        else:
+            resolved = complete_record(conn, "acct", issue, token,
+                                       {"amount": "-1.00", "posting_date": "2026-03-01"})
+        resolve_seconds = time.perf_counter() - started
+        assert resolved.transactions_after == rows_per_file + (kind == "complete"), resolved
+
+        later = root / "later.csv"
+        later.write_text(header + "03/20/2026,SYNTHETIC GROCER,9.00,\n")
+        started = time.perf_counter()
+        import_files(conn, [later], account_id="acct", layout=SYNTHETIC_CARD_V1)
+        later_seconds = time.perf_counter() - started
+
+        resolution = load_resolution(conn, resolved.resolution_id)
+        started = time.perf_counter()
+        revision = resolution_undo_outlook(conn, resolution, DEFAULT_RULES).revision
+        outlook_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        undone = undo_resolution(conn, "acct", resolved.resolution_id, revision)
+        undo_seconds = time.perf_counter() - started
+        assert undone.transactions_after == 2 * rows_per_file + 1, undone
+        print(
+            f"{kind:8} pairs={rows_per_file:5} merged={resolved.moved_records:5} "
+            f"item_show={show_seconds:7.3f}s resolve={resolve_seconds:7.3f}s "
+            f"later_import={later_seconds:7.3f}s resolution_show={outlook_seconds:7.3f}s "
+            f"undo={undo_seconds:7.3f}s split={undone.moved_records:5}",
+            flush=True,
+        )
+        conn.close()
+
+
+def resolved() -> None:
+    for kind in ("dismiss", "complete"):
+        for rows_per_file in (500, 2000, 5000):
+            measure_resolving(rows_per_file, kind)
+
+
+def measure_declaring(rows_per_file: int) -> None:
+    """Two exports of the same rows_per_file purchases, the first of unknown coverage and the second
+    declared complete at import. Declaring the first complete afterwards pays for every merge that
+    makes, and undoing it for every split. It is compared with importing the second export into a
+    ledger where the first was declared complete at import, which makes the same merges (D-051)."""
+    header = "Date,Description,Debit,Credit\n"
+    rows = "".join(
+        f"01/{1 + number % 28:02}/2026,SYNTHETIC SHOP {number},{1 + number}.00,\n"
+        for number in range(rows_per_file)
+    )
+    whole = declare_complete("2026-01-01", "2026-01-31", "posting")
+    seconds = {}
+    for at_import in (False, True):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            conn = new_ledger(root)
+            for name, content, coverage in (("a.csv", header + rows, whole if at_import else None),
+                                            ("b.csv", header + " " + rows, whole)):
+                source = root / name
+                source.write_text(content)
+                started = time.perf_counter()
+                (result,) = import_files(conn, [source], account_id="acct",
+                                         layout=SYNTHETIC_CARD_V1, declared_coverage=coverage)
+                seconds[at_import, name] = time.perf_counter() - started
+                assert result.outcome == "imported", result
+            if at_import:
+                assert account_movement(conn, "acct").transactions == rows_per_file
+                conn.close()
+                continue
+            assert account_movement(conn, "acct").transactions == 2 * rows_per_file
+            (document_id,) = conn.execute(
+                "SELECT id FROM source_document WHERE file_name = 'a.csv'"
+            ).fetchone()
+            started = time.perf_counter()
+            token = document_coverage_revision(load_document_coverage(conn, document_id))
+            show_seconds = time.perf_counter() - started
+            started = time.perf_counter()
+            declared = declare_coverage(conn, "acct", document_id, token, "complete",
+                                        "2026-01-01", "2026-01-31", "posting")
+            declare_seconds = time.perf_counter() - started
+            assert declared.transactions_after == rows_per_file, declared
+
+            later = root / "later.csv"
+            later.write_text(header + "03/20/2026,SYNTHETIC GROCER,9.00,\n")
+            started = time.perf_counter()
+            import_files(conn, [later], account_id="acct", layout=SYNTHETIC_CARD_V1)
+            later_seconds = time.perf_counter() - started
+
+            declaration = load_declaration(conn, declared.declaration_id)
+            started = time.perf_counter()
+            revision = declaration_undo_outlook(conn, declaration, DEFAULT_RULES).revision
+            outlook_seconds = time.perf_counter() - started
+            started = time.perf_counter()
+            undone = undo_declaration(conn, "acct", declared.declaration_id, revision)
+            undo_seconds = time.perf_counter() - started
+            assert undone.transactions_after == 2 * rows_per_file + 1, undone
+            conn.close()
+    print(
+        f"pairs={rows_per_file:5} merged={declared.moved_records:5} coverage_show={show_seconds:7.3f}s "
+        f"declare={declare_seconds:7.3f}s later_import={later_seconds:7.3f}s "
+        f"undo_show={outlook_seconds:7.3f}s undo={undo_seconds:7.3f}s split={undone.moved_records:5} "
+        f"merging_import={seconds[True, 'b.csv']:7.3f}s",
+        flush=True,
+    )
+
+
+def declared() -> None:
+    for rows_per_file in (500, 2000, 5000):
+        measure_declaring(rows_per_file)
+
+
+def merchant_name(number: int) -> str:
+    """A distinct merchant word for each number, so that no two share a description block."""
+    letters = "BCDFGHJKLMNPQRSTVWXZ"
+    word = ""
+    while True:
+        word = letters[number % len(letters)] + word
+        number //= len(letters)
+        if not number:
+            break
+    return word.rjust(4, "A") + "MART"
+
+
+def measure_pending(pairs: int, one_block: bool) -> None:
+    """One pending export and one posted export of the same pairs purchases on one day, each posted
+    at another amount. With one_block every description is alike, so every pending unit is related
+    to every posted unit, the worst case and the one D-032 documents for candidate discovery.
+    Otherwise every merchant has its own block, the common case (D-052)."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        conn = new_ledger(root)
+        header = "Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+
+        def name(number):
+            return f"SYNTHETIC SHOP {number}" if one_block else f"{merchant_name(number)} STORE"
+
+        pending = "".join(f",2026-01-10,,{name(number)},-{number + 1}.00,PENDING\n"
+                          for number in range(pairs))
+        posted = "".join(f",2026-01-10,2026-01-11,{name(number)},-{number + 1}.50,POSTED\n"
+                         for number in range(pairs))
+        seconds = []
+        for name, content in (("pending.csv", header + pending), ("posted.csv", header + posted)):
+            source = root / name
+            source.write_text(content)
+            started = time.perf_counter()
+            (result,) = import_files(conn, [source], account_id="acct", layout=SYNTHETIC_CHECKING_V1)
+            seconds.append(time.perf_counter() - started)
+            assert result.outcome == "imported", result
+        documents, records, unresolved, _ = load_evidence(conn, "acct")
+        started = time.perf_counter()
+        derivation = derive(documents, records, unresolved, DEFAULT_RULES)
+        derive_seconds = time.perf_counter() - started
+        raised = sum("pending_amount_changed" in item.reasons for item in derivation.items)
+        assert raised >= 1, "the shape must raise pending-to-posted candidates"
+
+        later = root / "later.csv"
+        later.write_text(header + ",2026-03-20,2026-03-21,SYNTHETIC GROCER,-9.00,POSTED\n")
+        started = time.perf_counter()
+        import_files(conn, [later], account_id="acct", layout=SYNTHETIC_CHECKING_V1)
+        later_seconds = time.perf_counter() - started
+        print(
+            f"{'one block' if one_block else 'distinct':9} pairs={pairs:5} "
+            f"items={len(derivation.items):5} pending_items={raised:5} "
+            f"posted_import={seconds[1]:7.3f}s derive={derive_seconds:7.3f}s "
+            f"steps={derivation.candidate_steps:9} later_import={later_seconds:7.3f}s",
+            flush=True,
+        )
+        conn.close()
+
+
+def pending_posted() -> None:
+    for one_block in (False, True):
+        for pairs in (100, 500, 2000):
+            measure_pending(pairs, one_block)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--worst"]:
         worst_cases()
@@ -806,6 +1227,18 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--corrected"]:
         corrected()
+        return
+    if sys.argv[1:] == ["--resolved"]:
+        resolved()
+        return
+    if sys.argv[1:] == ["--declared"]:
+        declared()
+        return
+    if sys.argv[1:] == ["--pending"]:
+        pending_posted()
+        return
+    if sys.argv[1:] == ["--classified"]:
+        classified()
         return
     sizes = [(24, 200), (24, 1000), (24, 4000)]
     if len(sys.argv) > 1:

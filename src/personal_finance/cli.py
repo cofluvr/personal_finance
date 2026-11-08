@@ -33,12 +33,24 @@ from personal_finance.reconcile.cross_document import (
     deciding_criterion,
     primary_rank,
 )
+from personal_finance.reconcile.classification_effects import (
+    FINANCIAL_TYPES,
+    TYPE_AGAINST_DIRECTION,
+    UNCLASSIFIED,
+)
+from personal_finance.reconcile.classifications import classify_transaction, undo_classification
 from personal_finance.reconcile.correction_effects import (
     FIELD_APPLIED,
     FIELD_BASIS_CHANGED,
     FIELD_IN_CONFLICT,
 )
 from personal_finance.reconcile.corrections import correct_value, undo_correction
+from personal_finance.reconcile.coverage_declarations import declare_coverage, undo_declaration
+from personal_finance.reconcile.record_resolutions import (
+    complete_record,
+    dismiss_record,
+    undo_resolution,
+)
 from personal_finance.reconcile.decisions import (
     DecisionRefused,
     confirm_groups,
@@ -49,6 +61,11 @@ from personal_finance.reconcile.decisions import (
     undo_decision,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reports.classification_evidence import (
+    classification_undo_outlook,
+    list_classifications,
+    load_classification,
+)
 from personal_finance.reports.correction_evidence import (
     correction_undo_outlook,
     list_corrections,
@@ -60,7 +77,20 @@ from personal_finance.reports.decision_evidence import (
     shown_kind,
     undo_outlook,
 )
+from personal_finance.reports.coverage_evidence import (
+    declaration_undo_outlook,
+    document_coverage_revision,
+    list_declarations,
+    load_declaration,
+    load_document_coverage,
+)
 from personal_finance.reports.import_summary import summarize_run
+from personal_finance.reports.resolution_evidence import (
+    binding_entries,
+    list_resolutions,
+    load_resolution,
+    resolution_undo_outlook,
+)
 from personal_finance.reports.review_evidence import (
     alike_decided_records,
     load_merge_evidence,
@@ -112,9 +142,9 @@ FAILURE_EXPLANATIONS = {
         "Existing data is unchanged. A change of meaning needs a new layout version."
     ),
     "coverage_conflict": (
-        "Coverage is fixed when a document is first imported, and a declaration cannot replace "
-        "coverage the document states. Existing data is unchanged. Correcting coverage needs "
-        "the history workflow planned for M2."
+        "This declaration differs from the coverage the document already has, or replaces "
+        "coverage the document states. Existing data is unchanged. To change a document's "
+        "coverage, find its ID with documents and use review coverage declare."
     ),
 }
 
@@ -139,6 +169,17 @@ REASON_EXPLANATIONS = {
     "boundary_date": "the date is too close to the end of what coverage supports",
     "single_day_overlap": "the documents overlap by a single day",
     "unresolved_row": "an unresolved row could affect the count",
+    "completed_row": (
+        "a row completed by hand could affect the count, and its typed values never make a "
+        "match confident"
+    ),
+    "pending_amount_changed": (
+        "a pending row and a posted row look alike but for their amount, as when a tip is added. "
+        "Confirm them to count the posted amount once"
+    ),
+    "completed_record_shares_id": (
+        "a record completed by hand shares this reliable ID, and is never merged automatically"
+    ),
     "external_id_conflict": "records with this ID disagree on a material field",
     "external_id_repeated": "this ID is repeated within a document",
     "automatic_match_withheld": (
@@ -196,6 +237,58 @@ CORRECTION_NOTICE = (
 CORRECTION_UNDO_NOTICE = (
     "The source value applies again, or the correction this one superseded. Source values were "
     "never changed."
+)
+
+CLASSIFY_NOTICE = (
+    "Totals list each financial type apart. Account movement is unchanged, matching never reads "
+    "types, and new records are not bound, but a re-export that joins this transaction keeps the "
+    "type applied."
+)
+
+CLASSIFICATION_UNDO_NOTICE = (
+    "The transaction is unclassified again, or has the type of the classification this one "
+    "superseded."
+)
+
+# What each outcome of a classified transaction means (D-053).
+CLASSIFICATION_STATE_EXPLANATIONS = {
+    FIELD_APPLIED: "the stated type applies",
+    FIELD_IN_CONFLICT: "classifications disagree, so it is unclassified. Undo all but one to settle it",
+    FIELD_BASIS_CHANGED: (
+        "a classification binds records now in several transactions, so it is unclassified. Undo "
+        "it, then classify each transaction"
+    ),
+    TYPE_AGAINST_DIRECTION: (
+        "its amount now runs against the stated type, as after a correction, so it is "
+        "unclassified. Undo the classification, or the correction"
+    ),
+}
+
+COMPLETE_NOTICE = (
+    "The row is now a transaction and is counted, using the values you supplied with those read "
+    "from the source. Its source cells stay unchanged. Matching never pairs it on typed values, "
+    "so a possible duplicate is raised for review instead."
+)
+
+DISMISS_NOTICE = (
+    "The row adds no transaction and no longer counts as unresolved. Its source cells stay "
+    "unchanged. It no longer keeps matches in its document from being confident, so totals can "
+    "be lower than before."
+)
+
+RESOLUTION_UNDO_NOTICE = (
+    "This re-derives from the evidence held now, without this resolution, and the row is "
+    "unresolved again. It does not restore an earlier snapshot."
+)
+
+COVERAGE_NOTICE = (
+    "Matching uses the declared coverage from now on, so totals can change. The claim made at "
+    "import is kept, and undoing this declaration restores the coverage before it."
+)
+
+COVERAGE_UNDO_NOTICE = (
+    "This re-derives from the evidence held now, with the coverage before this declaration. It "
+    "does not restore an earlier snapshot."
 )
 
 # What each state of a corrected field means for the value used (D-049).
@@ -370,7 +463,8 @@ def build_parser() -> argparse.ArgumentParser:
     transaction_commands = transaction.add_subparsers(dest="transaction_command", required=True)
     transaction_show = command(
         "show", transaction_commands, handler=run_review_transaction_show,
-        help="show one transaction's evidence and corrections, including amounts and descriptions",
+        help="show one transaction's evidence, corrections and classifications, including amounts "
+        "and descriptions",
     )
     transaction_show.add_argument("transaction_id", help="a transaction ID from transactions")
 
@@ -422,6 +516,139 @@ def build_parser() -> argparse.ArgumentParser:
     correction_undo.add_argument("--account", required=True, help="account name or ID")
     correction_undo.add_argument(
         "--revision", required=True, help="the revision from review correction show"
+    )
+
+    classify = command(
+        "classify", review_commands, handler=run_review_classify,
+        help="state the financial type of a transaction",
+    )
+    classify.add_argument("transaction_id", help="a transaction ID from transactions")
+    classify.add_argument("--account", required=True, help="account name or ID")
+    classify.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    classify.add_argument("--type", required=True, dest="financial_type",
+                          help=", ".join(FINANCIAL_TYPES))
+    classify.add_argument(
+        "--supersedes", metavar="CLASSIFICATION_ID",
+        help="the classification applying to this transaction now, which this one replaces",
+    )
+    classify.add_argument(
+        "--supersedes-revision", metavar="REVISION",
+        help="the revision from review classification show for the classification being replaced",
+    )
+
+    classifications = command(
+        "classifications", review_commands, handler=run_review_classifications,
+        help="list stored classifications",
+    )
+    classifications.add_argument("--account", help="account name or ID")
+
+    classification = review_commands.add_parser(
+        "classification", help="inspect or undo one classification"
+    )
+    classification_commands = classification.add_subparsers(
+        dest="classification_command", required=True
+    )
+    classification_show = command(
+        "show", classification_commands, handler=run_review_classification_show,
+        help="show what a classification binds and what undoing it would do",
+    )
+    classification_show.add_argument(
+        "classification_id", help="a classification ID from review classifications"
+    )
+    classification_undo = command(
+        "undo", classification_commands, handler=run_review_classification_undo,
+        help="stop a classification applying, keeping it on record",
+    )
+    classification_undo.add_argument(
+        "classification_id", help="a classification ID from review classifications"
+    )
+    classification_undo.add_argument("--account", required=True, help="account name or ID")
+    classification_undo.add_argument(
+        "--revision", required=True, help="the revision from review classification show"
+    )
+
+    complete = command(
+        "complete", review_commands, handler=run_review_complete,
+        help="supply the values an unresolved row lacks, so that it becomes a transaction",
+    )
+    complete.add_argument("item_id", help="an unresolved-record item ID from review list")
+    complete.add_argument("--account", required=True, help="account name or ID")
+    complete.add_argument("--revision", required=True, help="the revision from review show")
+    complete.add_argument(
+        "--amount", help="the amount, such as --amount=-12.50, negative for money out"
+    )
+    complete.add_argument("--transaction-date", help="the transaction date, YYYY-MM-DD")
+    complete.add_argument("--posting-date", help="the posting date, YYYY-MM-DD")
+    complete.add_argument("--description", help="the description")
+
+    dismiss = command(
+        "dismiss", review_commands, handler=run_review_dismiss,
+        help="state that an unresolved row adds no transaction, keeping it on record",
+    )
+    dismiss.add_argument("item_id", help="an unresolved-record item ID from review list")
+    dismiss.add_argument("--account", required=True, help="account name or ID")
+    dismiss.add_argument("--revision", required=True, help="the revision from review show")
+
+    resolutions = command(
+        "resolutions", review_commands, handler=run_review_resolutions,
+        help="list stored completions and dismissals",
+    )
+    resolutions.add_argument("--account", help="account name or ID")
+
+    resolution = review_commands.add_parser("resolution", help="inspect or undo one resolution")
+    resolution_commands = resolution.add_subparsers(dest="resolution_command", required=True)
+    resolution_show = command(
+        "show", resolution_commands, handler=run_review_resolution_show,
+        help="show what a resolution resolved and what undoing it would do",
+    )
+    resolution_show.add_argument("resolution_id", help="a resolution ID from review resolutions")
+    resolution_undo = command(
+        "undo", resolution_commands, handler=run_review_resolution_undo,
+        help="make a resolved row unresolved again, keeping the resolution on record",
+    )
+    resolution_undo.add_argument("resolution_id", help="a resolution ID from review resolutions")
+    resolution_undo.add_argument("--account", required=True, help="account name or ID")
+    resolution_undo.add_argument(
+        "--revision", required=True, help="the revision from review resolution show"
+    )
+
+    coverage = review_commands.add_parser("coverage", help="inspect or declare a document's coverage")
+    coverage_commands = coverage.add_subparsers(dest="coverage_command", required=True)
+    coverage_show = command(
+        "show", coverage_commands, handler=run_review_coverage_show,
+        help="show a document's coverage: the claim at import and any declaration since",
+    )
+    coverage_show.add_argument("document_id", help="a document ID from documents")
+    coverage_declare = command(
+        "declare", coverage_commands, handler=run_review_coverage_declare,
+        help="declare a document's coverage after import, keeping the claim at import",
+    )
+    coverage_declare.add_argument("document_id", help="a document ID from documents")
+    coverage_declare.add_argument("--account", required=True, help="account name or ID")
+    coverage_declare.add_argument(
+        "--revision", required=True, help="the revision from review coverage show"
+    )
+    coverage_declare.add_argument(
+        "--coverage-kind", required=True, help="complete, or unknown to withdraw a claim"
+    )
+    coverage_declare.add_argument("--coverage-start", help="first covered date, inclusive (YYYY-MM-DD)")
+    coverage_declare.add_argument("--coverage-end", help="last covered date, inclusive (YYYY-MM-DD)")
+    coverage_declare.add_argument("--coverage-basis", help="transaction or posting")
+    coverage_history = command(
+        "history", coverage_commands, handler=run_review_coverage_history,
+        help="list coverage declared after import",
+    )
+    coverage_history.add_argument("--account", help="account name or ID")
+    coverage_undo = command(
+        "undo", coverage_commands, handler=run_review_coverage_undo,
+        help="stop a coverage declaration applying, keeping it on record",
+    )
+    coverage_undo.add_argument("declaration_id", help="a declaration ID from review coverage history")
+    coverage_undo.add_argument("--account", required=True, help="account name or ID")
+    coverage_undo.add_argument(
+        "--revision", required=True, help="the revision from review coverage show"
     )
 
     totals = command("totals", handler=run_totals, help="show account movement")
@@ -616,6 +843,9 @@ def print_account_state(movement) -> None:
         print(f"  {line}")
     for line in describe_corrections(movement):
         print(f"  {line}")
+    for line in (*describe_resolutions(movement), *describe_declarations(movement),
+                 *describe_pending(movement), *describe_classifications(movement)):
+        print(f"  {line}")
     print(f"  Unresolved records, not included in totals: {movement.unresolved_records}")
 
 
@@ -645,6 +875,69 @@ def describe_corrections(movement) -> list[str]:
             f"Transactions keeping a source value because a correction binds records now in "
             f"several transactions: {movement.transactions_with_correction_basis_changed}. Run "
             "review corrections."
+        )
+    return lines
+
+
+def describe_classifications(movement) -> list[str]:
+    """Transactions a disagreement leaves unclassified, on their own lines (D-053)."""
+    lines = []
+    for count, reason in (
+        (movement.transactions_with_classification_conflict, "classifications disagree"),
+        (movement.transactions_with_classification_basis_changed,
+         "a classification binds records now in several transactions"),
+        (movement.transactions_with_classification_against_direction,
+         "their amount runs against the stated type"),
+    ):
+        if count:
+            lines.append(
+                f"Transactions left unclassified because {reason}: {count}. These are not "
+                "possible duplicates, decision conflicts or corrections. Run review "
+                "classifications."
+            )
+    return lines
+
+
+def describe_pending(movement) -> list[str]:
+    """Pending-to-posted outcomes on their own lines (D-052)."""
+    lines = []
+    if movement.transactions_posted_at_changed_amount:
+        lines.append(
+            f"Transactions posted at another amount than their pending row, such as with a tip: "
+            f"{movement.transactions_posted_at_changed_amount}. Each is counted once, at the "
+            "posted amount."
+        )
+    if movement.stale_pending_transactions:
+        lines.append(
+            f"Pending transactions more than 10 days older than the account's latest date: "
+            f"{movement.stale_pending_transactions}. They are counted, and none was removed."
+        )
+    return lines
+
+
+def describe_declarations(movement) -> list[str]:
+    """Coverage declared after import, on its own line (D-051)."""
+    if not movement.documents_with_declared_coverage:
+        return []
+    return [
+        f"Documents whose coverage you declared after import: "
+        f"{movement.documents_with_declared_coverage}. Matching uses that coverage. Run review "
+        "coverage history."
+    ]
+
+
+def describe_resolutions(movement) -> list[str]:
+    """Completed and dismissed rows on their own lines, apart from everything else (D-050)."""
+    lines = []
+    if movement.transactions_completed:
+        lines.append(
+            f"Transactions holding a row you completed by hand: {movement.transactions_completed}. "
+            "They are counted with the values you supplied. Run review resolutions."
+        )
+    if movement.records_dismissed:
+        lines.append(
+            f"Rows you dismissed as adding no transaction: {movement.records_dismissed}. They are "
+            "not counted and are not unresolved. Run review resolutions."
         )
     return lines
 
@@ -699,7 +992,7 @@ def run_reconcile(args) -> int:
 def run_documents(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     rows = conn.execute(
-        """SELECT document.file_name, document.layout_id, account.display_name,
+        """SELECT document.id, document.file_name, document.layout_id, account.display_name,
                   coverage_kind, coverage_start, coverage_end, date_basis, evidence,
                   (SELECT COUNT(*) FROM source_record record
                    WHERE record.source_document_id = document.id),
@@ -711,17 +1004,32 @@ def run_documents(args) -> int:
            JOIN account ON account.id = coverage.account_id
            ORDER BY document.imported_at, document.file_name"""
     ).fetchall()
-    for name, layout_id, account, kind, start, end, basis, evidence, records, pending in rows:
+    for document_id, name, layout_id, account, kind, start, end, basis, evidence, records, _ in rows:
         line = f"{name}: {records} records, account {account}, layout {layout_id}, "
-        line += f"coverage {kind}"
-        if kind != "unknown":
-            line += f" {start or '?'} to {end or '?'}, {basis or 'no'} basis, evidence {evidence}"
-        if kind == "complete":
-            line += f", pending {'included' if pending else 'excluded'}"
-        print(line)
+        document = load_document_coverage(conn, document_id)
+        line += describe_coverage_kind(document.effective, document)
+        if document.declaration_id:
+            line += f", declared after import, claimed at import: {kind}"
+        print(f"Document {document_id}: {line}")
     if not rows:
         print("No documents.")
     return 0
+
+
+def describe_coverage_kind(coverage, document) -> str:
+    """One coverage as documents prints it. Pending treatment follows its basis (D-026)."""
+    line = f"coverage {coverage.kind}"
+    if coverage.kind != "unknown":
+        line += (f" {coverage.start or '?'} to {coverage.end or '?'}, {coverage.date_basis or 'no'}"
+                 f" basis, evidence {coverage.evidence}")
+    if coverage.kind == "complete":
+        pending = document_pending_included(document, coverage.date_basis)
+        line += f", pending {'included' if pending else 'excluded'}"
+    return line
+
+
+def document_pending_included(document, basis) -> bool:
+    return dict(document.pending_included_by_basis)[basis]
 
 
 def run_transactions(args) -> int:
@@ -735,7 +1043,13 @@ def run_transactions(args) -> int:
                   entry.settlement_status,
                   COALESCE(fixed_description.corrected_text, entry.description),
                   EXISTS (SELECT 1 FROM transaction_correction fix
-                          WHERE fix.transaction_id = entry.id AND fix.state = 'applied')
+                          WHERE fix.transaction_id = entry.id AND fix.state = 'applied'),
+                  EXISTS (SELECT 1 FROM record_resolution completion
+                          WHERE completion.source_record_id = entry.primary_source_record_id
+                            AND completion.kind = 'completed'
+                            AND NOT EXISTS (SELECT 1 FROM record_resolution_event undone
+                                            WHERE undone.resolution_id = completion.id
+                                              AND undone.event = 'undone'))
            FROM ledger_transaction entry
            LEFT JOIN transaction_correction fixed_amount
                ON fixed_amount.transaction_id = entry.id AND fixed_amount.field = 'amount'
@@ -754,8 +1068,9 @@ def run_transactions(args) -> int:
               AND fixed_description.state = 'applied'
            ORDER BY shown_date, entry.id"""
     ).fetchall()
-    for transaction_id, when, cents, status, description, corrected in rows:
+    for transaction_id, when, cents, status, description, corrected, completed in rows:
         marker = "  (corrected)" if corrected else ""
+        marker += "  (completed by hand)" if completed else ""
         print(
             f"{transaction_id}  {when}  {format_cents(cents):>12}  {status:<8}  "
             f"{shown(description) if description else ''}{marker}"
@@ -782,7 +1097,7 @@ def run_trace(args) -> int:
     print(f"  Posting date: {posting_date or 'missing'}")
     print(f"  Amount: {format_cents(cents)}")
     print(f"  Status: {status}")
-    print(f"  Description: {description or 'missing'}")
+    print(f"  Description: {shown(description)}")
     corrected_fields = conn.execute(
         """SELECT field, state, corrected_amount_cents, corrected_text FROM transaction_correction
            WHERE transaction_id = ? ORDER BY field""",
@@ -801,7 +1116,10 @@ def run_trace(args) -> int:
         """SELECT document.file_name, document.content_sha256, document.layout_id,
                   record.id, record.record_index, record.raw_json, link.link_rule,
                   parse.settlement_status, origin.original_transaction_id,
-                  parse.transaction_date, parse.posting_date, parse.description
+                  parse.transaction_date, parse.posting_date, parse.description,
+                  completion.completed_amount_cents, completion.completed_transaction_date,
+                  completion.completed_posting_date, completion.completed_description,
+                  completion.id IS NOT NULL
            FROM transaction_source link
            JOIN source_record record ON record.id = link.source_record_id
            JOIN source_document document ON document.id = link.source_document_id
@@ -809,18 +1127,25 @@ def run_trace(args) -> int:
            JOIN record_parse parse ON parse.source_record_id = record.id
                                   AND parse.parser_version = meaning.parser_version
            LEFT JOIN source_record_origin origin ON origin.source_record_id = record.id
+           LEFT JOIN record_resolution completion
+               ON completion.source_record_id = record.id AND completion.kind = 'completed'
+              AND NOT EXISTS (SELECT 1 FROM record_resolution_event undone
+                              WHERE undone.resolution_id = completion.id
+                                AND undone.event = 'undone')
            WHERE link.transaction_id = ?
            ORDER BY document.imported_at""",
         (args.transaction_id,),
     ).fetchall()
 
     ranks = {
-        source[3]: primary_rank(source[7], source[9], source[10], source[11], source[1], source[4])
+        source[3]: primary_rank(*_traced_rank_values(source), source[1], source[4],
+                                completed_by_hand=bool(source[16]))
         for source in sources
     }
     print("Current sources:")
     for (name, digest, layout_id, record_id, index, raw_json, rule, source_status, original,
-         *_) in sources:
+         *_, completed_amount, completed_transaction_date, completed_posting_date,
+         completed_description, completed) in sources:
         print(f"Source {name}, row {index}")
         print(f"  Document SHA-256: {digest}")
         print(f"  Layout: {layout_id}")
@@ -830,6 +1155,9 @@ def run_trace(args) -> int:
         print(f"  Source status: {source_status}")
         print(f"  Original transaction: {original or 'unknown'}")
         print(f"  Original row: {json.loads(raw_json)}")
+        if completed:
+            print_completed_values((completed_amount, completed_transaction_date,
+                                    completed_posting_date, completed_description), "  ")
 
     if primary_id is None:
         print("Displayed values: source not recorded. Run reconcile to record it.")
@@ -839,6 +1167,26 @@ def run_trace(args) -> int:
             print(f"  {number}. {criterion}")
     print_history(conn, args.transaction_id)
     return 0
+
+
+def _traced_rank_values(source):
+    """Status, dates and description as derivation ranked them: a completed record's are read
+    where the parse has them, else supplied (D-050)."""
+    status, transaction_date, posting_date, description = source[7], *source[9:12]
+    supplied = source[13:16]
+    return (status, transaction_date or supplied[0], posting_date or supplied[1],
+            description or supplied[2])
+
+
+def print_completed_values(supplied, indent) -> None:
+    """What a person supplied, apart from what was read (D-050). None means nothing supplied."""
+    labels = ("Amount", "Transaction date", "Posting date", "Description")
+    print(f"{indent}Completed by hand, supplying what the parser could not read:")
+    given = [(label, value) for label, value in zip(labels, supplied) if value is not None]
+    for label, value in given:
+        print(f"{indent}  {label}: {format_cents(value) if label == 'Amount' else shown(value)}")
+    if not given:
+        print(f"{indent}  Nothing supplied: every value was read, and the row was accepted as read")
 
 
 def describe_role(record_id, primary_id, ranks) -> str:
@@ -1083,9 +1431,8 @@ def print_transaction_evidence(entry, shared) -> None:
 
     ranks = {
         record.record_id: primary_rank(
-            record.parsed.settlement_status, record.parsed.transaction_date,
-            record.parsed.posting_date, record.parsed.description, record.content_sha256,
-            record.row,
+            record.parsed.settlement_status, *_effective_rank_values(record),
+            record.content_sha256, record.row, completed_by_hand=record.completion is not None,
         )
         for record in entry.records
     }
@@ -1103,6 +1450,17 @@ def print_transaction_evidence(entry, shared) -> None:
     for record in entry.records:
         print_record_evidence(record, describe_role(record.record_id, primary_id, ranks), shared)
     print_corrections(entry)
+    print_classifications(entry)
+
+
+def _effective_rank_values(record):
+    """Dates and description as derivation ranked them (D-050)."""
+    parsed, completion = record.parsed, record.completion
+    if completion is None:
+        return parsed.transaction_date, parsed.posting_date, parsed.description
+    return (parsed.transaction_date or completion.transaction_date,
+            parsed.posting_date or completion.posting_date,
+            parsed.description or completion.description)
 
 
 def print_corrections(entry) -> None:
@@ -1119,6 +1477,21 @@ def print_corrections(entry) -> None:
     state_by_field = {correction.field: correction.field_state for correction in entry.corrections}
     for field, state in sorted(state_by_field.items()):
         print(f"    {field}: {FIELD_STATE_EXPLANATIONS[state]}")
+
+
+def print_classifications(entry) -> None:
+    """Classifications stay apart from the source values, like corrections (D-053)."""
+    if not entry.classifications:
+        print(f"  Financial type: {UNCLASSIFIED}")
+        return
+    print("  Classifications:")
+    for classification in entry.classifications:
+        print(
+            f"    Classification {classification.classification_id}: "
+            f"{classification.financial_type}, binding {describe_side(classification.bound_records)}"
+        )
+    state = entry.classifications[0].state
+    print(f"    Financial type: {CLASSIFICATION_STATE_EXPLANATIONS[state]}")
 
 
 def shown_corrected_value(field, value) -> str:
@@ -1142,6 +1515,10 @@ def print_record_evidence(record, role, shared) -> None:
     print(f"      Status: {parsed.settlement_status}")
     print(f"      Description: {shown(parsed.description)}")
     print(f"      External ID: {shown(parsed.external_id)}")
+    completion = record.completion
+    if completion is not None:
+        print_completed_values((completion.amount_cents, completion.transaction_date,
+                                completion.posting_date, completion.description), "    ")
 
 
 def print_document_evidence(document) -> None:
@@ -1153,6 +1530,11 @@ def print_document_evidence(document) -> None:
     print(f"    Date basis: {shown(document.date_basis)}")
     print(f"    Coverage evidence: {shown(document.coverage_evidence)}")
     print(f"    Generated on: {shown(document.generated_on)}")
+    if document.declared is not None:
+        declared = document.declared
+        interval = (f" {declared.coverage_start} to {declared.coverage_end}, "
+                    f"{declared.date_basis} basis" if declared.coverage_kind == "complete" else "")
+        print(f"    Declared after import, which matching uses: {declared.coverage_kind}{interval}")
     if document.effective_end is not None:
         print(f"    Last date matching relies on: {document.effective_end}")
         print(f"    Pending rows: {'included' if document.pending_covered else 'excluded'}")
@@ -1357,6 +1739,10 @@ def run_review_decision_show(args) -> int:
         print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
         if outlook.changes_corrected_values:
             print("  Changes which corrected values apply, or where. Run review corrections after.")
+        if outlook.changes_classifications:
+            print(
+                "  Changes which classifications apply, or where. Run review classifications after."
+            )
         print(f"  {UNDO_NOTICE}")
         if stale:
             print(
@@ -1377,6 +1763,7 @@ def run_review_undo(args) -> int:
     print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
     print(f"  Source memberships changed: {result.moved_records}")
     print_newly_unsettled(result.newly_unsettled_correction_fields)
+    print_newly_unclassified(result.newly_unclassified_transactions)
     print(f"  {UNDO_NOTICE}")
     return 0
 
@@ -1503,7 +1890,345 @@ def run_review_correction_undo(args) -> int:
     if result.restored:
         print(f"  Correction {result.restored}, which it superseded, applies again.")
     print_newly_unsettled(result.newly_unsettled_fields)
+    print_newly_unclassified(result.newly_unclassified_transactions)
     print(f"  {CORRECTION_UNDO_NOTICE}")
+    return 0
+
+
+def print_newly_unclassified(count) -> None:
+    if count:
+        print(
+            f"  Classified transactions now unclassified, because classifications disagree, lost "
+            f"their basis or no longer fit the direction: {count}. Run review classifications."
+        )
+
+
+def run_review_classify(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    result = classify_transaction(
+        conn, account_id, args.transaction_id, args.revision, args.financial_type,
+        supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
+    )
+
+    print(
+        f"Classification {result.classification_id} recorded: transaction {args.transaction_id} "
+        f"is a {result.financial_type}, binding {result.bound_record_count} records."
+    )
+    if args.supersedes:
+        print(f"  Supersedes classification {args.supersedes}. It stays on record.")
+    print(f"  {CLASSIFY_NOTICE}")
+    return 0
+
+
+def run_review_classifications(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_classifications(conn, account_id)
+    for classification_id, account, created_at, state, financial_type, bound_count in rows:
+        print(
+            f"Classification {classification_id}: {state}, {financial_type}, {bound_count} "
+            f"records, {shown(account)}, {created_at}"
+        )
+    print(f"Classifications: {len(rows)}")
+    unsettled = conn.execute(
+        """SELECT kind.transaction_id, kind.state FROM transaction_classification kind
+           JOIN ledger_transaction entry ON entry.id = kind.transaction_id
+           WHERE kind.state <> 'applied' AND (:account IS NULL OR entry.account_id = :account)
+           ORDER BY kind.transaction_id""",
+        {"account": account_id},
+    ).fetchall()
+    for transaction_id, state in unsettled:
+        print(f"Transaction {transaction_id}: {CLASSIFICATION_STATE_EXPLANATIONS[state]}")
+    if rows:
+        print("To see what a classification binds, run review classification show.")
+    return 0
+
+
+# How a classified transaction's outcome reads in an undo preview.
+CLASSIFICATION_PREVIEW_STATES = {
+    None: UNCLASSIFIED,
+    FIELD_APPLIED: "classified",
+    FIELD_IN_CONFLICT: "unclassified, classifications disagree",
+    FIELD_BASIS_CHANGED: "unclassified, basis changed",
+    TYPE_AGAINST_DIRECTION: "unclassified, against its direction",
+}
+
+
+def run_review_classification_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    classification = load_classification(conn, args.classification_id)
+    if classification is None:
+        raise CommandError("classification not found. Run review classifications.")
+
+    print(f"Classification {classification.classification_id}")
+    print(f"  Account: {shown(classification.account_name)} ({classification.account_id})")
+    print(f"  Type: {classification.financial_type}")
+    print(f"  Status: {classification.state}")
+    print(f"  Made: {classification.created_at}")
+    if classification.undone_at:
+        print(f"  Undone: {classification.undone_at}. It stays on record and no longer applies.")
+    if classification.superseded_by:
+        print(
+            f"  Superseded by classification {classification.superseded_by}. It stays on record "
+            "and no longer applies, unless that classification is undone."
+        )
+    if classification.newest_of_chain != classification.superseded_by:
+        print(
+            f"  Newest of its chain: classification {classification.newest_of_chain}, the only "
+            "one that can be undone. Each undo restores the classification before it."
+        )
+    if classification.supersedes_classification_id:
+        print(f"  Supersedes classification {classification.supersedes_classification_id}")
+    print(f"  From transaction: {classification.target_transaction_id}")
+    print("Bound records:")
+    for record in classification.bound_records:
+        where = record.transaction_id or "no transaction"
+        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
+
+    if classification.state == STATE_ACTIVE:
+        outlook = classification_undo_outlook(conn, classification)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this classification now:")
+        if classification.supersedes_classification_id:
+            print(
+                f"  Restores classification {classification.supersedes_classification_id}, which "
+                "it superseded"
+            )
+        for transaction_id, state_now, state_after in outlook.state_by_transaction:
+            print(
+                f"  Transaction {transaction_id}: {CLASSIFICATION_PREVIEW_STATES[state_now]} now, "
+                f"{CLASSIFICATION_PREVIEW_STATES[state_after]} after"
+            )
+        if stale_accounts(conn, DEFAULT_RULES, classification.account_id):
+            print(
+                "This account has not been reconciled under the current matching rules, so "
+                "undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
+def run_review_classification_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_classification(conn, account_id, args.classification_id, args.revision)
+
+    print(
+        f"Classification {args.classification_id} undone. It stays on record and no longer "
+        "applies."
+    )
+    if result.restored:
+        print(f"  Classification {result.restored}, which it superseded, applies again.")
+    print_newly_unclassified(result.newly_unclassified_transactions)
+    print(f"  {CLASSIFICATION_UNDO_NOTICE}")
+    return 0
+
+
+def run_review_complete(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    supplied = {
+        field: value
+        for field, value in (("amount", args.amount), ("transaction_date", args.transaction_date),
+                             ("posting_date", args.posting_date),
+                             ("description", args.description))
+        if value is not None
+    }
+    result = complete_record(conn, account_id, args.item_id, args.revision, supplied)
+
+    fields = ", ".join(result.supplied_fields) or "nothing, since every value was read"
+    print(f"Resolution {result.resolution_id} recorded: row completed, supplying {fields}.")
+    print(f"  Now transaction {result.transaction_id}. Item {args.item_id} closed.")
+    print_resolution_effect(result)
+    print(f"  {COMPLETE_NOTICE}")
+    return 0
+
+
+def run_review_dismiss(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = dismiss_record(conn, account_id, args.item_id, args.revision)
+
+    print(f"Resolution {result.resolution_id} recorded: row dismissed. Item {args.item_id} closed.")
+    print_resolution_effect(result)
+    print(f"  {DISMISS_NOTICE}")
+    return 0
+
+
+def print_resolution_effect(result) -> None:
+    print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
+    print(f"  Source memberships changed: {result.moved_records}")
+    print_newly_unsettled(result.newly_unsettled_correction_fields)
+    print_newly_unclassified(result.newly_unclassified_transactions)
+
+
+def run_review_resolutions(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_resolutions(conn, account_id)
+    for resolution_id, account, created_at, state, kind, file_name, row in rows:
+        print(
+            f"Resolution {resolution_id}: {state}, {kind}, {shown(file_name)} row {row}, "
+            f"{shown(account)}, {created_at}"
+        )
+    print(f"Resolutions: {len(rows)}")
+    if rows:
+        print("To see what a resolution resolved, run review resolution show.")
+    return 0
+
+
+def run_review_resolution_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    resolution = load_resolution(conn, args.resolution_id)
+    if resolution is None:
+        raise CommandError("resolution not found. Run review resolutions.")
+
+    record = resolution.record
+    print(f"Resolution {resolution.resolution_id}")
+    print(f"  Account: {shown(resolution.account_name)} ({resolution.account_id})")
+    print(f"  Kind: {resolution.kind}")
+    print(f"  Status: {resolution.state}")
+    print(f"  Made: {resolution.created_at}")
+    if resolution.undone_at:
+        print(f"  Undone: {resolution.undone_at}. It stays on record and no longer applies.")
+    print(f"  From review item: {resolution.target_issue_id}")
+    print(f"  Record: {shown(record.file_name)} row {record.row}, now in "
+          f"{record.transaction_id or 'no transaction'}")
+    if resolution.kind == "completed":
+        supplied = [field for field, value in zip(
+            ("amount", "transaction_date", "posting_date", "description"),
+            resolution.completed_values) if value is not None]
+        print(f"  Supplied: {', '.join(supplied) or 'nothing, since every value was read'}")
+
+    if resolution.state == STATE_ACTIVE:
+        outlook = resolution_undo_outlook(conn, resolution, DEFAULT_RULES)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this resolution now:")
+        print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
+        if resolution.kind == "completed":
+            decisions, corrections, classifications = binding_entries(conn, record.record_id)
+            for decision in decisions:
+                print(f"  Refused while decision {decision} binds the record. Undo it first.")
+            for correction in corrections:
+                print(f"  Refused while correction {correction} binds the record. Undo it first.")
+            for classification in classifications:
+                print(
+                    f"  Refused while classification {classification} binds the record. Undo it "
+                    "first."
+                )
+        print(f"  {RESOLUTION_UNDO_NOTICE}")
+        if stale_accounts(conn, DEFAULT_RULES, resolution.account_id):
+            print(
+                "This account has not been reconciled under the current matching rules, so "
+                "undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
+def run_review_resolution_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_resolution(conn, account_id, args.resolution_id, args.revision)
+
+    print(f"Resolution {args.resolution_id} undone. It stays on record and no longer applies.")
+    print(f"  The row is unresolved again, as item {result.issue_id}.")
+    print_resolution_effect(result)
+    print(f"  {RESOLUTION_UNDO_NOTICE}")
+    return 0
+
+
+def run_review_coverage_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    document = load_document_coverage(conn, args.document_id)
+    if document is None:
+        raise CommandError("document not found. Run documents.")
+
+    print(f"Document {document.document_id}: {shown(document.file_name)}")
+    print(f"  Account: {shown(document.account_name)} ({document.account_id})")
+    print(f"  Layout: {document.layout_id}")
+    print(f"  Document SHA-256: {document.content_sha256}")
+    print(f"  Claimed at import: {describe_coverage_kind(document.claimed, document)}")
+    if document.declaration_id:
+        print(f"  Declared after import: {describe_coverage_kind(document.effective, document)}, "
+              f"declaration {document.declaration_id}")
+    print(f"  Matching uses: {describe_coverage_kind(document.effective, document)}")
+    print(f"  Date bases this layout offers: {', '.join(document.offered_bases) or 'none'}")
+    print(f"  Revision: {document_coverage_revision(document)}")
+    if document.claimed.evidence == "document_metadata":
+        print("  The document states this coverage itself, so it can only be withdrawn.")
+
+    history = [row for row in list_declarations(conn, document.account_id)
+               if load_declaration(conn, row[0]).document_id == document.document_id]
+    if history:
+        print("Declarations, oldest first:")
+    for declaration_id, _, created_at, state, kind, _ in history:
+        print(f"  Declaration {declaration_id}: {state}, {kind}, {created_at}")
+    if document.declaration_id:
+        declaration = load_declaration(conn, document.declaration_id)
+        outlook = declaration_undo_outlook(conn, declaration, DEFAULT_RULES)
+        print(f"Undoing declaration {declaration.declaration_id} now:")
+        print(f"  Revision: {outlook.revision}")
+        restored = declaration.supersedes_declaration_id
+        print(f"  Restores {f'declaration {restored}' if restored else 'the claim at import'}")
+        print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
+    if stale_accounts(conn, DEFAULT_RULES, document.account_id):
+        print(
+            "This account has not been reconciled under the current matching rules, so "
+            "declaring and undoing will be refused until it is. Run reconcile."
+        )
+    return 0
+
+
+def run_review_coverage_declare(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = declare_coverage(
+        conn, account_id, args.document_id, args.revision, args.coverage_kind,
+        args.coverage_start, args.coverage_end, args.coverage_basis,
+    )
+
+    print(f"Declaration {result.declaration_id} recorded for document {args.document_id}.")
+    if result.other_declaration_id:
+        print(f"  Supersedes declaration {result.other_declaration_id}. It stays on record.")
+    print_coverage_effect(result)
+    print(f"  {COVERAGE_NOTICE}")
+    return 0
+
+
+def print_coverage_effect(result) -> None:
+    print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
+    print(f"  Source memberships changed: {result.moved_records}")
+    print_newly_unsettled(result.newly_unsettled_correction_fields)
+    print_newly_unclassified(result.newly_unclassified_transactions)
+
+
+def run_review_coverage_history(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_declarations(conn, account_id)
+    for declaration_id, account, created_at, state, kind, file_name in rows:
+        print(
+            f"Declaration {declaration_id}: {state}, {kind}, {shown(file_name)}, {shown(account)}, "
+            f"{created_at}"
+        )
+    print(f"Coverage declarations: {len(rows)}")
+    if rows:
+        print("To see a document's coverage and undo its declaration, run review coverage show.")
+    return 0
+
+
+def run_review_coverage_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_declaration(conn, account_id, args.declaration_id, args.revision)
+
+    print(f"Declaration {args.declaration_id} undone. It stays on record and no longer applies.")
+    restored = result.other_declaration_id
+    print(f"  {f'Declaration {restored}' if restored else 'The claim at import'} applies again.")
+    print_coverage_effect(result)
+    print(f"  {COVERAGE_UNDO_NOTICE}")
     return 0
 
 
@@ -1516,6 +2241,13 @@ def run_totals(args) -> int:
     print(f"Account outflows: {format_cents(movement.outflow_cents)}")
     print(f"Net account movement: {format_cents(movement.net_cents)}")
     print(f"Transactions: {movement.transactions}, of which pending: {movement.pending_transactions}")
+    print("By financial type, as you classified them:")
+    for financial_type, count, cents in movement.financial_types:
+        print(f"  {financial_type}: {count} transactions, {format_cents(cents)}")
+    print(
+        f"  {UNCLASSIFIED}: {movement.unclassified_transactions} transactions, "
+        f"{format_cents(movement.unclassified_cents)}"
+    )
     print("Disclosures:")
     print("- These are account movements. They include transfers and card payments.")
     print(f"- {MATCHING_NOTICE}")
@@ -1551,6 +2283,9 @@ def run_totals(args) -> int:
             "automatic match, and each is counted. Undoing a separation can lower totals."
         )
     for line in describe_corrections(movement):
+        print(f"- {line}")
+    for line in (*describe_resolutions(movement), *describe_declarations(movement),
+                 *describe_pending(movement), *describe_classifications(movement)):
         print(f"- {line}")
     return 0
 

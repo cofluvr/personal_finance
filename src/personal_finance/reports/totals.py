@@ -7,7 +7,8 @@ transfers and card payments.
 import sqlite3
 from dataclasses import dataclass
 
-from personal_finance.reconcile.apply import STATE_ACTIVE, decision_states
+from personal_finance.reconcile.apply import STATE_ACTIVE, decision_states, declared_coverage
+from personal_finance.reconcile.classification_effects import FINANCIAL_TYPES
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,27 @@ class AccountMovement:
     transactions_corrected: int = 0
     transactions_with_correction_conflict: int = 0
     transactions_with_correction_basis_changed: int = 0
+    # Transactions holding a record completed by hand, and rows dismissed as adding no transaction
+    # (D-050).
+    transactions_completed: int = 0
+    records_dismissed: int = 0
+    # Documents whose coverage a person declared after import (D-051).
+    documents_with_declared_coverage: int = 0
+    # Transactions counted at a posted amount other than their pending row's, and pending
+    # transactions left long after the account's latest date (D-052).
+    transactions_posted_at_changed_amount: int = 0
+    stale_pending_transactions: int = 0
+    # Each financial type that some transaction has, in the order of FINANCIAL_TYPES, with its
+    # transaction count and effective amount, and the same for unclassified transactions (D-053). A
+    # derived row holds a type only while it applies.
+    financial_types: tuple[tuple[str, int, int], ...] = ()
+    unclassified_transactions: int = 0
+    unclassified_cents: int = 0
+    # Transactions left unclassified because classifications disagree, lost their basis, or no
+    # longer fit the transaction's direction (D-053).
+    transactions_with_classification_conflict: int = 0
+    transactions_with_classification_basis_changed: int = 0
+    transactions_with_classification_against_direction: int = 0
 
 
 def account_movement(conn: sqlite3.Connection, account_id: str | None = None) -> AccountMovement:
@@ -115,10 +137,103 @@ def account_movement(conn: sqlite3.Connection, account_id: str | None = None) ->
         {"account": account_id},
     ).fetchone()
 
+    resolutions = conn.execute(
+        """SELECT COUNT(DISTINCT CASE WHEN resolution.kind = 'completed'
+                                      THEN link.transaction_id END),
+                  COUNT(CASE WHEN resolution.kind = 'dismissed' THEN 1 END)
+           FROM record_resolution resolution
+           LEFT JOIN transaction_source link ON link.source_record_id = resolution.source_record_id
+           WHERE (:account IS NULL OR resolution.account_id = :account)
+             AND NOT EXISTS (SELECT 1 FROM record_resolution_event undone
+                             WHERE undone.resolution_id = resolution.id
+                               AND undone.event = 'undone')""",
+        {"account": account_id},
+    ).fetchone()
+
     return AccountMovement(
         inflow, outflow, net, transactions, pending, unresolved, groups, members, *conflicts,
-        confirmed, _separated(conn, account_id), *corrections,
+        confirmed, _separated(conn, account_id), *corrections, *resolutions,
+        _declared_documents(conn, account_id), *_pending_disclosures(conn, account_id),
+        *_classifications(conn, account_id),
     )
+
+
+def _classifications(conn, account_id) -> tuple:
+    by_type = {
+        financial_type: (count, cents)
+        for financial_type, count, cents in conn.execute(
+            """SELECT kind.financial_type, COUNT(*),
+                      COALESCE(SUM(COALESCE(fix.corrected_amount_cents, entry.amount_cents)), 0)
+               FROM ledger_transaction entry
+               LEFT JOIN transaction_correction fix
+                   ON fix.transaction_id = entry.id AND fix.field = 'amount'
+                  AND fix.state = 'applied'
+               LEFT JOIN transaction_classification kind
+                   ON kind.transaction_id = entry.id
+               WHERE :account IS NULL OR entry.account_id = :account
+               GROUP BY kind.financial_type""",
+            {"account": account_id},
+        )
+    }
+    unclassified_count, unclassified_cents = by_type.pop(None, (0, 0))
+    unsettled = conn.execute(
+        """SELECT COUNT(CASE WHEN kind.state = 'conflict' THEN 1 END),
+                  COUNT(CASE WHEN kind.state = 'basis_changed' THEN 1 END),
+                  COUNT(CASE WHEN kind.state = 'against_direction' THEN 1 END)
+           FROM transaction_classification kind
+           JOIN ledger_transaction entry ON entry.id = kind.transaction_id
+           WHERE :account IS NULL OR entry.account_id = :account""",
+        {"account": account_id},
+    ).fetchone()
+    return (
+        tuple((financial_type, *by_type[financial_type])
+              for financial_type in FINANCIAL_TYPES if financial_type in by_type),
+        unclassified_count, unclassified_cents, *unsettled,
+    )
+
+
+# A pending transaction this much older than its account's latest date is disclosed (D-016).
+STALE_PENDING_DAYS = 10
+
+
+def _pending_disclosures(conn, account_id) -> tuple[int, int]:
+    changed = conn.execute(
+        """SELECT COUNT(DISTINCT entry.id)
+           FROM ledger_transaction entry
+           JOIN transaction_source link ON link.transaction_id = entry.id
+           JOIN document_interpretation meaning
+               ON meaning.source_document_id = link.source_document_id
+           JOIN record_parse parse ON parse.source_record_id = link.source_record_id
+                                  AND parse.parser_version = meaning.parser_version
+           WHERE (:account IS NULL OR entry.account_id = :account)
+             AND entry.settlement_status <> 'pending' AND parse.settlement_status = 'pending'
+             AND parse.amount_cents <> entry.amount_cents""",
+        {"account": account_id},
+    ).fetchone()[0]
+    stale = conn.execute(
+        """SELECT COUNT(*)
+           FROM ledger_transaction entry
+           JOIN (SELECT account_id,
+                        MAX(MAX(COALESCE(transaction_date, '')), MAX(COALESCE(posting_date, '')))
+                            AS latest
+                 FROM ledger_transaction GROUP BY account_id) newest
+               ON newest.account_id = entry.account_id
+           WHERE (:account IS NULL OR entry.account_id = :account)
+             AND entry.settlement_status = 'pending'
+             AND julianday(newest.latest)
+                 - julianday(COALESCE(entry.posting_date, entry.transaction_date)) > :days""",
+        {"account": account_id, "days": STALE_PENDING_DAYS},
+    ).fetchone()[0]
+    return changed, stale
+
+
+def _declared_documents(conn, account_id) -> int:
+    accounts = [row[0] for row in conn.execute(
+        """SELECT DISTINCT account_id FROM coverage_declaration
+           WHERE :account IS NULL OR account_id = :account""",
+        {"account": account_id},
+    )]
+    return sum(len(declared_coverage(conn, account)) for account in accounts)
 
 
 def _separated(conn, account_id) -> int:

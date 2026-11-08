@@ -14,17 +14,25 @@ from personal_finance.reconcile.apply import (
     load_evidence,
     superseded_by,
 )
+from personal_finance.reconcile.classification_effects import (
+    effective_classifications,
+    load_active_classifications,
+)
 from personal_finance.reconcile.correction_effects import (
+    FIELD_APPLIED,
     effective_field_corrections,
     load_active_corrections,
 )
 from personal_finance.reconcile.cross_document import derive
 from personal_finance.reconcile.rules import MatchingRules
+from personal_finance.reconcile.supersession import successor_and_newest
 
 # Bump whenever the material below changes, so an old token can never appear current. Version 3
 # restores only the decision just before this one, so a chain reads differently (D-048). Version 4
-# adds corrections binding records in scope, left out where there are none (D-049).
-DECISION_REVISION_VERSION = 4
+# adds corrections binding records in scope, left out where there are none (D-049). Version 5
+# marks records in scope completed by hand, left out where they are not (D-050). Version 6 adds
+# classifications binding records in scope, left out where there are none (D-053).
+DECISION_REVISION_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -81,6 +89,8 @@ class UndoOutlook:
     transactions_after: int
     # Whether undoing would change which corrected values apply, or where (D-049).
     changes_corrected_values: bool = False
+    # Whether undoing would change which classifications apply, or where (D-053).
+    changes_classifications: bool = False
 
 
 def shown_kind(kind: str, target_kind: str) -> str:
@@ -150,9 +160,7 @@ def load_decision(conn: sqlite3.Connection, decision_id: str) -> DecisionEvidenc
     )
     states = decision_states(conn, account_id)
     successors = superseded_by(conn, account_id)
-    newer = newest = successors.get(decision_id)
-    while newest in successors:
-        newest = successors[newest]
+    newer, newest = successor_and_newest(successors, decision_id)
     return DecisionEvidence(
         decision_id, account_id, account_name, target, created_at, states[decision_id], undone_at,
         pairs, kind, supersedes, newer, target_kind, newest,
@@ -241,7 +249,7 @@ def undo_outlook(
         "pairs": sorted(_pair_keys(pair) for pair in decision.pairs),
         "rules": rules.fingerprint(),
         "records": sorted(
-            ([key_of(record.id), _without(asdict(record), "id", "document_id")]
+            ([key_of(record.id), record_material(record)]
              for record in records if record.id in scope),
             key=repr,
         ),
@@ -293,8 +301,54 @@ def undo_outlook(
         changes_corrected_values = (
             material["corrections"]["with_decision"] != material["corrections"]["without_decision"]
         )
+    changes_classifications = False
+    active_classifications = load_active_classifications(conn, decision.account_id)
+    touching_classifications = [
+        classification for classification in active_classifications
+        if classification.bound_record_ids & scope
+    ]
+    if touching_classifications:
+        classified_record_ids = set().union(
+            *(classification.bound_record_ids for classification in touching_classifications)
+        )
+        amount_by_record_id = {record.id: record.amount_cents for record in records}
+
+        def classification_view(result):
+            group_by_record_id = {
+                record_id: index
+                for index, group in enumerate(result.groups) for record_id in group.record_ids
+            }
+            # Each group's amount as totals would use it: the primary source's (D-030), or a
+            # corrected amount applying there (D-049).
+            amounts = {
+                index: amount_by_record_id[group.primary_record_id]
+                for index, group in enumerate(result.groups)
+            }
+            for (index, field), effect in effective_field_corrections(
+                active_corrections, group_by_record_id
+            ).items():
+                if field == "amount" and effect.state == FIELD_APPLIED:
+                    amounts[index] = effect.applied_value
+            effects = effective_classifications(active_classifications, group_by_record_id,
+                                                amounts)
+            return sorted(
+                [keyed(result.groups[index].record_ids), effect.state, effect.applied_value]
+                for index, effect in effects.items()
+                if classified_record_ids.intersection(result.groups[index].record_ids)
+            )
+
+        # The outcome of every group holding a classified record, either side, is what undo would
+        # change, so the classifications themselves are not covered separately.
+        material["classifications"] = {
+            "with_decision": classification_view(now),
+            "without_decision": classification_view(after),
+        }
+        changes_classifications = (
+            material["classifications"]["with_decision"]
+            != material["classifications"]["without_decision"]
+        )
     return UndoOutlook(decision_revision(material), len(now.groups), len(after.groups),
-                       changes_corrected_values)
+                       changes_corrected_values, changes_classifications)
 
 
 def decision_revision(material: dict) -> str:
@@ -309,6 +363,15 @@ def _pair_keys(pair: BoundPair) -> list:
         [[(record.content_sha256, record.row) for record in side]
          for side in (pair.left, pair.right)]
     )
+
+
+def record_material(record) -> dict:
+    """A record's values as tokens cover them, marking one completed by hand only when it is, so
+    that a ledger without completions keeps its digests (D-050)."""
+    fields = _without(asdict(record), "id", "document_id")
+    if not fields["completed_by_hand"]:
+        del fields["completed_by_hand"]
+    return fields
 
 
 def _without(fields: dict, *names: str) -> dict:

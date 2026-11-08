@@ -18,7 +18,7 @@ from personal_finance.ingest.coverage import Coverage
 from personal_finance.ingest.csv_reader import RawRecord, read_document
 from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import Layout, ParsedRow
-from personal_finance.reconcile.apply import is_current, reconcile_account
+from personal_finance.reconcile.apply import declared_coverage, is_current, reconcile_account
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reconcile.same_document import find_candidate_groups
 from personal_finance.reports.import_summary import consolidated_records, final_transactions
@@ -195,7 +195,7 @@ def _import_content(
             _link(conn, transaction_id, record_id, document_id, account_id)
             transactions.append((transaction_id, parsed))
         else:
-            _insert_unresolved_issue(conn, record_id, parsed.reason_code)
+            insert_unresolved_issue(conn, record_id, parsed.reason_code)
             unresolved += 1
 
     for rule, members in find_candidate_groups(transactions):
@@ -235,7 +235,12 @@ def _repeat_import(
     if row is None:
         raise ImportFailure("account_mismatch")
 
+    # Compared with the coverage in effect, which a declaration since import can change (D-051).
     stored = Coverage(*row)
+    declaration = declared_coverage(conn, account_id).get(document_id)
+    if declaration is not None:
+        stored = Coverage(declaration.kind, declaration.start, declaration.end,
+                          declaration.date_basis, declaration.evidence)
     if declared is not None and declared != stored:
         raise ImportFailure("coverage_conflict")
 
@@ -376,7 +381,8 @@ def _link(conn, transaction_id, record_id, document_id, account_id) -> None:
     )
 
 
-def _insert_unresolved_issue(conn, record_id, reason_code) -> None:
+def insert_unresolved_issue(conn, record_id, reason_code) -> str:
+    """Raise a record's unresolved item, at import or when its resolution is undone (D-050)."""
     issue_id = _new_id()
     conn.execute(
         "INSERT INTO review_issue (id, kind, rule) VALUES (?, 'unresolved_record', ?)",
@@ -386,6 +392,7 @@ def _insert_unresolved_issue(conn, record_id, reason_code) -> None:
         "INSERT INTO review_issue_subject (review_issue_id, source_record_id) VALUES (?, ?)",
         (issue_id, record_id),
     )
+    return issue_id
 
 
 def _insert_candidate_issue(conn, document_id, rule, members) -> None:

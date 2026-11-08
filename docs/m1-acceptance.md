@@ -3,7 +3,7 @@
 **M1 is complete and accepted.** The owner gave final sign-off on 2026-11-06. The limits and
 deferred items below remain in force.
 
-Each criterion in [plan.md](plan.md) is listed with the tests that support it. One test can
+Each criterion in [archive/plan-m1-m2.md](archive/plan-m1-m2.md) is listed with the tests that support it. One test can
 support several criteria. `tests/unit/test_acceptance_matrix.py` fails if a criterion is
 missing here or a named test does not exist. It does not judge whether a test is sufficient.
 
@@ -49,7 +49,7 @@ missing here or a named test does not exist. It does not judge whether a test is
 | A31 | Passed | `a_failure_at_any_step_leaves_no_partial_data`, `a_process_crash_mid_import_leaves_no_partial_data` | |
 | A32 | Passed | `a32_a_user_declared_end_date_is_confident` | |
 | A33 | Passed | `a33_a_metadata_end_date_is_not_assumed_complete`, `a33_contrast_a_passed_end_date_is_confident` | |
-| A34 | Passed | `a34_a_conflicting_date_or_status_is_flagged`, `a34_an_id_repeated_within_a_document_is_flagged` | |
+| A34 | Passed | `a34_a_conflicting_date_is_flagged_and_pending_to_posted_merges`, `a34_an_id_repeated_within_a_document_is_flagged` | Amended by D-052 in M2.9: status no longer conflicts for a pending and a posted row with one ID. Accepted by the owner on 2026-11-08 |
 | A35 | Passed | `a35_an_unresolved_row_keeps_the_match_possible`, `a35_contrast_an_unrelated_unresolved_row_changes_nothing` | |
 | A36 | Passed | `a36_every_source_stays_linked_and_evidence_is_unchanged` | |
 | A37 | Passed | `a37_a_failure_at_any_stage_leaves_no_partial_state`, `a37_a_process_crash_during_matching_leaves_no_partial_state` | |
@@ -65,11 +65,11 @@ missing here or a named test does not exist. It does not judge whether a test is
 
 ## Completion conditions
 
-From "M1 acceptance criteria" in [plan.md](plan.md).
+From "M1 acceptance criteria" in [archive/plan-m1-m2.md](archive/plan-m1-m2.md).
 
 | Condition | Status | Evidence |
 |---|---|---|
-| All tests pass | Passed | See "Tests actually executed" in [handoff.md](handoff.md) |
+| All tests pass | Passed | See "Tests actually executed" in [archive/handoff-history.md](archive/handoff-history.md) |
 | A new-setup run works from the README | Passed | Clean install on 2026-11-06. See "Clean-install verification" below |
 | The decision log records the database, parser and deduplication rules | Passed | D-001, D-018, D-005 to D-008 and D-026 to D-033 |
 

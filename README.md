@@ -193,7 +193,7 @@ bin/pf trace --db "$DB" TRANSACTION_ID
 bin/pf reconcile --db "$DB"
 ```
 
-`transactions`, `trace`, `review show`, `review merge show` and `review transaction show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review confirm`, `review merges`, `review separate`, `review decisions`, `review decision show`, `review undo`, `review correct`, `review corrections`, `review correction show` and `review correction undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
+`transactions`, `trace`, `review show`, `review merge show` and `review transaction show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review confirm`, `review merges`, `review separate`, `review decisions`, `review decision show`, `review undo`, `review correct`, `review corrections`, `review correction show`, `review correction undo`, `review complete`, `review dismiss`, `review resolutions`, `review resolution show`, `review resolution undo`, `review coverage show`, `review coverage declare`, `review coverage history`, `review coverage undo`, `review classify`, `review classifications`, `review classification show` and `review classification undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
 
 ## Reading a Review Item
 
@@ -286,6 +286,74 @@ bin/pf review correction undo --db "$DB" --account ACCOUNT CORRECTION_ID --revis
 - To change a corrected field again, name the correction applying there with `--supersedes` and its revision from `review correction show`. Only the newest of a chain applies, and each undo restores the one before it.
 - If corrections that disagree end up in one transaction, or a correction's records end up in several transactions, the source value is used and `totals` says so on its own line. Undo one correction to settle it. `review confirm` and `review separate` refuse to cause either. See [D-049](docs/decisions.md).
 
+## Resolving an Unresolved Row
+
+```sh
+bin/pf review show --db "$DB" ITEM_ID
+bin/pf review complete --db "$DB" --account ACCOUNT ITEM_ID --revision REVISION \
+   [--amount=-12.50] [--transaction-date YYYY-MM-DD] [--posting-date YYYY-MM-DD] [--description TEXT]
+bin/pf review dismiss --db "$DB" --account ACCOUNT ITEM_ID --revision REVISION
+bin/pf review resolutions --db "$DB" --account ACCOUNT
+bin/pf review resolution show --db "$DB" RESOLUTION_ID
+bin/pf review resolution undo --db "$DB" --account ACCOUNT RESOLUTION_ID --revision REVISION
+```
+
+An `unresolved_record` item is a row the parser could not read as a transaction. `review complete` supplies what it could not read, and the row becomes a transaction. `review dismiss` says the row adds no transaction: a blank line, a heading or summary, or an event already counted elsewhere. The revision comes from `review show`.
+
+- A completion supplies only what is missing: an amount, a date or a description. It must leave the row with an amount and at least one date, and it cannot replace a value that was read. Complete the row first, then use `review correct` for that. A row whose values were all read, such as one with an unknown status, is completed with nothing supplied.
+- Source cells and parsed values are kept. `review show`, `review transaction show` and `trace` show what you supplied apart from what was read, and `transactions` marks the transaction.
+- Matching never pairs a completed row on the values you typed. An identical row in another file is raised as a possible duplicate, and `review confirm` can join them. A row read from a file supplies the displayed values before one you completed.
+- An unresolved row can keep confident matches in its file from happening, because it could distort the count. A dismissed row no longer does, so totals can fall. A completed row still does wherever its values could match.
+- `review resolution undo` makes the row unresolved again. Undoing a completion is refused while a decision, correction or classification binds the row: undo those first. Completing it again brings back the same transaction ID. See [D-050](docs/decisions.md).
+
+## Correcting a Document's Coverage
+
+```sh
+bin/pf documents --db "$DB"
+bin/pf review coverage show --db "$DB" DOCUMENT_ID
+bin/pf review coverage declare --db "$DB" --account ACCOUNT DOCUMENT_ID --revision REVISION \
+   --coverage-kind complete --coverage-start YYYY-MM-DD --coverage-end YYYY-MM-DD --coverage-basis posting
+bin/pf review coverage declare --db "$DB" --account ACCOUNT DOCUMENT_ID --revision REVISION --coverage-kind unknown
+bin/pf review coverage history --db "$DB" --account ACCOUNT
+bin/pf review coverage undo --db "$DB" --account ACCOUNT DECLARATION_ID --revision REVISION
+```
+
+Coverage given at import can be changed later. `documents` lists each document's ID, and `review coverage show` gives the revision to declare with and, while a declaration applies, the revision to undo it.
+
+- `complete` states, as at import, that nothing in the interval is missing on that date basis. `unknown` withdraws a claim. A document that states its own coverage can only have it withdrawn.
+- The claim made at import is kept. `documents` and `review show` show the declared coverage apart from it, and `totals` counts documents with declared coverage.
+- Matching uses the declared coverage from then on, so rows can merge or split and totals can change. The output says how many transactions there were before and after.
+- Each declaration replaces the one before it. Undo restores that one, or the claim at import. A repeat import with a declaration is compared with the coverage in effect. See [D-051](docs/decisions.md).
+
+## Pending and Posted Rows
+
+A pending row and its posted version are one purchase, often at another amount, as when a tip is added.
+
+- With an ID the source declares reliable, they become one transaction automatically, counted once at the posted amount.
+- Without one, a pending and a posted row alike but for their amount are raised as a possible duplicate with reason `pending_amount_changed`. Confirm them with `review confirm` to count the posted amount once.
+- A pending and a posted row of one file, flagged as `same_document_pending_posted`, can be confirmed the same way, as one group of the two. This is the only way one transaction holds two rows of one file.
+- `totals` says how many transactions were posted at another amount than their pending row, and how many pending transactions are more than 10 days older than the account's latest date. Those are counted and never removed.
+- After upgrading to this version, run `reconcile`: matching changed, so every account reads as not current until then. See [D-052](docs/decisions.md).
+
+## Stating a Financial Type
+
+```sh
+bin/pf review transaction show --db "$DB" TRANSACTION_ID
+bin/pf review classify --db "$DB" --account ACCOUNT TRANSACTION_ID --revision REVISION \
+   --type purchase [--supersedes CLASSIFICATION_ID --supersedes-revision REVISION]
+bin/pf review classifications --db "$DB" --account ACCOUNT
+bin/pf review classification show --db "$DB" CLASSIFICATION_ID
+bin/pf review classification undo --db "$DB" --account ACCOUNT CLASSIFICATION_ID --revision REVISION
+```
+
+Every transaction is `unclassified` until you state its type: `purchase`, `refund`, `income`, `fee`, `interest`, `transfer`, `card_payment`, `loan_payment` or `investment_contribution`. A refund and income are money in, a transfer either, and the others money out, so a type against the transaction's direction is refused. The revision comes from `review transaction show`.
+
+- `totals` lists each type with its count and amount, and the unclassified transactions, below account movement, which a type never changes. Matching never reads a type.
+- A classification binds the records the transaction holds when you make it, as a correction does. A re-export that merges with them keeps it applied.
+- To change a type, name the classification applying there with `--supersedes` and its revision from `review classification show`. Only the newest of a chain applies, and each undo restores the one before it.
+- If classifications that disagree end up in one transaction, a classification's records end up in several transactions, or undoing a correction turns the amount against the type, the transaction is unclassified and `totals` says so on its own line. Undo one classification to settle it. `review confirm`, `review separate` and `review correct` refuse to cause this.
+- Only you classify. Nothing suggests a type yet, and transfers are not yet matched across accounts. On a card, loan or investment account, a payment received is money in, so it can only be stated as a `transfer` for now. See [D-053](docs/decisions.md).
+
 ## Reading an Import Summary
 
 Each count keeps its own unit, so do not add different lines together. A file's lines describe the moment it was imported. The run summary and the account lines read the ledger after the last file.
@@ -301,6 +369,7 @@ Each count keeps its own unit, so do not add different lines together. A file's 
 | Open review groups | Possible duplicates awaiting review, with the distinct transactions they affect. Groups can overlap |
 | Decision conflicts | New evidence that disagrees with a stored decision, counted apart from possible duplicates. One transaction can appear in several of these counts |
 | Unresolved records | Rows that could not be read as a transaction. They are not in totals |
+| Rows completed or dismissed | Rows you resolved by hand, each on its own line |
 
 A failed file never counts towards rows read. It shows either `Source rows: unavailable`, or a count of rows read and then rolled back, of which none were kept. See [D-036](docs/decisions.md).
 

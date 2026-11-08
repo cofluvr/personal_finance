@@ -114,7 +114,7 @@ def test_a_file_for_another_account_is_rejected_not_skipped(db, capsys):
     assert "Files attempted: 1 (0 imported, 0 already imported, 1 failed)" in out
 
 
-def test_a_coverage_conflict_explains_the_limitation_and_changes_nothing(db, capsys):
+def test_a_coverage_conflict_explains_the_way_to_declare_and_changes_nothing(db, capsys):
     import_card(db)
     capsys.readouterr()
     main(["totals", "--db", db])
@@ -126,9 +126,9 @@ def test_a_coverage_conflict_explains_the_limitation_and_changes_nothing(db, cap
 
     out = capsys.readouterr().out
     assert "failed (coverage_conflict)" in out
-    assert "Coverage is fixed when a document is first imported" in out
+    assert "differs from the coverage the document already has" in out
     assert "Existing data is unchanged" in out
-    assert "M2" in out
+    assert "review coverage declare" in out
     assert "delete" not in out.lower()
     assert "sql" not in out.lower()
     main(["totals", "--db", db])
@@ -465,7 +465,8 @@ def test_trace_names_the_primary_source_and_explains_the_selection(db, tmp_path,
     assert "'SYNTHETIC CAFE'" in out, "the alternative's evidence stays visible"
     assert "Source status: unknown" in out
     assert f"Displayed values come from record {primary}, chosen by, in order:" in out
-    assert "4. lowest document hash, then row number" in out
+    assert "1. read from the source, then completed by hand" in out
+    assert "5. lowest document hash, then row number" in out
 
 
 def test_trace_explains_a_primary_that_was_never_recorded(db, tmp_path, capsys):

@@ -303,7 +303,8 @@ rows_strategy = st.lists(
 @settings(max_examples=200, deadline=None)
 @given(rows_strategy)
 def test_recomputed_links_match_union_find_components(rows):
-    """S16: direct links found pair by pair give the components discovery found."""
+    """S16: direct links found pair by pair give the components discovery found, with pending
+    rows among them so that pending-to-posted links are covered too (D-052)."""
     rules = replace(DEFAULT_RULES, max_group_span_days=10_000)
     documents = {name: doc(name) for name in "abcd"}
     start = date(2026, 1, 1)
@@ -311,12 +312,13 @@ def test_recomputed_links_match_union_find_components(rows):
         _Unit.of(
             [Record(str(index), "abcd"[document], index, amount,
                     posting_date=(start + timedelta(days=offset)).isoformat(),
-                    description=text, settlement_status="posted")],
+                    description=text,
+                    settlement_status="pending" if index % 3 == 0 else "posted")],
             documents,
         )
         for index, (document, offset, amount, text) in enumerate(rows)
     ]
-    joined, _ = _link_candidates(units, rules)
+    joined, _, _ = _link_candidates(units, rules)
     expected = {
         frozenset(index for index in component)
         for component in joined.components() if len(component) > 1

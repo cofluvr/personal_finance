@@ -49,7 +49,15 @@ ALL_TABLES = (*SOURCE_TABLES, "ledger_transaction", "transaction_source", "revie
               "review_issue_subject", "transaction_link_history", "transaction_identity_history",
               "decision", "decision_constraint", "decision_event", "account_reconciliation",
               "value_correction", "value_correction_record", "value_correction_event",
-              "transaction_correction")
+              "transaction_correction", "record_resolution", "record_resolution_event",
+              "coverage_declaration", "coverage_declaration_event", "type_classification",
+              "type_classification_record", "type_classification_event",
+              "transaction_classification")
+# Created by 0010, 0011 and 0013, children first (D-050, D-051, D-053).
+RESOLUTION_TABLES = ("record_resolution_event", "record_resolution")
+DECLARATION_TABLES = ("coverage_declaration_event", "coverage_declaration")
+CLASSIFICATION_TABLES = ("transaction_classification", "type_classification_event",
+                         "type_classification_record", "type_classification")
 
 
 def declared(start, end):
@@ -82,7 +90,8 @@ class Ledger:
         words = list(command)
         position = 2 if words[0] in ("account", "review") else 1
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
-                         ["review", "correction"]):
+                         ["review", "correction"], ["review", "resolution"],
+                         ["review", "coverage"], ["review", "classification"]):
             position = 3
         words[position:position] = ["--db", self.db]
         code = main(words)
@@ -122,7 +131,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r4-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r7-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)
@@ -145,7 +154,7 @@ class Ledger:
 
     def decision_revision(self, decision):
         out = self.run("review", "decision", "show", decision)[1]
-        return re.search(r"Revision: (d4-[0-9a-f]{16})", out)[1]
+        return re.search(r"Revision: (d6-[0-9a-f]{16})", out)[1]
 
     def undo(self, decision, revision=None, account="A"):
         return self.run("review", "undo", decision, "--account", account,
@@ -1007,7 +1016,7 @@ class TestUndoToken:  # S21
 
     def test_the_token_has_the_documented_form(self, ledger):
         _, token = self.decided(ledger)
-        assert re.fullmatch(r"d4-[0-9a-f]{16}", token)
+        assert re.fullmatch(r"d6-[0-9a-f]{16}", token)
 
 
 class TestConstraintsApplied:

@@ -4,10 +4,11 @@ derive() is a pure function: it reads no database and depends only on the set of
 documents, any active decisions and the rules, ordered by content hash and row number,
 never by import order or generated ID. Import order therefore cannot change the outcome.
 Applying the result is a separate step. Rules are in decisions.md D-006, D-007, D-026 to
-D-031 and D-042 to D-045.
+D-031, D-042 to D-045, D-050 and D-052.
 
 Reliable-ID matching and ID-less matching run on separate rows and neither one
-feeds the other. Description similarity only ever creates review items.
+feeds the other. Description similarity only ever creates review items. A record completed by
+hand takes part in neither, because its values were typed by a person (D-050).
 """
 
 from collections import Counter, defaultdict
@@ -23,6 +24,7 @@ LINK_NEW = "new_record"
 LINK_EXTERNAL_ID = "reliable_external_id"
 LINK_EXACT = "exact_coverage_pair"
 LINK_CONFIRMED = "confirmed_same_event"
+LINK_COMPLETED = "completed_record"
 
 RULE_EXTERNAL_ID = "cross_document_external_id"
 RULE_CANDIDATES = "cross_document_candidates"
@@ -30,6 +32,10 @@ RULE_DECISION = "identity_decision"
 
 REASON_WITHHELD = "automatic_match_withheld"
 REASON_BASIS_CHANGED = "decision_basis_changed"
+REASON_UNRESOLVED_ROW = "unresolved_row"
+REASON_COMPLETED_ROW = "completed_row"
+REASON_COMPLETED_SHARES_ID = "completed_record_shares_id"
+REASON_PENDING_AMOUNT_CHANGED = "pending_amount_changed"
 
 RELATION_DIFFERENT = "different_event"
 RELATION_SAME = "same_event"
@@ -41,6 +47,7 @@ _STATUS_RANK = {"posted": 0, "unknown": 1, "pending": 2}
 
 # How the source supplying a transaction's displayed values is chosen, in order (D-030).
 PRIMARY_CRITERIA = (
+    "read from the source, then completed by hand",
     "settlement status (posted, then unknown, then pending)",
     "more dates present",
     "has a description",
@@ -75,6 +82,8 @@ class Record:
     description: str | None = None
     external_id: str | None = None
     settlement_status: str = "unknown"
+    # Values the parse lacked were supplied by a person (D-050), so it never merges automatically.
+    completed_by_hand: bool = False
 
 
 @dataclass(frozen=True)
@@ -84,6 +93,8 @@ class UnresolvedRecord:
     transaction_date: str | None = None
     posting_date: str | None = None
     description: str | None = None
+    # A completed record still blocks confident pairing in its document, by its completed values.
+    completed_by_hand: bool = False
 
 
 @dataclass(frozen=True)
@@ -169,9 +180,11 @@ def derive(
     ordered = sorted(records, key=lambda row: _record_key(row, by_id))
     different = tuple(item for item in constraints if item.relation == RELATION_DIFFERENT)
 
-    id_merges, id_conflicts, separation = _match_reliable_ids(ordered, by_id)
-    id_less = [row for row in ordered if not _has_reliable_id(row, by_id)]
-    exact_merges, exact_reasons = _match_exact(id_less, by_id, unresolved, rules)
+    matchable = [row for row in ordered if not row.completed_by_hand]
+    id_merges, id_conflicts, separation = _match_reliable_ids(matchable, by_id)
+    id_less = [row for row in matchable if not _has_reliable_id(row, by_id)]
+    blockers = [*unresolved, *(_as_blocker(row) for row in ordered if row.completed_by_hand)]
+    exact_merges, exact_reasons = _match_exact(id_less, by_id, blockers, rules)
 
     merges = [(merge, LINK_EXTERNAL_ID) for merge in id_merges]
     merges += [(merge, LINK_EXACT) for merge in exact_merges]
@@ -191,17 +204,51 @@ def derive(
     ]
     units += confirmed
     merged = {row.id for merge, _ in units for row in merge}
-    units += [([row], LINK_NEW) for row in ordered if row.id not in merged]
+    units += [
+        ([row], LINK_COMPLETED if row.completed_by_hand else LINK_NEW)
+        for row in ordered if row.id not in merged
+    ]
 
     groups = tuple(_group(rows, rule, by_id) for rows, rule in units)
     candidates = [_Unit.of(rows, by_id) for rows, _ in units]
-    joined, steps = _link_candidates(candidates, rules)
+    joined, steps, pending_pairs = _link_candidates(candidates, rules)
+    reasons_by_row = defaultdict(set, {row: set(found) for row, found in exact_reasons.items()})
+    for pair in pending_pairs:
+        for position in pair:
+            for row in candidates[position].rows:
+                reasons_by_row[row.id].add(REASON_PENDING_AMOUNT_CHANGED)
     separated = _separated_units(candidates, different)
-    found, recomputed = _candidate_items(candidates, joined, exact_reasons, rules, separated)
+    found, recomputed = _candidate_items(candidates, joined, reasons_by_row, rules, separated)
     items = [_id_item(_without_withheld(conflict, withheld_by)) for conflict in id_conflicts]
     items += _not_covered_by(found, held)
     items += _conflict_items([rows for rows, _ in units], held, constraints)
+    items += _completed_id_items([rows for rows, _ in units], ordered, by_id)
     return Derivation(groups, tuple(items), separation, steps, recomputed, withheld_by)
+
+
+def _as_blocker(row: Record) -> UnresolvedRecord:
+    return UnresolvedRecord(row.document_id, row.amount_cents, row.transaction_date,
+                            row.posting_date, row.description, completed_by_hand=True)
+
+
+def _completed_id_items(units, rows, documents) -> list["ReviewItem"]:
+    """A completed record sharing a reliable ID with another record is raised, never merged (D-050)."""
+    home = {row.id: position for position, unit in enumerate(units) for row in unit}
+    holders = defaultdict(set)
+    completed = set()
+    for row in rows:
+        if _has_reliable_id(row, documents):
+            key = documents[row.document_id].id_namespace, row.external_id
+            holders[key].add(home[row.id])
+            if row.completed_by_hand:
+                completed.add(key)
+    items = []
+    for key in sorted(completed):
+        if len(holders[key]) > 1:
+            members = [units[position] for position in sorted(holders[key])]
+            items.append(_item(RULE_EXTERNAL_ID, members, {REASON_COMPLETED_SHARES_ID},
+                               _dates_of([row for unit in members for row in unit])))
+    return items
 
 
 def _withheld_merges(merges, constraints):
@@ -266,7 +313,7 @@ def _confirmed_units(rows, merges, withheld, constraints, documents):
         joined = dict(members)
         for position in positions:
             joined.update((row.id, row) for row in merges[position][0])
-        if _valid_unit(joined.values(), different, documents):
+        if _valid_unit(joined.values(), different, documents, members.keys()):
             absorbed.update(positions)
             units.append((sorted(joined.values(), key=lambda row: place[row.id]), LINK_CONFIRMED))
         else:
@@ -283,15 +330,36 @@ def _confirmed_units(rows, merges, withheld, constraints, documents):
     return units, absorbed
 
 
-def _valid_unit(rows, different, documents) -> bool:
-    """One record per document, no two distinct unique IDs, and no pair a decision keeps apart."""
+def _valid_unit(rows, different, documents, confirmed=()) -> bool:
+    """One record per document, no two distinct unique IDs, and no pair a decision keeps apart.
+
+    Two records of one document are allowed only as a pending and a posted row a person confirmed
+    as one event (D-052), so automatic matching never adds a second.
+    """
     rows = list(rows)
-    if len({row.document_id for row in rows}) < len(rows) or joins_distinct_ids(rows, documents):
+    if not _one_record_per_document(rows, confirmed) or joins_distinct_ids(rows, documents):
         return False
     present = {row.id for row in rows}
     return not any(
         present.intersection(item.left) and present.intersection(item.right) for item in different
     )
+
+
+def _one_record_per_document(rows, confirmed) -> bool:
+    by_document = defaultdict(list)
+    for row in rows:
+        by_document[row.document_id].append(row)
+    return all(
+        len(held) == 1 or (len(held) == 2 and is_pending_and_posted(*held)
+                           and all(row.id in confirmed for row in held))
+        for held in by_document.values()
+    )
+
+
+def is_pending_and_posted(left, right) -> bool:
+    """One pending row and one that is not, the only two records of a document that can be one
+    transaction, and only by confirmation (D-052)."""
+    return (left.settlement_status == "pending") != (right.settlement_status == "pending")
 
 
 def joins_distinct_ids(rows, documents) -> bool:
@@ -453,10 +521,18 @@ def _all_compatible(rows) -> bool:
 
 
 def _compatible(left: Record, right: Record) -> bool:
-    """Compare material fields (D-006). A date missing from one side is no conflict."""
+    """Compare material fields (D-006). A date missing from one side is no conflict.
+
+    A pending row and a posted row with one reliable ID are one event whose amount may have
+    changed, as with a tip, so only the direction and the transaction date must agree (D-052).
+    """
+    if _status_class(left) != _status_class(right):
+        return (
+            (left.amount_cents < 0) == (right.amount_cents < 0)
+            and _dates_agree(left.transaction_date, right.transaction_date)
+        )
     return (
         left.amount_cents == right.amount_cents
-        and _status_class(left) == _status_class(right)
         and _dates_agree(left.transaction_date, right.transaction_date)
         and _dates_agree(left.posting_date, right.posting_date)
     )
@@ -539,8 +615,9 @@ def _coverage_gap(left, right, key, blockers, rules) -> str | None:
 
     dates = {value for value in (transaction_date, posting_date) if value}
     for document in (left, right):
-        if _unresolved_could_affect(document.id, dates, amount, text, blockers, rules):
-            return "unresolved_row"
+        reason = _unresolved_could_affect(document.id, dates, amount, text, blockers, rules)
+        if reason:
+            return reason
     return None
 
 
@@ -562,22 +639,30 @@ def _index_unresolved(unresolved):
     return index
 
 
-def _unresolved_could_affect(document_id, dates, amount, text, blockers, rules) -> bool:
-    """An unresolved row matters only if nothing known about it rules it out (D-024)."""
+def _unresolved_could_affect(document_id, dates, amount, text, blockers, rules) -> str | None:
+    """Why a row of this document could distort the count, if one could (D-024, D-050).
+
+    An unresolved row matters only if nothing known about it rules it out. A completed row is
+    judged the same way by its completed values, and an unresolved row takes precedence.
+    """
     by_date = blockers.get(document_id)
     if not by_date:
-        return False
+        return None
 
     description = parse_description(text, rules)
+    found = None
     for value in (None, *dates):
         for row in by_date.get(value, ()):
             if row.amount_cents is not None and row.amount_cents != amount:
                 continue
-            if not fold(row.description):
-                return True
-            if similar(parse_description(row.description, rules), description, rules):
-                return True
-    return False
+            if fold(row.description) and not similar(
+                parse_description(row.description, rules), description, rules
+            ):
+                continue
+            if not row.completed_by_hand:
+                return REASON_UNRESOLVED_ROW
+            found = REASON_COMPLETED_ROW
+    return found
 
 
 @dataclass(frozen=True)
@@ -590,6 +675,9 @@ class _Unit:
     descriptions: frozenset[str]
     # Units in one lane can never be candidates for each other.
     lane: tuple[frozenset[str], frozenset[str]]
+    # Every row pending, or some row posted, for pending-to-posted candidates (D-052).
+    pending: bool = False
+    posted: bool = False
 
     @classmethod
     def of(cls, rows, documents):
@@ -606,6 +694,8 @@ class _Unit:
             tuple(sorted(days)),
             frozenset(text for text in map(fold, (row.description for row in rows)) if text),
             (frozenset(row.document_id for row in rows), frozenset(unique_namespaces)),
+            all(row.settlement_status == "pending" for row in rows),
+            any(row.settlement_status == "posted" for row in rows),
         )
 
 
@@ -630,6 +720,10 @@ def _link_candidates(units, rules):
 
     joined = _DisjointSet(len(units))
     steps = 0
+    pending_pairs = _pending_posted_pairs(units, rules)
+    for left, right in pending_pairs:
+        joined.union(left, right)
+    steps += len(pending_pairs)
     for descriptions in by_amount.values():
         sorted_lanes = {
             text: {lane: sorted(entries) for lane, entries in lanes.items()}
@@ -644,7 +738,59 @@ def _link_candidates(units, rules):
                 for right, right_entries in sorted_lanes[other].items():
                     if _lanes_can_link(left, right):
                         steps += _join_lanes(left_entries, right_entries, rules, joined)
-    return joined, steps
+    return joined, steps, pending_pairs
+
+
+def _pending_posted_pairs(units, rules) -> list[tuple[int, int]]:
+    """Pending and posted units alike but for their amount, as positions in units (D-052).
+
+    Equal amounts are linked by the ordinary path. A pending unit is compared only with posted
+    units in its date window sharing a description or its block (D-032), since descriptions can
+    only be similar within a block. So the cost follows pending rows and the spellings a block
+    holds, as discovery's does, not every row.
+    """
+    window = rules.date_window_days
+    posted_by_day_and_key = defaultdict(list)
+    for index, unit in enumerate(units):
+        if unit.posted:
+            for day, key in product(unit.days, _description_keys(unit, rules)):
+                posted_by_day_and_key[day, key].append(index)
+    related, pairs = {}, set()
+    for index, unit in enumerate(units):
+        if not unit.pending:
+            continue
+        nearby = {other for day in unit.days for offset in range(-window, window + 1)
+                  for key in _description_keys(unit, rules)
+                  for other in posted_by_day_and_key.get((day + offset, key), ())}
+        for other in sorted(nearby):
+            if _pending_posted_linked(unit, units[other], rules, related):
+                pairs.add((index, other))
+    return sorted(pairs)
+
+
+def _description_keys(unit, rules) -> set[tuple[str, str]]:
+    """Each description itself, and its block where it has one."""
+    blocks = {block_key(parse_description(text, rules), rules) for text in unit.descriptions}
+    return ({("text", text) for text in unit.descriptions}
+            | {("block", key) for key in blocks if key is not None})
+
+
+def _pending_posted_linked(left, right, rules, related) -> bool:
+    """A pending and a posted unit of different amounts in the same direction, dates within the
+    window and descriptions related (D-052). Review only: it never merges."""
+    if left.posted and right.pending:
+        left, right = right, left
+    if not (left.pending and right.posted) or left.amount_cents == right.amount_cents:
+        return False
+    if (left.amount_cents < 0) != (right.amount_cents < 0) or not _lanes_can_link(left.lane, right.lane):
+        return False
+    window = rules.date_window_days
+    if not any(abs(one - other) <= window for one, other in product(left.days, right.days)):
+        return False
+    return any(
+        _texts_related(one, other, rules, related)
+        for one, other in product(left.descriptions, right.descriptions)
+    )
 
 
 def _similar_descriptions(texts, rules):
@@ -746,6 +892,8 @@ def _undecided_parts(component, units, separated, rules):
 
 def _units_linked(left, right, rules, related) -> bool:
     """Whether discovery would link these two units directly. related remembers text pairs."""
+    if _pending_posted_linked(left, right, rules, related):
+        return True
     if left.amount_cents != right.amount_cents or not _lanes_can_link(left.lane, right.lane):
         return False
     window = rules.date_window_days
@@ -826,16 +974,19 @@ def _primary_rank(row: Record, documents):
         row.description,
         documents[row.document_id].content_sha256,
         row.row_index,
+        completed_by_hand=row.completed_by_hand,
     )
 
 
-def primary_rank(status, transaction_date, posting_date, description, content_sha256, row_index):
+def primary_rank(status, transaction_date, posting_date, description, content_sha256, row_index,
+                 *, completed_by_hand=False):
     """Order sources for display, lowest first, one term per entry of PRIMARY_CRITERIA.
 
     Depends only on the record itself, so import order cannot affect the choice.
     """
     dates = (transaction_date is not None) + (posting_date is not None)
-    return (_STATUS_RANK[status], -dates, not description, (content_sha256, row_index))
+    return (completed_by_hand, _STATUS_RANK[status], -dates, not description,
+            (content_sha256, row_index))
 
 
 def deciding_criterion(chosen, other) -> str:

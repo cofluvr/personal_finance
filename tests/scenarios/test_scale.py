@@ -1,7 +1,7 @@
 """Candidate discovery on larger synthetic data (A39).
 
 These check the amount of work, which is repeatable, rather than elapsed time. The
-measured timings are in docs/status.md. The claims hold for these shapes only:
+measured timings are in docs/benchmarks.md. The claims hold for these shapes only:
 cost also depends on overlapping documents and on similar descriptions in one block.
 """
 

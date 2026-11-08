@@ -54,7 +54,7 @@ class SeparationLedger(Ledger):
         return out
 
     def merge_revision(self, transaction):
-        return re.search(r"Revision: (t2-[0-9a-f]{16})", self.merge_show(transaction))[1]
+        return re.search(r"Revision: (t5-[0-9a-f]{16})", self.merge_show(transaction))[1]
 
     def records(self, transaction):
         """Record IDs by file name, read from the evidence and never from ID order."""
@@ -278,12 +278,12 @@ class TestRefusals:  # P4
     def test_unknown_transaction(self, ledger):
         _, records = merged_two(ledger)
         self.refused(ledger, TRANSACTION_NOT_FOUND, "no-such-transaction", [records["a.csv"]],
-                     [records["b.csv"]], revision="t2-0000000000000000")
+                     [records["b.csv"]], revision="t5-0000000000000000")
 
     def test_a_stale_token(self, ledger):
         transaction, records = merged_two(ledger)
         self.refused(ledger, STALE_TRANSACTION_REVISION, transaction, [records["a.csv"]],
-                     [records["b.csv"]], revision="t2-0000000000000000")
+                     [records["b.csv"]], revision="t5-0000000000000000")
 
     def test_a_token_from_before_new_evidence(self, ledger):
         ledger.card("a.csv", CAFE, extra=WHOLE_MONTH)
@@ -590,8 +590,8 @@ class TestTotals:  # P14
 
 class TestTokens:  # P15
     def test_the_version_is_pinned(self):
-        assert review_evidence.TRANSACTION_REVISION_VERSION == 2
-        assert review_evidence.REVISION_VERSION == 4
+        assert review_evidence.TRANSACTION_REVISION_VERSION == 5
+        assert review_evidence.REVISION_VERSION == 7
 
     def test_equal_in_any_import_order(self, tmp_path, capsys):
         tokens = []
@@ -749,7 +749,7 @@ class TestGaps:
             path.write_text(CARD_HEADER + " " * number + CAFE + "\n")
             ledger.load_path(path)
         (item,) = ledger.items()
-        assert ledger.revision(item) == "r4-d41e2251fcd3a611"
+        assert ledger.revision(item) == "r7-d41e2251fcd3a611"
 
     def test_a_confirmed_partition_is_not_counted_as_separated(self, ledger):
         item, one, two, three = three_of_them(ledger)
