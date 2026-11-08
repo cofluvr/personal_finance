@@ -119,10 +119,34 @@ def _write_marker(conn, account_id, rules) -> None:
 
 
 def decision_states(conn, account_id, without: str | None = None) -> dict[str, str]:
-    """Every decision of an account as active, undone or superseded (D-046).
+    """Every decision of an account as active, undone or superseded (D-046, D-048).
 
-    A decision is active unless it was undone, or an active decision supersedes it. without
+    A decision is superseded while any decision superseding it has not been undone, whether
+    that one is active or superseded in turn, so only the newest of a chain is active. without
     is treated as undone, to see what undoing it would leave.
+    """
+    undone, replacing = _supersession(conn, account_id, without)
+    states = {}
+    for decision, gone in undone.items():
+        if gone:
+            states[decision] = STATE_UNDONE
+        elif decision in replacing:
+            states[decision] = STATE_SUPERSEDED
+        else:
+            states[decision] = STATE_ACTIVE
+    return states
+
+
+def superseded_by(conn, account_id) -> dict[str, str]:
+    """For each superseded decision, the decision superseding it now."""
+    return _supersession(conn, account_id, None)[1]
+
+
+def _supersession(conn, account_id, without):
+    """Whether each decision is undone, and for each superseded one, its successor.
+
+    Only an active decision can be superseded, so at most one decision not undone supersedes
+    any other.
     """
     rows = conn.execute(
         """SELECT decision.id, decision.supersedes_decision_id,
@@ -131,28 +155,11 @@ def decision_states(conn, account_id, without: str | None = None) -> dict[str, s
            FROM decision WHERE decision.account_id = ?""",
         (account_id,),
     ).fetchall()
-    undone = {decision for decision, _, gone in rows if gone or decision == without}
-    replaced_by = defaultdict(list)
-    for decision, old, _ in rows:
-        if old is not None:
-            replaced_by[old].append(decision)
-
-    states = {}
-
-    def state_of(decision):
-        # A decision supersedes only an earlier one, so this always ends.
-        if decision not in states:
-            if decision in undone:
-                states[decision] = STATE_UNDONE
-            elif any(state_of(newer) == STATE_ACTIVE for newer in replaced_by[decision]):
-                states[decision] = STATE_SUPERSEDED
-            else:
-                states[decision] = STATE_ACTIVE
-        return states[decision]
-
-    for decision, _, _ in rows:
-        state_of(decision)
-    return states
+    undone = {decision: bool(gone) or decision == without for decision, _, gone in rows}
+    replacing = {
+        old: decision for decision, old, _ in rows if old is not None and not undone[decision]
+    }
+    return undone, replacing
 
 
 def load_constraints(conn, account_id, without: str | None = None) -> tuple[Constraint, ...]:

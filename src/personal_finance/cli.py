@@ -26,7 +26,7 @@ from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import LAYOUTS
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.money import format_cents
-from personal_finance.reconcile.apply import reconcile_account, stale_accounts
+from personal_finance.reconcile.apply import STATE_ACTIVE, reconcile_account, stale_accounts
 from personal_finance.reconcile.cross_document import (
     PRIMARY_CRITERIA,
     RULE_CANDIDATES,
@@ -44,7 +44,6 @@ from personal_finance.reconcile.decisions import (
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reports.decision_evidence import (
-    STATE_ACTIVE,
     list_decisions,
     load_decision,
     shown_kind,
@@ -1083,6 +1082,11 @@ def run_review_decision_show(args) -> int:
         print(
             f"  Superseded by decision {decision.superseded_by}. It stays on record and no "
             "longer applies, unless that decision is undone."
+        )
+    if decision.newest != decision.superseded_by:
+        print(
+            f"  Newest of its chain: decision {decision.newest}, the only one that can be "
+            "undone. Each undo restores the decision before it."
         )
     if decision.supersedes_decision_id:
         print(f"  Supersedes decision {decision.supersedes_decision_id}")

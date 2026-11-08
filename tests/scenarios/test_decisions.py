@@ -142,7 +142,7 @@ class Ledger:
 
     def decision_revision(self, decision):
         out = self.run("review", "decision", "show", decision)[1]
-        return re.search(r"Revision: (d2-[0-9a-f]{16})", out)[1]
+        return re.search(r"Revision: (d3-[0-9a-f]{16})", out)[1]
 
     def undo(self, decision, revision=None, account="A"):
         return self.run("review", "undo", decision, "--account", account,
@@ -1004,7 +1004,7 @@ class TestUndoToken:  # S21
 
     def test_the_token_has_the_documented_form(self, ledger):
         _, token = self.decided(ledger)
-        assert re.fullmatch(r"d2-[0-9a-f]{16}", token)
+        assert re.fullmatch(r"d3-[0-9a-f]{16}", token)
 
 
 class TestConstraintsApplied:

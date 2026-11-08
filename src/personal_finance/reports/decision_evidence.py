@@ -9,17 +9,17 @@ import sqlite3
 from dataclasses import asdict, dataclass
 
 from personal_finance.reconcile.apply import (
-    STATE_ACTIVE,
-    STATE_SUPERSEDED,
     decision_states,
     load_constraints,
     load_evidence,
+    superseded_by,
 )
 from personal_finance.reconcile.cross_document import derive
 from personal_finance.reconcile.rules import MatchingRules
 
-# Bump whenever the material below changes, so an old token can never appear current.
-DECISION_REVISION_VERSION = 2
+# Bump whenever the material below changes, so an old token can never appear current. Version 3
+# restores only the decision just before this one, so a chain reads differently (D-048).
+DECISION_REVISION_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -59,10 +59,12 @@ class DecisionEvidence:
     # reject or confirm (D-046).
     kind: str = "reject"
     supersedes_decision_id: str | None = None
-    # The active decision replacing this one, while it is superseded.
+    # The decision replacing this one, while it is superseded. It can be superseded in turn.
     superseded_by: str | None = None
     # item or transaction.
     target_kind: str = "item"
+    # The newest decision of its chain while superseded, the only one that can be undone (D-048).
+    newest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -140,17 +142,13 @@ def load_decision(conn: sqlite3.Connection, decision_id: str) -> DecisionEvidenc
                 right_part) in sorted(sides.items())
     )
     states = decision_states(conn, account_id)
-    superseded_by = None
-    if states[decision_id] == STATE_SUPERSEDED:
-        (superseded_by,) = (
-            newer for (newer,) in conn.execute(
-                "SELECT id FROM decision WHERE supersedes_decision_id = ?", (decision_id,)
-            )
-            if states[newer] == STATE_ACTIVE
-        )
+    successors = superseded_by(conn, account_id)
+    newer = newest = successors.get(decision_id)
+    while newest in successors:
+        newest = successors[newest]
     return DecisionEvidence(
         decision_id, account_id, account_name, target, created_at, states[decision_id], undone_at,
-        pairs, kind, supersedes, superseded_by, target_kind,
+        pairs, kind, supersedes, newer, target_kind, newest,
     )
 
 

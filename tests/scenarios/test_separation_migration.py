@@ -134,11 +134,11 @@ class TestPopulatedMigration:
         assert len(old_dump(conn)["decision_constraint"]) == 2
         conn.close()
 
-    def test_everything_survives_and_old_decisions_target_items(self, populated):
+    def test_everything_survives_and_old_decisions_target_items(self, populated, tmp_path):
         conn = connect(populated)
         before = old_dump(conn)
         constraints = load_constraints(conn, account_of(conn))
-        assert migrate(conn) == len(load_migrations()) == 7
+        assert migrate(conn, to_version(tmp_path / "to_0007", 7)) == 7
         assert dump(conn) == before
         assert conn.execute("SELECT DISTINCT target_kind FROM decision").fetchall() == [("item",)]
         assert conn.execute(
@@ -150,13 +150,13 @@ class TestPopulatedMigration:
         assert conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
         conn.close()
 
-    def test_indexes_and_triggers_are_recreated(self, populated):
+    def test_indexes_and_triggers_are_recreated(self, populated, tmp_path):
         conn = connect(populated)
         query = """SELECT type, name FROM sqlite_master
                    WHERE tbl_name = 'decision_constraint' AND type IN ('index', 'trigger')
                    ORDER BY name"""
         before = conn.execute(query).fetchall()
-        migrate(conn)
+        migrate(conn, to_version(tmp_path / "to_0007", 7))
         assert conn.execute(query).fetchall() == before
         # Two indexes, the UNIQUE constraint's own index and three triggers.
         assert len(before) == 6
@@ -196,9 +196,9 @@ class TestPopulatedMigration:
 
 
 @pytest.fixture
-def migrated(populated):
+def migrated(populated, tmp_path):
     conn = connect(populated)
-    migrate(conn)
+    migrate(conn, to_version(tmp_path / "to_0007", 7))
     conn.execute("PRAGMA foreign_keys = OFF")
     yield conn
     conn.close()

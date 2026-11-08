@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from itertools import combinations, product
 
 from personal_finance.reconcile.apply import (
+    STATE_ACTIVE,
+    STATE_SUPERSEDED,
     is_current,
     load_constraints,
     load_evidence,
@@ -28,8 +30,6 @@ from personal_finance.reconcile.cross_document import (
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reports.decision_evidence import (
-    STATE_ACTIVE,
-    STATE_SUPERSEDED,
     load_decision,
     undo_outlook,
 )
@@ -124,6 +124,11 @@ PAIR_UNACCOUNTED = (
 DECISION_SUPERSEDED = (
     "this decision is superseded by decision {newer}, so it does not apply now. Nothing was "
     "changed. Undo that decision instead, which restores this one."
+)
+DECISION_SUPERSEDED_IN_CHAIN = (
+    "this decision is superseded by decision {newer}, which is superseded in turn, so it does "
+    "not apply now. Nothing was changed. Only the newest decision of the chain, {newest}, can "
+    "be undone, and each undo restores the one before it."
 )
 RESTORE_CONTRADICTS = (
     "undoing this decision would restore decision {restored}, which contradicts decisions "
@@ -642,13 +647,22 @@ def _replaced(conn, account_id, replacing, rules):
         raise DecisionRefused(DECISION_NOT_FOUND)
     if decision.account_id != account_id:
         raise DecisionRefused(DECISION_WRONG_ACCOUNT)
-    if decision.state == STATE_SUPERSEDED:
-        raise DecisionRefused(DECISION_SUPERSEDED.format(newer=decision.superseded_by))
-    if decision.state != STATE_ACTIVE:
-        raise DecisionRefused(DECISION_NOT_ACTIVE)
+    _check_active(decision)
     if undo_outlook(conn, decision, rules).revision != revision:
         raise DecisionRefused(STALE_DECISION_REVISION)
     return decision
+
+
+def _check_active(decision) -> None:
+    """Only the newest decision of a chain applies, and only it can be undone (D-048)."""
+    if decision.state == STATE_SUPERSEDED:
+        if decision.newest != decision.superseded_by:
+            raise DecisionRefused(DECISION_SUPERSEDED_IN_CHAIN.format(
+                newer=decision.superseded_by, newest=decision.newest
+            ))
+        raise DecisionRefused(DECISION_SUPERSEDED.format(newer=decision.superseded_by))
+    if decision.state != STATE_ACTIVE:
+        raise DecisionRefused(DECISION_NOT_ACTIVE)
 
 
 def _account_for_pairs(replaced, groups, members, keep):
@@ -836,10 +850,7 @@ def _undo(conn, account_id, decision_id, revision, rules) -> Undo:
         raise DecisionRefused(DECISION_NOT_FOUND)
     if decision.account_id != account_id:
         raise DecisionRefused(DECISION_WRONG_ACCOUNT)
-    if decision.state == STATE_SUPERSEDED:
-        raise DecisionRefused(DECISION_SUPERSEDED.format(newer=decision.superseded_by))
-    if decision.state != STATE_ACTIVE:
-        raise DecisionRefused(DECISION_NOT_ACTIVE)
+    _check_active(decision)
     if undo_outlook(conn, decision, rules).revision != revision:
         raise DecisionRefused(STALE_DECISION_REVISION)
     restored = decision.supersedes_decision_id
