@@ -610,7 +610,7 @@ rules and the choices made where they left one in D-047. Tests are in
 
 ## Awaiting the owner
 
-- Approval of a plan for M2.6, correction overrides. Nothing of M2.6 is built.
+- Nothing. M2.6 was approved on 2026-11-08 (D-049) and is being built.
 - Pushing. Not authorized from here. The owner's own push is described under "Remote state".
 
 ## Recommended M2 scope
@@ -628,7 +628,7 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 | M2.3 | Accepted as built, 2026-11-07 | None |
 | M2.4 | Accepted as built, 2026-11-07 | None |
 | M2.5 | Accepted as built, 2026-11-08 | None |
-| M2.6 | Provisional, not approved. A plan was proposed for the owner's approval | Needs its own approval |
+| M2.6 | Approved 2026-11-08 (D-049), with local commits for it | Owner reviews when built |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
