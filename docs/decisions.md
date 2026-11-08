@@ -75,7 +75,7 @@ index line.
 | D-053 | Financial types — Approved, implemented and accepted in M3.1 |
 | D-054 | Transfers across accounts — Approved, implemented and accepted in M3.2 |
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
-| D-056 | Income and spending — Proposed for M3.4, awaiting approval |
+| D-056 | Income and spending — Approved, being implemented in M3.4 |
 
 ## Rules in brief
 
@@ -154,10 +154,15 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | One-sided transfers | A person's statement over a transfer-kind transaction, naming a registered counterpart. Refused while the other side may be in view | D-055 |
 | Counterpart coverage | A state only when complete coverage on one basis spans every day within 5 days. Less is a warning | D-055 |
 | Card payments | Out of spending, matched or one-sided. A one-sided one to a card warns that its spending is understated | D-012, D-055 |
+| Income and spending | Five groups, each transaction in one, adding to net account movement: confirmed transfers, income, spending, unconfirmed transfer kinds and unclassified | D-056 |
+| Confirmed transfers | A side of an applied match or one-sided transfer, whatever its own type | D-056 |
+| Unconfirmed transfer kinds | Neither income, spending nor transfers, disclosed as a bound on both | D-011, D-056 |
+| Reporting periods | In M4, with D-013. Totals cover the ledger or one account | D-056 |
 
-## D-056 Income and spending — Proposed for M3.4, awaiting approval
+## D-056 Income and spending — Approved, being implemented in M3.4
 
-Proposed for M3.4 on 2026-11-08. Meets PRD §9's required treatment (owned-account transfers are
+Proposed for M3.4 on 2026-11-08, and approved by the owner the same day with the lead engineer's
+recommendations, including points A to C, with no changes. Meets PRD §9's required treatment (owned-account transfers are
 neither income nor spending, card payments do not duplicate purchases, investment contributions are
 separate from everyday spending, loan interest is an expense, full loan payments stay visible,
 refunds reduce spending) and M3's milestone test, using D-011, D-012, D-053, D-054 and D-055. Changes

@@ -1,10 +1,9 @@
-# Session Handoff: M3.4 Proposed, Awaiting Approval
+# Session Handoff: M3.4 Approved, Being Built
 
 For a fresh session. Written 2026-11-08. **M1, M2 and M3.1 to M3.3 are complete and accepted.** The
 owner accepted M3.3, card payments, one-sided transfers and coverage warnings (D-055), on
-2026-11-08 as built, with no changes. **M3.4, income and spending, is proposed as D-056 and awaits
-approval.** Nothing of it is built. D-056 ends with three points for the owner's decision, A to C,
-each with the lead engineer's recommendation.
+2026-11-08 as built, with no changes. **M3.4, income and spending, D-056, was approved the same
+day with the lead engineer's recommendations, including points A to C,** and is being built.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -31,7 +30,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`: it records M3.3's acceptance and proposes D-056. M3.4 would start after it. Earlier markers are in the archive |
+| Latest commit | Run `git log -1`. M3.4 starts after the commit recording D-056's approval, itself after `944e68f`, which proposes it. Earlier markers are in the archive |
 | Latest gating run | Full suite, 1721 passed, exit code 0, on `c85c099` and again gating the commit recording M3.3's acceptance |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
@@ -155,17 +154,16 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Approval of D-056, the M3.4 plan, or the changes wanted, including points A to C at its end.
-  The T1 to T12 acceptance tests are in [plan.md](plan.md).
+- Review of M3.4 once built.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved through recording M3.3's acceptance and proposing D-056 | **Must be renewed** for anything further |
+| Local commits on `feature/m2-review` | Approved through M3.4 | **Must be renewed** for anything further |
 | M1, M2 and M3.1 to M3.3 | Accepted as built | None |
-| M3.4 | Plan D-056 proposed 2026-11-08, not approved | Owner approves or asks for changes |
+| M3.4 | Plan D-056 approved 2026-11-08, being built | Owner accepts or asks for changes |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
