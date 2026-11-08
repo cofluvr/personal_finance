@@ -181,7 +181,7 @@ bin/pf trace --db "$DB" TRANSACTION_ID
 bin/pf reconcile --db "$DB"
 ```
 
-`transactions`, `trace`, `review show`, `review merge show` and `review transaction show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review confirm`, `review merges`, `review separate`, `review decisions`, `review decision show`, `review undo`, `review correct`, `review corrections`, `review correction show` and `review correction undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
+`transactions`, `trace`, `review show`, `review merge show` and `review transaction show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review confirm`, `review merges`, `review separate`, `review decisions`, `review decision show`, `review undo`, `review correct`, `review corrections`, `review correction show`, `review correction undo`, `review complete`, `review dismiss`, `review resolutions`, `review resolution show` and `review resolution undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
 
 ## Reading a Review Item
 
@@ -274,6 +274,26 @@ bin/pf review correction undo --db "$DB" --account ACCOUNT CORRECTION_ID --revis
 - To change a corrected field again, name the correction applying there with `--supersedes` and its revision from `review correction show`. Only the newest of a chain applies, and each undo restores the one before it.
 - If corrections that disagree end up in one transaction, or a correction's records end up in several transactions, the source value is used and `totals` says so on its own line. Undo one correction to settle it. `review confirm` and `review separate` refuse to cause either. See [D-049](docs/decisions.md).
 
+## Resolving an Unresolved Row
+
+```sh
+bin/pf review show --db "$DB" ITEM_ID
+bin/pf review complete --db "$DB" --account ACCOUNT ITEM_ID --revision REVISION \
+   [--amount=-12.50] [--transaction-date YYYY-MM-DD] [--posting-date YYYY-MM-DD] [--description TEXT]
+bin/pf review dismiss --db "$DB" --account ACCOUNT ITEM_ID --revision REVISION
+bin/pf review resolutions --db "$DB" --account ACCOUNT
+bin/pf review resolution show --db "$DB" RESOLUTION_ID
+bin/pf review resolution undo --db "$DB" --account ACCOUNT RESOLUTION_ID --revision REVISION
+```
+
+An `unresolved_record` item is a row the parser could not read as a transaction. `review complete` supplies what it could not read, and the row becomes a transaction. `review dismiss` says the row adds no transaction: a blank line, a heading or summary, or an event already counted elsewhere. The revision comes from `review show`.
+
+- A completion supplies only what is missing: an amount, a date or a description. It must leave the row with an amount and at least one date, and it cannot replace a value that was read. Complete the row first, then use `review correct` for that. A row whose values were all read, such as one with an unknown status, is completed with nothing supplied.
+- Source cells and parsed values are kept. `review show`, `review transaction show` and `trace` show what you supplied apart from what was read, and `transactions` marks the transaction.
+- Matching never pairs a completed row on the values you typed. An identical row in another file is raised as a possible duplicate, and `review confirm` can join them. A row read from a file supplies the displayed values before one you completed.
+- An unresolved row can keep confident matches in its file from happening, because it could distort the count. A dismissed row no longer does, so totals can fall. A completed row still does wherever its values could match.
+- `review resolution undo` makes the row unresolved again. Undoing a completion is refused while a decision or correction binds the row: undo those first. Completing it again brings back the same transaction ID. See [D-050](docs/decisions.md).
+
 ## Reading an Import Summary
 
 Each count keeps its own unit, so do not add different lines together. A file's lines describe the moment it was imported. The run summary and the account lines read the ledger after the last file.
@@ -289,6 +309,7 @@ Each count keeps its own unit, so do not add different lines together. A file's 
 | Open review groups | Possible duplicates awaiting review, with the distinct transactions they affect. Groups can overlap |
 | Decision conflicts | New evidence that disagrees with a stored decision, counted apart from possible duplicates. One transaction can appear in several of these counts |
 | Unresolved records | Rows that could not be read as a transaction. They are not in totals |
+| Rows completed or dismissed | Rows you resolved by hand, each on its own line |
 
 A failed file never counts towards rows read. It shows either `Source rows: unavailable`, or a count of rows read and then rolled back, of which none were kept. See [D-036](docs/decisions.md).
 

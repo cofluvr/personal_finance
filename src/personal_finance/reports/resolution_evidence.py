@@ -13,7 +13,7 @@ from personal_finance.reconcile.apply import load_constraints, load_evidence
 from personal_finance.reconcile.cross_document import derive
 from personal_finance.reconcile.rules import MatchingRules
 from personal_finance.reconcile.supersession import STATE_ACTIVE, STATE_UNDONE
-from personal_finance.reports.decision_evidence import BoundRecord, record_material
+from personal_finance.reports.decision_evidence import BoundRecord
 
 # Bump whenever the material below changes, so an old token can never appear current.
 RESOLUTION_REVISION_VERSION = 1
@@ -123,10 +123,12 @@ def resolution_undo_outlook(
 ) -> ResolutionUndoOutlook:
     """The undo token, and the transaction counts either side of an undo (D-050).
 
-    Like a decision's (D-045), it covers what derivation gives with and without this resolution,
-    and the evidence of every record that differs between the two or is resolved by it. Evidence
-    that cannot affect the undo leaves it unchanged, so an unrelated file does not force another
-    inspection. Only an active resolution has one, so its state is not covered.
+    It covers what derivation would give without this resolution, for the records whose review
+    items differ with and without it and their transactions. That is all an undo does. Only an
+    active resolution has a token, and its kind, values and record never change, so none of them
+    is covered. A rules change reaches the token through derivation once reconciled, and is refused
+    before. Evidence that cannot affect the undo leaves it unchanged, so an unrelated file does not
+    force another inspection.
     """
     account_id = resolution.account_id
     documents, records, unresolved, _ = load_evidence(conn, account_id)
@@ -136,9 +138,8 @@ def resolution_undo_outlook(
     after = derive(documents, records_after, unresolved_after, rules, constraints)
 
     keys = _record_keys(conn, account_id)
+    # A change of grouping always changes the items too, so the items decide the scope.
     scope = {resolution.record.record_id}
-    for changed in set(now.groups) ^ set(after.groups):
-        scope.update(changed.record_ids)
     for changed in set(now.items) ^ set(after.items):
         scope.update(record for member in changed.members for record in member)
     for result in (now, after):
@@ -149,31 +150,17 @@ def resolution_undo_outlook(
     def keyed(record_ids):
         return sorted(keys[record_id] for record_id in record_ids)
 
-    def view(result, held):
-        return {
-            "groups": sorted(
-                [keyed(group.record_ids), group.link_rule, keys[group.primary_record_id]]
-                for group in result.groups if scope.intersection(group.record_ids)
-            ),
-            "items": sorted(
-                [item.rule, sorted(map(keyed, item.members)), list(item.reasons),
-                 item.date_start, item.date_end]
-                for item in result.items
-                if scope.intersection(record for member in item.members for record in member)
-            ),
-            "records": sorted(
-                [keys[record.id], record_material(record)]
-                for record in held if record.id in scope
-            ),
-        }
-
     material = {
-        "kind": resolution.kind,
-        "values": list(resolution.completed_values),
-        "record": keys[resolution.record.record_id],
-        "rules": rules.fingerprint(),
-        "with_resolution": view(now, records),
-        "without_resolution": view(after, records_after),
+        "groups": sorted(
+            [keyed(group.record_ids), group.link_rule, keys[group.primary_record_id]]
+            for group in after.groups if scope.intersection(group.record_ids)
+        ),
+        "items": sorted(
+            [item.rule, sorted(map(keyed, item.members)), list(item.reasons),
+             item.date_start, item.date_end]
+            for item in after.items
+            if scope.intersection(record for member in item.members for record in member)
+        ),
     }
     text = json.dumps(material, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]

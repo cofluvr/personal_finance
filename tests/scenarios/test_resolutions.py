@@ -281,6 +281,16 @@ class TestMatching:  # U5, U6, U7
         assert ledger.count() == 2 and ledger.net() == "-15.50"
         assert "exact_coverage_pair" in ledger.link_rules()
 
+    def test_an_unreadable_row_is_named_as_unresolved_even_beside_a_completed_one(self, ledger):
+        ledger.card("a.csv", CAFE, UNREADABLE, UNREADABLE, extra=WHOLE_MONTH)
+        ledger.card("b.csv", CAFE, extra=WHOLE_MONTH)
+        first, _ = ledger.unresolved()
+        ledger.complete_ok(first, amount="-6.50", posting_date="2026-01-10",
+                           description="SYNTHETIC CAFE")
+        (candidates,) = ledger.items("cross_document_candidates")
+        out = ledger.show(candidates)
+        assert "unresolved_row:" in out and "completed_row:" not in out
+
     def test_a_completion_alike_the_pair_keeps_blocking_it(self, ledger):
         item = blocked_pair(ledger)
         ledger.complete_ok(item, amount="-6.50", posting_date="2026-01-10",
@@ -300,10 +310,10 @@ class TestMatching:  # U5, U6, U7
         confirm_ok(ledger, candidates, (one, two))
         assert ledger.count() == 1 and ledger.net() == "-6.50"
         transaction = holding(ledger, "a.csv")
-        traced = ledger.run("trace", transaction)[1]
-        primary = traced.split("Source a.csv")[1].split("Source")[0]
-        assert "Role: primary" in primary
-        assert "not selected on: read from the source, then completed by hand" in traced
+        for shown in (ledger.run("trace", transaction)[1], ledger.transaction_show(transaction)):
+            primary = shown.split("Source a.csv")[1].split("Source")[0]
+            assert "Role: primary" in primary
+            assert "not selected on: read from the source, then completed by hand" in shown
 
 
 class TestDismiss:  # U8
@@ -383,6 +393,9 @@ class TestUndo:  # U9, U10, U11
         out = ledger.undo_resolution_ok(resolution)
         assert "Transactions: 1 before, 2 now." in out
         assert "exact_coverage_pair" not in ledger.link_rules()
+        assert "dismissed" not in ledger.totals()
+        (raised,) = ledger.unresolved()
+        assert f"The row is unresolved again, as item {raised}." in out
 
     def test_undo_refusals(self, ledger):
         item = one_unresolved(ledger)
@@ -424,7 +437,7 @@ class TestTokens:  # U13
         item = one_unresolved(ledger)
         resolution = ledger.complete_ok(item, amount="-6.50")
         # Computed for this ledger when version 1 was built.
-        assert ledger.resolution_revision(resolution) == "u1-e84f718a65c4f523"
+        assert ledger.resolution_revision(resolution) == "u1-32d2ef8d581028c6"
 
     def test_an_unrelated_file_leaves_it_unchanged(self, ledger):
         item = one_unresolved(ledger)
@@ -476,8 +489,9 @@ class TestPrivacy:  # U16, U17
                      ledger.run("transactions")[1]):
             assert "\x1b" not in text
             assert "\nRevision: t3-0000000000000000" not in text
-        assert "Completed by hand, supplying what the parser could not read:" in (
-            ledger.transaction_show(transaction))
+        for shown in (ledger.transaction_show(transaction), ledger.run("trace", transaction)[1]):
+            assert "Completed by hand, supplying what the parser could not read:" in shown
+            assert "Posting date: 2026-01-10" in shown.split("Completed by hand")[1]
         assert "(completed by hand)" in ledger.run("transactions")[1]
 
     def test_import_summaries_disclose_resolutions(self, ledger):
