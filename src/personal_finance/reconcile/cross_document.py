@@ -744,25 +744,35 @@ def _link_candidates(units, rules):
 def _pending_posted_pairs(units, rules) -> list[tuple[int, int]]:
     """Pending and posted units alike but for their amount, as positions in units (D-052).
 
-    Equal amounts are linked by the ordinary path. Only posted units within the date window of a
-    pending unit are compared, so the cost follows pending rows, not every row.
+    Equal amounts are linked by the ordinary path. A pending unit is compared only with posted
+    units in its date window sharing a description or its block (D-032), since descriptions can
+    only be similar within a block. So the cost follows pending rows and the spellings a block
+    holds, as discovery's does, not every row.
     """
     window = rules.date_window_days
-    posted_by_day = defaultdict(list)
+    posted_by_day_and_key = defaultdict(list)
     for index, unit in enumerate(units):
         if unit.posted:
-            for day in unit.days:
-                posted_by_day[day].append(index)
+            for day, key in product(unit.days, _description_keys(unit, rules)):
+                posted_by_day_and_key[day, key].append(index)
     related, pairs = {}, set()
     for index, unit in enumerate(units):
         if not unit.pending:
             continue
         nearby = {other for day in unit.days for offset in range(-window, window + 1)
-                  for other in posted_by_day.get(day + offset, ())}
+                  for key in _description_keys(unit, rules)
+                  for other in posted_by_day_and_key.get((day + offset, key), ())}
         for other in sorted(nearby):
             if _pending_posted_linked(unit, units[other], rules, related):
                 pairs.add((index, other))
     return sorted(pairs)
+
+
+def _description_keys(unit, rules) -> set[tuple[str, str]]:
+    """Each description itself, and its block where it has one."""
+    blocks = {block_key(parse_description(text, rules), rules) for text in unit.descriptions}
+    return ({("text", text) for text in unit.descriptions}
+            | {("block", key) for key in blocks if key is not None})
 
 
 def _pending_posted_linked(left, right, rules, related) -> bool:

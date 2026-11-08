@@ -7,8 +7,8 @@ Not part of the test suite. Run from the repository root:
     --confirmed to compare confirmation with rejection, --separated to compare separating a
     merge with rejection and partition, --superseded to compare a separation superseding a
     confirmation with a partition, --corrected for value corrections, --resolved for completing
-    and dismissing unresolved rows, --declared for coverage declared after import, or rows per
-    month such as 200 1000 4000)
+    and dismissing unresolved rows, --declared for coverage declared after import, --pending for
+    pending rows posted at another amount, or rows per month such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
 one import_files call: reading and parsing the file, writing records, reconciling the
@@ -31,7 +31,7 @@ from synthetic_ledger import dense_rows, full_reexports, ordinary_rows, variant_
 from personal_finance.db.migrate import connect, create_database
 from personal_finance.cli import DIRECT_PAIRS_SHOWN
 from personal_finance.ingest.coverage import declare_complete
-from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1
+from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1, SYNTHETIC_CHECKING_V1
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.reconcile.apply import decision_states, load_evidence
 from personal_finance.reconcile.correction_effects import (
@@ -942,6 +942,71 @@ def declared() -> None:
         measure_declaring(rows_per_file)
 
 
+def merchant_name(number: int) -> str:
+    """A distinct merchant word for each number, so that no two share a description block."""
+    letters = "BCDFGHJKLMNPQRSTVWXZ"
+    word = ""
+    while True:
+        word = letters[number % len(letters)] + word
+        number //= len(letters)
+        if not number:
+            break
+    return word.rjust(4, "A") + "MART"
+
+
+def measure_pending(pairs: int, one_block: bool) -> None:
+    """One pending export and one posted export of the same pairs purchases on one day, each posted
+    at another amount. With one_block every description is alike, so every pending unit is related
+    to every posted unit, the worst case and the one D-032 documents for candidate discovery.
+    Otherwise every merchant has its own block, the common case (D-052)."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        conn = new_ledger(root)
+        header = "Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+
+        def name(number):
+            return f"SYNTHETIC SHOP {number}" if one_block else f"{merchant_name(number)} STORE"
+
+        pending = "".join(f",2026-01-10,,{name(number)},-{number + 1}.00,PENDING\n"
+                          for number in range(pairs))
+        posted = "".join(f",2026-01-10,2026-01-11,{name(number)},-{number + 1}.50,POSTED\n"
+                         for number in range(pairs))
+        seconds = []
+        for name, content in (("pending.csv", header + pending), ("posted.csv", header + posted)):
+            source = root / name
+            source.write_text(content)
+            started = time.perf_counter()
+            (result,) = import_files(conn, [source], account_id="acct", layout=SYNTHETIC_CHECKING_V1)
+            seconds.append(time.perf_counter() - started)
+            assert result.outcome == "imported", result
+        documents, records, unresolved, _ = load_evidence(conn, "acct")
+        started = time.perf_counter()
+        derivation = derive(documents, records, unresolved, DEFAULT_RULES)
+        derive_seconds = time.perf_counter() - started
+        raised = sum("pending_amount_changed" in item.reasons for item in derivation.items)
+        assert raised >= 1, "the shape must raise pending-to-posted candidates"
+
+        later = root / "later.csv"
+        later.write_text(header + ",2026-03-20,2026-03-21,SYNTHETIC GROCER,-9.00,POSTED\n")
+        started = time.perf_counter()
+        import_files(conn, [later], account_id="acct", layout=SYNTHETIC_CHECKING_V1)
+        later_seconds = time.perf_counter() - started
+        print(
+            f"{'one block' if one_block else 'distinct':9} pairs={pairs:5} "
+            f"items={len(derivation.items):5} pending_items={raised:5} "
+            f"posted_import={seconds[1]:7.3f}s derive={derive_seconds:7.3f}s "
+            f"steps={derivation.candidate_steps:9} later_import={later_seconds:7.3f}s",
+            flush=True,
+        )
+        conn.close()
+
+
+def pending_posted() -> None:
+    for one_block in (False, True):
+        for pairs in (100, 500, 2000):
+            measure_pending(pairs, one_block)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--worst"]:
         worst_cases()
@@ -966,6 +1031,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--declared"]:
         declared()
+        return
+    if sys.argv[1:] == ["--pending"]:
+        pending_posted()
         return
     sizes = [(24, 200), (24, 1000), (24, 4000)]
     if len(sys.argv) > 1:
