@@ -69,7 +69,7 @@ PRD §9 requirements, to plan when a real layout shows one (M6).
 | M3.1 | Financial types, stated by a person (D-053) | Accepted |
 | M3.2 | Transfer candidates across accounts, and reconciling two accounts together (D-054) | Accepted |
 | M3.3 | Card payments, one-sided transfers and coverage warnings (D-012, D-055) | Accepted |
-| M3.4 | Income and spending, with disclosures of unconfirmed transfers (D-056) | Approved, being built |
+| M3.4 | Income and spending, with disclosures of unconfirmed transfers (D-056) | Built, awaiting review |
 
 ### M3.1 acceptance criteria
 

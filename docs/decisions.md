@@ -75,7 +75,7 @@ index line.
 | D-053 | Financial types — Approved, implemented and accepted in M3.1 |
 | D-054 | Transfers across accounts — Approved, implemented and accepted in M3.2 |
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
-| D-056 | Income and spending — Approved, being implemented in M3.4 |
+| D-056 | Income and spending — Approved, implemented in M3.4, awaiting review |
 
 ## Rules in brief
 
@@ -159,7 +159,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Unconfirmed transfer kinds | Neither income, spending nor transfers, disclosed as a bound on both | D-011, D-056 |
 | Reporting periods | In M4, with D-013. Totals cover the ledger or one account | D-056 |
 
-## D-056 Income and spending — Approved, being implemented in M3.4
+## D-056 Income and spending — Approved, implemented in M3.4, awaiting review
 
 Proposed for M3.4 on 2026-11-08, and approved by the owner the same day with the lead engineer's
 recommendations, including points A to C, with no changes. Meets PRD §9's required treatment (owned-account transfers are
@@ -228,6 +228,40 @@ fees netted into one side and transfers split over several transactions.
 - **C. M3 closes after M3.4** with fees separate from principal and split transfers recorded as
   open PRD §9 requirements, to plan when a real layout shows one (M6). Alternatively an M3.5 plans
   them now, on invented layouts only.
+
+**How these were implemented,** where the rules above left a choice, for the owner's review with
+M3.4:
+
+- One query reads each transaction's effective amount, its applied type, and whether an effect row
+  names it. Effect rows name their transactions only while they apply, so being named confirms a
+  transfer. Each effect column is looked up by its own unique index.
+- `totals` computes the groups before printing anything, so recommendation 1's internal error
+  leaves no partial report.
+- Income and spending print one net amount each, spending as money out less money in, so it can be
+  negative. The other groups print their amounts out and in. Spending types and confirmed types
+  print in the order of D-053's types, as "By financial type" does, with matched sides left
+  unclassified last.
+- The disclosure appears whenever an unconfirmed transfer kind or an unclassified transaction
+  exists, even when both bounds are 0.00.
+- The loan payment warning sits with D-055's card payment warning, and counts only an applied
+  one-sided `loan_payment` whose counterpart is a loan. One received on the loan does not warn, and
+  neither does a plain `transfer` to a loan.
+- For one account, the groups hold that account's transactions only, so a match across two
+  accounts puts one side in each account's confirmed transfers.
+- Pending transactions count in their groups, as in account movement, under its disclosure.
+- M1's test that `totals` never says "income" or "spending" now binds only the account movement
+  lines, which D-010 governs. It was renamed, and A25 in `m1-acceptance.md` names the new test.
+
+**For the owner's review, found while building M3.4:**
+
+- **Writes fail above 32,766 transactions bound by transfers.** `write_transfer_effects` passes one
+  SQL variable per transaction holding bound records, so at 16,000 matches and 16,000 one-sided
+  transfers every write fails with "too many SQL variables", reported as a database error. It is
+  M3.2 and M3.3 code, so it was not changed here. Recommended: read the facts in batches, before
+  M4's 100,000-transaction benchmark.
+- **`7a07bf4` fails one test on its own.** It renamed the test A25 names without gating on the doc
+  checks, so `test_acceptance_matrix` fails there. `4c976d2` fixed it, and history is not
+  rewritten.
 
 ## Not yet decided
 

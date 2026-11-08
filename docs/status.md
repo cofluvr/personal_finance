@@ -22,7 +22,7 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M3.1: financial types | Accepted (D-053) |
 | M3.2: transfers across accounts | Accepted (D-054) |
 | M3.3: card payments, one-sided transfers and coverage warnings | Accepted (D-055) |
-| M3.4: income and spending | Approved, being built (D-056) |
+| M3.4: income and spending | Built, awaiting review (D-056) |
 | M3 to M8 | Not started |
 
 ## What exists
@@ -62,8 +62,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `reconcile.coverage_in_effect` holds the coverage in effect for an account (D-027, D-051).
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
-- `personal_finance.reports.totals`: account inflows, outflows and net movement, types, and transfers
-  between accounts.
+- `personal_finance.reports.totals`: account inflows, outflows and net movement, types, transfers
+  between accounts, and income and spending (D-056).
 - `personal_finance.reports.import_summary`: run-level import counts in explicit units (D-036).
 - `personal_finance.reports.review_evidence`: the evidence behind one review item or one
   transaction, and their revision tokens (D-040, D-047).
@@ -123,9 +123,14 @@ distinct spellings per block, and in the units of a group a decision touches.
 - Disagreeing classifications, one whose records end up in several transactions, or one whose
   transaction's amount a correction's undo turns against it, leave the transaction unclassified
   until one is undone. There is no command to settle them other than undo.
-- `totals` lists financial types, matched transfers and one-sided transfers next to account
-  movement. It is not yet income or spending, which wait for M3.4, so card payments are kept out
-  of spending only once M3.4 reports it (D-012, D-055).
+- Income and spending count only what a person classified. Unconfirmed transfer kinds and
+  unclassified transactions are in neither, and `totals` gives how far that may understate each.
+  There are no reporting periods: totals cover the ledger or one account (D-056).
+- A loan payment is never split into principal and interest, so a one-sided one to a loan leaves
+  that loan's interest out of spending, with a warning (D-056).
+- Every write fails with a database error once more than 32,766 transactions hold records bound by
+  matches and one-sided transfers, because `write_transfer_effects` passes one SQL variable per
+  transaction (D-056, for review).
 - Only a person matches a transfer, one pair at a time, and only a candidate: a transfer-kind type
   on one side, the exactly opposite amount in another account, and dates within 5 days. Fees apart
   from the amount transferred and a transfer split over several transactions are not matched, and
