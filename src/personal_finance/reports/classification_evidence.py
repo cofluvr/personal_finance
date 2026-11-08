@@ -14,6 +14,7 @@ from personal_finance.reconcile.classification_effects import (
     effective_amount_by_transaction,
     effective_classifications,
     load_active_classifications,
+    type_of_account,
 )
 from personal_finance.reconcile.correction_effects import transaction_by_record_id
 from personal_finance.reconcile.supersession import successor_and_newest
@@ -135,6 +136,7 @@ def classification_undo_outlook(
 
     membership = transaction_by_record_id(conn, account_id)
     amounts = effective_amount_by_transaction(conn, account_id)
+    account_type = type_of_account(conn, account_id)
     bound_record_ids = {record.record_id for record in classification.bound_records}
     holding_transactions = {membership[record_id] for record_id in bound_record_ids}
     records_by_transaction = {transaction: set() for transaction in holding_transactions}
@@ -143,10 +145,10 @@ def classification_undo_outlook(
             records_by_transaction[transaction].add(record_id)
 
     effects_with_it = effective_classifications(
-        load_active_classifications(conn, account_id), membership, amounts)
+        load_active_classifications(conn, account_id), membership, amounts, account_type)
     effects_without_it = effective_classifications(
         load_active_classifications(conn, account_id, classification.classification_id),
-        membership, amounts)
+        membership, amounts, account_type)
 
     def keyed(record_ids):
         return sorted(key_by_record_id[record_id] for record_id in record_ids)

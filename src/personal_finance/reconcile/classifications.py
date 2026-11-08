@@ -16,6 +16,7 @@ from personal_finance.reconcile.classification_effects import (
     effective_amount_by_transaction,
     fits_direction,
     load_active_classifications,
+    type_of_account,
     unsettled_classifications,
     write_classification_effects,
 )
@@ -36,7 +37,8 @@ TYPE_UNKNOWN = (
 )
 TYPE_AGAINST_DIRECTION = (
     "the type {financial_type} is money {direction}, and this transaction is money {other}. "
-    "Nothing was changed. A transfer may be either."
+    "Nothing was changed. A transfer may be either, and a card, loan or investment payment may be "
+    "money in on the account it pays."
 )
 TRANSACTION_NOT_FOUND = (
     "transaction not found. A later import or decision can retire one: run transactions"
@@ -158,7 +160,7 @@ def _classify(conn, account_id, transaction_id, revision, financial_type, rules,
     if financial_type == shown_now:
         raise DecisionRefused(TYPE_UNCHANGED)
     amount_cents = effective_amount_by_transaction(conn, account_id)[transaction_id]
-    if not fits_direction(financial_type, amount_cents):
+    if not fits_direction(financial_type, amount_cents, type_of_account(conn, account_id)):
         direction, other = ("in", "out") if amount_cents < 0 else ("out", "in")
         raise DecisionRefused(TYPE_AGAINST_DIRECTION.format(
             financial_type=financial_type, direction=direction, other=other))

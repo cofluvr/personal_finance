@@ -1,7 +1,7 @@
 """Migration 0013 on a populated ledger, and its append-only tables (F13, D-053).
 
-A ledger built at the latest version, with 0013's empty tables dropped and set back to version 12, is
-a version 12 ledger: 0013 only creates tables. Migration stops at 13, so that only 0013 is tested.
+A ledger built at the latest version, with the empty tables of 0013 and later dropped and set back to
+version 12, is a version 12 ledger: 0013 only creates tables. Migration stops at 13, so that only 0013 is tested.
 """
 
 import sqlite3
@@ -10,18 +10,19 @@ import pytest
 from test_classifications import ClassificationLedger
 from test_confirmations import confirm_ok
 from test_coverage_declarations import MONTH
-from test_decisions import ALL_TABLES, CLASSIFICATION_TABLES, pair_up
+from test_decisions import ALL_TABLES, CLASSIFICATION_TABLES, TRANSFER_TABLES, pair_up
 from test_resolutions import CAFE_NO_AMOUNT
 from test_supersession import holding
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 
-VERSION_12_TABLES = tuple(table for table in ALL_TABLES if table not in CLASSIFICATION_TABLES)
+VERSION_12_TABLES = tuple(table for table in ALL_TABLES
+                          if table not in (*CLASSIFICATION_TABLES, *TRANSFER_TABLES))
 
 
 def set_back_to_version_12(path) -> None:
     conn = connect(path)
-    for table in CLASSIFICATION_TABLES:
+    for table in (*TRANSFER_TABLES, *CLASSIFICATION_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
     conn.execute("PRAGMA user_version = 12")

@@ -52,12 +52,15 @@ ALL_TABLES = (*SOURCE_TABLES, "ledger_transaction", "transaction_source", "revie
               "transaction_correction", "record_resolution", "record_resolution_event",
               "coverage_declaration", "coverage_declaration_event", "type_classification",
               "type_classification_record", "type_classification_event",
-              "transaction_classification")
-# Created by 0010, 0011 and 0013, children first (D-050, D-051, D-053).
+              "transaction_classification", "transfer_match", "transfer_match_side",
+              "transfer_match_record", "transfer_match_event", "transfer_match_effect")
+# Created by 0010, 0011, 0013 and 0014, children first (D-050, D-051, D-053, D-054).
 RESOLUTION_TABLES = ("record_resolution_event", "record_resolution")
 DECLARATION_TABLES = ("coverage_declaration_event", "coverage_declaration")
 CLASSIFICATION_TABLES = ("transaction_classification", "type_classification_event",
                          "type_classification_record", "type_classification")
+TRANSFER_TABLES = ("transfer_match_effect", "transfer_match_event", "transfer_match_record",
+                   "transfer_match_side", "transfer_match")
 
 
 def declared(start, end):
@@ -81,8 +84,8 @@ class Ledger:
         assert self.run("init")[0] == 0
         self.add_account("A")
 
-    def add_account(self, name):
-        code, _, _ = self.run("account", "add", "--name", name, "--type", "checking")
+    def add_account(self, name, account_type="checking"):
+        code, _, _ = self.run("account", "add", "--name", name, "--type", account_type)
         assert code == 0
 
     def run(self, *command):

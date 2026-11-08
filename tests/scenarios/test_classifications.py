@@ -237,6 +237,23 @@ class TestRefusals:  # F4
                                                 direction=direction, other=other)
         self.nothing_changes(ledger, lambda: ledger.classify(transaction, financial_type), message)
 
+    @pytest.mark.parametrize(("account_type", "financial_type"), [
+        ("checking", "loan_payment"),
+        ("savings", "investment_contribution"),
+        ("credit_card", "loan_payment"),
+        ("loan", "card_payment"),
+        ("investment", "card_payment"),
+    ])
+    def test_a_payment_received_on_an_account_it_does_not_pay(self, ledger, account_type,
+                                                              financial_type):  # X8
+        ledger.add_account("P", account_type)
+        ledger.card("a.csv", REFUND, account="P")
+        transaction = holding(ledger, "a.csv")
+        message = TYPE_AGAINST_DIRECTION.format(financial_type=financial_type,
+                                                direction="out", other="in")
+        self.nothing_changes(
+            ledger, lambda: ledger.classify(transaction, financial_type, account="P"), message)
+
     def test_a_type_it_already_has(self, ledger):
         transaction = single(ledger)
         classification = ledger.classify_ok(transaction, "purchase")
@@ -330,6 +347,40 @@ class TestRefusals:  # F4
             "--supersedes", classification,
         )
         assert code == 2 and "must be given together" in err
+
+
+class TestReceivingAccount:  # X8
+    @pytest.mark.parametrize(("account_type", "financial_type"), [
+        ("credit_card", "card_payment"),
+        ("loan", "loan_payment"),
+        ("investment", "investment_contribution"),
+        ("retirement", "investment_contribution"),
+    ])
+    def test_a_payment_is_money_in_or_out_on_the_account_it_pays(self, ledger, account_type,
+                                                                 financial_type):
+        ledger.add_account("P", account_type)
+        ledger.card("in.csv", REFUND, account="P")
+        ledger.card("out.csv", OTHER, account="P")
+        for name in ("in.csv", "out.csv"):
+            code, out, err = ledger.classify(holding(ledger, name), financial_type, account="P")
+            assert code == 0, err
+        assert ledger.types() == [(financial_type, "2", "-5.00"), ("unclassified", "0", "0.00")]
+        assert sorted(state for _, state, _ in ledger.outcomes()) == ["applied", "applied"]
+
+    def test_a_correction_turning_a_card_payment_in_keeps_it_applied(self, ledger):
+        ledger.add_account("P", "credit_card")
+        ledger.card("a.csv", CAFE, account="P")
+        transaction = holding(ledger, "a.csv")
+        ledger.classify_ok(transaction, "card_payment", account="P")
+        code, _, err = ledger.correct(transaction, "amount", "6.50", account="P")
+        assert code == 0, err
+        assert ledger.outcomes() == [(("a.csv",), "applied", "card_payment")]
+
+    def test_interest_stays_money_out_on_savings(self, ledger):
+        ledger.add_account("P", "savings")
+        ledger.card("a.csv", REFUND, account="P")
+        code, _, err = ledger.classify(holding(ledger, "a.csv"), "interest", account="P")
+        assert code == 2 and "the type interest is money out" in err
 
 
 def against_its_direction(ledger):

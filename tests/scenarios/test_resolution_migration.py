@@ -15,6 +15,7 @@ from test_decisions import (
     CLASSIFICATION_TABLES,
     DECLARATION_TABLES,
     RESOLUTION_TABLES,
+    TRANSFER_TABLES,
     pair_up,
 )
 from test_resolutions import CAFE_NO_AMOUNT, ResolutionLedger, one_unresolved
@@ -23,7 +24,7 @@ from personal_finance.db.migrate import connect, load_migrations, migrate, schem
 
 VERSION_9_TABLES = tuple(table for table in ALL_TABLES
                          if table not in (*RESOLUTION_TABLES, *DECLARATION_TABLES,
-                                          *CLASSIFICATION_TABLES))
+                                          *CLASSIFICATION_TABLES, *TRANSFER_TABLES))
 
 
 def up_to_version_10(folder):
@@ -35,7 +36,8 @@ def up_to_version_10(folder):
 
 def set_back_to_version_9(path) -> None:
     conn = connect(path)
-    for table in (*CLASSIFICATION_TABLES, *DECLARATION_TABLES, *RESOLUTION_TABLES):
+    for table in (*TRANSFER_TABLES, *CLASSIFICATION_TABLES, *DECLARATION_TABLES,
+                  *RESOLUTION_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
     conn.execute("PRAGMA user_version = 9")

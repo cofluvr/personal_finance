@@ -17,6 +17,7 @@ from personal_finance.reconcile.apply import (
 from personal_finance.reconcile.classification_effects import (
     effective_classifications,
     load_active_classifications,
+    type_of_account,
 )
 from personal_finance.reconcile.correction_effects import (
     FIELD_APPLIED,
@@ -312,6 +313,7 @@ def undo_outlook(
             *(classification.bound_record_ids for classification in touching_classifications)
         )
         amount_by_record_id = {record.id: record.amount_cents for record in records}
+        account_type = type_of_account(conn, decision.account_id)
 
         def classification_view(result):
             group_by_record_id = {
@@ -330,7 +332,7 @@ def undo_outlook(
                 if field == "amount" and effect.state == FIELD_APPLIED:
                     amounts[index] = effect.applied_value
             effects = effective_classifications(active_classifications, group_by_record_id,
-                                                amounts)
+                                                amounts, account_type)
             return sorted(
                 [keyed(result.groups[index].record_ids), effect.state, effect.applied_value]
                 for index, effect in effects.items()
