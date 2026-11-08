@@ -402,3 +402,100 @@ def active_decisions(ledger):
     out = ledger.run("review", "decisions")[1]
     return re.findall(r"^Decision (\S+): active,", out, re.MULTILINE)
 
+
+
+def rejected_then_re_exported(ledger, name="again.csv"):
+    """a and b rejected as different events, then a's row again in a file that does not merge."""
+    item, one, two = pair_up(ledger)
+    decision = ledger.reject_ok(item, (one, two))
+    ledger.card(name, test_confirmations.CAFE)
+    (again,) = ledger.items("cross_document_candidates")
+    return decision, again
+
+
+def alike_lines(out):
+    if "Alike a decided record" not in out:
+        return []
+    section = out.split("Alike a decided record, and not bound by any decision:\n")[1]
+    return re.findall(r"^  (\S+ row \d+ matches \S+ row \d+) in every parsed value, decided by "
+                      r"(\S+)$", section, re.MULTILINE)
+
+
+class TestNewEvidence:  # N9, N10
+    def test_a_re_export_that_merges_is_kept_apart_with_its_record(self, ledger):  # N9
+        item, one, two = pair_up(ledger)
+        decision = ledger.reject_ok(item, (one, two))
+        ledger.card("again.csv", test_confirmations.CAFE, extra=test_confirmations.FIRST_HALF)
+        assert ledger.together() == [["a.csv", "again.csv"], ["b.csv"]]
+        assert ledger.items() == []
+        relations = record_relations(ledger)
+        assert relations == {("different_event", frozenset({"a.csv", "b.csv"}))}
+        assert active_decisions(ledger) == [decision]
+
+    def test_a_re_export_that_does_not_merge_is_reviewed_again(self, ledger):  # N9
+        decision, again = rejected_then_re_exported(ledger)
+        assert len(ledger.transactions(again)) == 3
+        assert record_relations(ledger) == {("different_event", frozenset({"a.csv", "b.csv"}))}
+        # Listed by document hash, not file name.
+        assert sorted(alike_lines(ledger.show(again))) == [
+            ("again.csv row 1 matches a.csv row 1", decision),
+            ("again.csv row 1 matches b.csv row 1", decision),
+        ]
+
+    def test_a_re_export_of_a_separated_id_is_a_conflict(self, ledger):  # N9, P7
+        ledger.checking("a.csv", "S-1,2026-01-09,2026-01-10,SYNTHETIC CAFE,-5.00,POSTED")
+        ledger.checking("b.csv", "S-1,2026-01-09,2026-01-10,SYNTHETIC CAFE,-5.00,POSTED")
+        (transaction,) = ledger.merges()
+        records = ledger.records(transaction)
+        decision = separate_ok(ledger, transaction, [records["a.csv"]], [records["b.csv"]])
+        rows = len(ledger.dump()["decision_constraint"])
+        ledger.checking("c.csv", "S-1,2026-01-09,2026-01-10,SYNTHETIC CAFE,-5.00,POSTED")
+        (conflict,) = ledger.items("decision_conflict")
+        assert len(ledger.dump()["decision_constraint"]) == rows
+        assert sorted(alike_lines(ledger.show(conflict))) == [
+            ("c.csv row 1 matches a.csv row 1", decision),
+            ("c.csv row 1 matches b.csv row 1", decision),
+        ]
+
+    def test_a_confirmation_on_the_new_item_binds_it(self, ledger):  # N10
+        decision, again = rejected_then_re_exported(ledger)
+        files = by_file(ledger)
+        new = confirm_ok(ledger, again, (files["again.csv"], files["a.csv"]), (files["b.csv"],))
+        assert ledger.together() == [["a.csv", "again.csv"], ["b.csv"]]
+        assert ledger.items() == []
+        relations = record_relations(ledger)
+        assert ("same_event", frozenset({"a.csv", "again.csv"})) in relations
+        assert ("different_event", frozenset({"again.csv", "b.csv"})) in relations
+        assert set(active_decisions(ledger)) == {decision, new}
+
+
+class TestAlikeListing:  # N11
+    def test_it_binds_nothing_and_leaves_the_token_unchanged(self, ledger):
+        rejected_then_re_exported(ledger)
+        (again,) = ledger.items()
+        before = ledger.dump()
+        assert alike_lines(ledger.show(again))
+        assert ledger.dump() == before
+        # Computed for this ledger at b55e31b, before the listing existed.
+        assert ledger.revision(again) == "r3-74d05de08ff20c6b"
+
+    def test_records_a_decision_binds_are_not_listed(self, ledger):
+        decision, again = rejected_then_re_exported(ledger)
+        files = by_file(ledger)
+        confirm_ok(ledger, again, (files["again.csv"], files["a.csv"]))
+        assert all(not alike_lines(ledger.show(item)) for item in ledger.items())
+
+    def test_a_record_differing_in_one_value_is_not_listed(self, ledger):
+        item, one, two = pair_up(ledger)
+        ledger.reject_ok(item, (one, two))
+        ledger.card("again.csv", "01/11/2026,SYNTHETIC CAFE,6.50,")
+        (again,) = ledger.items("cross_document_candidates")
+        assert alike_lines(ledger.show(again)) == []
+
+    def test_file_names_are_escaped(self, ledger):
+        """Older sections print file names as typed, a documented limitation, so only this one
+        is checked."""
+        _, again = rejected_then_re_exported(ledger, name="again\x1b[2J.csv")
+        section = ledger.show(again).split("Alike a decided record")[1].split("Direct candidate")[0]
+        assert "\x1b" not in section
+        assert "matches a.csv row 1" in section

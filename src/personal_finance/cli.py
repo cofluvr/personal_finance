@@ -51,6 +51,7 @@ from personal_finance.reports.decision_evidence import (
 )
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.review_evidence import (
+    alike_decided_records,
     load_merge_evidence,
     load_review_evidence,
     review_revision,
@@ -820,6 +821,7 @@ def run_review_show(args) -> int:
     print(f"  Revision: {review_revision(item)}")
     print_machine_reasons(item)
     print_decided_pairs(item)
+    print_alike_records(alike_decided_records(item))
     if item.rule == RULE_CANDIDATES and item.status == "open":
         print_direct_pairs(undecided_direct_pairs(conn, item))
 
@@ -878,6 +880,22 @@ def print_decided_pairs(item) -> None:
             print(f"  Decision {pair.decision_id}:")
             print(f"    {describe_side(pair.left)}")
             print(f"    {verb} {describe_side(pair.right)}")
+
+
+def print_alike_records(alike) -> None:
+    """Evidence that a record repeats a decided one. It binds nothing (D-048)."""
+    if not alike:
+        return
+    print("Alike a decided record, and not bound by any decision:")
+    for entry in alike[:DIRECT_PAIRS_SHOWN]:
+        print(
+            f"  {shown(entry.record.file_name)} row {entry.record.row} matches "
+            f"{shown(entry.decided.file_name)} row {entry.decided.row} in every parsed value, "
+            f"decided by {', '.join(entry.decision_ids)}"
+        )
+    if len(alike) > DIRECT_PAIRS_SHOWN:
+        print(f"  Only the first {DIRECT_PAIRS_SHOWN} are listed.")
+    print("  No decision transfers to a new record. To decide one, confirm a partition here.")
 
 
 def describe_side(records) -> str:

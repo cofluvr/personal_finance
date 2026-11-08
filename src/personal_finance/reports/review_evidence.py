@@ -7,6 +7,7 @@ loaded because a person asked to see this one item, so nothing routine may call 
 import hashlib
 import json
 import sqlite3
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 
 from personal_finance.ingest.coverage import effective_end
@@ -176,6 +177,46 @@ def _without_immaterial(value):
     if isinstance(value, (list, tuple)):
         return [_without_immaterial(entry) for entry in value]
     return value
+
+
+@dataclass(frozen=True)
+class AlikeRecord:
+    """A record no active decision binds, alike in every parsed value to one that a decision
+    binds in the same item."""
+
+    record: RecordEvidence
+    decided: RecordEvidence
+    decision_ids: tuple[str, ...]
+
+
+def alike_decided_records(item: ReviewEvidence) -> tuple[AlikeRecord, ...]:
+    """Records in an item that look like a re-export of a decided record (D-048).
+
+    Evidence only, as fingerprints are (D-009): it binds nothing. It reads nothing but the
+    item's own evidence, which its revision already covers, so the revision is unchanged.
+    """
+    bound = defaultdict(set)
+    for pair in item.decided:
+        for record in (*pair.left, *pair.right):
+            bound[_decided_key(record)].add(pair.decision_id)
+
+    parsed = [record for record in item.records if record.parsed.status == "parsed"]
+    by_values = defaultdict(list)
+    for record in sorted(parsed, key=_record_key):
+        if _record_key(record) in bound:
+            by_values[_parsed_values(record)].append(record)
+    return tuple(
+        AlikeRecord(record, other, tuple(sorted(bound[_record_key(other)])))
+        for record in sorted(parsed, key=_record_key) if _record_key(record) not in bound
+        for other in by_values.get(_parsed_values(record), ())
+        if other.content_sha256 != record.content_sha256
+    )
+
+
+def _parsed_values(record: RecordEvidence) -> tuple:
+    parsed = record.parsed
+    return (parsed.transaction_date, parsed.posting_date, parsed.amount_cents, parsed.description,
+            parsed.external_id, parsed.settlement_status)
 
 
 def rows_sharing_a_document(item: ReviewEvidence) -> dict[str, tuple[int, ...]]:
