@@ -1073,7 +1073,7 @@ with M2.5 on 2026-11-08:
 - The `d3` digest is unchanged for a ledger without chains: `d2-2a1e1dd2ac99de82` became
   `d3-2a1e1dd2ac99de82`, and a test pins it.
 
-## D-049 Value corrections — Approved
+## D-049 Value corrections — Approved, implemented in M2.6
 
 Approved by the owner on 2026-11-08 with the M2.6 plan, taking every recommendation in it. Meets
 D-041's requirements on corrections, and extends D-030. Builds on D-009 and D-040, and changes none
@@ -1153,12 +1153,40 @@ while empty.
 | Item | Each transaction's active corrections: field, value, state and bound records by file and row | `r3` to `r4` |
 | Transaction | The same, for one transaction | `t1` to `t2` |
 | Decision undo | Corrections binding records in its scope, and their states with and without it | `d3` to `d4` |
-| Correction undo, new | Its state, field, value, bound records and their evidence, the transactions holding them, other active corrections of that field there, and the outcome with and without it | `c1` |
+| Correction undo, new | Its field, value, the transactions holding its bound records, and the field's outcome there with and without it | `c1` |
 
 **Cost.** Applying corrections is linear in bound records and transactions. A correction adds no
 constraint, so it touches no candidate group. It is measured on the dense constrained group, where
 derivation is quadratic, and on many corrections and long chains. If a correction costs more than a
 later import of the same account, the work stops and is reported.
+
+**How these were implemented,** where the rules above left a choice. They await the owner's review
+with M2.6:
+
+- Fields are stored by their command names: `amount`, `transaction_date`, `posting_date` and
+  `description`. An amount is integer cents in its own column, and the others are text, with checks
+  that each value fits its field.
+- `transaction_correction` is rewritten whole for the account by every reconcile and correction, after
+  memberships are final, and loses a retired transaction's rows by `ON DELETE CASCADE`.
+- Several corrections applying to one field refuse superseding even when they agree, since replacing
+  one would leave the other: undo all but one first.
+- `review confirm` and `review separate` compare the account's unsettled fields before and after,
+  keyed by the records of each transaction, and refuse if any is new. Decision undo reports the new
+  ones and never refuses for them.
+- `review correction show` prints no values, which is stricter than D-037 requires, like
+  `review decision show`. `review transaction show` and `review merge show` share one display.
+  `transactions` now escapes descriptions, since a corrected one is typed by a person.
+- The chain rule moved to `reconcile/supersession.py`, now shared by decisions and corrections.
+- `c1` was first built also covering its state, the bound records' evidence and other corrections of
+  the field. Deliberate breaks showed only the pin noticed any of them: only an active correction has
+  a token, the records and documents are immutable, and another correction reaching those
+  transactions changes the outcomes. Both were removed before
+  review, keeping version 1, since no `c1` token had been shown outside this slice.
+- `c1-e2235f95e29f164e` is pinned for a fixed ledger as computed when built. The digests
+  `r4-d41e2251fcd3a611`, `r4-74d05de08ff20c6b`, `r4-8f8c8b328e5b7256`, `t2-4ae2352458f9c44c` and
+  `d4-2a1e1dd2ac99de82` are the version 3, 1 and 3 digests pinned before M2.6, unchanged.
+- Equivalent corrections made at different points can bind different records, so the order test
+  compares everything but revisions, and checks that records arriving later are never bound.
 
 ## Not yet decided
 
