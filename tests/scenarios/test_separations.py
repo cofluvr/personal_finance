@@ -15,6 +15,7 @@ from test_decisions import (
     WHOLE_MONTH,
     Ledger,
     pair_up,
+    three_of_them,
 )
 
 from personal_finance.cli import ID_OVERRIDE_NOTICE, SEPARATE_NOTICE
@@ -577,6 +578,15 @@ class TestTotals:  # P14
         assert f"From transaction: {transaction}" in out
         assert f"At decision time: both in {transaction}, groups 1 and 2" in out
 
+    def test_decision_show_names_one_group_for_a_kept_pair(self, ledger):
+        transaction, records = merged_three(ledger)
+        decision = ledger.separate_ok(
+            transaction, [records["a.csv"], records["b.csv"]], [records["c.csv"]]
+        )
+        out = ledger.run("review", "decision", "show", decision)[1]
+        assert f"At decision time: both in {transaction}, group 1\n" in out
+        assert out.count(f"both in {transaction}, groups 1 and 2") == 2
+
 
 class TestTokens:  # P15
     def test_the_version_is_pinned(self):
@@ -671,3 +681,88 @@ class TestPrivacy:  # P14, D-037
         transaction, _ = merged_two(ledger)
         out = ledger.merge_show(transaction)
         assert self.AMOUNT in out and self.TEXT in out
+
+
+class TestGaps:
+    """Tests added for breaks that survived the first run (D-047)."""
+
+    def test_the_lower_group_is_always_on_the_left(self, ledger):
+        # The same records in both orders, so one of them puts the higher group first by record
+        # ID, whatever IDs were made.
+        transaction, records = merged_three(ledger)
+        orders = ([["c.csv"], ["a.csv", "b.csv"]], [["a.csv", "b.csv"], ["c.csv"]])
+        for order in orders:
+            decision = ledger.separate_ok(
+                transaction, *[[records[name] for name in group] for group in order]
+            )
+            conn = ledger.conn()
+            parts = conn.execute(
+                "SELECT left_part, right_part FROM decision_constraint WHERE decision_id = ?",
+                (decision,),
+            ).fetchall()
+            conn.close()
+            assert len(parts) == 3
+            assert all(left <= right for left, right in parts)
+            assert ledger.undo(decision)[0] == 0
+            assert ledger.merges() == [transaction]
+
+    def test_no_override_notice_when_no_id_is_shared_across_groups(self, ledger):
+        """x and a confirmed, and y joined to x by an exact pair. Only a carries an ID."""
+        row = "01/10/2026,SYNTHETIC CAFE,5.00,"
+        ledger.card("x.csv", row, extra=WHOLE_MONTH)
+        ledger.checking("a.csv", ID_ROW)
+        (item,) = ledger.items()
+        confirm_ok(ledger, item, tuple(ledger.transactions(item)))
+        ledger.card("y.csv", row, extra=WHOLE_MONTH)
+        (transaction,) = ledger.merges()
+        records = ledger.records(transaction)
+        assert set(records) == {"x.csv", "a.csv", "y.csv"}
+        code, out, err = ledger.separate(transaction, [records["x.csv"], records["a.csv"]],
+                                         [records["y.csv"]])
+        assert code == 0, err
+        assert "overrides that match" not in out
+        assert ledger.together() == [["a.csv", "x.csv"], ["y.csv"]]
+
+    def test_a_decision_on_its_records_changes_the_token(self, ledger):
+        transaction, _ = merged_two(ledger)
+        ledger.card("x.csv", CAFE)
+        token = ledger.merge_revision(transaction)
+        (item,) = ledger.items()
+        ledger.reject_ok(item, tuple(ledger.transactions(item)))
+        assert ledger.merges() == [transaction]
+        assert ledger.merge_revision(transaction) != token
+        assert "Already decided, as different events:" in ledger.merge_show(transaction)
+
+    def test_merge_show_warns_about_a_stale_account(self, ledger):
+        transaction, _ = merged_two(ledger)
+        assert "has not been reconciled" not in ledger.merge_show(transaction)
+        conn = ledger.conn()
+        conn.execute("UPDATE account_reconciliation SET rules_fingerprint = ?", ("0" * 64,))
+        conn.close()
+        assert "has not been reconciled" in ledger.merge_show(transaction)
+
+    def test_the_item_token_is_unchanged_by_m2_4(self, tmp_path, capsys):
+        """Computed at 3a765fe, before the evidence loading was shared with transactions."""
+        ledger = SeparationLedger(tmp_path, capsys)
+        for number, name in enumerate(("a.csv", "b.csv")):
+            path = tmp_path / name
+            path.write_text(CARD_HEADER + " " * number + CAFE + "\n")
+            ledger.load_path(path)
+        (item,) = ledger.items()
+        assert ledger.revision(item) == "r3-d41e2251fcd3a611"
+
+    def test_a_confirmed_partition_is_not_counted_as_separated(self, ledger):
+        item, one, two, three = three_of_them(ledger)
+        confirm_ok(ledger, item, (one, two), (three,))
+        totals = ledger.totals()
+        assert "confirmed as one event" in totals
+        assert "separated" not in totals
+
+    def test_merges_lists_only_the_account_asked_for(self, ledger):
+        transaction, _ = merged_two(ledger)
+        ledger.add_account("B")
+        ledger.card("p.csv", CAFE, extra=FIRST_HALF, account="B")
+        ledger.card("q.csv", CAFE, extra=FIRST_HALF, account="B")
+        assert len(ledger.merges()) == 2
+        out = ledger.run("review", "merges", "--account", "A")[1]
+        assert re.findall(r"^Transaction (\S+):", out, re.MULTILINE) == [transaction]

@@ -1095,6 +1095,8 @@ def run_review_decision_show(args) -> int:
         print(f"Pair {number} of {len(decision.pairs)}: {pair.relation}")
         if pair.left_part is None:
             print(f"  At decision time: {pair.left_transaction_id} and {pair.right_transaction_id}")
+        elif pair.left_part == pair.right_part:
+            print(f"  At decision time: both in {pair.left_transaction_id}, group {pair.left_part}")
         else:
             print(
                 f"  At decision time: both in {pair.left_transaction_id}, groups "
