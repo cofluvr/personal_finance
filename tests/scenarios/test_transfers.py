@@ -441,6 +441,19 @@ class TestOutcomes:  # X6, X7
         assert ledger.matches() == [("amounts_differ", (), ())]
         assert "because the amounts no longer offset exactly" in ledger.totals()
 
+    def test_sides_that_swap_direction_no_longer_apply(self, ledger):
+        ledger.card("out.csv", "01/10/2026,SYNTHETIC MOVE OUT,,50.00")
+        ledger.card("in.csv", "01/12/2026,SYNTHETIC MOVE IN,50.00,", account="S")
+        outflow, inflow = holding(ledger, "out.csv"), holding(ledger, "in.csv")
+        corrections = [ledger.correct_ok(outflow, "amount", "-50.00"),
+                       ledger.correct_ok(inflow, "amount", "50.00", account="S")]
+        ledger.classify_ok(outflow, "transfer")
+        ledger.match_ok(outflow, inflow)
+        assert ledger.undo_correction(corrections[0])[0] == 0
+        assert ledger.undo_correction(corrections[1], account="S")[0] == 0
+        # The amounts offset again, but money now leaves the side stated as the inflow.
+        assert ledger.matches() == [("amounts_differ", (), ())]
+
     def test_a_correction_that_stops_the_amounts_offsetting_refuses(self, ledger):
         _, outflow, inflow = matched(ledger)
         before = ledger.dump()
@@ -560,6 +573,16 @@ class TestUndo:  # X9
 
 
 class TestTokens:  # X10
+    def test_a_transaction_token_covers_the_other_side(self, ledger):
+        match, outflow, first = matched(ledger)
+        ledger.card("second.csv", "01/11/2026,SYNTHETIC MOVE IN AGAIN,,50.00", account="S")
+        second = holding(ledger, "second.csv")
+        token = ledger.transaction_revision(outflow)
+        assert ledger.undo_match(match)[0] == 0
+        ledger.match_ok(outflow, second)
+        # The same records here, matched with other records there.
+        assert ledger.transaction_revision(outflow) != token
+
     def test_the_version_is_pinned(self, ledger):
         assert transfer_evidence.MATCH_REVISION_VERSION == 1
         match, _, _ = matched(ledger)
@@ -608,6 +631,20 @@ class TestTotals:  # X13
         assert ledger.undo_match(match)[0] == 0
         assert ledger.transfers_section().startswith(
             "  Matched: 0 pairs, moving 0.00\n  In a candidate pair, not matched: 4 transactions\n")
+
+    def test_an_account_with_no_match_or_candidate(self, ledger):
+        matched(ledger)
+        ledger.card("next.csv", "02/10/2026,SYNTHETIC MOVE OUT,20.00,")
+        ledger.card("next-in.csv", "02/11/2026,SYNTHETIC MOVE IN,,20.00", account="S")
+        ledger.classify_ok(holding(ledger, "next.csv"), "transfer")
+        ledger.add_account("T", "savings")
+        ledger.card("t.csv", "02/20/2026,SYNTHETIC GROCER,9.00,", account="T")
+        assert ledger.candidates("T") == []
+        assert ledger.transfers_section("T") == (
+            "  Matched: 0 pairs, moving 0.00\n"
+            "  In a candidate pair, not matched: 0 transactions\n"
+            "  Of a transfer kind with no match or candidate: 0 transactions\n"
+        )
 
     def test_an_empty_ledger(self, ledger):
         assert ledger.transfers_section() == (

@@ -115,15 +115,15 @@ def load_match(conn: sqlite3.Connection, match_id: str) -> StoredMatch | None:
 
 
 def match_revision(conn: sqlite3.Connection, match: StoredMatch) -> str:
-    """The undo token: the outcome, and the transaction tokens of every transaction holding a
-    record either side binds.
+    """The undo token: the transaction tokens of every transaction holding a record either side
+    binds.
 
     Undoing a match moves no record and changes no amount or type, and a transaction token
-    covers everything about each transaction, this match's outcome there included. So an unrelated
-    file leaves it unchanged, and anything that changes what either side holds changes it.
+    covers everything about each transaction, this match's outcome there included, so the outcome
+    is not covered separately. An unrelated file leaves it unchanged, and anything that changes
+    what either side holds changes it.
     """
     material = {
-        "effect": match.effect,
         "sides": {
             side.side: sorted(
                 transaction_revision(load_merge_evidence(conn, transaction_id))
