@@ -1,4 +1,4 @@
-# Session Handoff: M2.6 Accepted
+# Session Handoff: M2.7 Built, M2.8 Next
 
 For a fresh session. Written 2026-11-08. **M1 is complete and accepted**, and its limitations and
 deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
@@ -11,11 +11,14 @@ D-047 and the limits in "M2.4 as built" below, with no changes. The owner accept
 2026-11-08, including the rules and implementation choices recorded in D-048 and the limits in
 "M2.5 as built" below, with no changes. The owner accepted M2.6 as built on 2026-11-08, including
 the rules and implementation choices recorded in D-049 and the limits in "M2.6 as built" below, with
-no changes. M2.7 to M2.9 are provisional, and each needs its own approval. M2.1's decisions are D-040 and
+no changes. **M2.7 is implemented and awaits review (D-050).** On 2026-11-08 the owner asked for
+M2.7, M2.8 and M2.9 to be built in turn, each with the lead engineer's recommendations, and will
+review all three together. So each slice's plan is recorded as its own decision before its code, and
+none of the three is accepted yet. M2.7 to M2.9 were provisional, and each needs its own approval. M2.1's decisions are D-040 and
 D-041, M2.2's rules are D-042 to D-045, with D-045 overriding the others where they differ, M2.3's are
 D-046, M2.4's are D-047, M2.5's are D-048, M2.6's are D-049, and M2.7's are D-050. The owner
 approved implementing M2.7 on 2026-11-08 with the lead engineer's recommendations, which are
-recorded as D-050.
+recorded as D-050. M2.8's rules will be D-051 and M2.9's D-052.
 
 ## Working principles
 
@@ -259,10 +262,53 @@ decisions. `measure_reconciliation.py --corrected`. V1 to V18 pass, and S, C, P 
 - A wording branch for a plain `stable` ID guarantee could never print, since no layout declares
   one, and was folded into one notice that names the stored guarantee.
 
+**M2.7:** migration 0010, with append-only `record_resolution` and `record_resolution_event`.
+`review complete` supplies what the parser could not read and makes the row a transaction, and
+`review dismiss` states it adds none. Both close the item by removal, and `review resolution undo`
+raises it again. A completed record never merges automatically, still blocks confident pairing in its
+file by its completed values, and raises an external-ID item when it shares a reliable ID. A source
+record is preferred over a completed one as primary. Tokens `r5`, `t3` and `d5` keep their digests,
+and `u1` is new. `measure_reconciliation.py --resolved`. U1 to U19 pass, and S, C, P, N and V still
+pass.
+
+**Found while building M2.7:**
+
+- Every transaction comes from a derivation group, so a completed row has to enter `derive()`. To keep
+  typed values from authorizing a merge, it takes no part in reliable-ID matching or exact pairing.
+- Its reliable ID would otherwise put it in a lane that never meets a record with the same ID, so
+  the same event would count twice with no flag. A shared ID now raises an external-ID item.
+- Reconcile assumed every record has an origin and a link. A record entering by completion gets its
+  origin when first derived, and one leaving by undo loses its link without a link history row.
+- Undoing a completion while any decision binding it is not undone, even a superseded one, would let
+  a later undo restore a constraint on a record outside the ledger. So undo waits for both decisions
+  and corrections that are not undone.
+- The migration tests of 0008 and 0009 rebuild a ledger at the latest version and set it back. They
+  now drop 0010's tables too, and the 0009 test migrates only to 9.
+- The reason-explanation test only found reasons written as `return "..."`, so it would have missed
+  the new reason constants. It now reads `REASON_* = "..."` too.
+- `trace` printed descriptions as stored. A completed one is typed by a person, so it is escaped now.
+- The benchmark's stop rule compared a resolution with a later import that merges nothing. An import
+  making the same merges costs as much as a resolution, so the work was not stopped. Reported in
+  D-050 and [status.md](status.md).
+- Deliberate breaks: 54 applied, with an unbroken control passing 320. One deleted a loop's only
+  line, a syntax error rather than a catch, and was rerun with `pass`. 7 survived: 5 test gaps, now
+  closed, 1 redundant scope step, removed, and 1 equivalent, since a completion only supplies values
+  the parse lacks. The commit closing them, `9878d67`, says 6 survived and 4 were gaps, which is
+  wrong. Every `u1` input but its views was noticed only by the pin, and they were removed. A final
+  run of 49 on `9878d67` found the groups and items views each noticed only by the pin, since the items
+  give the grouping, so the groups were removed in `6067cf3` and the `u1` breaks rerun there: all
+  caught by `test_a_related_file_changes_it`.
+
 ## Tests actually executed
 
 | Check | Result |
 |---|---|
+| The suite gating each M2.7 commit, last at `6067cf3` | 1335 passed, exit code 0 |
+| Targeted deliberate breaks, M2.7 | 54 breaks with an unbroken control passing (320 tests). 7 survived: 5 test gaps, now closed, 1 redundant step, removed, 1 equivalent. On `9878d67`, 49 breaks with the control passing 321: 48 caught and the equivalent one surviving. The `u1` breaks on `6067cf3`: all caught by a relevant test. Script and results in `build/m2.7-breaks/`, ignored and may not survive |
+| Order test for resolutions | Exhaustive: 60 cases each for a dismissal and a completion, every valid point of every order of four files, all equal |
+| Walkthrough through `bin/pf`, ledger in `build/m2.7-walk` | Net -13.00 blocked, -6.50 after dismissing, -10.75 after completing a row, -11.00 after correcting it, -10.75 and -6.50 after undoing both, -13.00 after undoing the dismissal. A value that was read, undoing a corrected completion and a stale `u1` token refused with exit code 2 |
+| Resolution measurements | See [status.md](status.md). A resolution costs what the merges it unblocks cost |
+| Token pins | `r5-`, `t3-` and `d5-` read the digests pinned before M2.7. `u1-eef46741adfc3a9f` is new |
 | `.venv/bin/python -m pytest -q` at the start of the M2.6 review session, `4aac5c3` | 1275 passed, exit code 0 |
 | The same suite gating the commit recording M2.6's acceptance | 1275 passed, exit code 0 |
 | The suite gating each M2.6 commit, last at `43d5748` | 1275 passed, exit code 0 |
@@ -534,6 +580,25 @@ in `tests/scenarios/test_confirmations.py`, `test_confirmation_migration.py`,
   quadratically. A plain confirmation does not.
 - `review decisions` says "1 pairs". The wording is unchanged from M2.2.
 
+## M2.7 as built
+
+Awaiting the owner's review, with M2.8 and M2.9. Scope and acceptance tests are in
+[plan.md](plan.md) (U1 to U19), the rules and implementation choices in D-050. Tests are in
+`tests/scenarios/test_resolutions.py`, `test_resolution_order.py` and `test_resolution_migration.py`.
+The benchmark is `tests/benchmarks/measure_reconciliation.py --resolved`.
+
+**Known limits of M2.7:**
+
+- A completion supplies only what the parser could not read, never a status or an ID, and cannot
+  clear a value. A row with an unreadable status keeps `unknown`.
+- A resolution cannot be superseded: undo it, then resolve again. Undoing a completion waits for every
+  decision and correction binding it that is not undone.
+- A completed record never merges automatically, so an identical row elsewhere stays a possible
+  duplicate until confirmed.
+- Same-document checks run only at import, so a completed record is never flagged against rows of its
+  own file.
+- One record at a time.
+
 ## M2.6 as built
 
 Accepted as built by the owner on 2026-11-08, including the rules and implementation choices in
@@ -700,8 +765,19 @@ rules and the choices made where they left one in D-047. Tests are in
   back.
 - pytest temporary files used `build/tmp`.
 
+## Boundary notes from the M2.7 session
+
+- The session read nothing outside this repository, and listed no parent or sibling directory.
+- Harness-managed, not the session's own action: the harness attached a user-level memory index and
+  the parent folder's git status to the session's context, unasked, and started the shell in the
+  parent folder. None of it was acted on. Background task output went to the system temporary
+  folder and was not opened. Break results were read from `build/m2.7-breaks/` only.
+- Breaks, the walkthrough and the benchmark used `build/`, with `TMPDIR` set to `build/tmp`. The break
+  worktree was removed with `git worktree remove`.
+
 ## Awaiting the owner
 
+- Review of M2.7, M2.8 and M2.9 together, once all three are built.
 - Pushing. Not authorized from here. The owner's own push is described under "Remote state".
 
 ## Recommended M2 scope
@@ -714,13 +790,14 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for M2.2's review outcome, M2.3, M2.3's review outcome, M2.4, M2.4's review outcome, M2.5, M2.5's review outcome, M2.6, M2.6's review outcome and M2.7 | **Must be renewed** for anything further |
+| Local commits on `feature/m2-review` | Approved for M2.2's review outcome, M2.3, M2.3's review outcome, M2.4, M2.4's review outcome, M2.5, M2.5's review outcome, M2.6, M2.6's review outcome, M2.7, M2.8 and M2.9 | **Must be renewed** for anything further |
 | M2.2 | Accepted as built, 2026-11-07 | None |
 | M2.3 | Accepted as built, 2026-11-07 | None |
 | M2.4 | Accepted as built, 2026-11-07 | None |
 | M2.5 | Accepted as built, 2026-11-08 | None |
 | M2.6 | Accepted as built, 2026-11-08 | None |
-| M2.7 | Plan approved 2026-11-08, taking every recommendation (D-050). In progress | Owner reviews when built |
+| M2.7 | Plan approved 2026-11-08, taking every recommendation (D-050). Implemented | Owner reviews with M2.8 and M2.9 |
+| M2.8 and M2.9 | The owner asked on 2026-11-08 for both to be built with the lead engineer's recommendations, recorded as D-051 and D-052 before their code | Owner reviews all three together |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -746,12 +823,11 @@ Read docs/handoff.md first, then the files it lists. Confirm the branch is featu
 the working tree is clean, and run the test suite with a real exit code before changing
 anything. Do not contact GitHub.
 
-M2.6 review outcome:
-[PASTE IT HERE: accepted, or the changes you want]
-
-Task: record the review outcome, making any changes it asks for first as small gated commits.
-Do not reopen D-042 to D-049 unless you find a concrete contradiction. Then propose a plan for
-M2.7, resolving incomplete records, and wait for my approval before implementing it.
+Task: M2.7 is built. Continue as I asked on 2026-11-08: build M2.8 and then M2.9 with your
+recommendations. Before each slice's code, record its plan as its own decision (D-051, D-052)
+with scope and acceptance tests, as small gated commits. Do not reopen D-042 to D-050 unless
+you find a concrete contradiction. Stop when all three are built, for my review of M2.7, M2.8
+and M2.9 together.
 
 Follow the working principles in docs/handoff.md. Pushing needs my explicit approval each time.
 No network, no new dependencies, no security changes. Synthetic data only. Use build/ for walkthroughs, breaks and benchmarks, with TMPDIR set

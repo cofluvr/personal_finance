@@ -1189,7 +1189,7 @@ with M2.6 on 2026-11-08:
 - Equivalent corrections made at different points can bind different records, so the order test
   compares everything but revisions, and checks that records arriving later are never bound.
 
-## D-050 Resolving incomplete records — Approved
+## D-050 Resolving incomplete records — Approved, implemented in M2.7
 
 Approved by the owner on 2026-11-08 with the M2.7 plan, taking every recommendation in it. Meets
 PRD §5's unresolved-import queue, D-024 and D-041's requirement that corrections stay distinguishable.
@@ -1268,9 +1268,37 @@ while empty.
 document's exact pairs, so that it pays for many merges, against a later import of the same account.
 If a resolution costs materially more than that import, the work stops and is reported.
 
+As measured, that comparison was the wrong one, and this is reported for the owner. The later import
+merges nothing, so at 5,000 unblocked pairs a resolution took 1.1 to 4.6s against 0.3 to 0.4s. An
+import making the same 5,000 merges took 6.7s, so a resolution costs what the merges it unblocks cost,
+and nothing more. The work was not stopped. See [status.md](status.md).
+
 **Not in scope.** Same-document checks (D-021) run only at import, so a completed record is never
 flagged against rows of its own document. Clearing a parsed value, supplying a status or an ID,
 superseding a resolution, and resolving several records at once.
+
+**How these were implemented,** where the rules above left a choice. They await the owner's review
+with M2.7:
+
+- Completed values are merged into the record inside `load_evidence`, so `derive()` sees one record
+  marked `completed_by_hand`, and builds that record's blocker itself. Its signature is unchanged.
+- A record entering the ledger by completion gets its `source_record_origin` the first time it is
+  derived, and a record leaving it by undo has its link removed without a link history row, since
+  neither is a move between transactions. The identity history says `record_completed` and
+  `record_completion_undone`.
+- The first criterion for the primary source is `read from the source, then completed by hand`, so
+  every later criterion's number moved by one in `trace`.
+- `review complete` takes `--amount`, `--transaction-date`, `--posting-date` and `--description`, and
+  a value that was read is refused naming the field. Value parsing is shared with corrections.
+- `u1` was first built also covering the resolution's kind, values and record, the rules, derivation
+  with the resolution, and the transactions holding records in scope. Deliberate breaks showed only
+  the pin noticed each. They cannot change while a token can be checked, reach it through derivation,
+  or follow from the items. It now covers the review items derivation gives without the resolution,
+  for the records whose items differ. No `u1` token was shown outside this slice, so it keeps
+  version 1. `u1-eef46741adfc3a9f` is pinned for a fixed ledger.
+- `r5-d41e2251fcd3a611`, `r5-74d05de08ff20c6b`, `r5-8f8c8b328e5b7256`, `t3-4ae2352458f9c44c` and
+  `d5-2a1e1dd2ac99de82` are the digests pinned before M2.7, unchanged.
+- `trace` now escapes descriptions, since a completed one is typed by a person.
 
 ## Not yet decided
 

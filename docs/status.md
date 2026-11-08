@@ -15,7 +15,7 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.4: separating machine-made merges | Accepted (D-047) |
 | M2.5: new evidence on decided records, and superseding chains | Accepted (D-048) |
 | M2.6: value corrections | Accepted (D-049) |
-| M2.7: resolving incomplete records | Approved, in progress (D-050) |
+| M2.7: resolving incomplete records | Implemented, awaiting review (D-050) |
 | M2.8 and M2.9 | Provisional, not approved |
 | M3 to M8 | Not started |
 
@@ -25,7 +25,7 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.db.migrate`: database creation, connections, migrations.
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
-  `0008_supersession_chains` and `0009_value_corrections`,
+  `0008_supersession_chains`, `0009_value_corrections` and `0010_record_resolutions`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
@@ -41,6 +41,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.reconcile.correction_effects` and `corrections`: which corrected values apply
   to which transactions, and correcting and undoing values under one write lock (D-049).
   `reconcile.supersession` holds the chain rule that decisions and corrections share (D-048).
+- `personal_finance.reconcile.record_resolutions`: completing and dismissing unresolved records, and
+  undoing that, under one write lock (D-050).
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement.
@@ -49,11 +51,15 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   transaction, and their revision tokens (D-040, D-047).
 - `personal_finance.reports.decision_evidence`: what a decision binds, and the undo token (D-045).
 - `personal_finance.reports.correction_evidence`: what a correction binds, and its undo token (D-049).
+- `personal_finance.reports.resolution_evidence`: what a resolution resolved, and its undo token
+  (D-050).
 - CLI: `init`, `migrate`, `account add`, `import`, `reconcile`, `documents`, `transactions`,
   `trace`, `review list`, `review show`, `review reject`, `review confirm`, `review merges`,
   `review merge show`, `review separate`, `review decisions`, `review decision show`,
   `review undo`, `review transaction show`, `review correct`, `review corrections`,
-  `review correction show`, `review correction undo`, `totals`, run through the `bin/pf` launcher (D-038).
+  `review correction show`, `review correction undo`, `review complete`, `review dismiss`,
+  `review resolutions`, `review resolution show`, `review resolution undo`, `totals`, run through
+  the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
 
@@ -278,6 +284,29 @@ below a later import of the same account in every row, though with thousands of 
 nothing else to derive the two are close, because both rewrite every derived row. Matching was not
 changed.
 
+**Resolutions (U19),** measured 2026-11-08 on the same machine with
+`measure_reconciliation.py --resolved`. Two exports of the same purchases under complete coverage, with
+one row of the first that the parser cannot read. That row blocks every confident pair, so resolving it
+pays for every merge it unblocks, and undoing it for every split. The shape asserts that it does:
+merged and split equal the pairs in every run. Full output is in `build/m2.7-bench/`, which is ignored
+and may not survive.
+
+| Kind | Pairs | Item show | Resolve | Later import | Resolution show | Undo |
+|---|---|---|---|---|---|---|
+| Dismiss | 500 | 0.005s | 0.243s | 0.044s | 0.128s | 0.408s |
+| Dismiss | 2,000 | 0.002s | 1.141s | 0.222s | 0.526s | 1.962s |
+| Dismiss | 5,000 | 0.003 to 0.059s | 1.094 to 4.568s | 0.305 to 0.440s | 0.788 to 1.046s | 3.116 to 11.551s |
+| Complete | 500 | 0.001s | 0.132s | 0.039s | 0.106s | 0.220s |
+| Complete | 2,000 | 0.004s | 1.217s | 0.738s | 0.545s | 2.132s |
+| Complete | 5,000 | 0.004 to 0.014s | 1.500 to 3.023s | 0.235 to 0.886s | 0.561 to 1.510s | 2.611 to 5.420s |
+
+The 5,000 rows were run three times, and the machine was loaded during the first run. For comparison,
+an import that makes the same merges, the second export into a ledger without the unreadable row,
+took 0.238s at 500, 1.309s at 2,000 and 6.745s at 5,000. **A resolution costs what the merges or
+splits it causes cost.** The later import in the table merges nothing, so it is cheaper by design.
+D-050's stop rule compared against that import, which this shows to be the wrong comparison.
+Matching was not changed.
+
 ## Known limitations
 
 - Only `cross_document_candidates` items can be rejected, and only they and decision conflicts can
@@ -310,7 +339,13 @@ changed.
   columns is an application rule, not something the database enforces. Corrections live in their
   own tables, and `ledger_transaction` keeps the primary source's values (D-049).
 - Only amount, transaction date, posting date and description can be corrected, and no value can
-  be cleared. Unresolved records cannot be corrected (M2.7).
+  be cleared. An unresolved record can be corrected once completed.
+- A completion supplies only values the parser could not read, and never a status or an ID. A row
+  whose status was unreadable keeps `unknown`. There is no superseding a resolution: undo it, then
+  resolve again. Undoing a completion waits for any decision or correction binding it.
+- A completed record never merges automatically, so a re-export of it is reviewed as a possible
+  duplicate. Same-document checks run only at import, so it is never flagged against rows of its
+  own file.
 - A correction binds the records of its transaction when made. One made after a merge binds more
   records, so a later split gives it `basis_changed` where an earlier correction would not. Item
   and transaction tokens then differ too, because they cover the bound records.
@@ -337,7 +372,7 @@ changed.
   reliable IDs is counted twice with no flag, unless coverage proves an exact match.
   Rows with a blank description are never matched or flagged.
 - An unresolved row with no parsed fields, such as `wrong_column_count`, blocks all
-  confident ID-less pairing for its document.
+  confident ID-less pairing for its document until it is dismissed or completed (D-050).
 - Long runs of repeated purchases become several overlapping review items. Reviewing
   them as a group arrives in M2.
 - A transaction merged before migration 0004 shows no primary source until its account is
