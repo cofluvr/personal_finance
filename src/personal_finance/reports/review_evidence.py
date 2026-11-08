@@ -17,10 +17,11 @@ from personal_finance.reconcile.correction_effects import load_active_correction
 from personal_finance.reconcile.rules import DEFAULT_RULES
 
 # Bump whenever the material evidence changes, so an old token can never appear current. Version
-# 4 adds corrections (D-049).
-REVISION_VERSION = 4
-# The same, for one transaction's evidence, which a separation or correction names (D-047, D-049).
-TRANSACTION_REVISION_VERSION = 2
+# 4 adds corrections (D-049), and version 5 completed values (D-050).
+REVISION_VERSION = 5
+# The same, for one transaction's evidence, which a separation or correction names (D-047, D-049,
+# D-050).
+TRANSACTION_REVISION_VERSION = 3
 
 # Fields left out of a revision. Random IDs and names say where evidence is stored or how
 # it is labelled, not what it says. Records are identified by document hash and row
@@ -32,7 +33,7 @@ IMMATERIAL_FIELDS = frozenset(
 )
 # Fields left out while empty, so that evidence holding none keeps the digest it had before they
 # existed (D-049).
-OMITTED_WHILE_EMPTY = frozenset({"corrections"})
+OMITTED_WHILE_EMPTY = frozenset({"corrections", "completion"})
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,17 @@ class ParsedValues:
 
 
 @dataclass(frozen=True)
+class CompletedValues:
+    """What a person supplied for an unresolved record, each None where it supplied nothing
+    because the parse had a value (D-050). Kept apart from what the parser read."""
+
+    amount_cents: int | None
+    transaction_date: str | None
+    posting_date: str | None
+    description: str | None
+
+
+@dataclass(frozen=True)
 class RecordEvidence:
     record_id: str
     content_sha256: str
@@ -58,6 +70,8 @@ class RecordEvidence:
     cells: tuple[str, ...]
     parsed: ParsedValues
     link_rule: str | None
+    # Set only for a record completed by hand.
+    completion: CompletedValues | None = None
 
 
 @dataclass(frozen=True)
@@ -326,11 +340,13 @@ def _record_of(row):
     account."""
     (transaction_id, link_rule, record_id, account_id, index, raw_json, file_name, digest,
      *rest) = row
+    completed, *supplied = rest[20:]
     record = RecordEvidence(
         record_id, digest, file_name, index, tuple(json.loads(raw_json)),
         ParsedValues(*rest[:8]), link_rule,
+        CompletedValues(*supplied) if completed else None,
     )
-    return transaction_id, record, _document(digest, file_name, rest[8:]), account_id
+    return transaction_id, record, _document(digest, file_name, rest[8:20]), account_id
 
 
 def _decided_pairs(conn, account_id, held) -> tuple[DecidedPair, ...]:
@@ -478,7 +494,10 @@ _RECORD_FIELDS = """
     meaning.external_id_namespace, meaning.external_id_guarantee,
     meaning.pending_in_transaction_basis, meaning.pending_in_posting_basis,
     coverage.coverage_kind, coverage.coverage_start, coverage.coverage_end,
-    coverage.date_basis, coverage.evidence"""
+    coverage.date_basis, coverage.evidence,
+    completion.id IS NOT NULL, completion.completed_amount_cents,
+    completion.completed_transaction_date, completion.completed_posting_date,
+    completion.completed_description"""
 
 # What a record row needs once its source_record is joined.
 _RECORD_DETAILS = """
@@ -487,7 +506,11 @@ _RECORD_DETAILS = """
     JOIN record_parse parse ON parse.source_record_id = record.id
                            AND parse.parser_version = meaning.parser_version
     JOIN document_coverage coverage ON coverage.source_document_id = document.id
-                                   AND coverage.account_id = record.account_id"""
+                                   AND coverage.account_id = record.account_id
+    LEFT JOIN record_resolution completion
+        ON completion.source_record_id = record.id AND completion.kind = 'completed'
+       AND NOT EXISTS (SELECT 1 FROM record_resolution_event undone
+                       WHERE undone.resolution_id = completion.id AND undone.event = 'undone')"""
 
 _MERGE_RECORDS = f"""
     SELECT link.transaction_id, {_RECORD_FIELDS}

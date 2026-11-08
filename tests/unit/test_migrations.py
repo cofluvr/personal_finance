@@ -46,6 +46,8 @@ def test_new_database_has_the_expected_tables(conn):
         "import_run",
         "ledger_transaction",
         "record_parse",
+        "record_resolution",
+        "record_resolution_event",
         "review_issue",
         "review_issue_subject",
         "source_document",

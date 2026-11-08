@@ -4,10 +4,11 @@ derive() is a pure function: it reads no database and depends only on the set of
 documents, any active decisions and the rules, ordered by content hash and row number,
 never by import order or generated ID. Import order therefore cannot change the outcome.
 Applying the result is a separate step. Rules are in decisions.md D-006, D-007, D-026 to
-D-031 and D-042 to D-045.
+D-031, D-042 to D-045 and D-050.
 
 Reliable-ID matching and ID-less matching run on separate rows and neither one
-feeds the other. Description similarity only ever creates review items.
+feeds the other. Description similarity only ever creates review items. A record completed by
+hand takes part in neither, because its values were typed by a person (D-050).
 """
 
 from collections import Counter, defaultdict
@@ -23,6 +24,7 @@ LINK_NEW = "new_record"
 LINK_EXTERNAL_ID = "reliable_external_id"
 LINK_EXACT = "exact_coverage_pair"
 LINK_CONFIRMED = "confirmed_same_event"
+LINK_COMPLETED = "completed_record"
 
 RULE_EXTERNAL_ID = "cross_document_external_id"
 RULE_CANDIDATES = "cross_document_candidates"
@@ -30,6 +32,9 @@ RULE_DECISION = "identity_decision"
 
 REASON_WITHHELD = "automatic_match_withheld"
 REASON_BASIS_CHANGED = "decision_basis_changed"
+REASON_UNRESOLVED_ROW = "unresolved_row"
+REASON_COMPLETED_ROW = "completed_row"
+REASON_COMPLETED_SHARES_ID = "completed_record_shares_id"
 
 RELATION_DIFFERENT = "different_event"
 RELATION_SAME = "same_event"
@@ -41,6 +46,7 @@ _STATUS_RANK = {"posted": 0, "unknown": 1, "pending": 2}
 
 # How the source supplying a transaction's displayed values is chosen, in order (D-030).
 PRIMARY_CRITERIA = (
+    "read from the source, then completed by hand",
     "settlement status (posted, then unknown, then pending)",
     "more dates present",
     "has a description",
@@ -75,6 +81,8 @@ class Record:
     description: str | None = None
     external_id: str | None = None
     settlement_status: str = "unknown"
+    # Values the parse lacked were supplied by a person (D-050), so it never merges automatically.
+    completed_by_hand: bool = False
 
 
 @dataclass(frozen=True)
@@ -84,6 +92,8 @@ class UnresolvedRecord:
     transaction_date: str | None = None
     posting_date: str | None = None
     description: str | None = None
+    # A completed record still blocks confident pairing in its document, by its completed values.
+    completed_by_hand: bool = False
 
 
 @dataclass(frozen=True)
@@ -169,9 +179,11 @@ def derive(
     ordered = sorted(records, key=lambda row: _record_key(row, by_id))
     different = tuple(item for item in constraints if item.relation == RELATION_DIFFERENT)
 
-    id_merges, id_conflicts, separation = _match_reliable_ids(ordered, by_id)
-    id_less = [row for row in ordered if not _has_reliable_id(row, by_id)]
-    exact_merges, exact_reasons = _match_exact(id_less, by_id, unresolved, rules)
+    matchable = [row for row in ordered if not row.completed_by_hand]
+    id_merges, id_conflicts, separation = _match_reliable_ids(matchable, by_id)
+    id_less = [row for row in matchable if not _has_reliable_id(row, by_id)]
+    blockers = [*unresolved, *(_as_blocker(row) for row in ordered if row.completed_by_hand)]
+    exact_merges, exact_reasons = _match_exact(id_less, by_id, blockers, rules)
 
     merges = [(merge, LINK_EXTERNAL_ID) for merge in id_merges]
     merges += [(merge, LINK_EXACT) for merge in exact_merges]
@@ -191,7 +203,10 @@ def derive(
     ]
     units += confirmed
     merged = {row.id for merge, _ in units for row in merge}
-    units += [([row], LINK_NEW) for row in ordered if row.id not in merged]
+    units += [
+        ([row], LINK_COMPLETED if row.completed_by_hand else LINK_NEW)
+        for row in ordered if row.id not in merged
+    ]
 
     groups = tuple(_group(rows, rule, by_id) for rows, rule in units)
     candidates = [_Unit.of(rows, by_id) for rows, _ in units]
@@ -201,7 +216,33 @@ def derive(
     items = [_id_item(_without_withheld(conflict, withheld_by)) for conflict in id_conflicts]
     items += _not_covered_by(found, held)
     items += _conflict_items([rows for rows, _ in units], held, constraints)
+    items += _completed_id_items([rows for rows, _ in units], ordered, by_id)
     return Derivation(groups, tuple(items), separation, steps, recomputed, withheld_by)
+
+
+def _as_blocker(row: Record) -> UnresolvedRecord:
+    return UnresolvedRecord(row.document_id, row.amount_cents, row.transaction_date,
+                            row.posting_date, row.description, completed_by_hand=True)
+
+
+def _completed_id_items(units, rows, documents) -> list["ReviewItem"]:
+    """A completed record sharing a reliable ID with another record is raised, never merged (D-050)."""
+    home = {row.id: position for position, unit in enumerate(units) for row in unit}
+    holders = defaultdict(set)
+    completed = set()
+    for row in rows:
+        if _has_reliable_id(row, documents):
+            key = documents[row.document_id].id_namespace, row.external_id
+            holders[key].add(home[row.id])
+            if row.completed_by_hand:
+                completed.add(key)
+    items = []
+    for key in sorted(completed):
+        if len(holders[key]) > 1:
+            members = [units[position] for position in sorted(holders[key])]
+            items.append(_item(RULE_EXTERNAL_ID, members, {REASON_COMPLETED_SHARES_ID},
+                               _dates_of([row for unit in members for row in unit])))
+    return items
 
 
 def _withheld_merges(merges, constraints):
@@ -539,8 +580,9 @@ def _coverage_gap(left, right, key, blockers, rules) -> str | None:
 
     dates = {value for value in (transaction_date, posting_date) if value}
     for document in (left, right):
-        if _unresolved_could_affect(document.id, dates, amount, text, blockers, rules):
-            return "unresolved_row"
+        reason = _unresolved_could_affect(document.id, dates, amount, text, blockers, rules)
+        if reason:
+            return reason
     return None
 
 
@@ -562,22 +604,30 @@ def _index_unresolved(unresolved):
     return index
 
 
-def _unresolved_could_affect(document_id, dates, amount, text, blockers, rules) -> bool:
-    """An unresolved row matters only if nothing known about it rules it out (D-024)."""
+def _unresolved_could_affect(document_id, dates, amount, text, blockers, rules) -> str | None:
+    """Why a row of this document could distort the count, if one could (D-024, D-050).
+
+    An unresolved row matters only if nothing known about it rules it out. A completed row is
+    judged the same way by its completed values, and an unresolved row takes precedence.
+    """
     by_date = blockers.get(document_id)
     if not by_date:
-        return False
+        return None
 
     description = parse_description(text, rules)
+    found = None
     for value in (None, *dates):
         for row in by_date.get(value, ()):
             if row.amount_cents is not None and row.amount_cents != amount:
                 continue
-            if not fold(row.description):
-                return True
-            if similar(parse_description(row.description, rules), description, rules):
-                return True
-    return False
+            if fold(row.description) and not similar(
+                parse_description(row.description, rules), description, rules
+            ):
+                continue
+            if not row.completed_by_hand:
+                return REASON_UNRESOLVED_ROW
+            found = REASON_COMPLETED_ROW
+    return found
 
 
 @dataclass(frozen=True)
@@ -826,16 +876,19 @@ def _primary_rank(row: Record, documents):
         row.description,
         documents[row.document_id].content_sha256,
         row.row_index,
+        completed_by_hand=row.completed_by_hand,
     )
 
 
-def primary_rank(status, transaction_date, posting_date, description, content_sha256, row_index):
+def primary_rank(status, transaction_date, posting_date, description, content_sha256, row_index,
+                 *, completed_by_hand=False):
     """Order sources for display, lowest first, one term per entry of PRIMARY_CRITERIA.
 
     Depends only on the record itself, so import order cannot affect the choice.
     """
     dates = (transaction_date is not None) + (posting_date is not None)
-    return (_STATUS_RANK[status], -dates, not description, (content_sha256, row_index))
+    return (completed_by_hand, _STATUS_RANK[status], -dates, not description,
+            (content_sha256, row_index))
 
 
 def deciding_criterion(chosen, other) -> str:

@@ -1,4 +1,4 @@
-"""Applies a derivation to one account. See decisions.md D-029, D-033 and D-042 to D-045.
+"""Applies a derivation to one account. See decisions.md D-029, D-033, D-042 to D-045 and D-050.
 
 Every function here runs inside the caller's database transaction, so an import and
 its reconciliation commit together or not at all. Source evidence is only read.
@@ -36,6 +36,11 @@ MANAGED_RULES = (RULE_CANDIDATES, RULE_EXTERNAL_ID, RULE_DECISION)
 KIND_DUPLICATE = "possible_duplicate"
 KIND_CONFLICT = "decision_conflict"
 
+RESOLUTION_COMPLETED = "completed"
+RESOLUTION_DISMISSED = "dismissed"
+# Why a transaction appeared or went when a record entered or left the evidence (D-050).
+REASON_RECORD_COMPLETED = "record_completed"
+REASON_COMPLETION_UNDONE = "record_completion_undone"
 
 
 @dataclass(frozen=True)
@@ -179,8 +184,40 @@ def load_constraints(conn, account_id, without: str | None = None) -> tuple[Cons
     )
 
 
-def load_evidence(conn, account_id):
-    """Read stored interpretation only, never the current Python layouts (D-026)."""
+def active_resolutions(conn, account_id, treated_as_undone: str | None = None) -> dict[str, tuple]:
+    """Each resolved record's resolution: its ID, kind and completed values (D-050).
+
+    treated_as_undone leaves one resolution out, to see what undoing it would leave.
+    """
+    return {
+        record_id: (resolution_id, kind, values)
+        for resolution_id, record_id, kind, *values in conn.execute(
+            """SELECT resolution.id, resolution.source_record_id, resolution.kind,
+                      resolution.completed_amount_cents, resolution.completed_transaction_date,
+                      resolution.completed_posting_date, resolution.completed_description
+               FROM record_resolution resolution
+               WHERE resolution.account_id = ?
+                 AND NOT EXISTS (SELECT 1 FROM record_resolution_event undone
+                                 WHERE undone.resolution_id = resolution.id
+                                   AND undone.event = 'undone')""",
+            (account_id,),
+        )
+        if resolution_id != treated_as_undone
+    }
+
+
+def completed_values(parsed_values, completion) -> tuple:
+    """A completed record's amount, dates and description: parsed where read, else supplied."""
+    return tuple(parsed if parsed is not None else supplied
+                 for parsed, supplied in zip(parsed_values, completion))
+
+
+def load_evidence(conn, account_id, without_resolution: str | None = None):
+    """Read stored interpretation only, never the current Python layouts (D-026).
+
+    A completed record is a record with its completed values, and a dismissed one is neither a
+    record nor a blocker (D-050). without_resolution leaves one resolution out, as if undone.
+    """
     documents, imported = [], {}
     for row in conn.execute(
         """SELECT document.id, document.content_sha256, document.generated_on,
@@ -203,6 +240,7 @@ def load_evidence(conn, account_id):
         )
         imported[document_id] = (imported_at, digest)
 
+    resolutions = active_resolutions(conn, account_id, without_resolution)
     records, unresolved, import_order = [], [], {}
     for row in conn.execute(
         """SELECT record.id, record.source_document_id, record.record_index, parse.status,
@@ -218,11 +256,17 @@ def load_evidence(conn, account_id):
         (account_id,),
     ):
         record_id, document_id, index, status, *values = row
+        resolution = resolutions.get(record_id)
         if status == "parsed":
             records.append(Record(record_id, document_id, index, *values))
             import_order[record_id] = (*imported[document_id], index)
-        else:
+        elif resolution is None:
             unresolved.append(UnresolvedRecord(document_id, *values[:4]))
+        elif resolution[1] == RESOLUTION_COMPLETED:
+            records.append(Record(record_id, document_id, index,
+                                  *completed_values(values[:4], resolution[2]), *values[4:],
+                                  completed_by_hand=True))
+            import_order[record_id] = (*imported[document_id], index)
     return documents, records, unresolved, import_order
 
 
@@ -262,6 +306,14 @@ class _State:
             )
         )
 
+        # A completed record enters the ledger after its import, and gets its origin then (D-050).
+        self.new_origins = {
+            record_id: str(uuid.uuid4())
+            for group in derivation.groups for record_id in group.record_ids
+            if record_id not in origins
+        }
+        origins.update(self.new_origins)
+
         self.target = {}
         self.target_rule = {}
         self.new_members = {}
@@ -288,6 +340,11 @@ class _State:
             )
         }
         self.stored_created_at = {key: value[-1] for key, value in stored.items()}
+        self.conn.executemany(
+            """INSERT INTO source_record_origin (source_record_id, original_transaction_id)
+               VALUES (?, ?)""",
+            sorted(self.new_origins.items()),
+        )
         self.revived = {}
         for transaction_id, record in self.primary.items():
             values = (record.external_id, record.transaction_date, record.posting_date,
@@ -295,14 +352,16 @@ class _State:
                       record.id)
             if transaction_id not in stored:
                 created_at = self._created_at_of_retired(transaction_id)
-                self.revived[transaction_id] = created_at
+                if created_at is not None:
+                    self.revived[transaction_id] = created_at
                 self.conn.execute(
                     """INSERT INTO ledger_transaction (id, account_id, external_id,
                                                        transaction_date, posting_date,
                                                        amount_cents, description,
                                                        settlement_status,
                                                        primary_source_record_id, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+                               COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))""",
                     (transaction_id, self.account_id, *values, created_at),
                 )
             elif stored[transaction_id][:-1] != values:
@@ -315,15 +374,19 @@ class _State:
                     (*values, transaction_id),
                 )
 
-    def _created_at_of_retired(self, transaction_id) -> str:
+    def _created_at_of_retired(self, transaction_id) -> str | None:
         """The retired row's timestamp, or for a row retired before migration 0004, when
-        its first record was linked, which is the same import."""
+        its first record was linked, which is the same import. None for a transaction that
+        never existed, which only a completed record's first entry creates (D-050)."""
         row = self.conn.execute(
             """SELECT transaction_created_at FROM transaction_identity_history
                WHERE transaction_id = ? AND event = 'retired' ORDER BY id DESC LIMIT 1""",
             (transaction_id,),
         ).fetchone()
-        return row[0] if row else self.links[self.first_record[transaction_id]][3]
+        if row:
+            return row[0]
+        first_link = self.links.get(self.first_record[transaction_id])
+        return first_link[3] if first_link else None
 
     def _record_identity_event(self, transaction_id, event, created_at, reason) -> None:
         self.conn.execute(
@@ -336,9 +399,29 @@ class _State:
         )
 
     def write_links(self, last_fingerprint) -> int:
+        # A record leaves the evidence only when its completion is undone, and enters it only when
+        # completed. Neither is a move between transactions, so neither is in the link history.
+        departed = [record_id for record_id in self.links if record_id not in self.target]
+        self.conn.executemany(
+            "DELETE FROM transaction_source WHERE source_record_id = ?",
+            [(record_id,) for record_id in departed],
+        )
+        for record_id in departed:
+            self.moved_out.setdefault(self.links[record_id][0], REASON_COMPLETION_UNDONE)
+        for record_id, transaction_id in sorted(self.target.items()):
+            if record_id not in self.links:
+                self.conn.execute(
+                    """INSERT INTO transaction_source (transaction_id, source_record_id,
+                                                       source_document_id, account_id, link_rule)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (transaction_id, record_id, self.records[record_id].document_id,
+                     self.account_id, self.target_rule[record_id]),
+                )
+                self.moved_in.setdefault(transaction_id, REASON_RECORD_COMPLETED)
+
         moved = [
             record_id for record_id, link in self.links.items()
-            if self.target[record_id] != link[0]
+            if record_id in self.target and self.target[record_id] != link[0]
         ]
         # Removing first lets records swap places without breaking the per-document rule.
         self.conn.executemany(
@@ -371,7 +454,7 @@ class _State:
             )
 
         for record_id, link in self.links.items():
-            if self.target[record_id] == link[0] and self.target_rule[record_id] != link[1]:
+            if self.target.get(record_id) == link[0] and self.target_rule[record_id] != link[1]:
                 self.conn.execute(
                     "UPDATE transaction_source SET link_rule = ? WHERE source_record_id = ?",
                     (self.target_rule[record_id], record_id),
@@ -522,7 +605,8 @@ class _State:
             targets = {
                 self.target[record_id]
                 for record_id in self.old_members[transaction_id]
-                if document_id is None or self.links[record_id][2] == document_id
+                if record_id in self.target
+                and (document_id is None or self.links[record_id][2] == document_id)
             }
             if targets == {transaction_id}:
                 continue

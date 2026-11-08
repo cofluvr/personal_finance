@@ -465,7 +465,8 @@ def test_trace_names_the_primary_source_and_explains_the_selection(db, tmp_path,
     assert "'SYNTHETIC CAFE'" in out, "the alternative's evidence stays visible"
     assert "Source status: unknown" in out
     assert f"Displayed values come from record {primary}, chosen by, in order:" in out
-    assert "4. lowest document hash, then row number" in out
+    assert "1. read from the source, then completed by hand" in out
+    assert "5. lowest document hash, then row number" in out
 
 
 def test_trace_explains_a_primary_that_was_never_recorded(db, tmp_path, capsys):

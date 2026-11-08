@@ -49,7 +49,9 @@ ALL_TABLES = (*SOURCE_TABLES, "ledger_transaction", "transaction_source", "revie
               "review_issue_subject", "transaction_link_history", "transaction_identity_history",
               "decision", "decision_constraint", "decision_event", "account_reconciliation",
               "value_correction", "value_correction_record", "value_correction_event",
-              "transaction_correction")
+              "transaction_correction", "record_resolution", "record_resolution_event")
+# Created by 0010, children first (D-050).
+RESOLUTION_TABLES = ("record_resolution_event", "record_resolution")
 
 
 def declared(start, end):
@@ -122,7 +124,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r4-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r5-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)
@@ -145,7 +147,7 @@ class Ledger:
 
     def decision_revision(self, decision):
         out = self.run("review", "decision", "show", decision)[1]
-        return re.search(r"Revision: (d4-[0-9a-f]{16})", out)[1]
+        return re.search(r"Revision: (d5-[0-9a-f]{16})", out)[1]
 
     def undo(self, decision, revision=None, account="A"):
         return self.run("review", "undo", decision, "--account", account,
@@ -1007,7 +1009,7 @@ class TestUndoToken:  # S21
 
     def test_the_token_has_the_documented_form(self, ledger):
         _, token = self.decided(ledger)
-        assert re.fullmatch(r"d4-[0-9a-f]{16}", token)
+        assert re.fullmatch(r"d5-[0-9a-f]{16}", token)
 
 
 class TestConstraintsApplied:

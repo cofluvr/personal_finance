@@ -189,13 +189,18 @@ class TestPrimaryRecord:
         assert result.groups[0].primary_record_id == "2"
 
     def test_the_deciding_criterion_is_the_first_that_differs(self):
-        def rank(status="posted", transaction="2026-01-09", posting="2026-01-10", text="X", row=1):
-            return primary_rank(status, transaction, posting, text, "a" * 64, row)
+        def rank(status="posted", transaction="2026-01-09", posting="2026-01-10", text="X", row=1,
+                 completed=False):
+            return primary_rank(status, transaction, posting, text, "a" * 64, row,
+                                completed_by_hand=completed)
 
-        assert deciding_criterion(rank(), rank(status="unknown")) == PRIMARY_CRITERIA[0]
-        assert deciding_criterion(rank(), rank(posting=None)) == PRIMARY_CRITERIA[1]
-        assert deciding_criterion(rank(), rank(text=None)) == PRIMARY_CRITERIA[2]
-        assert deciding_criterion(rank(), rank(row=2)) == PRIMARY_CRITERIA[3]
+        assert deciding_criterion(rank(), rank(completed=True)) == PRIMARY_CRITERIA[0]
+        assert deciding_criterion(rank(), rank(status="unknown")) == PRIMARY_CRITERIA[1]
+        assert deciding_criterion(rank(), rank(posting=None)) == PRIMARY_CRITERIA[2]
+        assert deciding_criterion(rank(), rank(text=None)) == PRIMARY_CRITERIA[3]
+        assert deciding_criterion(rank(), rank(row=2)) == PRIMARY_CRITERIA[4]
+        # A record read from the source wins even over a posted, fuller record completed by hand.
+        assert rank(status="pending", posting=None, text=None) < rank(completed=True)
 
     def test_the_choice_does_not_depend_on_input_order(self):
         rows = [row("1", "a", external_id="X"), row("2", "b", external_id="X")]

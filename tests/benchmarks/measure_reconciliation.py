@@ -699,7 +699,7 @@ def measure_many_corrections(count: int) -> None:
             conn.execute(
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  target_transaction_id, target_revision)
-                   VALUES (?, 'acct', 'amount', -1, ?, 't2-0')""",
+                   VALUES (?, 'acct', 'amount', -1, ?, 't3-0')""",
                 (correction_id, transaction_id),
             )
             conn.execute("INSERT INTO value_correction_record VALUES (?, ?)", (correction_id, record_id))
@@ -752,7 +752,7 @@ def measure_correction_chain(length: int) -> None:
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  target_transaction_id, target_revision,
                                                  supersedes_correction_id)
-                   VALUES (?, 'acct', 'amount', ?, ?, 't2-0', ?)""",
+                   VALUES (?, 'acct', 'amount', ?, ?, 't3-0', ?)""",
                 (correction_id, -1 - number, transaction_id,
                  f"c{number - 1:06}" if number else None),
             )

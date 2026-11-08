@@ -195,7 +195,7 @@ def _import_content(
             _link(conn, transaction_id, record_id, document_id, account_id)
             transactions.append((transaction_id, parsed))
         else:
-            _insert_unresolved_issue(conn, record_id, parsed.reason_code)
+            insert_unresolved_issue(conn, record_id, parsed.reason_code)
             unresolved += 1
 
     for rule, members in find_candidate_groups(transactions):
@@ -376,7 +376,7 @@ def _link(conn, transaction_id, record_id, document_id, account_id) -> None:
     )
 
 
-def _insert_unresolved_issue(conn, record_id, reason_code) -> None:
+def insert_unresolved_issue(conn, record_id, reason_code) -> None:
     issue_id = _new_id()
     conn.execute(
         "INSERT INTO review_issue (id, kind, rule) VALUES (?, 'unresolved_record', ?)",

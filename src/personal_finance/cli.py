@@ -139,6 +139,13 @@ REASON_EXPLANATIONS = {
     "boundary_date": "the date is too close to the end of what coverage supports",
     "single_day_overlap": "the documents overlap by a single day",
     "unresolved_row": "an unresolved row could affect the count",
+    "completed_row": (
+        "a row completed by hand could affect the count, and its typed values never make a "
+        "match confident"
+    ),
+    "completed_record_shares_id": (
+        "a record completed by hand shares this reliable ID, and is never merged automatically"
+    ),
     "external_id_conflict": "records with this ID disagree on a material field",
     "external_id_repeated": "this ID is repeated within a document",
     "automatic_match_withheld": (

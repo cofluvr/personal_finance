@@ -23,8 +23,9 @@ from personal_finance.reconcile.rules import MatchingRules
 
 # Bump whenever the material below changes, so an old token can never appear current. Version 3
 # restores only the decision just before this one, so a chain reads differently (D-048). Version 4
-# adds corrections binding records in scope, left out where there are none (D-049).
-DECISION_REVISION_VERSION = 4
+# adds corrections binding records in scope, left out where there are none (D-049). Version 5
+# marks records in scope completed by hand, left out where they are not (D-050).
+DECISION_REVISION_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -241,7 +242,7 @@ def undo_outlook(
         "pairs": sorted(_pair_keys(pair) for pair in decision.pairs),
         "rules": rules.fingerprint(),
         "records": sorted(
-            ([key_of(record.id), _without(asdict(record), "id", "document_id")]
+            ([key_of(record.id), record_material(record)]
              for record in records if record.id in scope),
             key=repr,
         ),
@@ -309,6 +310,15 @@ def _pair_keys(pair: BoundPair) -> list:
         [[(record.content_sha256, record.row) for record in side]
          for side in (pair.left, pair.right)]
     )
+
+
+def record_material(record) -> dict:
+    """A record's values as tokens cover them, marking one completed by hand only when it is, so
+    that a ledger without completions keeps its digests (D-050)."""
+    fields = _without(asdict(record), "id", "document_id")
+    if not fields["completed_by_hand"]:
+        del fields["completed_by_hand"]
+    return fields
 
 
 def _without(fields: dict, *names: str) -> dict:

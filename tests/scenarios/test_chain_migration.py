@@ -14,6 +14,7 @@ from test_confirmations import confirm_ok
 from test_decisions import ALL_TABLES, CAFE
 from test_separations import SeparationLedger
 from test_supersession import chain_of_three
+from test_decisions import RESOLUTION_TABLES
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 from personal_finance.reconcile.decisions import STALE_ACCOUNT
@@ -26,9 +27,10 @@ def markers(conn):
     ))
 
 
-# Created by 0009, children first. Nothing in these ledgers corrects a value.
+# Created by 0009 and 0010, children first. Nothing in these ledgers corrects a value or resolves
+# a record.
 VERSION_9_TABLES = ("transaction_correction", "value_correction_event", "value_correction_record",
-                    "value_correction")
+                    "value_correction", *RESOLUTION_TABLES)
 
 
 def set_back(path: Path) -> None:
@@ -115,7 +117,7 @@ class TestAfterMigration:  # N13
         assert ledger.run("migrate")[0] == 0
         assert "have not been reconciled" in ledger.totals()
         before = ledger.dump(VERSION_8_TABLES)
-        code, _, err = ledger.undo(newest, "d4-0000000000000000")
+        code, _, err = ledger.undo(newest, "d5-0000000000000000")
         assert code == 2 and STALE_ACCOUNT in err
         assert ledger.dump(VERSION_8_TABLES) == before
 
