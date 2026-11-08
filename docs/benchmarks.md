@@ -296,3 +296,33 @@ A chain of 2,000 reads its states in 0.0019s, and classification show on its new
 M2.6 figures above within noise, before and after the rewrite lost its early return, so ledgers
 without classifications pay nothing measurable.
 
+
+**Transfers (X14),** measured 2026-11-08 on the same machine with
+`measure_reconciliation.py --transfers`. Full output is in `build/m3.2-bench/transfers.txt`, which is
+ignored and may not survive.
+
+First, a checking and a savings account where every transaction but one pair is matched, written
+directly. Every import, decision, correction and classification in either account rewrites every
+match's outcome. The shape asserts that the later import rewrites them once, all of them, and that
+every one applies.
+
+| Matches | Rewrite | Totals | Show and match | Show and undo | Later import |
+|---|---|---|---|---|---|
+| 100 | 0.002s | 0.001s | 0.006s | 0.004s | 0.007s |
+| 1,000 | 0.022s | 0.009s | 0.048s | 0.034s | 0.061s |
+| 4,000 | 0.103s | 0.039s | 0.222s | 0.152s | 0.259s |
+
+Second, candidates, computed whenever `review transfers` or `totals` runs. Distinct amounts give one
+candidate per transfer-kind transaction. Equal amounts on one day give every pair, which is the
+quadratic case, and the shape asserts that count.
+
+| Shape | Transactions per account | Candidates | List | Totals |
+|---|---|---|---|---|
+| Distinct amounts | 1,000 | 1,000 | 0.008s | 0.009s |
+| Distinct amounts | 4,000 | 4,000 | 0.034s | 0.042s |
+| One amount, one day | 50 | 2,500 | 0.004s | 0.004s |
+| One amount, one day | 200 | 40,000 | 0.064s | 0.070s |
+| One amount, one day | 400 | 160,000 | 0.272s | 0.314s |
+
+**Matches add linear work to every write, and candidates are quadratic only in one amount on nearby
+dates.**

@@ -28,6 +28,7 @@ from personal_finance.reconcile.classification_effects import write_classificati
 from personal_finance.reconcile.correction_effects import write_correction_effects
 from personal_finance.reconcile.rules import DEFAULT_RULES, RULES_VERSION, MatchingRules
 from personal_finance.reconcile.same_document import RULE_SAME_DOCUMENT_PENDING_POSTED
+from personal_finance.reconcile.transfer_effects import write_transfer_effects
 from personal_finance.reconcile.supersession import (
     STATE_ACTIVE,
     STATE_SUPERSEDED,
@@ -105,10 +106,12 @@ def reconcile_account(
     state.write_review_items()
     state.repoint_other_issues()
     state.retire_unused_transactions()
-    # After memberships are final, since corrections follow their records (D-049), and
-    # classifications after corrections, since a corrected amount gives the direction (D-053).
+    # After memberships are final, since corrections follow their records (D-049), classifications
+    # after corrections, since a corrected amount gives the direction (D-053), and transfer matches
+    # last, for the whole ledger, since they read all three (D-054).
     write_correction_effects(conn, account_id)
     write_classification_effects(conn, account_id)
+    write_transfer_effects(conn)
     _write_marker(conn, account_id, rules)
     return ReconcileResult(derivation, moved)
 

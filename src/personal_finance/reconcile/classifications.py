@@ -16,13 +16,19 @@ from personal_finance.reconcile.classification_effects import (
     effective_amount_by_transaction,
     fits_direction,
     load_active_classifications,
+    type_of_account,
     unsettled_classifications,
     write_classification_effects,
 )
 from personal_finance.reconcile.correction_effects import FIELD_APPLIED
-from personal_finance.reconcile.decisions import STALE_ACCOUNT, DecisionRefused
+from personal_finance.reconcile.decisions import (
+    LEAVES_TRANSFER_UNSETTLED,
+    STALE_ACCOUNT,
+    DecisionRefused,
+)
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reconcile.supersession import STATE_ACTIVE, STATE_SUPERSEDED
+from personal_finance.reconcile.transfer_effects import unsettled_matches, write_transfer_effects
 from personal_finance.reports.classification_evidence import (
     classification_undo_outlook,
     load_classification,
@@ -36,7 +42,8 @@ TYPE_UNKNOWN = (
 )
 TYPE_AGAINST_DIRECTION = (
     "the type {financial_type} is money {direction}, and this transaction is money {other}. "
-    "Nothing was changed. A transfer may be either."
+    "Nothing was changed. A transfer may be either, and a card, loan or investment payment may be "
+    "money in on the account it pays."
 )
 TRANSACTION_NOT_FOUND = (
     "transaction not found. A later import or decision can retire one: run transactions"
@@ -95,6 +102,8 @@ class ClassificationUndone:
     # Transactions this undo leaves unclassified for a disagreement, a changed basis or direction,
     # and that were not before.
     newly_unclassified_transactions: int
+    # Transfer matches this undo stops applying, and that applied before (D-054).
+    newly_unsettled_matches: int
 
 
 def classify_transaction(
@@ -158,7 +167,7 @@ def _classify(conn, account_id, transaction_id, revision, financial_type, rules,
     if financial_type == shown_now:
         raise DecisionRefused(TYPE_UNCHANGED)
     amount_cents = effective_amount_by_transaction(conn, account_id)[transaction_id]
-    if not fits_direction(financial_type, amount_cents):
+    if not fits_direction(financial_type, amount_cents, type_of_account(conn, account_id)):
         direction, other = ("in", "out") if amount_cents < 0 else ("out", "in")
         raise DecisionRefused(TYPE_AGAINST_DIRECTION.format(
             financial_type=financial_type, direction=direction, other=other))
@@ -177,8 +186,12 @@ def _classify(conn, account_id, transaction_id, revision, financial_type, rules,
            VALUES (?, ?)""",
         [(classification_id, record_id) for record_id in sorted(record_ids)],
     )
+    unmatched_before = unsettled_matches(conn)
     _record_classification_event(conn, classification_id, "made")
     write_classification_effects(conn, account_id)
+    write_transfer_effects(conn)
+    if unsettled_matches(conn) - unmatched_before:
+        raise DecisionRefused(LEAVES_TRANSFER_UNSETTLED)
     return ClassificationMade(classification_id, financial_type, len(record_ids))
 
 
@@ -230,10 +243,13 @@ def _undo_classification(conn, account_id, classification_id, revision,
         raise DecisionRefused(STALE_ACCOUNT)
     classification = _checked_for_replacing(conn, account_id, classification_id, revision)
     unsettled_before = unsettled_classifications(conn, account_id)
+    unmatched_before = unsettled_matches(conn)
     _record_classification_event(conn, classification_id, "undone")
     write_classification_effects(conn, account_id)
+    write_transfer_effects(conn)
     newly_unsettled = unsettled_classifications(conn, account_id) - unsettled_before
-    return ClassificationUndone(classification.supersedes_classification_id, len(newly_unsettled))
+    return ClassificationUndone(classification.supersedes_classification_id, len(newly_unsettled),
+                                len(unsettled_matches(conn) - unmatched_before))
 
 
 def _record_classification_event(conn, classification_id, event) -> None:

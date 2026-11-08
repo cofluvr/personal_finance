@@ -12,6 +12,7 @@ from personal_finance.reconcile.apply import load_evidence
 from personal_finance.reconcile.classification_effects import (
     effective_classifications,
     load_active_classifications,
+    type_of_account,
 )
 from personal_finance.reconcile.correction_effects import (
     FIELD_APPLIED,
@@ -177,6 +178,7 @@ def correction_undo_outlook(
         if any(membership[record_id] in holding_transactions
                for classification in classifications
                for record_id in classification.bound_record_ids):
+            account_type = type_of_account(conn, account_id)
             source_amounts = dict(conn.execute(
                 "SELECT id, amount_cents FROM ledger_transaction WHERE account_id = ?",
                 (account_id,),
@@ -187,7 +189,8 @@ def correction_undo_outlook(
                 for (transaction, field), effect in effects.items():
                     if field == "amount" and effect.state == FIELD_APPLIED:
                         amounts[transaction] = effect.applied_value
-                outcomes = effective_classifications(classifications, membership, amounts)
+                outcomes = effective_classifications(classifications, membership, amounts,
+                                                     account_type)
                 return sorted(
                     [keyed(records_by_transaction[transaction]), outcomes[transaction].state,
                      outcomes[transaction].applied_value]

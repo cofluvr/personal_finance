@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from personal_finance.reconcile.apply import STATE_ACTIVE, decision_states, declared_coverage
 from personal_finance.reconcile.classification_effects import FINANCIAL_TYPES
+from personal_finance.reconcile.transfer_effects import TRANSFER_TYPES, transfer_candidates
 
 
 @dataclass(frozen=True)
@@ -189,6 +190,77 @@ def _classifications(conn, account_id) -> tuple:
         tuple((financial_type, *by_type[financial_type])
               for financial_type in FINANCIAL_TYPES if financial_type in by_type),
         unclassified_count, unclassified_cents, *unsettled,
+    )
+
+
+@dataclass(frozen=True)
+class TransferSummary:
+    """Transfers between accounts, counted for the ledger or for the matches with a side in one
+    account (D-054). Account movement is unchanged by any of it."""
+
+    # Applied matches, and the amount they move, counted once per match.
+    matches: int
+    matched_cents: int
+    # Transactions in a candidate pair, the account's own only for one account.
+    transactions_in_candidates: int
+    # Transactions of a transfer kind that are in neither a match nor a candidate pair.
+    unpaired_transfer_kind: int
+    basis_changed: int
+    conflicts: int
+    amounts_differ: int
+    types_differ: int
+
+
+def transfer_summary(conn: sqlite3.Connection, account_id: str | None = None) -> TransferSummary:
+    states = dict(conn.execute(
+        """SELECT effect.state, COUNT(*) FROM transfer_match_effect effect
+           WHERE :account IS NULL OR EXISTS (
+               SELECT 1 FROM transfer_match_side side
+               WHERE side.match_id = effect.match_id AND side.account_id = :account)
+           GROUP BY effect.state""",
+        {"account": account_id},
+    ))
+    matched_cents = conn.execute(
+        """SELECT COALESCE(SUM(COALESCE(fix.corrected_amount_cents, entry.amount_cents)), 0)
+           FROM transfer_match_effect effect
+           JOIN ledger_transaction entry ON entry.id = effect.inflow_transaction_id
+           LEFT JOIN transaction_correction fix
+               ON fix.transaction_id = entry.id AND fix.field = 'amount' AND fix.state = 'applied'
+           WHERE :account IS NULL OR :account IN (
+               entry.account_id,
+               (SELECT outflow.account_id FROM ledger_transaction outflow
+                WHERE outflow.id = effect.outflow_transaction_id))""",
+        {"account": account_id},
+    ).fetchone()[0]
+    in_candidates = {
+        facts.transaction_id
+        for candidate in transfer_candidates(conn, account_id)
+        for facts in (candidate.outflow, candidate.inflow)
+        if account_id is None or facts.account_id == account_id
+    }
+    marks = ", ".join("?" for _ in TRANSFER_TYPES)
+    unpaired = sum(
+        transaction_id not in in_candidates
+        for (transaction_id,) in conn.execute(
+            f"""SELECT entry.id FROM ledger_transaction entry
+                JOIN transaction_classification kind ON kind.transaction_id = entry.id
+                WHERE kind.state = 'applied' AND kind.financial_type IN ({marks})
+                  AND (? IS NULL OR entry.account_id = ?)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM transaction_source link
+                      JOIN transfer_match_record bound
+                          ON bound.source_record_id = link.source_record_id
+                      WHERE link.transaction_id = entry.id
+                        AND NOT EXISTS (SELECT 1 FROM transfer_match_event undone
+                                        WHERE undone.match_id = bound.match_id
+                                          AND undone.event = 'undone'))""",
+            (*TRANSFER_TYPES, account_id, account_id),
+        )
+    )
+    return TransferSummary(
+        states.get("applied", 0), matched_cents, len(in_candidates), unpaired,
+        states.get("basis_changed", 0), states.get("conflict", 0),
+        states.get("amounts_differ", 0), states.get("type_differs", 0),
     )
 
 

@@ -63,8 +63,8 @@ own approval.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M3.1 | Financial types, stated by a person (D-053) | Built, awaiting review |
-| M3.2 | Transfer candidates across accounts, and reconciling two accounts together | Provisional |
+| M3.1 | Financial types, stated by a person (D-053) | Accepted |
+| M3.2 | Transfer candidates across accounts, and reconciling two accounts together (D-054) | Built, awaiting review |
 | M3.3 | Card payments, one-sided transfers and coverage warnings (D-012) | Provisional |
 | M3.4 | Totals by financial type, with disclosures of unconfirmed candidates | Provisional |
 
@@ -86,6 +86,25 @@ own approval.
 | F12 | Equivalent classifications made at different valid points in the import sequence give the same outcome, exhaustively for four files |
 | F13 | Migration 0013 works on a populated ledger, makes no account stale and is atomic on failure. Classification tables are append-only |
 | F14 | S, C, P, N, V, U, K and Q still pass, and classifying is measured on many classified transactions against a later import |
+
+### M3.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| X1 | A transfer-kind transaction with an exactly opposite one in another account within 5 days is a candidate. No type on either side, another amount, a date outside the window, the same account, or a type that does not fit the pair is not |
+| X2 | Matching changes no account movement and no type totals. Source evidence, `ledger_transaction` and `derive()` output are byte-identical |
+| X3 | Refused, with nothing changed: wrong account on either side, unknown transaction, the same account, a stale token of either kind, a stale account on either side, a pair that is not a candidate, a side already matched |
+| X4 | A stale account is not reconciled by the refused command |
+| X5 | A match survives repeat imports, `reconcile`, unrelated files, a re-export joining either side, and a rules change |
+| X6 | An automatic split of a matched side gives `basis_changed`, two matches reaching one transaction `conflict`, an amount that stops offsetting `amounts_differ`, and a type that stops fitting `type_differs`, each disclosed |
+| X7 | `review confirm`, `review separate`, `review correct` and `review classify` refuse atomically to unsettle an applied match. Undos report it, and undoing a completion waits for a match |
+| X8 | Card, loan and investment payments accept money in on the account they pay and refuse it elsewhere |
+| X9 | Undo keeps the match on record, needs both accounts current and its token, and never refuses for contradiction |
+| X10 | Tokens: `r8`, `t6` and `m1` pinned, digests kept without matches, an unrelated file leaves `m1` unchanged |
+| X11 | Equivalent matches made at different valid points in the import sequence of two accounts give the same outcome, exhaustively for four files |
+| X12 | Migration 0014 works on a populated ledger, marks as not current only the accounts of recommendation 7, and is atomic on failure. Match tables are append-only |
+| X13 | `totals` reports matches, candidates, unmatched transfer-kind transactions and unsettled matches, for the ledger and for one account |
+| X14 | S, C, P, N, V, U, K, Q and F still pass, and the outcome is measured on many matches against a later import |
 
 ## Backlog benchmarks
 

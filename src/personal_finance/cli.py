@@ -61,6 +61,16 @@ from personal_finance.reconcile.decisions import (
     undo_decision,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reconcile.transfer_effects import (
+    MATCH_AMOUNTS_DIFFER,
+    MATCH_APPLIED,
+    MATCH_BASIS_CHANGED,
+    MATCH_CONFLICT,
+    MATCH_TYPE_DIFFERS,
+    TRANSFER_DATE_WINDOW_DAYS,
+    transfer_candidates,
+)
+from personal_finance.reconcile.transfers import match_transfer, undo_transfer
 from personal_finance.reports.classification_evidence import (
     classification_undo_outlook,
     list_classifications,
@@ -99,7 +109,8 @@ from personal_finance.reports.review_evidence import (
     rows_sharing_a_document,
     transaction_revision,
 )
-from personal_finance.reports.totals import account_movement
+from personal_finance.reports.totals import account_movement, transfer_summary
+from personal_finance.reports.transfer_evidence import list_matches, load_match, match_revision
 
 ACCOUNT_TYPES = ("checking", "savings", "credit_card", "loan", "investment", "retirement")
 
@@ -261,6 +272,33 @@ CLASSIFICATION_STATE_EXPLANATIONS = {
     TYPE_AGAINST_DIRECTION: (
         "its amount now runs against the stated type, as after a correction, so it is "
         "unclassified. Undo the classification, or the correction"
+    ),
+}
+
+MATCH_NOTICE = (
+    "Account movement and type totals are unchanged, matching never reads transfers, and new "
+    "records are not bound, but a re-export that joins either side keeps the match applied."
+)
+
+MATCH_UNDO_NOTICE = "Both transactions are unmatched again, and can be matched again."
+
+# What each outcome of a transfer match means (D-054).
+MATCH_STATE_EXPLANATIONS = {
+    MATCH_APPLIED: "both sides are one movement of money between your accounts",
+    MATCH_BASIS_CHANGED: (
+        "a side's bound records are now in several transactions, so it does not apply. Undo it, "
+        "then match again"
+    ),
+    MATCH_CONFLICT: (
+        "a transaction holds records of two matches, so neither applies. Undo all but one"
+    ),
+    MATCH_AMOUNTS_DIFFER: (
+        "the amounts no longer offset exactly, as after a correction, so it does not apply. Undo "
+        "it, or the correction"
+    ),
+    MATCH_TYPE_DIFFERS: (
+        "a type stated on a side no longer fits a transfer between these accounts, so it does not "
+        "apply. Undo it, or the classification"
     ),
 }
 
@@ -567,6 +605,49 @@ def build_parser() -> argparse.ArgumentParser:
     classification_undo.add_argument("--account", required=True, help="account name or ID")
     classification_undo.add_argument(
         "--revision", required=True, help="the revision from review classification show"
+    )
+
+    transfers = command(
+        "transfers", review_commands, handler=run_review_transfers,
+        help="list transfer candidates and stored transfer matches",
+    )
+    transfers.add_argument("--account", help="account name or ID")
+
+    transfer = review_commands.add_parser(
+        "transfer", help="match, inspect or undo a transfer between two accounts"
+    )
+    transfer_commands = transfer.add_subparsers(dest="transfer_command", required=True)
+    transfer_match = command(
+        "match", transfer_commands, handler=run_review_transfer_match,
+        help="state that two transactions of two accounts are one transfer",
+    )
+    transfer_match.add_argument("transaction_id", help="a transaction ID from review transfers")
+    transfer_match.add_argument("--account", required=True, help="its account name or ID")
+    transfer_match.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    transfer_match.add_argument("--counterpart", required=True, dest="counterpart_id",
+                                help="the other transaction's ID, from review transfers")
+    transfer_match.add_argument("--counterpart-account", required=True,
+                                help="the other transaction's account name or ID")
+    transfer_match.add_argument(
+        "--counterpart-revision", required=True,
+        help="the other transaction's revision from review transaction show",
+    )
+    transfer_show = command(
+        "show", transfer_commands, handler=run_review_transfer_show,
+        help="show what a transfer match binds, and its undo revision",
+    )
+    transfer_show.add_argument("match_id", help="a match ID from review transfers")
+    transfer_undo = command(
+        "undo", transfer_commands, handler=run_review_transfer_undo,
+        help="stop a transfer match applying, keeping it on record",
+    )
+    transfer_undo.add_argument("match_id", help="a match ID from review transfers")
+    transfer_undo.add_argument("--account", required=True,
+                               help="the name or ID of either of its accounts")
+    transfer_undo.add_argument(
+        "--revision", required=True, help="the revision from review transfer show"
     )
 
     complete = command(
@@ -1451,6 +1532,7 @@ def print_transaction_evidence(entry, shared) -> None:
         print_record_evidence(record, describe_role(record.record_id, primary_id, ranks), shared)
     print_corrections(entry)
     print_classifications(entry)
+    print_transfers(entry)
 
 
 def _effective_rank_values(record):
@@ -1492,6 +1574,17 @@ def print_classifications(entry) -> None:
         )
     state = entry.classifications[0].state
     print(f"    Financial type: {CLASSIFICATION_STATE_EXPLANATIONS[state]}")
+
+
+def print_transfers(entry) -> None:
+    """Transfer matches binding this transaction's records (D-054)."""
+    for transfer in entry.transfers:
+        print(f"  Transfer match {transfer.match_id}, this transaction's side: {transfer.side}")
+        print(f"    Binding here: {describe_side(transfer.bound_records)}")
+        print(f"    Binding on the other side: {describe_side(transfer.counterpart_bound_records)}")
+        if transfer.counterpart_transaction_id:
+            print(f"    Other side now: transaction {transfer.counterpart_transaction_id}")
+        print(f"    Transfer: {MATCH_STATE_EXPLANATIONS[transfer.state]}")
 
 
 def shown_corrected_value(field, value) -> str:
@@ -1764,6 +1857,7 @@ def run_review_undo(args) -> int:
     print(f"  Source memberships changed: {result.moved_records}")
     print_newly_unsettled(result.newly_unsettled_correction_fields)
     print_newly_unclassified(result.newly_unclassified_transactions)
+    print_newly_unmatched(result.newly_unsettled_matches)
     print(f"  {UNDO_NOTICE}")
     return 0
 
@@ -1891,8 +1985,18 @@ def run_review_correction_undo(args) -> int:
         print(f"  Correction {result.restored}, which it superseded, applies again.")
     print_newly_unsettled(result.newly_unsettled_fields)
     print_newly_unclassified(result.newly_unclassified_transactions)
+    print_newly_unmatched(result.newly_unsettled_matches)
     print(f"  {CORRECTION_UNDO_NOTICE}")
     return 0
+
+
+def print_newly_unmatched(count) -> None:
+    if count:
+        print(
+            f"  Transfer matches that no longer apply, because a side's records split or reach "
+            f"another match, the amounts no longer offset or a type no longer fits: {count}. Run "
+            "review transfers."
+        )
 
 
 def print_newly_unclassified(count) -> None:
@@ -2022,7 +2126,100 @@ def run_review_classification_undo(args) -> int:
     if result.restored:
         print(f"  Classification {result.restored}, which it superseded, applies again.")
     print_newly_unclassified(result.newly_unclassified_transactions)
+    print_newly_unmatched(result.newly_unsettled_matches)
     print(f"  {CLASSIFICATION_UNDO_NOTICE}")
+    return 0
+
+
+def run_review_transfers(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    name_by_account = dict(conn.execute("SELECT id, display_name FROM account"))
+
+    def side(facts):
+        kind = facts.financial_type or UNCLASSIFIED
+        return (f"transaction {facts.transaction_id} ({shown(name_by_account[facts.account_id])}, "
+                f"{kind})")
+
+    candidates = transfer_candidates(conn, account_id)
+    for candidate in candidates:
+        print(f"Candidate: {side(candidate.outflow)} to {side(candidate.inflow)}")
+    print(f"Transfer candidates: {len(candidates)}")
+    rows = list_matches(conn, account_id)
+    for match_id, state, effect, outflow_account, inflow_account, created_at in rows:
+        outcome = f", {effect}" if effect else ""
+        print(
+            f"Match {match_id}: {state}{outcome}, {shown(outflow_account)} to "
+            f"{shown(inflow_account)}, {created_at}"
+        )
+    print(f"Transfer matches: {len(rows)}")
+    if candidates:
+        print(
+            "A candidate is a transfer kind on one side and the exactly opposite amount in another "
+            f"account within {TRANSFER_DATE_WINDOW_DAYS} days. To see its evidence, including "
+            "amounts, run review transaction show on each side."
+        )
+    if rows:
+        print("To see what a match binds, run review transfer show.")
+    return 0
+
+
+def run_review_transfer_match(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    counterpart_account_id = find_account(conn, args.counterpart_account)
+    result = match_transfer(
+        conn, account_id, args.transaction_id, args.revision, counterpart_account_id,
+        args.counterpart_id, args.counterpart_revision,
+    )
+
+    print(
+        f"Match {result.match_id} recorded: transaction {result.outflow_transaction_id} to "
+        f"transaction {result.inflow_transaction_id}, binding {result.outflow_record_count} and "
+        f"{result.inflow_record_count} records."
+    )
+    print(f"  {MATCH_NOTICE}")
+    return 0
+
+
+def run_review_transfer_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    match = load_match(conn, args.match_id)
+    if match is None:
+        raise CommandError("transfer match not found. Run review transfers.")
+
+    print(f"Transfer match {match.match_id}")
+    print(f"  Status: {match.state}")
+    print(f"  Made: {match.created_at}")
+    if match.undone_at:
+        print(f"  Undone: {match.undone_at}. It stays on record and no longer applies.")
+    for side in (match.outflow, match.inflow):
+        print(f"{side.side.capitalize()} side:")
+        print(f"  Account: {shown(side.account_name)} ({side.account_id})")
+        print(f"  From transaction: {side.target_transaction_id}")
+        for record in side.bound_records:
+            where = record.transaction_id or "no transaction"
+            print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
+    if match.state == STATE_ACTIVE:
+        print(f"  Transfer: {MATCH_STATE_EXPLANATIONS[match.effect]}")
+        print(f"  Revision: {match_revision(conn, match)}")
+        print(f"Undoing this match now: {MATCH_UNDO_NOTICE}")
+        if stale_accounts(conn, DEFAULT_RULES, match.outflow.account_id) or stale_accounts(
+                conn, DEFAULT_RULES, match.inflow.account_id):
+            print(
+                "An account of this match has not been reconciled under the current matching "
+                "rules, so undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
+def run_review_transfer_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    undo_transfer(conn, account_id, args.match_id, args.revision)
+
+    print(f"Match {args.match_id} undone. It stays on record and no longer applies.")
+    print(f"  {MATCH_UNDO_NOTICE}")
     return 0
 
 
@@ -2062,6 +2259,7 @@ def print_resolution_effect(result) -> None:
     print(f"  Source memberships changed: {result.moved_records}")
     print_newly_unsettled(result.newly_unsettled_correction_fields)
     print_newly_unclassified(result.newly_unclassified_transactions)
+    print_newly_unmatched(result.newly_unsettled_matches)
 
 
 def run_review_resolutions(args) -> int:
@@ -2108,7 +2306,8 @@ def run_review_resolution_show(args) -> int:
         print("Undoing this resolution now:")
         print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
         if resolution.kind == "completed":
-            decisions, corrections, classifications = binding_entries(conn, record.record_id)
+            decisions, corrections, classifications, matches = binding_entries(
+                conn, record.record_id)
             for decision in decisions:
                 print(f"  Refused while decision {decision} binds the record. Undo it first.")
             for correction in corrections:
@@ -2117,6 +2316,10 @@ def run_review_resolution_show(args) -> int:
                 print(
                     f"  Refused while classification {classification} binds the record. Undo it "
                     "first."
+                )
+            for match in matches:
+                print(
+                    f"  Refused while transfer match {match} binds the record. Undo it first."
                 )
         print(f"  {RESOLUTION_UNDO_NOTICE}")
         if stale_accounts(conn, DEFAULT_RULES, resolution.account_id):
@@ -2202,6 +2405,7 @@ def print_coverage_effect(result) -> None:
     print(f"  Source memberships changed: {result.moved_records}")
     print_newly_unsettled(result.newly_unsettled_correction_fields)
     print_newly_unclassified(result.newly_unclassified_transactions)
+    print_newly_unmatched(result.newly_unsettled_matches)
 
 
 def run_review_coverage_history(args) -> int:
@@ -2248,6 +2452,14 @@ def run_totals(args) -> int:
         f"  {UNCLASSIFIED}: {movement.unclassified_transactions} transactions, "
         f"{format_cents(movement.unclassified_cents)}"
     )
+    transfers = transfer_summary(conn, account_id)
+    print("Transfers between your accounts, as you matched them:")
+    print(f"  Matched: {transfers.matches} pairs, moving {format_cents(transfers.matched_cents)}")
+    print(f"  In a candidate pair, not matched: {transfers.transactions_in_candidates} transactions")
+    print(
+        f"  Of a transfer kind with no match or candidate: {transfers.unpaired_transfer_kind} "
+        "transactions"
+    )
     print("Disclosures:")
     print("- These are account movements. They include transfers and card payments.")
     print(f"- {MATCHING_NOTICE}")
@@ -2285,9 +2497,32 @@ def run_totals(args) -> int:
     for line in describe_corrections(movement):
         print(f"- {line}")
     for line in (*describe_resolutions(movement), *describe_declarations(movement),
-                 *describe_pending(movement), *describe_classifications(movement)):
+                 *describe_pending(movement), *describe_classifications(movement),
+                 *describe_transfers(transfers)):
         print(f"- {line}")
     return 0
+
+
+def describe_transfers(transfers) -> list[str]:
+    """Matches that no longer apply, and unmatched candidates, on their own lines (D-011, D-054)."""
+    lines = [
+        f"{count} transfer matches no longer apply, because {reason}. Their transactions count as "
+        "unmatched. Run review transfers."
+        for count, reason in (
+            (transfers.basis_changed, "a side's bound records are now in several transactions"),
+            (transfers.conflicts, "a transaction holds records of two matches"),
+            (transfers.amounts_differ, "the amounts no longer offset exactly"),
+            (transfers.types_differ, "a type no longer fits a transfer between those accounts"),
+        )
+        if count
+    ]
+    if transfers.transactions_in_candidates:
+        lines.append(
+            f"{transfers.transactions_in_candidates} transactions may be transfers between your "
+            "accounts and are not matched. Each still counts as the type stated, or unclassified. "
+            "Run review transfers."
+        )
+    return lines
 
 
 def main(argv: list[str] | None = None) -> int:

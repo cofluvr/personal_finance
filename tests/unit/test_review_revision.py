@@ -18,6 +18,7 @@ from personal_finance.reports.review_evidence import (
     RecordEvidence,
     ReviewEvidence,
     TransactionEvidence,
+    TransferEvidence,
     review_revision,
     rows_sharing_a_document,
 )
@@ -94,6 +95,18 @@ def variations(target, path=""):
 CASES = dict(variations(item()))
 
 
+def with_transfer():
+    """An item whose first transaction is the outflow side of an applied match (D-054)."""
+    first, second = item().transactions
+    transfer = TransferEvidence("match", "outflow", "applied", (DecidedRecord("a" * 64, "a.csv", 1),),
+                                (DecidedRecord("b" * 64, "b.csv", 4),), "transaction-9")
+    return replace(item(), transactions=(replace(first, transfers=(transfer,)), second))
+
+
+TRANSFER_CASES = {name: case for name, case in variations(with_transfer())
+                  if name.startswith("transactions.transfers.")}
+
+
 def test_the_walk_reaches_nested_evidence():
     assert {"reasons", "documents.effective_end", "transactions.amount_cents",
             "transactions.records.parsed.amount_cents", "unresolved.cells",
@@ -106,15 +119,31 @@ def test_every_field_is_material_or_explicitly_exempt(name):
     assert (review_revision(CASES[name]) == review_revision(item())) is same
 
 
+@pytest.mark.parametrize("name", sorted(TRANSFER_CASES))
+def test_every_transfer_field_is_material_or_explicitly_exempt(name):  # X10
+    same = name.rsplit(".", 1)[-1] in IMMATERIAL_FIELDS
+    assert (review_revision(TRANSFER_CASES[name]) == review_revision(with_transfer())) is same
+
+
+def test_the_transfer_walk_reaches_every_field():
+    assert {"transactions.transfers.side", "transactions.transfers.state",
+            "transactions.transfers.bound_records.row",
+            "transactions.transfers.counterpart_bound_records.content_sha256",
+            "transactions.transfers.match_id",
+            "transactions.transfers.counterpart_transaction_id"} <= set(TRANSFER_CASES)
+
+
 def test_exempt_fields_are_identifiers_names_and_the_stale_warning_only():
     assert IMMATERIAL_FIELDS == {
         "issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
-        "account_name", "decision_id", "correction_id", "classification_id",
+        "account_name", "decision_id", "correction_id", "classification_id", "match_id",
+        "counterpart_transaction_id",
     }
 
 
-def test_only_corrections_completions_declarations_and_classifications_are_left_out_while_empty():
-    assert OMITTED_WHILE_EMPTY == {"corrections", "completion", "declared", "classifications"}
+def test_only_corrections_completions_declarations_classifications_and_transfers_are_left_out_while_empty():
+    assert OMITTED_WHILE_EMPTY == {"corrections", "completion", "declared", "classifications",
+                                   "transfers"}
 
 
 @pytest.mark.parametrize("field", ["transactions", "unresolved", "documents", "decided"])
@@ -132,12 +161,14 @@ def test_moving_a_record_between_transactions_changes_the_revision():
 
 
 def test_the_definition_is_pinned_so_a_change_must_bump_the_version():
-    assert REVISION_VERSION == 7
-    assert review_revision(item()) == "r7-8f8c8b328e5b7256"
+    assert REVISION_VERSION == 8
+    # Version 8 adds transfer matches, left out while empty, so the digest is kept (D-054).
+    assert review_revision(item()) == "r8-8f8c8b328e5b7256"
+    assert review_revision(with_transfer()) == "r8-ba0201407a1df723"
 
 
 def test_the_token_has_the_documented_form():
-    assert re.fullmatch(r"r7-[0-9a-f]{16}", review_revision(item()))
+    assert re.fullmatch(r"r8-[0-9a-f]{16}", review_revision(item()))
 
 
 def test_rows_sharing_a_document_ignores_documents_with_one_record():

@@ -38,6 +38,13 @@ DIRECTION_BY_TYPE = {
     "loan_payment": MONEY_OUT,
     "investment_contribution": MONEY_OUT,
 }
+# Types that also allow money in on the kind of account they pay, where the payment is received
+# (D-054).
+PAID_ACCOUNT_TYPES_BY_TYPE = {
+    "card_payment": frozenset({"credit_card"}),
+    "loan_payment": frozenset({"loan"}),
+    "investment_contribution": frozenset({"investment", "retirement"}),
+}
 
 # The field name under which classifications share D-049's effective-value rule.
 TYPE_FIELD = "financial_type"
@@ -46,12 +53,19 @@ TYPE_FIELD = "financial_type"
 TYPE_AGAINST_DIRECTION = "against_direction"
 
 
-def fits_direction(financial_type: str, amount_cents: int) -> bool:
-    """A zero amount runs neither way, so it fits every type."""
+def fits_direction(financial_type: str, amount_cents: int, account_type: str) -> bool:
+    """A zero amount runs neither way, so it fits every type. A payment received on the account it
+    pays is money in there (D-054)."""
     direction = DIRECTION_BY_TYPE[financial_type]
     if direction is None or amount_cents == 0:
         return True
+    if account_type in PAID_ACCOUNT_TYPES_BY_TYPE.get(financial_type, ()):
+        return True
     return (amount_cents > 0) == (direction == MONEY_IN)
+
+
+def type_of_account(conn: sqlite3.Connection, account_id: str) -> str:
+    return conn.execute("SELECT account_type FROM account WHERE id = ?", (account_id,)).fetchone()[0]
 
 
 def classification_chain_states(
@@ -98,9 +112,11 @@ def load_active_classifications(
 
 
 def effective_classifications(
-    active_classifications, transaction_by_record_id, effective_amount_by_transaction
+    active_classifications, transaction_by_record_id, effective_amount_by_transaction,
+    account_type: str,
 ) -> dict[object, FieldCorrection]:
-    """The state and applied type of every classified transaction, keyed by transaction.
+    """The state and applied type of every classified transaction of one account, keyed by
+    transaction.
 
     As for effective_field_corrections, a transaction is whatever transaction_by_record_id maps
     records to, and effective_amount_by_transaction gives the amount totals use for each.
@@ -110,7 +126,7 @@ def effective_classifications(
         active_classifications, transaction_by_record_id
     ).items():
         if effect.state == FIELD_APPLIED and not fits_direction(
-            effect.applied_value, effective_amount_by_transaction[transaction]
+            effect.applied_value, effective_amount_by_transaction[transaction], account_type
         ):
             effect = FieldCorrection(TYPE_AGAINST_DIRECTION, None, effect.correction_ids)
         outcome[transaction] = effect
@@ -139,7 +155,7 @@ def write_classification_effects(conn: sqlite3.Connection, account_id: str) -> N
     )
     effects = effective_classifications(
         load_active_classifications(conn, account_id), transaction_by_record_id(conn, account_id),
-        effective_amount_by_transaction(conn, account_id),
+        effective_amount_by_transaction(conn, account_id), type_of_account(conn, account_id),
     )
     conn.executemany(
         """INSERT INTO transaction_classification (transaction_id, state, financial_type)

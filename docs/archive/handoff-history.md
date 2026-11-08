@@ -1,4 +1,4 @@
-# Handoff History, M1 to M3.1
+# Handoff History, M1 to M3.2
 
 Moved out of [handoff.md](../handoff.md) on 2026-11-08 to keep each session's required reading small. The text is
 unchanged from the handoff at `80ca837`, with links adjusted to this folder. Measurements it
@@ -585,6 +585,33 @@ The benchmark is `tests/benchmarks/measure_reconciliation.py --resolved`.
   own file.
 - One record at a time.
 
+## M3.1 as built
+
+Built and accepted by the owner on 2026-11-08 as built, with no changes, including the implementation choices and points for review in D-053. Scope and acceptance tests are in [plan.md](../plan.md)
+(F1 to F14), the rules, implementation choices and points for review in D-053. Tests are in
+`tests/scenarios/test_classifications.py`, `test_classification_order.py` and
+`test_classification_migration.py`. The benchmark is `measure_reconciliation.py --classified`.
+The suite gating the last M3.1 commit, `735e010`, passed 1512 tests with exit code 0. Breaks,
+walkthrough and benchmark output are in `build/m3.1-breaks/`, `build/m3.1-walk/` and
+`build/m3.1-bench/`.
+
+**Known limits of M3.1:**
+
+- Only a person classifies, one transaction at a time. No layout or rule suggests a type (D-014).
+- Each type but `transfer` fits one direction whatever the account, so a payment received on a card,
+  loan or investment account can only be a `transfer`, and interest earned only `income`.
+- A classification binds the records of its transaction when made. A re-export that does not merge
+  is unclassified, and a split leaves every part unclassified.
+- Disagreeing classifications, a changed basis, or a correction's undo turning the amount against
+  the type leave the transaction unclassified, with no command but undo to settle it.
+- A classified transaction can be superseded only while one classification applies there.
+- `totals` lists types beside account movement. It is not income or spending: transfers are not
+  matched across accounts until M3.2, and reports wait for M3.4.
+- `transactions` does not show types. `review transaction show` and `review classifications` do.
+- Lines read "1 transactions", as `review decisions` reads "1 pairs".
+
+The full list of limitations is in [status.md](../status.md).
+
 ## M2.6 as built
 
 Accepted as built by the owner on 2026-11-08, including the rules and implementation choices in
@@ -750,6 +777,19 @@ rules and the choices made where they left one in D-047. Tests are in
   One oversized output, the session's own read of this file, was saved under `~/.claude` and read
   back.
 - pytest temporary files used `build/tmp`.
+
+## Boundary notes from the M3.1 review and M3.2 session
+
+- The session read nothing outside this repository, and listed no parent or sibling directory.
+- Harness-managed, not the session's own action: the harness attached a user-level memory index and
+  the parent folder's git status to the session's context, unasked, and started the shell in the
+  parent folder. None of it was acted on. Each command started in this repository. Background task
+  output went to the system temporary folder and was not opened. Break results were read from
+  `build/m3.2-breaks/` only.
+- The breaks, benchmark and pytest temporary files used `build/`, with `TMPDIR` set to `build/tmp`.
+- One commit, `1d1267d`, was gated through `pytest | tail`, so on `tail`'s exit code. The gate
+  printed 407 passed, and the full suite had exit code 0 just before with nothing changed between.
+  Every later commit was chained on pytest's own exit code.
 
 ## Boundary notes from the M3.1 session
 
