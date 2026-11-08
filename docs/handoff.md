@@ -1,4 +1,4 @@
-# Session Handoff: M2 Accepted, M3.1 Plan Proposed
+# Session Handoff: M3.1 Built, Awaiting Review
 
 For a fresh session. Written 2026-11-08. **M1 is complete and accepted**, and its limitations and
 deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
@@ -14,8 +14,10 @@ the rules and implementation choices recorded in D-049 and the limits in "M2.6 a
 no changes. On 2026-11-08 the owner asked for M2.7, M2.8 and M2.9 to be built in turn with the lead
 engineer's recommendations, each recorded as its own decision before its code, and **accepted all
 three as built the same day**, including the amendment of A34, continuing past D-050's stop rule, and
-the limits in "M2.7 as built" to "M2.9 as built" below. **M2 is complete and accepted.** A plan for M3.1,
-financial types, is proposed as D-053 and awaits the owner's approval. Nothing of M3 is built. M2.1's decisions are D-040 and
+the limits in "M2.7 as built" to "M2.9 as built" below. **M2 is complete and accepted.** The owner
+approved the M3.1 plan, financial types, as D-053 with no changes on 2026-11-08. **M3.1 is built and
+awaits review**, with the implementation choices and the points for review at the end of D-053, and
+the limits in "M3.1 as built" below. M3.2 is not started. M2.1's decisions are D-040 and
 D-041, M2.2's rules are D-042 to D-045, with D-045 overriding the others where they differ, M2.3's are
 D-046, M2.4's are D-047, M2.5's are D-048, M2.6's are D-049, and M2.7's are D-050. The owner
 approved implementing M2.7 on 2026-11-08 with the lead engineer's recommendations, which are
@@ -42,7 +44,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review`. See "Remote state" |
-| Latest commit | Run `git log -1`: the commit recording this handoff. M2.6's acceptance is recorded after `4aac5c3`. M2.6 starts after `8384fb6`, which records its plan's approval, itself after `0032c9c`, which records M2.5's acceptance. M2.5 starts after `d1feb30`, which records its plan's approval, itself after `7551e18`, which records M2.4's acceptance. M2.4 starts after `97f7296`, which records M2.3's acceptance. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a` |
+| Latest commit | Run `git log -1`: the commit recording this handoff. M3.1 starts after `c25913f`, which records D-053's approval, itself after `08e4225`, which proposed it. M2.6's acceptance is recorded after `4aac5c3`. M2.6 starts after `8384fb6`, which records its plan's approval, itself after `0032c9c`, which records M2.5's acceptance. M2.5 starts after `d1feb30`, which records its plan's approval, itself after `7551e18`, which records M2.4's acceptance. M2.4 starts after `97f7296`, which records M2.3's acceptance. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a` |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -69,7 +71,8 @@ Then the code in
 `src/personal_finance/ingest/pipeline.py`, `reconcile/cross_document.py`,
 `reconcile/apply.py`, `reconcile/decisions.py`, `reports/review_evidence.py`,
 `reports/decision_evidence.py`, `reconcile/correction_effects.py`, `reconcile/corrections.py`,
-`reports/correction_evidence.py` and `db/migrations/`.
+`reports/correction_evidence.py`, `reconcile/classification_effects.py`, `reconcile/classifications.py`,
+`reports/classification_evidence.py` and `db/migrations/`.
 
 ## Completed
 
@@ -352,10 +355,59 @@ still pass.
   281 failures**: its replacement renamed a function, a bad break. Applied by hand it failed nothing
   relevant, and once fixed it was caught by the new test.
 
+**M3.1:** migration 0013, with append-only `type_classification`, `type_classification_record` and
+`type_classification_event`, and the derived `transaction_classification`. `review classify`,
+`review classifications`, `review classification show` and `review classification undo`. Nine types
+and `unclassified`, each type fitting one direction but `transfer`. A classification binds the records
+of its transaction and shares D-049's effective-value rule and D-048's chains. `totals` lists each
+type and the unclassified transactions below account movement, which no type changes. Tokens `r7`,
+`t5`, `d6` and `c2` keep their digests without classifications, and `f1` is new.
+`measure_reconciliation.py --classified`. F1 to F14 pass, and S, C, P, N, V, U, K and Q still pass.
+
+**Found while building M3.1:**
+
+- **D-053's direction rule and the receiving account.** On a card, loan or investment account a
+  payment received is money in, which `card_payment`, `loan_payment` and `investment_contribution`
+  refuse, so that side can only be a `transfer`. Built as approved, because it only refuses. For the
+  owner's review, at the end of D-053.
+- A correction can turn an amount's sign under a classification, and undoing a correction never
+  refuses (D-049), so a fourth derived state, `against_direction`, leaves such a transaction
+  unclassified and disclosed. `review correct` refuses to cause it.
+- Undoing a completion would have left a classification binding a record outside the ledger, a
+  `KeyError` on the next rewrite. It now waits for classifications too, as for corrections (D-050).
+- The 0012 migration test populated a version 11 ledger through the import API, which now writes
+  0013's table, so the fixture adds 0013's tables by hand. Its migration, and the older ones' tests,
+  now stop at their own version or drop 0013's tables.
+- The test helper did not know `review classification` takes `--db` third, so the first run of the
+  new tests failed on argument parsing, not on the code.
+- `pair_up`'s first transaction follows content hashes, which a new test assumed was `a.csv`. It
+  now names the file.
+- A schema test first passed on a primary-key clash, not the check it named. Each schema refusal
+  now has a control insert that succeeds.
+- The walk to the newest of a chain was copied three times, and is shared now.
+- The walkthrough script first tried a direction refusal on a transaction already classified, and
+  got the right refusal for that instead. The step was rewritten.
+- Deliberate breaks: 62 applied, with an unbroken control passing 408. 50 caught, each by a relevant
+  test, and 1 a syntax error, a bad break that removed a loop's only line. 12 survived: 7 test gaps,
+  now closed, 3 immaterial inputs or redundant code, removed, 1 early return that only saved work,
+  removed, and 1 equivalent, the amounts in `d6`'s views, which change only its digest since
+  identical groups give identical amounts. The type in `f1` was noticed only by the pin and removed.
+  A rerun of all 62 on `735e010`, control passing 414: 57 caught, each by a relevant test, 4 no longer
+  applying to removed code, and the equivalent one surviving.
+
 ## Tests actually executed
 
 | Check | Result |
 |---|---|
+| The suite at the start of the M3.1 session, `08e4225` | 1410 passed, exit code 0 |
+| The suite gating each M3.1 commit, last at `735e010` | 1512 passed, exit code 0 |
+| Targeted deliberate breaks, M3.1 | 62 breaks with an unbroken control passing (408 tests). 50 caught, 1 syntax error, 12 survived: 7 test gaps closed, 4 removed, 1 equivalent. Rerun on `735e010`, control passing 414: 57 caught, 4 did not apply to removed code, the equivalent one survived. Script and results in `build/m3.1-breaks/`, ignored and may not survive |
+| `tests/scenarios/test_classifications.py` repeated 3 times | 75 passed each time, exit code 0, before the gap tests |
+| Order test for classifications | Exhaustive: 60 cases, every valid point of every order of four files, all equal, with later records never bound |
+| Migration 0013 on populated data | A decision, correction, completion and declaration kept, no account stale, atomic on failure |
+| Walkthrough through `bin/pf`, ledger in `build/m3.1-walk` | Net -13.00 throughout. Purchase -30.00, refund 30.00, a cafe purchase -6.50, the bookshop superseded as a fee and undone back to a purchase. A refund on a purchase, an unknown type, a second classification without `--supersedes`, undoing a superseded classification and a correction against the type refused with exit code 2. Script and output in `build/m3.1-walk/` |
+| Classification measurements | See [status.md](status.md). Linear, and below a later import |
+| Token pins | `r7-`, `t5-`, `d6-` and `c2-` read the digests pinned before M3.1. `f1-d981b70d43d9af68` is new |
 | The suite gating each M2.9 commit, last at `9708bc6` | 1410 passed, exit code 0 |
 | Targeted deliberate breaks, M2.9 | 27 breaks with an unbroken control passing (340 tests). 18 caught, 2 did not apply, 7 survived, all test gaps, closed. Reruns on `a2330ab` and `9708bc6`: all caught by relevant tests, after a bad break that renamed a function was fixed. Script and results in `build/m2.9-breaks/`, ignored and may not survive |
 | Order test for pending and posted exports | Exhaustive: all 24 orders of four files, equal |
@@ -457,6 +509,8 @@ may not survive.
 ## Known limitations
 
 - Only two invented layouts exist. It must not be used with real financial data.
+- Only a person classifies, one transaction at a time, and a payment received on a card, loan or
+  investment account can only be a `transfer`. See "Known limits of M3.1".
 - Coverage cannot be changed after import (M2.8, provisional).
 - Only candidate pairs can be rejected, and only candidate items and conflicts confirmed. See
   "Known limits of M2.3".
@@ -544,6 +598,10 @@ may not survive.
 | Effective value | Agreeing corrections apply. Disagreeing ones, or one whose records sit in several transactions, leave the source value, disclosed | D-049 |
 | Correction chains | D-048's rule. Undo never refuses for contradiction. Confirm and separate refuse to leave a correction unsettled | D-049 |
 | Correction tokens | `r4`, `t2` and `d4` add corrections, keeping digests when there are none. `c1` for undo | D-049 |
+| Financial types | Nine types and `unclassified`, stated by a person only. Each fits one direction but `transfer` | D-053 |
+| A classification | A correction of a field with no source value: D-049's rules, D-048's chains, stored apart | D-053 |
+| Type totals | Account movement unchanged. One line per type and one for unclassified | D-053 |
+| Classification tokens | `r7`, `t5`, `d6` and `c2` add classifications, keeping digests. `f1` for undo | D-053 |
 
 ## Open follow-ups
 
@@ -645,6 +703,28 @@ in `tests/scenarios/test_confirmations.py`, `test_confirmation_migration.py`,
 - A partition, like a rejection, makes every later import of the account recompute the touched group
   quadratically. A plain confirmation does not.
 - `review decisions` says "1 pairs". The wording is unchanged from M2.2.
+
+## M3.1 as built
+
+Built 2026-11-08, awaiting the owner's review. Scope and acceptance tests are in [plan.md](plan.md)
+(F1 to F14), the rules, implementation choices and points for review in D-053. Tests are in
+`tests/scenarios/test_classifications.py`, `test_classification_order.py` and
+`test_classification_migration.py`. The benchmark is `measure_reconciliation.py --classified`.
+
+**Known limits of M3.1:**
+
+- Only a person classifies, one transaction at a time. No layout or rule suggests a type (D-014).
+- Each type but `transfer` fits one direction whatever the account, so a payment received on a card,
+  loan or investment account can only be a `transfer`, and interest earned only `income`.
+- A classification binds the records of its transaction when made. A re-export that does not merge
+  is unclassified, and a split leaves every part unclassified.
+- Disagreeing classifications, a changed basis, or a correction's undo turning the amount against
+  the type leave the transaction unclassified, with no command but undo to settle it.
+- A classified transaction can be superseded only while one classification applies there.
+- `totals` lists types beside account movement. It is not income or spending: transfers are not
+  matched across accounts until M3.2, and reports wait for M3.4.
+- `transactions` does not show types. `review transaction show` and `review classifications` do.
+- Lines read "1 transactions", as `review decisions` reads "1 pairs".
 
 ## M2.9 as built
 
@@ -864,6 +944,20 @@ rules and the choices made where they left one in D-047. Tests are in
   back.
 - pytest temporary files used `build/tmp`.
 
+## Boundary notes from the M3.1 session
+
+- The session read nothing outside this repository, and listed no parent or sibling directory.
+- Harness-managed, not the session's own action: the harness attached a user-level memory index and
+  the parent folder's git status to the session's context, unasked, and started the shell in the
+  parent folder. None of it was acted on. The session's first command changed into this repository.
+  One oversized output, the session's own read of this file, was saved under `~/.claude` and not
+  opened. This file was read directly instead. Background task output went to the system temporary
+  folder and was not opened. Break results were read from `build/m3.1-breaks/` only.
+- The walkthrough, breaks and benchmark used `build/`, with `TMPDIR` set to `build/tmp`. The break
+  worktree was created and removed with `git worktree`.
+- One commit, `dadf4ad`, was made in a command after its gating suite rather than chained to it. The
+  suite had exit code 0 and nothing changed between them. Every later commit was chained.
+
 ## Boundary notes from the M2.7 to M2.9 review
 
 - The owner accepted all three with "I approve", taken as acceptance of the slices only. It was not
@@ -893,7 +987,10 @@ rules and the choices made where they left one in D-047. Tests are in
 
 ## Awaiting the owner
 
-- Nothing yet. The owner approved D-053 with no changes on 2026-11-08, and M3.1 is being built.
+- Review of M3.1 as built, including the implementation choices and the points for review at the
+  end of D-053: direction on the receiving account, interest as money out only, and the F labels.
+- A plan for M3.2, transfers across accounts, which needs its own decision on reconciling two
+  accounts together. Not started.
 - Pushing. Not authorized from here. The owner's own push is described under "Remote state".
 
 ## Recommended M2 scope
@@ -906,14 +1003,14 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for M2.2's review outcome, M2.3, M2.3's review outcome, M2.4, M2.4's review outcome, M2.5, M2.5's review outcome, M2.6, M2.6's review outcome, M2.7, M2.8, M2.9 and their review outcome | **Must be renewed** for anything further |
+| Local commits on `feature/m2-review` | Approved for M2.2's review outcome, M2.3, M2.3's review outcome, M2.4, M2.4's review outcome, M2.5, M2.5's review outcome, M2.6, M2.6's review outcome, M2.7, M2.8, M2.9 and their review outcome, D-053's outcome and M3.1 | **Must be renewed** for anything further |
 | M2.2 | Accepted as built, 2026-11-07 | None |
 | M2.3 | Accepted as built, 2026-11-07 | None |
 | M2.4 | Accepted as built, 2026-11-07 | None |
 | M2.5 | Accepted as built, 2026-11-08 | None |
 | M2.6 | Accepted as built, 2026-11-08 | None |
 | M2.7 | Accepted as built, 2026-11-08 | None |
-| M3.1 | Plan D-053 approved with no changes, 2026-11-08. Being built | Review when built |
+| M3.1 | Plan D-053 approved with no changes, 2026-11-08. Built, awaiting review | Owner accepts or asks for changes |
 | M3.2 to M3.4 | Provisional, not approved | Each needs its own plan and approval |
 | M2.8 and M2.9 | Accepted as built, 2026-11-08 | None |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
@@ -941,12 +1038,13 @@ Read docs/handoff.md first, then the files it lists. Confirm the branch is featu
 the working tree is clean, and run the test suite with a real exit code before changing
 anything. Do not contact GitHub.
 
-M3.1 plan outcome (D-053, financial types):
-[PASTE IT HERE: approved, or the changes you want]
+M3.1 review outcome (D-053, financial types, including its points for review):
+[PASTE IT HERE: accepted, or the changes you want]
 
-Task: record the outcome in D-053, making it approved with any changes, then implement M3.1 as
-approved, as small gated commits. Do not reopen D-042 to D-052 unless you find a concrete
-contradiction. Stop for review when M3.1 is built. Do not start M3.2.
+Task: record the outcome in D-053 and the handoff. If changes are wanted, make them as small gated
+commits and stop for review again. If accepted, propose a plan for M3.2 as its own decision, and
+stop for approval before building any of it. Do not reopen D-042 to D-053 unless you find a
+concrete contradiction.
 
 Follow the working principles in docs/handoff.md. Pushing needs my explicit approval each time.
 No network, no new dependencies, no security changes. Synthetic data only. Use build/ for walkthroughs, breaks and benchmarks, with TMPDIR set

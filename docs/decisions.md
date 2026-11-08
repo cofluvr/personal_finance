@@ -1463,7 +1463,7 @@ with M2.9 on 2026-11-08, including the amendment of A34:
 - The `d5` pin moved from `d5-2a1e1dd2ac99de82` to `d5-ecb0f4cc0ef102ac` only because it covers the
   rules fingerprint, checked by computing it under rules version 1. Every other pin is unchanged.
 
-## D-053 Financial types — Approved, being implemented in M3.1
+## D-053 Financial types — Approved, implemented in M3.1, awaiting review
 
 Proposed for M3.1 on 2026-11-08, and approved by the owner the same day with no changes. Meets PRD §7 and §9's requirement that
 income, spending, transfers, debt principal and investment contributions stay distinct, and D-014,
@@ -1509,6 +1509,51 @@ pf review classification undo --db DB --account A CLASSIFICATION_ID --revision f
 **Open for M3.2, not decided here.** Transfers pair transactions of two accounts, and every rule so
 far reconciles one account at a time, including what makes an account current (D-033) and the order
 tests (A16). M3.2 needs its own decision on reconciling two accounts together.
+
+**How these were implemented,** where the rules above left a choice, for the owner's review with
+M3.1:
+
+- Unclassified is never stored. A transaction is unclassified while no classification applies to it.
+- Direction is that of the effective amount, a corrected amount where one applies (D-049), and a zero
+  amount runs neither way, so it fits every type.
+- A correction can change an amount's sign, so the derived row has a fourth state beside D-049's
+  three, `against_direction`: a single agreeing type whose transaction now runs the other way leaves
+  it unclassified and disclosed, like a disagreement. `review correct` refuses to cause it, as
+  `review confirm` and `review separate` refuse to leave a classification unsettled. Undoing a
+  correction never refuses (D-049), and says when it causes it.
+- Classifications share `effective_field_corrections` as corrections of the field `financial_type`,
+  whose value is the type. The walk to the newest of a chain, copied for decisions, corrections and
+  declarations, moved to `supersession.successor_and_newest` and is shared by all four.
+- A classified transaction can be superseded only while one classification applies there, as for
+  corrections. Otherwise undo first.
+- `totals` adds a "By financial type" section: each type that some transaction has, in the order of
+  recommendation 1, with its count and net effective amount, and always an unclassified line. Types no
+  transaction has are not listed. The unsettled counts are disclosed on their own lines, in `totals`
+  and after an import.
+- Tokens. `r7` and `t5` add each transaction's active classifications with their outcome there, left
+  out while there are none. `d6` adds the outcome of every group holding a classified record in
+  scope under both derivations, using each group's effective amount, left out while there are none.
+  `c2` adds, for an amount correction only, the classifications of its transactions with and without
+  it, because only an amount can turn a direction, so no other correction's token changes. `f1`
+  covers the records of the transactions holding the bound records, and the outcome there with and
+  without it. The outcomes give the classifications' types and bindings, so deliberate breaks showed
+  those inputs noticed only by the pin, and they were removed before review. Ledgers without
+  classifications keep every digest pinned before M3.1.
+- Undoing a completion also waits for classifications binding its record, for D-050's reason: a
+  binding record outside the ledger has no transaction.
+- Decision undo, correction undo, resolutions and coverage declarations report the transactions they
+  newly leave unclassified, as they report unsettled corrections.
+
+**For the owner's review, found while building M3.1:**
+
+- **Direction on the receiving account.** Recommendation 1 gives each type but `transfer` one
+  direction, whatever the account. On a credit card, loan or investment account, the payment received
+  is money in, which `card_payment`, `loan_payment` and `investment_contribution` refuse, so that side
+  can only be stated as a `transfer` or left unclassified. It fails safe: it refuses, never miscounts,
+  and allowing more later invalidates nothing stored. Recommended for M3.2 or M3.3: let the account
+  type decide the direction of those three.
+- `interest` is money out only, so interest earned on savings can only be `income`.
+- The acceptance tests F1 to F14 share letters with follow-ups F1 to F4 in the handoff.
 
 ## Not yet decided
 

@@ -19,7 +19,7 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.8: coverage correction with history | Accepted (D-051) |
 | M2.9: pending to posted | Accepted (D-052) |
 | **M2 overall** | **Complete and accepted** |
-| M3.1: financial types | Proposed, awaiting approval (D-053) |
+| M3.1: financial types | Built, awaiting review (D-053) |
 | M3 to M8 | Not started |
 
 ## What exists
@@ -29,7 +29,7 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
-  `0011_coverage_declarations` and `0012_pending_posted_links`,
+  `0011_coverage_declarations`, `0012_pending_posted_links` and `0013_type_classifications`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
@@ -49,6 +49,9 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   undoing that, under one write lock (D-050).
 - `personal_finance.reconcile.coverage_declarations`: declaring a document's coverage after import,
   and undoing that, under one write lock (D-051).
+- `personal_finance.reconcile.classification_effects` and `classifications`: which financial type
+  applies to which transaction, sharing the corrections' effective-value rule, and classifying and
+  undoing under one write lock (D-053).
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement.
@@ -57,6 +60,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   transaction, and their revision tokens (D-040, D-047).
 - `personal_finance.reports.decision_evidence`: what a decision binds, and the undo token (D-045).
 - `personal_finance.reports.correction_evidence`: what a correction binds, and its undo token (D-049).
+- `personal_finance.reports.classification_evidence`: what a classification binds, and its undo
+  token (D-053).
 - `personal_finance.reports.resolution_evidence`: what a resolution resolved, and its undo token
   (D-050).
 - `personal_finance.reports.coverage_evidence`: a document's claimed and declared coverage, and their
@@ -67,7 +72,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `review undo`, `review transaction show`, `review correct`, `review corrections`,
   `review correction show`, `review correction undo`, `review complete`, `review dismiss`,
   `review resolutions`, `review resolution show`, `review resolution undo`, `review coverage show`,
-  `review coverage declare`, `review coverage history`, `review coverage undo`, `totals`, run
+  `review coverage declare`, `review coverage history`, `review coverage undo`, `review classify`,
+  `review classifications`, `review classification show`, `review classification undo`, `totals`, run
   through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
@@ -352,7 +358,49 @@ to every posted row, the output is one item of 4,000 transactions, and the cost 
 by every later import. That is the documented limit of distinct spellings per block, reached here
 through amounts that differ.
 
+**Classifications (F14),** measured 2026-11-08 on the same machine with
+`measure_reconciliation.py --classified`. Full output is in `build/m3.1-bench/classified.txt`, which
+is ignored and may not survive.
+
+First, the dense shape of the corrections, three unmerged files of one group with a partition
+touching it. A classification moves no record, so it does not derive, while the later import pays
+derivation in full: 2.4s at 2,000. The partition's undo token covers the classification under both
+derivations, and costs the same with it as without.
+
+| Transactions | Transaction show | Classify | Later import | Classification show | Undo | Decision show before, after |
+|---|---|---|---|---|---|---|
+| 98 | 0.000s | 0.001s | 0.010s | 0.001s | 0.001s | 0.010s, 0.010s |
+| 500 | 0.001s | 0.002s | 0.155s | 0.005s | 0.031s | 0.162s, 0.160s |
+| 998 | 0.001s | 0.003s | 0.594s | 0.004s | 0.005s | 0.623s, 0.618s |
+| 2,000 | 0.001s | 0.005s | 2.397s | 0.012s | 0.009s | 2.767s, 2.398s |
+
+Second, one account where every transaction but one has an active classification. Every import,
+correction and classification rewrites the account's derived rows. The shape asserts that every one
+applies.
+
+| Classifications | Rewrite | Totals | Show and classify | Show and correct | Classification show | Later import |
+|---|---|---|---|---|---|---|
+| 99 | 0.001s | 0.001s | 0.003s | 0.003s | 0.002s | 0.006s |
+| 499 | 0.005s | 0.001s | 0.011s | 0.010s | 0.009s | 0.019s |
+| 999 | 0.011s | 0.002s | 0.024s | 0.021s | 0.015s | 0.037s |
+| 1,999 | 0.021s | 0.004s | 0.044s | 0.043s | 0.034s | 0.079s |
+| 3,999 | 0.041s | 0.008s | 0.093s | 0.086s | 0.064s | 0.159s |
+
+A chain of 2,000 reads its states in 0.0019s, and classification show on its newest takes 0.012s.
+**Classifications add no quadratic recomputation.** `--corrected` rerun on the same code matches the
+M2.6 figures above within noise, before and after the rewrite lost its early return, so ledgers
+without classifications pay nothing measurable.
+
 ## Known limitations
+
+- Only a person classifies, one transaction at a time. A type must fit the transaction's
+  direction, and on a card, loan or investment account a payment received is money in, so it can
+  only be stated as a `transfer` until M3.2 or M3.3 decides direction by account (D-053).
+- Disagreeing classifications, one whose records end up in several transactions, or one whose
+  transaction's amount a correction's undo turns against it, leave the transaction unclassified
+  until one is undone. There is no command to settle them other than undo.
+- `totals` lists financial types next to account movement. It is not yet income or spending:
+  transfers are not matched across accounts until M3.2, and reports wait for M3.4.
 
 - Only `cross_document_candidates` items can be rejected, and only they and decision conflicts can
   be confirmed. External-ID and same-document items stay open.
@@ -387,7 +435,8 @@ through amounts that differ.
   be cleared. An unresolved record can be corrected once completed.
 - A completion supplies only values the parser could not read, and never a status or an ID. A row
   whose status was unreadable keeps `unknown`. There is no superseding a resolution: undo it, then
-  resolve again. Undoing a completion waits for any decision or correction binding it.
+  resolve again. Undoing a completion waits for any decision, correction or classification
+  binding it.
 - A completed record never merges automatically, so a re-export of it is reviewed as a possible
   duplicate. Same-document checks run only at import, so it is never flagged against rows of its
   own file.
