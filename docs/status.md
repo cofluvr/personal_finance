@@ -21,7 +21,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | **M2 overall** | **Complete and accepted** |
 | M3.1: financial types | Accepted (D-053) |
 | M3.2: transfers across accounts | Accepted (D-054) |
-| M3.3: card payments, one-sided transfers and coverage warnings | Built, awaiting review (D-055) |
+| M3.3: card payments, one-sided transfers and coverage warnings | Accepted (D-055) |
+| M3.4: income and spending | Proposed, awaiting approval (D-056) |
 | M3 to M8 | Not started |
 
 ## What exists
@@ -135,7 +136,7 @@ distinct spellings per block, and in the units of a group a decision touches.
   transfer, whose type stops fitting or is undone, or whose counterpart's other side or covering
   coverage arrives no longer applies until undone. It is never superseded (D-055).
 - Coverage warnings are about one-sided transfers only. Coverage by reporting period waits for
-  M3.4's periods.
+  reporting periods, which D-056 proposes to leave in M4 with D-013.
 - A match binds the records of both transactions when made, so a re-export that does not merge is
   unmatched. A match is never superseded: undo it and match again.
 - A match whose side splits, that reaches a transaction another match or a one-sided transfer

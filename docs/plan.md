@@ -59,14 +59,15 @@ them passing. The rules are D-040 to D-052.
 ## M3 plan
 
 Proposed on 2026-11-08. M3.1 was approved the same day with no changes. Each later slice needs its
-own approval. M3.2 was built on the lead engineer's recommendations and accepted with no changes.
+own approval. M3.2 was built on the lead engineer's recommendations and accepted with no changes,
+and M3.3 was accepted as built with no changes.
 
 | Slice | Scope | Status |
 |---|---|---|
 | M3.1 | Financial types, stated by a person (D-053) | Accepted |
 | M3.2 | Transfer candidates across accounts, and reconciling two accounts together (D-054) | Accepted |
-| M3.3 | Card payments, one-sided transfers and coverage warnings (D-012, D-055) | Built, awaiting review |
-| M3.4 | Totals by financial type, with disclosures of unconfirmed candidates | Provisional |
+| M3.3 | Card payments, one-sided transfers and coverage warnings (D-012, D-055) | Accepted |
+| M3.4 | Income and spending, with disclosures of unconfirmed transfers (D-056) | Proposed, awaiting approval |
 
 ### M3.1 acceptance criteria
 
@@ -126,6 +127,25 @@ Approved with D-055 on 2026-11-08.
 | O12 | Equivalent statements made at different valid points in the import sequence of two accounts give the same outcome, exhaustively for four files, including the counterpart's arrival |
 | O13 | Migration 0015 works on a populated ledger, makes no account stale, and is atomic on failure. One-sided transfer tables are append-only |
 | O14 | S, C, P, N, V, U, K, Q, F and X still pass, and the outcome is measured on many one-sided transfers whose counterpart holds many opposite amounts on nearby dates and many coverage intervals, against a later import |
+
+### M3.4 acceptance criteria
+
+Proposed with D-056 on 2026-11-08, awaiting approval.
+
+| ID | Test |
+|---|---|
+| T1 | Every transaction is in exactly one of confirmed transfers, income, spending, unconfirmed transfer kinds and unclassified, and their signed sums equal net account movement, for the ledger and for one account, over generated ledgers |
+| T2 | Account movement, "By financial type" and the transfer sections are unchanged. `totals` writes nothing, and source evidence, `ledger_transaction`, `derive()` output and every token are byte-identical |
+| T3 | Both sides of an applied match are confirmed transfers, including an unclassified side. Undoing it moves a transfer-kind side to unconfirmed and an unclassified side to unclassified |
+| T4 | An applied one-sided transfer is a confirmed transfer. Each state that no longer applies leaves it an unconfirmed transfer kind, or unclassified once its type is undone |
+| T5 | A matched or one-sided card payment is out of spending, card purchases count once as spending, and D-055's warning stays |
+| T6 | Spending is purchases, fees and interest less refunds, income is `income` only, and a refund larger than the purchases gives negative spending, shown as such |
+| T7 | Unconfirmed transfer kinds and unclassified transactions are in neither income nor spending, and the disclosure gives both bounds exactly |
+| T8 | Confirmed transfers are reported by type with counts and amounts out and in, and loan payments and investment contributions stay apart from spending |
+| T9 | An applied one-sided loan payment to a loan account warns that its interest is not in spending, and one to another account kind does not |
+| T10 | A match or one-sided transfer on a transaction whose applied type is not a transfer kind stops the report with an internal error |
+| T11 | The groups are the same at every valid point of the existing exhaustive import-order tests for two accounts |
+| T12 | S, C, P, N, V, U, K, Q, F, X and O still pass, and `totals` is measured on a ledger with many transactions in every group, including many matches and one-sided transfers, with the new section's cost shown apart from the candidate search |
 
 ## Backlog benchmarks
 
