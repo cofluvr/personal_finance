@@ -437,7 +437,7 @@ class TestTokens:  # U13
         item = one_unresolved(ledger)
         resolution = ledger.complete_ok(item, amount="-6.50")
         # Computed for this ledger when version 1 was built.
-        assert ledger.resolution_revision(resolution) == "u1-32d2ef8d581028c6"
+        assert ledger.resolution_revision(resolution) == "u1-eef46741adfc3a9f"
 
     def test_an_unrelated_file_leaves_it_unchanged(self, ledger):
         item = one_unresolved(ledger)

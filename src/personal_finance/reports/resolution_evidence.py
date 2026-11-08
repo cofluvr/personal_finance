@@ -123,8 +123,8 @@ def resolution_undo_outlook(
 ) -> ResolutionUndoOutlook:
     """The undo token, and the transaction counts either side of an undo (D-050).
 
-    It covers what derivation would give without this resolution, for the records whose review
-    items differ with and without it and their transactions. That is all an undo does. Only an
+    It covers the review items derivation would give without this resolution, for the records
+    whose items differ with and without it and their transactions. That is all an undo does. Only an
     active resolution has a token, and its kind, values and record never change, so none of them
     is covered. A rules change reaches the token through derivation once reconciled, and is refused
     before. Evidence that cannot affect the undo leaves it unchanged, so an unrelated file does not
@@ -142,19 +142,12 @@ def resolution_undo_outlook(
     scope = {resolution.record.record_id}
     for changed in set(now.items) ^ set(after.items):
         scope.update(record for member in changed.members for record in member)
-    for result in (now, after):
-        for group in result.groups:
-            if scope.intersection(group.record_ids):
-                scope.update(group.record_ids)
 
     def keyed(record_ids):
         return sorted(keys[record_id] for record_id in record_ids)
 
+    # An item's members are its transactions' records, so the items also give their grouping.
     material = {
-        "groups": sorted(
-            [keyed(group.record_ids), group.link_rule, keys[group.primary_record_id]]
-            for group in after.groups if scope.intersection(group.record_ids)
-        ),
         "items": sorted(
             [item.rule, sorted(map(keyed, item.members)), list(item.reasons),
              item.date_start, item.date_end]
