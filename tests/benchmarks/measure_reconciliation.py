@@ -724,7 +724,7 @@ def measure_many_corrections(count: int) -> None:
             conn.execute(
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  target_transaction_id, target_revision)
-                   VALUES (?, 'acct', 'amount', -1, ?, 't5-0')""",
+                   VALUES (?, 'acct', 'amount', -1, ?, 't6-0')""",
                 (correction_id, transaction_id),
             )
             conn.execute("INSERT INTO value_correction_record VALUES (?, ?)", (correction_id, record_id))
@@ -777,7 +777,7 @@ def measure_correction_chain(length: int) -> None:
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  target_transaction_id, target_revision,
                                                  supersedes_correction_id)
-                   VALUES (?, 'acct', 'amount', ?, ?, 't5-0', ?)""",
+                   VALUES (?, 'acct', 'amount', ?, ?, 't6-0', ?)""",
                 (correction_id, -1 - number, transaction_id,
                  f"c{number - 1:06}" if number else None),
             )
@@ -902,7 +902,7 @@ def measure_many_classifications(count: int) -> None:
             conn.execute(
                 """INSERT INTO type_classification (id, account_id, financial_type,
                                                     target_transaction_id, target_revision)
-                   VALUES (?, 'acct', 'purchase', ?, 't5-0')""",
+                   VALUES (?, 'acct', 'purchase', ?, 't6-0')""",
                 (classification_id, transaction_id),
             )
             conn.execute("INSERT INTO type_classification_record VALUES (?, ?)",
@@ -967,7 +967,7 @@ def measure_classification_chain(length: int) -> None:
                 """INSERT INTO type_classification (id, account_id, financial_type,
                                                     target_transaction_id, target_revision,
                                                     supersedes_classification_id)
-                   VALUES (?, 'acct', ?, ?, 't5-0', ?)""",
+                   VALUES (?, 'acct', ?, ?, 't6-0', ?)""",
                 (classification_id, ("purchase", "fee")[number % 2], transaction_id,
                  f"f{number - 1:06}" if number else None),
             )

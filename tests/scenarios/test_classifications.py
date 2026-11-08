@@ -206,14 +206,14 @@ class TestRefusals:  # F4
     def test_an_unknown_transaction(self, ledger):
         single(ledger)
         self.nothing_changes(
-            ledger, lambda: ledger.classify("nope", "purchase", revision="t5-0"),
+            ledger, lambda: ledger.classify("nope", "purchase", revision="t6-0"),
             TRANSACTION_NOT_FOUND,
         )
 
     def test_a_stale_token_and_one_of_the_last_version(self, ledger):
         transaction = single(ledger)
-        last_version = "t4-" + ledger.transaction_revision(transaction)[3:]
-        for token in ("t5-0000000000000000", last_version):
+        last_version = "t5-" + ledger.transaction_revision(transaction)[3:]
+        for token in ("t6-0000000000000000", last_version):
             self.nothing_changes(
                 ledger, lambda: ledger.classify(transaction, "purchase", revision=token),
                 STALE_TRANSACTION_REVISION,
@@ -806,7 +806,7 @@ class TestTokens:  # F11
 
     def test_last_version_tokens_of_the_same_digest_are_refused(self, ledger):
         item, one, two = pair_up(ledger)
-        code, _, _ = ledger.reject(item, (one, two), revision="r6-" + ledger.revision(item)[3:])
+        code, _, _ = ledger.reject(item, (one, two), revision="r7-" + ledger.revision(item)[3:])
         assert code == 2
 
     def test_an_unrelated_file_leaves_the_classification_token_unchanged(self, ledger):
@@ -883,7 +883,7 @@ class TestPrivacy:
             outputs += [out, err]
         for code, out, err in (ledger.classify(transaction, "refund", supersedes=classification),
                                ledger.undo_classification(classification),
-                               ledger.classify(transaction, "fee", revision="t5-0")):
+                               ledger.classify(transaction, "fee", revision="t6-0")):
             outputs += [out, err]
         text = "".join(outputs)
         for sentinel in ("6.51", "SENTINEL"):

@@ -94,7 +94,8 @@ class Ledger:
         position = 2 if words[0] in ("account", "review") else 1
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
                          ["review", "correction"], ["review", "resolution"],
-                         ["review", "coverage"], ["review", "classification"]):
+                         ["review", "coverage"], ["review", "classification"],
+                         ["review", "transfer"]):
             position = 3
         words[position:position] = ["--db", self.db]
         code = main(words)
@@ -134,7 +135,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r7-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r8-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)

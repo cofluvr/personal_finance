@@ -16,14 +16,15 @@ from personal_finance.reconcile.apply import declared_coverage, load_constraints
 from personal_finance.reconcile.classification_effects import load_active_classifications
 from personal_finance.reconcile.correction_effects import load_active_corrections
 from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reconcile.transfer_effects import INFLOW, OUTFLOW
 
 # Bump whenever the material evidence changes, so an old token can never appear current. Version
 # 4 adds corrections (D-049), version 5 completed values (D-050), version 6 declared coverage
-# (D-051), and version 7 classifications (D-053).
-REVISION_VERSION = 7
-# The same, for one transaction's evidence, which a separation, correction or classification names
-# (D-047, D-049, D-050, D-051, D-053).
-TRANSACTION_REVISION_VERSION = 5
+# (D-051), version 7 classifications (D-053), and version 8 transfer matches (D-054).
+REVISION_VERSION = 8
+# The same, for one transaction's evidence, which a separation, correction, classification or
+# transfer match names (D-047, D-049, D-050, D-051, D-053, D-054).
+TRANSACTION_REVISION_VERSION = 6
 
 # Fields left out of a revision. Random IDs and names say where evidence is stored or how
 # it is labelled, not what it says. Records are identified by document hash and row
@@ -31,11 +32,13 @@ TRANSACTION_REVISION_VERSION = 5
 # reaches the token through the evidence itself.
 IMMATERIAL_FIELDS = frozenset(
     {"issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
-     "account_name", "decision_id", "correction_id", "classification_id"}
+     "account_name", "decision_id", "correction_id", "classification_id", "match_id",
+     "counterpart_transaction_id"}
 )
 # Fields left out while empty, so that evidence holding none keeps the digest it had before they
 # existed (D-049).
-OMITTED_WHILE_EMPTY = frozenset({"corrections", "completion", "declared", "classifications"})
+OMITTED_WHILE_EMPTY = frozenset({"corrections", "completion", "declared", "classifications",
+                                 "transfers"})
 
 
 @dataclass(frozen=True)
@@ -108,6 +111,21 @@ class ClassificationEvidence:
 
 
 @dataclass(frozen=True)
+class TransferEvidence:
+    """An active transfer match binding a record of one transaction (D-054)."""
+
+    match_id: str
+    # This transaction's side: outflow or inflow.
+    side: str
+    # The match's outcome: applied, basis_changed, conflict, amounts_differ or type_differs.
+    state: str
+    bound_records: tuple[DecidedRecord, ...]
+    counterpart_bound_records: tuple[DecidedRecord, ...]
+    # The other side's transaction while the match applies, else None.
+    counterpart_transaction_id: str | None
+
+
+@dataclass(frozen=True)
 class TransactionEvidence:
     """A logical transaction as it stands now, with every record supporting it.
 
@@ -126,6 +144,7 @@ class TransactionEvidence:
     records: tuple[RecordEvidence, ...]
     corrections: tuple[CorrectionEvidence, ...] = ()
     classifications: tuple[ClassificationEvidence, ...] = ()
+    transfers: tuple[TransferEvidence, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -328,7 +347,7 @@ def load_review_evidence(conn: sqlite3.Connection, issue_id: str) -> ReviewEvide
         details.get("date_start"),
         details.get("date_end"),
         _transactions(conn, issue_id, linked, corrections_by_transaction,
-                      classifications_by_transaction),
+                      classifications_by_transaction, _transfers_by_transaction(conn, linked)),
         tuple(sorted(unresolved, key=_record_key)),
         _documents(conn, account_id, documents),
         bool(accounts & set(stale_accounts(conn, DEFAULT_RULES))),
@@ -357,7 +376,8 @@ def load_merge_evidence(conn: sqlite3.Connection, transaction_id: str) -> MergeE
         _transaction_entry(row, linked_by_transaction,
                            _corrections_by_transaction(conn, account_id, linked_by_transaction),
                            _classifications_by_transaction(conn, account_id,
-                                                           linked_by_transaction)),
+                                                           linked_by_transaction),
+                           _transfers_by_transaction(conn, linked_by_transaction)),
         _documents(conn, account_id, documents),
         account_id in stale_accounts(conn, DEFAULT_RULES, account_id),
         account_id,
@@ -445,9 +465,11 @@ _TRANSACTION = """
 
 
 def _transactions(conn, issue_id, linked, corrections_by_transaction,
-                  classifications_by_transaction) -> tuple[TransactionEvidence, ...]:
+                  classifications_by_transaction,
+                  transfers_by_transaction) -> tuple[TransactionEvidence, ...]:
     entries = [
-        _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction)
+        _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
+                           transfers_by_transaction)
         for row in conn.execute(
             _TRANSACTION + """
             JOIN review_issue_subject subject ON subject.transaction_id = entry.id
@@ -458,8 +480,8 @@ def _transactions(conn, issue_id, linked, corrections_by_transaction,
     return tuple(sorted(entries, key=_transaction_order))
 
 
-def _transaction_entry(row, linked, corrections_by_transaction,
-                       classifications_by_transaction) -> TransactionEvidence:
+def _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
+                       transfers_by_transaction) -> TransactionEvidence:
     transaction_id, *values, primary_id = row
     records = tuple(sorted(linked.get(transaction_id, ()), key=_record_key))
     primary = next(
@@ -467,7 +489,8 @@ def _transaction_entry(row, linked, corrections_by_transaction,
     )
     return TransactionEvidence(transaction_id, *values, primary, records,
                                corrections_by_transaction.get(transaction_id, ()),
-                               classifications_by_transaction.get(transaction_id, ()))
+                               classifications_by_transaction.get(transaction_id, ()),
+                               transfers_by_transaction.get(transaction_id, ()))
 
 
 def _corrections_by_transaction(conn, account_id, linked) -> dict[str, tuple]:
@@ -531,6 +554,56 @@ def _classifications_by_transaction(conn, account_id, linked) -> dict[str, tuple
                 ),
             ))
     return found
+
+
+def _transfers_by_transaction(conn, linked) -> dict[str, tuple]:
+    """Active transfer matches binding each transaction's records, with their outcome."""
+    transaction_by_record_id = {
+        record.record_id: transaction_id
+        for transaction_id, records in linked.items() for record in records
+    }
+    record_ids_by_match_and_side = defaultdict(set)
+    touched_matches = set()
+    for match_id, side, record_id in conn.execute(
+        """SELECT bound.match_id, bound.side, bound.source_record_id
+           FROM transfer_match_record bound
+           WHERE bound.match_id IN (
+                   SELECT mine.match_id FROM transfer_match_record mine
+                   JOIN transaction_source link ON link.source_record_id = mine.source_record_id
+                   WHERE link.transaction_id IN (SELECT value FROM json_each(?)))
+             AND NOT EXISTS (SELECT 1 FROM transfer_match_event undone
+                             WHERE undone.match_id = bound.match_id AND undone.event = 'undone')""",
+        (json.dumps(sorted(linked)),),
+    ):
+        record_ids_by_match_and_side[match_id, side].add(record_id)
+        if record_id in transaction_by_record_id:
+            touched_matches.add((match_id, side, transaction_by_record_id[record_id]))
+    if not touched_matches:
+        return {}
+    effect_by_match = {
+        match_id: (state, outflow, inflow)
+        for match_id, state, outflow, inflow in conn.execute(
+            """SELECT match_id, state, outflow_transaction_id, inflow_transaction_id
+               FROM transfer_match_effect"""
+        )
+    }
+    found = defaultdict(list)
+    for match_id, side, transaction_id in touched_matches:
+        state, outflow, inflow = effect_by_match[match_id]
+        other = INFLOW if side == OUTFLOW else OUTFLOW
+        found[transaction_id].append(TransferEvidence(
+            match_id, side, state,
+            _decided_records(conn, record_ids_by_match_and_side[match_id, side]),
+            _decided_records(conn, record_ids_by_match_and_side[match_id, other]),
+            inflow if side == OUTFLOW else outflow,
+        ))
+    return {
+        transaction_id: tuple(sorted(transfers, key=lambda transfer: (
+            transfer.side, [_decided_key(record) for record in transfer.bound_records],
+            [_decided_key(record) for record in transfer.counterpart_bound_records],
+        )))
+        for transaction_id, transfers in found.items()
+    }
 
 
 def _correction_order(correction: CorrectionEvidence):
