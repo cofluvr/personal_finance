@@ -15,7 +15,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.4: separating machine-made merges | Accepted (D-047) |
 | M2.5: new evidence on decided records, and superseding chains | Accepted (D-048) |
 | M2.6: value corrections | Accepted (D-049) |
-| M2.7 to M2.9 | Provisional, not approved |
+| M2.7: resolving incomplete records | Approved, in progress (D-050) |
+| M2.8 and M2.9 | Provisional, not approved |
 | M3 to M8 | Not started |
 
 ## What exists

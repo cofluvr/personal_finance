@@ -149,7 +149,7 @@ the decision log records the database, parser and deduplication rules.
 
 ## M2 plan
 
-M2.1, M2.2, M2.3 (D-046), M2.4 (D-047), M2.5 (D-048) and M2.6 (D-049) are accepted. **M2.7 to M2.9 are provisional**:
+M2.1, M2.2, M2.3 (D-046), M2.4 (D-047), M2.5 (D-048) and M2.6 (D-049) are accepted. M2.7 is approved (D-050). **M2.8 and M2.9 are provisional**:
 a direction, not approval to implement, and each needs its own approval. D-041 lists requirements
 they must meet.
 
@@ -161,7 +161,7 @@ they must meet.
 | M2.4 | Separating machine-made merges | Accepted (D-047) |
 | M2.5 | New evidence that touches a decided record, and superseding a decision | Accepted (D-048) |
 | M2.6 | Correction overrides | Accepted (D-049) |
-| M2.7 | Resolving incomplete records | Provisional |
+| M2.7 | Resolving incomplete records | Approved (D-050) |
 | M2.8 | Coverage correction with history | Provisional |
 | M2.9 | Pending to posted, including tips, changed descriptions and the D-008 migration | Provisional |
 
@@ -385,6 +385,39 @@ Deferred: correcting status or an external ID, clearing a value, correcting unre
 | V16 | Privacy: routine correction commands show no amounts or descriptions. Displays escape descriptions |
 | V17 | S1 to S23, C1 to C21, P1 to P22 and N1 to N18 still pass |
 | V18 | A correction, its undo and a later import are measured on the dense constrained group, and on many corrections and long chains |
+
+### M2.7 scope
+
+The rules are D-050. Migration 0010, `review complete`, `review dismiss`, `review resolutions`,
+`review resolution show` and `review resolution undo`, the matching rules for completed records,
+tokens `r5`, `t3`, `d5` and `u1`, disclosure lines, and a benchmark with `--resolved`.
+
+Deferred: same-document checks on completed records, clearing a parsed value, supplying a status or
+an ID, superseding a resolution, resolving several records at once.
+
+### M2.7 acceptance criteria
+
+| ID | Test |
+|---|---|
+| U1 | Completing a missing amount creates one transaction with it. Totals change by exactly that amount, source evidence is byte-identical, and the item is gone |
+| U2 | A completion supplies only what the parse lacks, and must leave an amount and a date. A row with every value read is completed with nothing supplied |
+| U3 | Refused, with nothing changed: wrong account, unknown item, an item of another kind, stale token, stale account, a value the parse has, a completion leaving no amount or date, an invalid value, which is not repeated |
+| U4 | A stale account is not reconciled by the refused command |
+| U5 | A completed record never merges automatically. An identical row of another document stays separate and is raised as a candidate. A shared reliable ID raises an external-ID item |
+| U6 | A completed record blocks confident pairing in its document by its completed values, and stops blocking keys its values rule out |
+| U7 | Confirming a completed record with a candidate counts it once, and the source record supplies the displayed values |
+| U8 | A dismissal creates no transaction, and removing its blocker lets an exact pair merge confidently |
+| U9 | Undoing a completion equals a ledger built without it, raises the item again, and completing again revives the same transaction ID |
+| U10 | Undoing a completion is refused while a decision or correction binding it is not undone |
+| U11 | Undoing a dismissal restores the blocker and splits what it unblocked |
+| U12 | A completed transaction can be corrected, and resolutions survive repeat imports, `reconcile`, unrelated files and a rules change |
+| U13 | Tokens: `r5`, `t3` and `d5` pinned, keeping digests without resolutions, `u1` pinned, stale `u1` refused, and an unrelated file leaves `u1` unchanged |
+| U14 | Equivalent resolutions made at different valid points in the import sequence give the same outcome, exhaustively for four files |
+| U15 | Migration 0010 works on a populated ledger, makes no account stale and is atomic on failure. Resolution tables are append-only |
+| U16 | Privacy: routine resolution commands show no amounts or descriptions. Displays mark and escape completed values |
+| U17 | `totals` and import summaries disclose completed and dismissed records on their own lines |
+| U18 | S1 to S23, C1 to C21, P1 to P22, N1 to N18 and V1 to V18 still pass |
+| U19 | A dismissal unblocking a document's exact pairs, a completion, their undo and a later import are measured |
 
 ## Backlog benchmarks
 

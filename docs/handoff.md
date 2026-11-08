@@ -13,7 +13,9 @@ D-047 and the limits in "M2.4 as built" below, with no changes. The owner accept
 the rules and implementation choices recorded in D-049 and the limits in "M2.6 as built" below, with
 no changes. M2.7 to M2.9 are provisional, and each needs its own approval. M2.1's decisions are D-040 and
 D-041, M2.2's rules are D-042 to D-045, with D-045 overriding the others where they differ, M2.3's are
-D-046, M2.4's are D-047, M2.5's are D-048, and M2.6's are D-049.
+D-046, M2.4's are D-047, M2.5's are D-048, M2.6's are D-049, and M2.7's are D-050. The owner
+approved implementing M2.7 on 2026-11-08 with the lead engineer's recommendations, which are
+recorded as D-050.
 
 ## Working principles
 
@@ -718,7 +720,7 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 | M2.4 | Accepted as built, 2026-11-07 | None |
 | M2.5 | Accepted as built, 2026-11-08 | None |
 | M2.6 | Accepted as built, 2026-11-08 | None |
-| M2.7 | Provisional, not approved | Needs its own plan and approval |
+| M2.7 | Plan approved 2026-11-08, taking every recommendation (D-050). In progress | Owner reviews when built |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |

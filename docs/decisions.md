@@ -1189,6 +1189,89 @@ with M2.6 on 2026-11-08:
 - Equivalent corrections made at different points can bind different records, so the order test
   compares everything but revisions, and checks that records arriving later are never bound.
 
+## D-050 Resolving incomplete records — Approved
+
+Approved by the owner on 2026-11-08 with the M2.7 plan, taking every recommendation in it. Meets
+PRD §5's unresolved-import queue, D-024 and D-041's requirement that corrections stay distinguishable.
+Builds on D-009, D-029, D-030 and D-040, and changes none of D-042 to D-049.
+
+```sh
+pf review complete --db DB --account A ITEM_ID --revision r5-… \
+   [--amount=-12.50] [--transaction-date D] [--posting-date D] [--description TEXT]
+pf review dismiss --db DB --account A ITEM_ID --revision r5-…
+pf review resolutions --db DB [--account A]
+pf review resolution show --db DB RESOLUTION_ID
+pf review resolution undo --db DB --account A RESOLUTION_ID --revision u1-…
+```
+
+**What is resolved.** One open `unresolved_record` item, which is one source record. A record has at
+most one active resolution. There is no superseding: undo, then resolve again.
+
+**Completing.** A completion supplies only what the parser could not read: an amount when none was
+parsed, a date when that date is missing, a description when there is none. It never replaces a
+parsed value, which is what a correction does afterwards (D-049), and it must leave the record with
+an amount and at least one date. A row whose values were all read, such as `invalid_status`, is
+completed with nothing supplied. Settlement status and external IDs are never supplied: the parse's
+status stands (M2.9), and an ID is identity evidence (D-026). Values are written as for corrections.
+
+**Dismissing.** A statement that the row adds no transaction: a blank line, a heading or summary row,
+or an event already counted elsewhere. It creates no transaction and stops counting as unresolved.
+
+**Storage.** Migration 0010 adds append-only `record_resolution` and `record_resolution_event`.
+`source_record` and `record_parse` are untouched, and the parse stays `unresolved`. The item is closed
+by removal (D-045), and an undo raises a new one with the parse's reason code. A completed record's
+transaction holds its effective values in `ledger_transaction`, because it has no others, and it is
+marked as completed wherever it is shown.
+
+**Matching.** A completed record enters `derive()` as a record with its effective values, marked as
+completed by hand. Its values were typed by a person, so they never authorize a merge:
+
+| Path | A completed record |
+|---|---|
+| Reliable-ID matching and exact pairing (D-006) | Takes no part. It is always a transaction of its own unless a person confirms it |
+| Exact pairing in its own document (D-024) | Blocks a confident pair under D-024's test, using its completed values, with reason `completed_row` |
+| Candidate discovery | Takes part, so a possible duplicate is raised for review |
+| A reliable ID shared with another record | Raises an external-ID item with reason `completed_record_shares_id`, never a merge |
+| `review confirm` and `review reject` | Allowed as for any transaction |
+| Primary source (D-030) | A record read from the source is preferred over one completed by hand, as a new first criterion |
+
+A dismissed record is neither a record nor a blocker, since the person says it is not a transaction.
+So a dismissal can make an exact pair confident and lower totals. It never makes one by typed values.
+
+**Undo.** Re-derives from current evidence, never a snapshot (D-043). Undoing a completion is refused
+while any decision or correction binding the record is not undone: undo those first. Otherwise its
+transaction is retired, and completing the record again revives the same transaction ID (D-029).
+Undoing a dismissal restores the blocker, so what it unblocked can split.
+
+**Commands.** D-043's checks under one write lock: the account must be current, and account, item and
+token are checked together. Completion, dismissal and undo each derive the account once, and report
+transaction counts before and after. Routine output, `review complete`, `review dismiss`,
+`review resolutions` and `review resolution show` print no amounts or descriptions, and refusals
+never repeat a value. `review show`, `review transaction show`, `trace` and `transactions` show
+completed values marked as completed, apart from parsed values.
+
+**Distinguishable (D-041).** `totals` and import summaries disclose transactions completed by hand and
+rows dismissed on their own lines, apart from possible duplicates, conflicts and corrections.
+
+**Tokens (D-040).** A ledger without resolutions keeps its digests, because the new fields are left out
+while empty.
+
+| Token | New inputs | Version |
+|---|---|---|
+| Item | Each record's completed values | `r4` to `r5` |
+| Transaction | The same, for one transaction | `t2` to `t3` |
+| Decision undo | Whether each record in scope is completed by hand | `d4` to `d5` |
+| Correction undo | None: a completion binding a corrected record cannot be undone | `c1`, unchanged |
+| Resolution undo, new | Its kind, values and record, the evidence of records in scope, and derivation with and without it | `u1` |
+
+**Cost.** One derivation per command, as for a decision. Measured where a dismissal unblocks a whole
+document's exact pairs, so that it pays for many merges, against a later import of the same account.
+If a resolution costs materially more than that import, the work stops and is reported.
+
+**Not in scope.** Same-document checks (D-021) run only at import, so a completed record is never
+flagged against rows of its own document. Clearing a parsed value, supplying a status or an ID,
+superseding a resolution, and resolving several records at once.
+
 ## Not yet decided
 
 From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend details
