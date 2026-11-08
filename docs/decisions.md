@@ -996,12 +996,13 @@ with M2.4 on 2026-11-07:
 - The item token was checked unchanged by the shared loading code: a fixed ledger gives
   `r3-d41e2251fcd3a611` both at `3a765fe` and after, and a test pins it.
 
-## D-048 New evidence on decided records, and superseding chains — Approved, implemented in M2.5
+## D-048 New evidence on decided records, and superseding chains — Approved, implemented and accepted in M2.5
 
 Approved by the owner on 2026-11-07 with the M2.5 plan, taking every recommendation in it. Builds on
 D-042 to D-047. It amends one rule of D-046, the state of a superseded decision, because that rule
 contradicted D-046's own requirement that a confirmation contradict no active decision but the one
-it names (F4).
+it names (F4). Accepted as built by the owner on 2026-11-08, including the implementation choices
+below, with the limits in the handoff's "M2.5 as built".
 
 ```sh
 pf review separate --db DB --account A TRANSACTION_ID --revision t1-… --group R1 --group R2 \
@@ -1052,8 +1053,8 @@ changed-basis conflict under D-046's joining rules. Nothing new raises one.
 unmerged documents, where the confirmed unit still links with the third. If it is materially slower
 than a partition there, the work stops and is reported.
 
-**How these were implemented,** where the rules above left a choice. They await the owner's review
-with M2.5:
+**How these were implemented,** where the rules above left a choice. The owner accepted all of them
+with M2.5 on 2026-11-08:
 
 - A decision is superseded exactly when a decision not undone names it, since only an active decision
   can be superseded. `review decision show` names the immediate successor and, in a chain, the newest.

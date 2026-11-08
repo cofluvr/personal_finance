@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-11-07. Branch: `feature/m2-review`, from `643e1b1`. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [handoff.md](handoff.md)). Handoff: [handoff.md](handoff.md).
+Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [handoff.md](handoff.md)). Handoff: [handoff.md](handoff.md).
 
 | Milestone | Status |
 |---|---|
@@ -13,7 +13,7 @@ Last updated: 2026-11-07. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.2: decision core, pair rejection and undo | Accepted |
 | M2.3: confirmation, partitions and superseding | Accepted (D-046) |
 | M2.4: separating machine-made merges | Accepted (D-047) |
-| M2.5: new evidence on decided records, and superseding chains | Implemented, awaiting review (D-048) |
+| M2.5: new evidence on decided records, and superseding chains | Accepted (D-048) |
 | M2.6 to M2.9 | Provisional, not approved |
 | M3 to M8 | Not started |
 
