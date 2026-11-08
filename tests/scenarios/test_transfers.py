@@ -621,12 +621,14 @@ class TestTotals:  # X13
         assert ledger.transfers_section() == (
             "  Matched: 1 pairs, moving 50.00\n"
             "  In a candidate pair, not matched: 2 transactions\n"
-            "  Of a transfer kind with no match or candidate: 1 transactions\n"
+            "  One-sided, the other side not in the ledger: 0 transactions, 0.00 out and 0.00 in\n"
+            "  Of a transfer kind with no match, candidate or one-sided transfer: 1 transactions\n"
         )
         assert ledger.transfers_section("S") == (
             "  Matched: 1 pairs, moving 50.00\n"
             "  In a candidate pair, not matched: 1 transactions\n"
-            "  Of a transfer kind with no match or candidate: 0 transactions\n"
+            "  One-sided, the other side not in the ledger: 0 transactions, 0.00 out and 0.00 in\n"
+            "  Of a transfer kind with no match, candidate or one-sided transfer: 0 transactions\n"
         )
         assert "2 transactions may be transfers between your accounts and are not matched" in \
             ledger.totals()
@@ -645,12 +647,14 @@ class TestTotals:  # X13
         assert ledger.transfers_section("T") == (
             "  Matched: 0 pairs, moving 0.00\n"
             "  In a candidate pair, not matched: 0 transactions\n"
-            "  Of a transfer kind with no match or candidate: 0 transactions\n"
+            "  One-sided, the other side not in the ledger: 0 transactions, 0.00 out and 0.00 in\n"
+            "  Of a transfer kind with no match, candidate or one-sided transfer: 0 transactions\n"
         )
 
     def test_an_empty_ledger(self, ledger):
         assert ledger.transfers_section() == (
             "  Matched: 0 pairs, moving 0.00\n"
             "  In a candidate pair, not matched: 0 transactions\n"
-            "  Of a transfer kind with no match or candidate: 0 transactions\n"
+            "  One-sided, the other side not in the ledger: 0 transactions, 0.00 out and 0.00 in\n"
+            "  Of a transfer kind with no match, candidate or one-sided transfer: 0 transactions\n"
         )

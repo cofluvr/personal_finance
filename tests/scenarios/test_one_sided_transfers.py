@@ -601,3 +601,61 @@ class TestTokens:  # O11
             tokens.append((ledger.one_sided_revision(statement),
                            ledger.transaction_revision(transaction)))
         assert tokens[0] == tokens[1]
+
+
+class TestTotals:  # O10
+    def test_counts_amounts_and_coverage_warnings(self, ledger):
+        stated(ledger)
+        ledger.card("in.csv", "02/12/2026,SYNTHETIC MOVE IN,,20.00")
+        ledger.classify_ok(holding(ledger, "in.csv"), "transfer")
+        ledger.add_account("T", "savings")
+        ledger.card("t.csv", UNRELATED_ROW, account="T")
+        ledger.one_sided_ok(holding(ledger, "in.csv"), "T")
+        assert ledger.transfers_section() == (
+            "  Matched: 0 pairs, moving 0.00\n"
+            "  In a candidate pair, not matched: 0 transactions\n"
+            "  One-sided, the other side not in the ledger: 2 transactions, 50.00 out and 20.00 in\n"
+            "  Of a transfer kind with no match, candidate or one-sided transfer: 0 transactions\n"
+        )
+        assert "2 one-sided transfers rest on another account whose side is not in the ledger: 1 " \
+               "where that account has no documents, 1 where its documents do not cover every " \
+               "day within 5 days." in ledger.totals()
+        assert "spending on that card is understated" not in ledger.totals()
+
+    def test_for_one_account_those_held_there_or_naming_it(self, ledger):
+        stated(ledger)
+        ledger.add_account("T", "savings")
+        for account in ("A", "S"):
+            assert "  One-sided, the other side not in the ledger: 1 transactions, 50.00 out " \
+                   "and 0.00 in\n" in ledger.transfers_section(account)
+        assert "  One-sided, the other side not in the ledger: 0 transactions" in \
+            ledger.transfers_section("T")
+
+    def test_a_card_payment_to_a_card_with_no_history_warns(self, ledger):
+        stated(ledger, "Card", financial_type="card_payment")
+        assert "1 card payments, 50.00, go to a card whose purchases for those dates are not in " \
+               "the ledger, so spending on that card is understated." in ledger.totals()
+        assert "spending on that card is understated" in ledger.run("totals", "--account",
+                                                                    "Card")[1]
+
+    def test_a_card_payment_received_on_the_card_does_not_warn(self, ledger):
+        ledger.card("card.csv", "01/12/2026,SYNTHETIC PAYMENT,,50.00", account="Card")
+        transaction = holding(ledger, "card.csv")
+        ledger.classify_ok(transaction, "card_payment", account="Card")
+        ledger.one_sided_ok(transaction, account="Card")
+        assert "spending on that card is understated" not in ledger.totals()
+
+    def test_unpaired_transfer_kinds_leave_it_out(self, ledger):
+        transaction = outflow(ledger)
+        assert "candidate or one-sided transfer: 1 transactions" in ledger.transfers_section()
+        ledger.one_sided_ok(transaction)
+        assert "candidate or one-sided transfer: 0 transactions" in ledger.transfers_section()
+
+    def test_unsettled_states_are_disclosed_and_not_counted(self, ledger):
+        stated(ledger)
+        ledger.card("in.csv", IN_ROW, account="S")
+        assert "1 one-sided transfers no longer apply, because a transaction of the counterpart " \
+               "may be the other side." in ledger.totals()
+        assert "  One-sided, the other side not in the ledger: 0 transactions" in \
+            ledger.transfers_section()
+        assert "rest on another account" not in ledger.totals()

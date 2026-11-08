@@ -116,7 +116,7 @@ from personal_finance.reports.review_evidence import (
     rows_sharing_a_document,
     transaction_revision,
 )
-from personal_finance.reports.totals import account_movement, transfer_summary
+from personal_finance.reports.totals import account_movement, one_sided_summary, transfer_summary
 from personal_finance.reports.transfer_evidence import (
     list_matches,
     list_one_sided,
@@ -2592,9 +2592,14 @@ def run_totals(args) -> int:
     print("Transfers between your accounts, as you matched them:")
     print(f"  Matched: {transfers.matches} pairs, moving {format_cents(transfers.matched_cents)}")
     print(f"  In a candidate pair, not matched: {transfers.transactions_in_candidates} transactions")
+    one_sided = one_sided_summary(conn, account_id)
     print(
-        f"  Of a transfer kind with no match or candidate: {transfers.unpaired_transfer_kind} "
-        "transactions"
+        f"  One-sided, the other side not in the ledger: {one_sided.applied} transactions, "
+        f"{format_cents(one_sided.out_cents)} out and {format_cents(one_sided.in_cents)} in"
+    )
+    print(
+        f"  Of a transfer kind with no match, candidate or one-sided transfer: "
+        f"{transfers.unpaired_transfer_kind} transactions"
     )
     print("Disclosures:")
     print("- These are account movements. They include transfers and card payments.")
@@ -2634,7 +2639,7 @@ def run_totals(args) -> int:
         print(f"- {line}")
     for line in (*describe_resolutions(movement), *describe_declarations(movement),
                  *describe_pending(movement), *describe_classifications(movement),
-                 *describe_transfers(transfers)):
+                 *describe_transfers(transfers), *describe_one_sided(one_sided)):
         print(f"- {line}")
     return 0
 
@@ -2658,6 +2663,43 @@ def describe_transfers(transfers) -> list[str]:
             "accounts and are not matched. Each still counts as the type stated, or unclassified. "
             "Run review transfers."
         )
+    return lines
+
+
+def describe_one_sided(one_sided) -> list[str]:
+    """Coverage warnings for one-sided transfers, and those that no longer apply (D-012, D-055)."""
+    lines = []
+    if one_sided.applied:
+        lines.append(
+            f"{one_sided.applied} one-sided transfers rest on another account whose side is not in "
+            f"the ledger: {one_sided.counterpart_without_documents} where that account has no "
+            f"documents, {one_sided.counterpart_partly_covered} where its documents do not cover "
+            "every day within "
+            f"{TRANSFER_DATE_WINDOW_DAYS} days. Import its statements, or declare their coverage, "
+            "to check them."
+        )
+    if one_sided.card_payments_without_history:
+        lines.append(
+            f"{one_sided.card_payments_without_history} card payments, "
+            f"{format_cents(one_sided.card_payments_without_history_cents)}, go to a card whose "
+            "purchases for those dates are not in the ledger, so spending on that card is "
+            "understated."
+        )
+    lines += [
+        f"{count} one-sided transfers no longer apply, because {reason}. Their transactions count "
+        "as unpaired. Run review transfers."
+        for count, reason in (
+            (one_sided.basis_changed, "their bound records are now in several transactions"),
+            (one_sided.conflicts, "a transaction holds records of another match or one-sided "
+                                  "transfer"),
+            (one_sided.types_differ, "a type no longer fits a transfer to the counterpart"),
+            (one_sided.counterparts_found, "a transaction of the counterpart may be the other "
+                                           "side"),
+            (one_sided.counterparts_covered, "the counterpart's complete coverage spans their "
+                                             "dates"),
+        )
+        if count
+    ]
     return lines
 
 
