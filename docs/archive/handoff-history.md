@@ -806,6 +806,15 @@ rules and the choices made where they left one in D-047. Tests are in
   back.
 - pytest temporary files used `build/tmp`.
 
+## Boundary notes from the M3.2 review and M3.3 session
+
+- `ebc2ab4`, which adds the one-sided order test and benchmark, was gated as `pytest ... | tail -1
+  && git commit`, so the commit followed `tail`, not pytest: the pitfall the handoff names. Its
+  output shows 69 passed, and every later gate, including the full suite, passed on that code, so
+  nothing broken was committed. History is not rewritten.
+- Commit 2's first full-suite gate failed on one test listing every ledger table. It was fixed, that
+  test rerun alone, and the full gate rerun before committing `ead542c`.
+
 ## Boundary notes from the M3.1 review and M3.2 session
 
 - The session read nothing outside this repository, and listed no parent or sibling directory.
@@ -869,7 +878,7 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 
 ## Where each slice starts in git
 
-Run `git log -1`: the commit recording this handoff. M3.2's acceptance is recorded after `f19bd1d`. M3.2 starts after `0a08cd5`, which proposes D-054, itself after `dd961a4`, which records M3.1's acceptance. M3.1 starts after `c25913f`, which records D-053's approval, itself after `08e4225`, which proposed it. M2.6's acceptance is recorded after `4aac5c3`. M2.6 starts after `8384fb6`, which records its plan's approval, itself after `0032c9c`, which records M2.5's acceptance. M2.5 starts after `d1feb30`, which records its plan's approval, itself after `7551e18`, which records M2.4's acceptance. M2.4 starts after `97f7296`, which records M2.3's acceptance. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a`
+Run `git log -1`: the commit recording this handoff. M3.3 starts after `6bd89a5`, which records D-055's approval, itself after `37882b5`, which records M3.2's acceptance and proposes D-055. M3.2's acceptance is recorded after `f19bd1d`. M3.2 starts after `0a08cd5`, which proposes D-054, itself after `dd961a4`, which records M3.1's acceptance. M3.1 starts after `c25913f`, which records D-053's approval, itself after `08e4225`, which proposed it. M2.6's acceptance is recorded after `4aac5c3`. M2.6 starts after `8384fb6`, which records its plan's approval, itself after `0032c9c`, which records M2.5's acceptance. M2.5 starts after `d1feb30`, which records its plan's approval, itself after `7551e18`, which records M2.4's acceptance. M2.4 starts after `97f7296`, which records M2.3's acceptance. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a`
 
 ## Remote state, in full
 

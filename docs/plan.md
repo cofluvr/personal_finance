@@ -65,7 +65,7 @@ own approval. M3.2 was built on the lead engineer's recommendations and accepted
 |---|---|---|
 | M3.1 | Financial types, stated by a person (D-053) | Accepted |
 | M3.2 | Transfer candidates across accounts, and reconciling two accounts together (D-054) | Accepted |
-| M3.3 | Card payments, one-sided transfers and coverage warnings (D-012, D-055) | Approved, in progress |
+| M3.3 | Card payments, one-sided transfers and coverage warnings (D-012, D-055) | Built, awaiting review |
 | M3.4 | Totals by financial type, with disclosures of unconfirmed candidates | Provisional |
 
 ### M3.1 acceptance criteria

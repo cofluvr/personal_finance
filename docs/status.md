@@ -21,7 +21,7 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | **M2 overall** | **Complete and accepted** |
 | M3.1: financial types | Accepted (D-053) |
 | M3.2: transfers across accounts | Accepted (D-054) |
-| M3.3: card payments, one-sided transfers and coverage warnings | Approved, in progress (D-055) |
+| M3.3: card payments, one-sided transfers and coverage warnings | Built, awaiting review (D-055) |
 | M3 to M8 | Not started |
 
 ## What exists
@@ -31,8 +31,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
-  `0011_coverage_declarations`, `0012_pending_posted_links`, `0013_type_classifications` and
-  `0014_transfer_matches`,
+  `0011_coverage_declarations`, `0012_pending_posted_links`, `0013_type_classifications`,
+  `0014_transfer_matches` and `0015_one_sided_transfers`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
@@ -55,9 +55,10 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.reconcile.classification_effects` and `classifications`: which financial type
   applies to which transaction, sharing the corrections' effective-value rule, and classifying and
   undoing under one write lock (D-053).
-- `personal_finance.reconcile.transfer_effects` and `transfers`: which transfer matches apply and
-  which pairs are candidates, read after each account derives alone, and matching and undoing
-  under one write lock (D-054).
+- `personal_finance.reconcile.transfer_effects` and `transfers`: which transfer matches and one-sided
+  transfers apply and which pairs are candidates, read after each account derives alone, and
+  matching, stating and undoing under one write lock (D-054, D-055).
+  `reconcile.coverage_in_effect` holds the coverage in effect for an account (D-027, D-051).
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement, types, and transfers
@@ -69,8 +70,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.reports.correction_evidence`: what a correction binds, and its undo token (D-049).
 - `personal_finance.reports.classification_evidence`: what a classification binds, and its undo
   token (D-053).
-- `personal_finance.reports.transfer_evidence`: what a transfer match binds, and its undo token
-  (D-054).
+- `personal_finance.reports.transfer_evidence`: what a transfer match or one-sided transfer binds,
+  and their undo tokens (D-054, D-055).
 - `personal_finance.reports.resolution_evidence`: what a resolution resolved, and its undo token
   (D-050).
 - `personal_finance.reports.coverage_evidence`: a document's claimed and declared coverage, and their
@@ -83,7 +84,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `review resolutions`, `review resolution show`, `review resolution undo`, `review coverage show`,
   `review coverage declare`, `review coverage history`, `review coverage undo`, `review classify`,
   `review classifications`, `review classification show`, `review classification undo`,
-  `review transfers`, `review transfer match`, `review transfer show`, `review transfer undo`, `totals`, run
+  `review transfers`, `review transfer match`, `review transfer one-sided`, `review transfer show`,
+  `review transfer undo`, `totals`, run
   through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
@@ -120,21 +122,29 @@ distinct spellings per block, and in the units of a group a decision touches.
 - Disagreeing classifications, one whose records end up in several transactions, or one whose
   transaction's amount a correction's undo turns against it, leave the transaction unclassified
   until one is undone. There is no command to settle them other than undo.
-- `totals` lists financial types and matched transfers next to account movement. It is not yet
-  income or spending, which wait for M3.4.
+- `totals` lists financial types, matched transfers and one-sided transfers next to account
+  movement. It is not yet income or spending, which wait for M3.4, so card payments are kept out
+  of spending only once M3.4 reports it (D-012, D-055).
 - Only a person matches a transfer, one pair at a time, and only a candidate: a transfer-kind type
   on one side, the exactly opposite amount in another account, and dates within 5 days. Fees apart
-  from the amount transferred, a transfer split over several transactions, and one-sided transfers
-  are not matched. One-sided transfers are proposed for M3.3, and the others for later (D-054,
-  D-055).
+  from the amount transferred and a transfer split over several transactions are not matched, and
+  are not planned yet (D-054, D-055).
+- Only a person states a one-sided transfer, naming a registered counterpart account, and only
+  while no candidate pairs it with that account and the counterpart's complete coverage does not
+  span every day within 5 days. One whose records split, that reaches another match or one-sided
+  transfer, whose type stops fitting or is undone, or whose counterpart's other side or covering
+  coverage arrives no longer applies until undone. It is never superseded (D-055).
+- Coverage warnings are about one-sided transfers only. Coverage by reporting period waits for
+  M3.4's periods.
 - A match binds the records of both transactions when made, so a re-export that does not merge is
   unmatched. A match is never superseded: undo it and match again.
-- A match whose side splits, that reaches a transaction another match reaches, whose amounts stop
-  offsetting or whose type stops fitting no longer applies until undone. `totals` discloses it, and
-  so do undos, but an import summary does not.
+- A match whose side splits, that reaches a transaction another match or a one-sided transfer
+  reaches, whose amounts stop offsetting or whose type stops fitting no longer applies until
+  undone. `totals` discloses it, and so do undos, but an import summary does not, for either kind.
 - Candidates are computed whenever `review transfers` or `totals` runs, quadratic in transactions of
-  one amount on nearby dates. Every write rewrites every match's outcome, linear in matches. Both are
-  measured in [benchmarks.md](benchmarks.md).
+  one amount on nearby dates. Every write rewrites every match's outcome, linear in matches, and
+  every one-sided transfer's, which costs one-sided transfers times equal opposite amounts in their
+  counterparts. All are measured in [benchmarks.md](benchmarks.md).
 
 - Only `cross_document_candidates` items can be rejected, and only they and decision conflicts can
   be confirmed. External-ID and same-document items stay open.

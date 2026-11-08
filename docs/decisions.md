@@ -74,7 +74,7 @@ index line.
 | D-052 | Pending to posted — Approved, implemented and accepted in M2.9 |
 | D-053 | Financial types — Approved, implemented and accepted in M3.1 |
 | D-054 | Transfers across accounts — Approved, implemented and accepted in M3.2 |
-| D-055 | Card payments, one-sided transfers and coverage warnings — Approved, being implemented in M3.3 |
+| D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented in M3.3, awaiting review |
 
 ## Rules in brief
 
@@ -150,8 +150,11 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Transfers across accounts | Each account derives alone. A person matches two candidates, binding their records, and the outcome is read after both | D-054 |
 | Transfer candidates | A person's transfer-kind type on one side, the exact opposite amount in another account, dates within 5 days. Never stored | D-054 |
 | Receiving accounts | Card, loan and investment payments may be money in on the account they pay | D-054 |
+| One-sided transfers | A person's statement over a transfer-kind transaction, naming a registered counterpart. Refused while the other side may be in view | D-055 |
+| Counterpart coverage | A state only when complete coverage on one basis spans every day within 5 days. Less is a warning | D-055 |
+| Card payments | Out of spending, matched or one-sided. A one-sided one to a card warns that its spending is understated | D-012, D-055 |
 
-## D-055 Card payments, one-sided transfers and coverage warnings — Approved, being implemented in M3.3
+## D-055 Card payments, one-sided transfers and coverage warnings — Approved, implemented in M3.3, awaiting review
 
 Proposed for M3.3 on 2026-11-08, and approved by the owner the same day with the lead engineer's
 recommendations, including the four points for the owner's decision, with no changes.
@@ -241,6 +244,46 @@ recommends planning them when a real layout or M3.4 shows the need.
   covered for part of the window gives a warning, and the one-sided transfer applies.
 - Recommendation 4 changes the outcome of a match only where a one-sided transfer reaches its
   transaction, which cannot happen on a ledger made before M3.3.
+
+**How these were implemented,** where the rules above left a choice, for the owner's review with
+M3.3:
+
+- A one-sided transfer needs a transfer kind applied on its own transaction. A match fits while a
+  side is unclassified, but a one-sided transfer has no other evidence that it is a transfer, so
+  one left unclassified, as after its classification's undo, is `type_differs`.
+- The window is every day within 5 days of any effective date, corrected where a correction
+  applies. A transaction with no date has no window, so coverage never spans it.
+- Coverage spans the window when one date basis's spans of complete coverage in effect, joined
+  across documents, hold every day of it. A span ends at its effective end (D-027), and a
+  declaration replaces the claim at import (D-051). A layout's pending definition is not read,
+  because a transfer posts in the end. The declared-coverage helpers moved from `apply` to a new
+  `coverage_in_effect` module, because `apply` imports the transfer outcomes.
+- `counterpart_found` uses D-054's candidate rule unchanged, against the counterpart account's
+  transactions of the exactly opposite amount.
+- `t7` names the counterpart by its display name, which is unique, because account IDs are random
+  and immaterial: another counterpart is another statement, and changes the token. `o1` covers
+  the `t7` of every transaction holding a bound record, as `m1` does.
+- `review transfer show` and `undo` take either kind of ID, and an unknown one gives one message
+  naming both. `unsettled_matches` became `unsettled_transfers`, so every command that refused or
+  reported unsettled matches covers both kinds, on one line naming both.
+- Undoing a match now reports the one-sided transfers it leaves unsettled, because freeing a side
+  can bring a counterpart into view. This replaces D-054's choice that undoing a match reports
+  nothing more. Undoing a one-sided transfer reports the same, and in practice only settles.
+- Separating a one-sided transfer's transaction is refused by its classification first, because
+  the type sits on the same transaction and a split leaves every part unclassified (D-053).
+- For totals, "documents that do not cover" means the counterpart has any document, whatever its
+  coverage. The card payment warning counts only one-sided `card_payment`s whose counterpart is a
+  credit card, so a payment received on the card itself does not warn.
+
+**For the owner's review, found while building M3.3:**
+
+- **Every write rewrites every one-sided outcome,** and each searches its counterpart for
+  opposite amounts, so a write anywhere costs one-sided transfers times equal opposite amounts in
+  their counterparts: about 3.5 seconds for 1,000 against 1,000 (see benchmarks). Filtering the
+  search by date in SQL would make the usual case linear. Not done, as nothing needs it yet.
+- Matches without one-sided transfers rewrite about 40% slower at 4,000, from the shared
+  bookkeeping, and stay linear.
+- An import summary still reports no unsettled matches or one-sided transfers. `totals` does.
 
 ## Not yet decided
 
