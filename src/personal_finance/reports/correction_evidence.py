@@ -15,6 +15,7 @@ from personal_finance.reconcile.correction_effects import (
     load_active_corrections,
     transaction_by_record_id,
 )
+from personal_finance.reconcile.supersession import successor_and_newest
 from personal_finance.reports.decision_evidence import BoundRecord
 
 # Bump whenever the material below changes, so an old token can never appear current.
@@ -103,9 +104,7 @@ def load_correction(conn: sqlite3.Connection, correction_id: str) -> StoredCorre
         )
     ]
     states_by_id, successor_by_superseded_id = correction_chain_states(conn, account_id)
-    newer = newest = successor_by_superseded_id.get(correction_id)
-    while newest in successor_by_superseded_id:
-        newest = successor_by_superseded_id[newest]
+    newer, newest = successor_and_newest(successor_by_superseded_id, correction_id)
     return StoredCorrection(
         correction_id, account_id, account_name, field,
         corrected_amount_cents if field == "amount" else corrected_text,

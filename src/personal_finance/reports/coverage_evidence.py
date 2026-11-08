@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from personal_finance.ingest.coverage import Coverage
 from personal_finance.reconcile.apply import coverage_declaration_states, declared_coverage
 from personal_finance.reconcile.rules import MatchingRules
+from personal_finance.reconcile.supersession import successor_and_newest
 from personal_finance.reports.undo_items import items_left_by_undo
 
 # Bump whenever the material below changes, so an old token can never appear current.
@@ -144,9 +145,7 @@ def load_declaration(conn: sqlite3.Connection, declaration_id: str) -> StoredDec
     (account_id, account_name, document_id, file_name, kind, start, end, basis, created_at,
      undone_at, supersedes) = row
     states, successor_by_superseded_id = coverage_declaration_states(conn, account_id)
-    newer = newest = successor_by_superseded_id.get(declaration_id)
-    while newest in successor_by_superseded_id:
-        newest = successor_by_superseded_id[newest]
+    newer, newest = successor_and_newest(successor_by_superseded_id, declaration_id)
     declared = Coverage(kind, start, end, basis, "user_declared" if kind == "complete" else None)
     return StoredDeclaration(declaration_id, account_id, account_name, document_id, file_name,
                              declared, created_at, states[declaration_id], undone_at, supersedes,

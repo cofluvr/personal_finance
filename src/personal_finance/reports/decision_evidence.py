@@ -20,6 +20,7 @@ from personal_finance.reconcile.correction_effects import (
 )
 from personal_finance.reconcile.cross_document import derive
 from personal_finance.reconcile.rules import MatchingRules
+from personal_finance.reconcile.supersession import successor_and_newest
 
 # Bump whenever the material below changes, so an old token can never appear current. Version 3
 # restores only the decision just before this one, so a chain reads differently (D-048). Version 4
@@ -151,9 +152,7 @@ def load_decision(conn: sqlite3.Connection, decision_id: str) -> DecisionEvidenc
     )
     states = decision_states(conn, account_id)
     successors = superseded_by(conn, account_id)
-    newer = newest = successors.get(decision_id)
-    while newest in successors:
-        newest = successors[newest]
+    newer, newest = successor_and_newest(successors, decision_id)
     return DecisionEvidence(
         decision_id, account_id, account_name, target, created_at, states[decision_id], undone_at,
         pairs, kind, supersedes, newer, target_kind, newest,
