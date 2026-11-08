@@ -893,7 +893,7 @@ rules and the choices made where they left one in D-047. Tests are in
 
 ## Awaiting the owner
 
-- Approval of the M3.1 plan, D-053, or the changes wanted. Nothing of M3 is built.
+- Nothing yet. The owner approved D-053 with no changes on 2026-11-08, and M3.1 is being built.
 - Pushing. Not authorized from here. The owner's own push is described under "Remote state".
 
 ## Recommended M2 scope
@@ -913,7 +913,7 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 | M2.5 | Accepted as built, 2026-11-08 | None |
 | M2.6 | Accepted as built, 2026-11-08 | None |
 | M2.7 | Accepted as built, 2026-11-08 | None |
-| M3.1 | Plan proposed as D-053, 2026-11-08. Not approved | Owner approves or changes it |
+| M3.1 | Plan D-053 approved with no changes, 2026-11-08. Being built | Review when built |
 | M3.2 to M3.4 | Provisional, not approved | Each needs its own plan and approval |
 | M2.8 and M2.9 | Accepted as built, 2026-11-08 | None |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |

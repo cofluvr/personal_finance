@@ -483,17 +483,17 @@ under unreliable IDs.
 
 ## M3 plan
 
-Proposed on 2026-11-08, not approved. **Nothing of M3 is approved to build.** Each slice needs its
+Proposed on 2026-11-08. M3.1 was approved the same day with no changes. Each later slice needs its
 own approval.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M3.1 | Financial types, stated by a person (D-053) | Proposed, awaiting approval |
+| M3.1 | Financial types, stated by a person (D-053) | Approved, being built |
 | M3.2 | Transfer candidates across accounts, and reconciling two accounts together | Provisional |
 | M3.3 | Card payments, one-sided transfers and coverage warnings (D-012) | Provisional |
 | M3.4 | Totals by financial type, with disclosures of unconfirmed candidates | Provisional |
 
-### M3.1 acceptance criteria, proposed
+### M3.1 acceptance criteria
 
 | ID | Test |
 |---|---|

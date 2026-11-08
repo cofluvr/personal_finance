@@ -1463,9 +1463,9 @@ with M2.9 on 2026-11-08, including the amendment of A34:
 - The `d5` pin moved from `d5-2a1e1dd2ac99de82` to `d5-ecb0f4cc0ef102ac` only because it covers the
   rules fingerprint, checked by computing it under rules version 1. Every other pin is unchanged.
 
-## D-053 Financial types — Proposed, awaiting the owner's approval
+## D-053 Financial types — Approved, being implemented in M3.1
 
-Proposed for M3.1 on 2026-11-08. Nothing of it is built. Meets PRD §7 and §9's requirement that
+Proposed for M3.1 on 2026-11-08, and approved by the owner the same day with no changes. Meets PRD §7 and §9's requirement that
 income, spending, transfers, debt principal and investment contributions stay distinct, and D-014,
 which puts financial type before categories. Builds on D-049, and changes none of D-042 to D-052.
 
