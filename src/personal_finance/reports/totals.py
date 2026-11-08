@@ -33,6 +33,10 @@ class AccountMovement:
     transactions_corrected: int = 0
     transactions_with_correction_conflict: int = 0
     transactions_with_correction_basis_changed: int = 0
+    # Transactions holding a record completed by hand, and rows dismissed as adding no transaction
+    # (D-050).
+    transactions_completed: int = 0
+    records_dismissed: int = 0
 
 
 def account_movement(conn: sqlite3.Connection, account_id: str | None = None) -> AccountMovement:
@@ -115,9 +119,22 @@ def account_movement(conn: sqlite3.Connection, account_id: str | None = None) ->
         {"account": account_id},
     ).fetchone()
 
+    resolutions = conn.execute(
+        """SELECT COUNT(DISTINCT CASE WHEN resolution.kind = 'completed'
+                                      THEN link.transaction_id END),
+                  COUNT(CASE WHEN resolution.kind = 'dismissed' THEN 1 END)
+           FROM record_resolution resolution
+           LEFT JOIN transaction_source link ON link.source_record_id = resolution.source_record_id
+           WHERE (:account IS NULL OR resolution.account_id = :account)
+             AND NOT EXISTS (SELECT 1 FROM record_resolution_event undone
+                             WHERE undone.resolution_id = resolution.id
+                               AND undone.event = 'undone')""",
+        {"account": account_id},
+    ).fetchone()
+
     return AccountMovement(
         inflow, outflow, net, transactions, pending, unresolved, groups, members, *conflicts,
-        confirmed, _separated(conn, account_id), *corrections,
+        confirmed, _separated(conn, account_id), *corrections, *resolutions,
     )
 
 

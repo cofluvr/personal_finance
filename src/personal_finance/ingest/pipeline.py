@@ -376,7 +376,8 @@ def _link(conn, transaction_id, record_id, document_id, account_id) -> None:
     )
 
 
-def insert_unresolved_issue(conn, record_id, reason_code) -> None:
+def insert_unresolved_issue(conn, record_id, reason_code) -> str:
+    """Raise a record's unresolved item, at import or when its resolution is undone (D-050)."""
     issue_id = _new_id()
     conn.execute(
         "INSERT INTO review_issue (id, kind, rule) VALUES (?, 'unresolved_record', ?)",
@@ -386,6 +387,7 @@ def insert_unresolved_issue(conn, record_id, reason_code) -> None:
         "INSERT INTO review_issue_subject (review_issue_id, source_record_id) VALUES (?, ?)",
         (issue_id, record_id),
     )
+    return issue_id
 
 
 def _insert_candidate_issue(conn, document_id, rule, members) -> None:

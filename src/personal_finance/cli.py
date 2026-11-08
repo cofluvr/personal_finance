@@ -39,6 +39,11 @@ from personal_finance.reconcile.correction_effects import (
     FIELD_IN_CONFLICT,
 )
 from personal_finance.reconcile.corrections import correct_value, undo_correction
+from personal_finance.reconcile.record_resolutions import (
+    complete_record,
+    dismiss_record,
+    undo_resolution,
+)
 from personal_finance.reconcile.decisions import (
     DecisionRefused,
     confirm_groups,
@@ -61,6 +66,12 @@ from personal_finance.reports.decision_evidence import (
     undo_outlook,
 )
 from personal_finance.reports.import_summary import summarize_run
+from personal_finance.reports.resolution_evidence import (
+    binding_entries,
+    list_resolutions,
+    load_resolution,
+    resolution_undo_outlook,
+)
 from personal_finance.reports.review_evidence import (
     alike_decided_records,
     load_merge_evidence,
@@ -203,6 +214,23 @@ CORRECTION_NOTICE = (
 CORRECTION_UNDO_NOTICE = (
     "The source value applies again, or the correction this one superseded. Source values were "
     "never changed."
+)
+
+COMPLETE_NOTICE = (
+    "The row is now a transaction and is counted, using the values you supplied with those read "
+    "from the source. Its source cells stay unchanged. Matching never pairs it on typed values, "
+    "so a possible duplicate is raised for review instead."
+)
+
+DISMISS_NOTICE = (
+    "The row adds no transaction and no longer counts as unresolved. Its source cells stay "
+    "unchanged. It no longer keeps matches in its document from being confident, so totals can "
+    "be lower than before."
+)
+
+RESOLUTION_UNDO_NOTICE = (
+    "This re-derives from the evidence held now, without this resolution, and the row is "
+    "unresolved again. It does not restore an earlier snapshot."
 )
 
 # What each state of a corrected field means for the value used (D-049).
@@ -431,6 +459,51 @@ def build_parser() -> argparse.ArgumentParser:
         "--revision", required=True, help="the revision from review correction show"
     )
 
+    complete = command(
+        "complete", review_commands, handler=run_review_complete,
+        help="supply the values an unresolved row lacks, so that it becomes a transaction",
+    )
+    complete.add_argument("item_id", help="an unresolved-record item ID from review list")
+    complete.add_argument("--account", required=True, help="account name or ID")
+    complete.add_argument("--revision", required=True, help="the revision from review show")
+    complete.add_argument(
+        "--amount", help="the amount, such as --amount=-12.50, negative for money out"
+    )
+    complete.add_argument("--transaction-date", help="the transaction date, YYYY-MM-DD")
+    complete.add_argument("--posting-date", help="the posting date, YYYY-MM-DD")
+    complete.add_argument("--description", help="the description")
+
+    dismiss = command(
+        "dismiss", review_commands, handler=run_review_dismiss,
+        help="state that an unresolved row adds no transaction, keeping it on record",
+    )
+    dismiss.add_argument("item_id", help="an unresolved-record item ID from review list")
+    dismiss.add_argument("--account", required=True, help="account name or ID")
+    dismiss.add_argument("--revision", required=True, help="the revision from review show")
+
+    resolutions = command(
+        "resolutions", review_commands, handler=run_review_resolutions,
+        help="list stored completions and dismissals",
+    )
+    resolutions.add_argument("--account", help="account name or ID")
+
+    resolution = review_commands.add_parser("resolution", help="inspect or undo one resolution")
+    resolution_commands = resolution.add_subparsers(dest="resolution_command", required=True)
+    resolution_show = command(
+        "show", resolution_commands, handler=run_review_resolution_show,
+        help="show what a resolution resolved and what undoing it would do",
+    )
+    resolution_show.add_argument("resolution_id", help="a resolution ID from review resolutions")
+    resolution_undo = command(
+        "undo", resolution_commands, handler=run_review_resolution_undo,
+        help="make a resolved row unresolved again, keeping the resolution on record",
+    )
+    resolution_undo.add_argument("resolution_id", help="a resolution ID from review resolutions")
+    resolution_undo.add_argument("--account", required=True, help="account name or ID")
+    resolution_undo.add_argument(
+        "--revision", required=True, help="the revision from review resolution show"
+    )
+
     totals = command("totals", handler=run_totals, help="show account movement")
     totals.add_argument("--account", help="account name or ID")
     return parser
@@ -623,6 +696,8 @@ def print_account_state(movement) -> None:
         print(f"  {line}")
     for line in describe_corrections(movement):
         print(f"  {line}")
+    for line in describe_resolutions(movement):
+        print(f"  {line}")
     print(f"  Unresolved records, not included in totals: {movement.unresolved_records}")
 
 
@@ -652,6 +727,22 @@ def describe_corrections(movement) -> list[str]:
             f"Transactions keeping a source value because a correction binds records now in "
             f"several transactions: {movement.transactions_with_correction_basis_changed}. Run "
             "review corrections."
+        )
+    return lines
+
+
+def describe_resolutions(movement) -> list[str]:
+    """Completed and dismissed rows on their own lines, apart from everything else (D-050)."""
+    lines = []
+    if movement.transactions_completed:
+        lines.append(
+            f"Transactions holding a row you completed by hand: {movement.transactions_completed}. "
+            "They are counted with the values you supplied. Run review resolutions."
+        )
+    if movement.records_dismissed:
+        lines.append(
+            f"Rows you dismissed as adding no transaction: {movement.records_dismissed}. They are "
+            "not counted and are not unresolved. Run review resolutions."
         )
     return lines
 
@@ -742,7 +833,13 @@ def run_transactions(args) -> int:
                   entry.settlement_status,
                   COALESCE(fixed_description.corrected_text, entry.description),
                   EXISTS (SELECT 1 FROM transaction_correction fix
-                          WHERE fix.transaction_id = entry.id AND fix.state = 'applied')
+                          WHERE fix.transaction_id = entry.id AND fix.state = 'applied'),
+                  EXISTS (SELECT 1 FROM record_resolution completion
+                          WHERE completion.source_record_id = entry.primary_source_record_id
+                            AND completion.kind = 'completed'
+                            AND NOT EXISTS (SELECT 1 FROM record_resolution_event undone
+                                            WHERE undone.resolution_id = completion.id
+                                              AND undone.event = 'undone'))
            FROM ledger_transaction entry
            LEFT JOIN transaction_correction fixed_amount
                ON fixed_amount.transaction_id = entry.id AND fixed_amount.field = 'amount'
@@ -761,8 +858,9 @@ def run_transactions(args) -> int:
               AND fixed_description.state = 'applied'
            ORDER BY shown_date, entry.id"""
     ).fetchall()
-    for transaction_id, when, cents, status, description, corrected in rows:
+    for transaction_id, when, cents, status, description, corrected, completed in rows:
         marker = "  (corrected)" if corrected else ""
+        marker += "  (completed by hand)" if completed else ""
         print(
             f"{transaction_id}  {when}  {format_cents(cents):>12}  {status:<8}  "
             f"{shown(description) if description else ''}{marker}"
@@ -789,7 +887,7 @@ def run_trace(args) -> int:
     print(f"  Posting date: {posting_date or 'missing'}")
     print(f"  Amount: {format_cents(cents)}")
     print(f"  Status: {status}")
-    print(f"  Description: {description or 'missing'}")
+    print(f"  Description: {shown(description)}")
     corrected_fields = conn.execute(
         """SELECT field, state, corrected_amount_cents, corrected_text FROM transaction_correction
            WHERE transaction_id = ? ORDER BY field""",
@@ -808,7 +906,10 @@ def run_trace(args) -> int:
         """SELECT document.file_name, document.content_sha256, document.layout_id,
                   record.id, record.record_index, record.raw_json, link.link_rule,
                   parse.settlement_status, origin.original_transaction_id,
-                  parse.transaction_date, parse.posting_date, parse.description
+                  parse.transaction_date, parse.posting_date, parse.description,
+                  completion.completed_amount_cents, completion.completed_transaction_date,
+                  completion.completed_posting_date, completion.completed_description,
+                  completion.id IS NOT NULL
            FROM transaction_source link
            JOIN source_record record ON record.id = link.source_record_id
            JOIN source_document document ON document.id = link.source_document_id
@@ -816,18 +917,25 @@ def run_trace(args) -> int:
            JOIN record_parse parse ON parse.source_record_id = record.id
                                   AND parse.parser_version = meaning.parser_version
            LEFT JOIN source_record_origin origin ON origin.source_record_id = record.id
+           LEFT JOIN record_resolution completion
+               ON completion.source_record_id = record.id AND completion.kind = 'completed'
+              AND NOT EXISTS (SELECT 1 FROM record_resolution_event undone
+                              WHERE undone.resolution_id = completion.id
+                                AND undone.event = 'undone')
            WHERE link.transaction_id = ?
            ORDER BY document.imported_at""",
         (args.transaction_id,),
     ).fetchall()
 
     ranks = {
-        source[3]: primary_rank(source[7], source[9], source[10], source[11], source[1], source[4])
+        source[3]: primary_rank(*_traced_rank_values(source), source[1], source[4],
+                                completed_by_hand=bool(source[16]))
         for source in sources
     }
     print("Current sources:")
     for (name, digest, layout_id, record_id, index, raw_json, rule, source_status, original,
-         *_) in sources:
+         *_, completed_amount, completed_transaction_date, completed_posting_date,
+         completed_description, completed) in sources:
         print(f"Source {name}, row {index}")
         print(f"  Document SHA-256: {digest}")
         print(f"  Layout: {layout_id}")
@@ -837,6 +945,9 @@ def run_trace(args) -> int:
         print(f"  Source status: {source_status}")
         print(f"  Original transaction: {original or 'unknown'}")
         print(f"  Original row: {json.loads(raw_json)}")
+        if completed:
+            print_completed_values((completed_amount, completed_transaction_date,
+                                    completed_posting_date, completed_description), "  ")
 
     if primary_id is None:
         print("Displayed values: source not recorded. Run reconcile to record it.")
@@ -846,6 +957,26 @@ def run_trace(args) -> int:
             print(f"  {number}. {criterion}")
     print_history(conn, args.transaction_id)
     return 0
+
+
+def _traced_rank_values(source):
+    """Status, dates and description as derivation ranked them: a completed record's are read
+    where the parse has them, else supplied (D-050)."""
+    status, transaction_date, posting_date, description = source[7], *source[9:12]
+    supplied = source[13:16]
+    return (status, transaction_date or supplied[0], posting_date or supplied[1],
+            description or supplied[2])
+
+
+def print_completed_values(supplied, indent) -> None:
+    """What a person supplied, apart from what was read (D-050). None means nothing supplied."""
+    labels = ("Amount", "Transaction date", "Posting date", "Description")
+    print(f"{indent}Completed by hand, supplying what the parser could not read:")
+    given = [(label, value) for label, value in zip(labels, supplied) if value is not None]
+    for label, value in given:
+        print(f"{indent}  {label}: {format_cents(value) if label == 'Amount' else shown(value)}")
+    if not given:
+        print(f"{indent}  Nothing supplied: every value was read, and the row was accepted as read")
 
 
 def describe_role(record_id, primary_id, ranks) -> str:
@@ -1090,9 +1221,8 @@ def print_transaction_evidence(entry, shared) -> None:
 
     ranks = {
         record.record_id: primary_rank(
-            record.parsed.settlement_status, record.parsed.transaction_date,
-            record.parsed.posting_date, record.parsed.description, record.content_sha256,
-            record.row,
+            record.parsed.settlement_status, *_effective_rank_values(record),
+            record.content_sha256, record.row, completed_by_hand=record.completion is not None,
         )
         for record in entry.records
     }
@@ -1110,6 +1240,16 @@ def print_transaction_evidence(entry, shared) -> None:
     for record in entry.records:
         print_record_evidence(record, describe_role(record.record_id, primary_id, ranks), shared)
     print_corrections(entry)
+
+
+def _effective_rank_values(record):
+    """Dates and description as derivation ranked them (D-050)."""
+    parsed, completion = record.parsed, record.completion
+    if completion is None:
+        return parsed.transaction_date, parsed.posting_date, parsed.description
+    return (parsed.transaction_date or completion.transaction_date,
+            parsed.posting_date or completion.posting_date,
+            parsed.description or completion.description)
 
 
 def print_corrections(entry) -> None:
@@ -1149,6 +1289,10 @@ def print_record_evidence(record, role, shared) -> None:
     print(f"      Status: {parsed.settlement_status}")
     print(f"      Description: {shown(parsed.description)}")
     print(f"      External ID: {shown(parsed.external_id)}")
+    completion = record.completion
+    if completion is not None:
+        print_completed_values((completion.amount_cents, completion.transaction_date,
+                                completion.posting_date, completion.description), "    ")
 
 
 def print_document_evidence(document) -> None:
@@ -1514,6 +1658,113 @@ def run_review_correction_undo(args) -> int:
     return 0
 
 
+def run_review_complete(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    supplied = {
+        field: value
+        for field, value in (("amount", args.amount), ("transaction_date", args.transaction_date),
+                             ("posting_date", args.posting_date),
+                             ("description", args.description))
+        if value is not None
+    }
+    result = complete_record(conn, account_id, args.item_id, args.revision, supplied)
+
+    fields = ", ".join(result.supplied_fields) or "nothing, since every value was read"
+    print(f"Resolution {result.resolution_id} recorded: row completed, supplying {fields}.")
+    print(f"  Now transaction {result.transaction_id}. Item {args.item_id} closed.")
+    print_resolution_effect(result)
+    print(f"  {COMPLETE_NOTICE}")
+    return 0
+
+
+def run_review_dismiss(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = dismiss_record(conn, account_id, args.item_id, args.revision)
+
+    print(f"Resolution {result.resolution_id} recorded: row dismissed. Item {args.item_id} closed.")
+    print_resolution_effect(result)
+    print(f"  {DISMISS_NOTICE}")
+    return 0
+
+
+def print_resolution_effect(result) -> None:
+    print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
+    print(f"  Source memberships changed: {result.moved_records}")
+    print_newly_unsettled(result.newly_unsettled_correction_fields)
+
+
+def run_review_resolutions(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_resolutions(conn, account_id)
+    for resolution_id, account, created_at, state, kind, file_name, row in rows:
+        print(
+            f"Resolution {resolution_id}: {state}, {kind}, {shown(file_name)} row {row}, "
+            f"{shown(account)}, {created_at}"
+        )
+    print(f"Resolutions: {len(rows)}")
+    if rows:
+        print("To see what a resolution resolved, run review resolution show.")
+    return 0
+
+
+def run_review_resolution_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    resolution = load_resolution(conn, args.resolution_id)
+    if resolution is None:
+        raise CommandError("resolution not found. Run review resolutions.")
+
+    record = resolution.record
+    print(f"Resolution {resolution.resolution_id}")
+    print(f"  Account: {shown(resolution.account_name)} ({resolution.account_id})")
+    print(f"  Kind: {resolution.kind}")
+    print(f"  Status: {resolution.state}")
+    print(f"  Made: {resolution.created_at}")
+    if resolution.undone_at:
+        print(f"  Undone: {resolution.undone_at}. It stays on record and no longer applies.")
+    print(f"  From review item: {resolution.target_issue_id}")
+    print(f"  Record: {shown(record.file_name)} row {record.row}, now in "
+          f"{record.transaction_id or 'no transaction'}")
+    if resolution.kind == "completed":
+        supplied = [field for field, value in zip(
+            ("amount", "transaction_date", "posting_date", "description"),
+            resolution.completed_values) if value is not None]
+        print(f"  Supplied: {', '.join(supplied) or 'nothing, since every value was read'}")
+
+    if resolution.state == STATE_ACTIVE:
+        outlook = resolution_undo_outlook(conn, resolution, DEFAULT_RULES)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this resolution now:")
+        print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
+        if resolution.kind == "completed":
+            decisions, corrections = binding_entries(conn, record.record_id)
+            for decision in decisions:
+                print(f"  Refused while decision {decision} binds the record. Undo it first.")
+            for correction in corrections:
+                print(f"  Refused while correction {correction} binds the record. Undo it first.")
+        print(f"  {RESOLUTION_UNDO_NOTICE}")
+        if stale_accounts(conn, DEFAULT_RULES, resolution.account_id):
+            print(
+                "This account has not been reconciled under the current matching rules, so "
+                "undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
+def run_review_resolution_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_resolution(conn, account_id, args.resolution_id, args.revision)
+
+    print(f"Resolution {args.resolution_id} undone. It stays on record and no longer applies.")
+    print(f"  The row is unresolved again, as item {result.issue_id}.")
+    print_resolution_effect(result)
+    print(f"  {RESOLUTION_UNDO_NOTICE}")
+    return 0
+
+
 def run_totals(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
@@ -1558,6 +1809,8 @@ def run_totals(args) -> int:
             "automatic match, and each is counted. Undoing a separation can lower totals."
         )
     for line in describe_corrections(movement):
+        print(f"- {line}")
+    for line in describe_resolutions(movement):
         print(f"- {line}")
     return 0
 

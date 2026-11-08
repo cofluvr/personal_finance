@@ -106,24 +106,33 @@ def parsed_corrected_value(field: str, value_text: str) -> int | str:
     """The value as stored, or a refusal that does not repeat it."""
     if field not in CORRECTABLE_FIELDS:
         raise DecisionRefused(FIELD_UNSUPPORTED)
+    return parsed_typed_value(field, value_text, AMOUNT_INVALID, DATE_INVALID, DESCRIPTION_BLANK)
+
+
+def parsed_typed_value(field: str, value_text: str, amount_invalid: str, date_invalid: str,
+                       description_blank: str) -> int | str:
+    """A value a person typed for a field, as stored, or a refusal that does not repeat it.
+
+    Shared by corrections (D-049) and completions (D-050), which word their refusals apart.
+    """
     if field == "amount":
         try:
             cents = parse_cents(value_text)
         except MoneyParseError:
-            raise DecisionRefused(AMOUNT_INVALID) from None
+            raise DecisionRefused(amount_invalid) from None
         if cents is None:
-            raise DecisionRefused(AMOUNT_INVALID)
+            raise DecisionRefused(amount_invalid)
         return cents
     if field == "description":
         if not value_text.strip():
-            raise DecisionRefused(DESCRIPTION_BLANK)
+            raise DecisionRefused(description_blank)
         return value_text
     try:
         if not _ISO_DATE.fullmatch(value_text):
             raise ValueError
         date.fromisoformat(value_text)
     except ValueError:
-        raise DecisionRefused(DATE_INVALID) from None
+        raise DecisionRefused(date_invalid) from None
     return value_text
 
 
