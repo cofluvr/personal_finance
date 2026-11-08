@@ -1,6 +1,7 @@
 """Superseding chains and new evidence on decided records, using synthetic data only (D-048)."""
 
 import re
+from itertools import permutations
 
 import pytest
 import test_confirmations
@@ -499,3 +500,108 @@ class TestAlikeListing:  # N11
         section = ledger.show(again).split("Alike a decided record")[1].split("Direct candidate")[0]
         assert "\x1b" not in section
         assert "matches a.csv row 1" in section
+
+
+class TestChainsAreEquivalentToTheirNewest:  # N15
+    @staticmethod
+    def outcome(ledger):
+        view = ledger.view()
+        return record_relations(ledger), view["movement"], view["transactions"], view["review"]
+
+    def test_a_chain_matches_one_decision_equal_to_its_newest(self, tmp_path, capsys):
+        outcomes = []
+        for name in ("chain", "direct"):
+            folder = tmp_path / name
+            folder.mkdir()
+            ledger = SeparationLedger(folder, capsys)
+            if name == "chain":
+                chain_of_three(ledger)
+            else:
+                item, *_ = four_of_them(ledger)
+                files = by_file(ledger)
+                confirm_ok(ledger, item, (files["a.csv"], files["b.csv"], files["c.csv"]))
+            outcomes.append(self.outcome(ledger))
+        assert outcomes[0] == outcomes[1]
+
+    def test_undoing_the_newest_matches_the_decision_before_it(self, tmp_path, capsys):
+        outcomes = []
+        for name in ("chain", "direct"):
+            folder = tmp_path / name
+            folder.mkdir()
+            ledger = SeparationLedger(folder, capsys)
+            if name == "chain":
+                _, _, newest = chain_of_three(ledger)
+                assert ledger.undo(newest)[0] == 0
+            else:
+                item, *_ = four_of_them(ledger)
+                files = by_file(ledger)
+                confirm_ok(ledger, item, (files["a.csv"], files["b.csv"]), (files["c.csv"],))
+            outcomes.append(self.outcome(ledger))
+        assert outcomes[0] == outcomes[1]
+
+
+# Fixed padding per file, so that a file's bytes never depend on when it is imported.
+ORDER_FILES = {
+    "a.csv": (0, test_confirmations.CAFE, test_confirmations.FIRST_HALF),
+    "b.csv": (1, test_confirmations.CAFE, test_confirmations.SECOND_HALF),
+    "c.csv": (2, test_confirmations.CAFE, ()),
+    "d.csv": (3, test_confirmations.OTHER, ()),
+}
+
+
+def import_fixed(ledger, name):
+    padding, row, extra = ORDER_FILES[name]
+    path = ledger.folder / name
+    path.write_text(test_confirmations.CARD_HEADER + " " * padding + row + "\n")
+    ledger.load_path(path, *extra)
+
+
+def confirm_a_and_b(ledger):
+    pair = {holding(ledger, "a.csv"), holding(ledger, "b.csv")}
+    (item,) = [item for item in ledger.items() if pair <= set(ledger.transactions(item))]
+    return confirm_ok(ledger, item, tuple(sorted(pair)))
+
+
+def separate_a_from_b(ledger, confirmation):
+    transaction = holding(ledger, "a.csv")
+    records = ledger.records(transaction)
+    separate_ok(ledger, transaction, [records["a.csv"]], [records["b.csv"]],
+                supersedes=confirmation)
+
+
+def replay(folder, capsys, order, confirm_at, separate_at):
+    """Import files in order, confirming a=b after file confirm_at and separating them again,
+    superseding that confirmation, after file separate_at."""
+    folder.mkdir()
+    ledger = SeparationLedger(folder, capsys)
+    confirmation = None
+    for position, name in enumerate(order):
+        import_fixed(ledger, name)
+        if position == confirm_at:
+            confirmation = confirm_a_and_b(ledger)
+        if position == separate_at:
+            separate_a_from_b(ledger, confirmation)
+    return ledger.view()
+
+
+def decision_points(order):
+    ready = max(order.index("a.csv"), order.index("b.csv"))
+    return [
+        (confirm_at, separate_at)
+        for confirm_at in range(ready, len(order))
+        for separate_at in range(confirm_at, len(order))
+    ]
+
+
+def test_a_superseding_separation_at_any_point_in_any_order(tmp_path, capsys):  # N16
+    canonical = replay(tmp_path / "canonical", capsys, tuple(ORDER_FILES), 3, 3)
+    compared = 0
+    for number, order in enumerate(permutations(ORDER_FILES)):
+        for confirm_at, separate_at in decision_points(order):
+            folder = tmp_path / f"{number}-{confirm_at}-{separate_at}"
+            assert replay(folder, capsys, order, confirm_at, separate_at) == canonical, (
+                order, confirm_at, separate_at
+            )
+            compared += 1
+    # 4, 8 and 12 orders have a and b in by file 2, 3 and 4, with 6, 3 and 1 points each.
+    assert compared == 60
