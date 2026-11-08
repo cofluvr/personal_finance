@@ -92,9 +92,10 @@ Pitfalls that recurred across M1 to M3.1:
 - **Order dependence.** `pair_up`'s first transaction follows content hashes, and generated IDs are
   random, so tests name files rather than assume an order. A test that failed at random once took the
   credit for four surviving breaks.
-- **Deliberate breaks.** Check which test caught each break, not only that one did. Removing a loop's
-  only line is a syntax error, not a catch: use `pass`. A replacement that renames a function is a bad
-  break. A break that matches nothing must stop the script, not run on unchanged code.
+- **Deliberate breaks,** run as in "Testing for review". Check which test caught each break, not
+  only that one did. Removing a loop's only line is a syntax error, not a catch: use `pass`. A
+  replacement that renames a function is a bad break. A break that matches nothing must stop the
+  script, not run on unchanged code.
 - **Tests that pass for the wrong reason.** Give each schema refusal a control insert that succeeds.
   Pass test helper arguments by keyword. Count the tests actually run: a nested function or a test
   class imported by name changes the count.
@@ -128,6 +129,35 @@ F1 and F4 are fixed, and recorded in the archive.
 - Gate every commit on pytest's own exit code, chained as in `pytest -q && git commit`. A pipe such
   as `pytest | tail` hides that exit code. `bd095bf` is a broken commit made when they were not
   chained, and history is not rewritten to remove it.
+- While a slice is in progress, gate each commit on the test files for the code it changes and the
+  scenario files that exercise it. Gate the last commit before stopping for review on the full
+  suite, about 3.5 minutes. If a gate fails, rerun only the failing tests with `pytest --lf` while
+  fixing, then rerun the gate itself before committing.
+
+## Testing for review
+
+Set by the owner on 2026-11-08 to cut test time, which reached about two hours a milestone in M3.1
+(62 breaks of about 50s each, then all 62 again on the final code). The bar is unchanged: every break
+must be caught by a relevant test, or be shown to be a test gap, closed, or equivalent code.
+
+1. **Fewer, targeted breaks.** About 20 to 25 a slice, aimed at refusals, money and direction rules,
+   token inputs, and the new invariants and migrations. Skip wording, messages and paths that only
+   save work.
+2. **Narrow first.** Run each break against the one or two test files that cover the broken code,
+   with the most relevant file first. Widen to the slice's wider set only for a break that survives
+   there, before calling it a gap.
+3. **Stop at the first failure.** Run breaks with `pytest -x -q --tb=no`. One relevant failure is a
+   catch. Record which test failed, and treat a catch by an unrelated test as a survivor.
+4. **Rerun only what needs it.** On the final code, rerun only the breaks that survived, those whose
+   target code changed since, and those that did not apply. A caught break on unchanged code stays
+   caught.
+5. **The unbroken control** still runs once, on the same narrow files, before any break.
+6. **No repeat runs** of a test file to look for flakiness, unless the work touches random or
+   order-dependent tests.
+7. **Parallel worktrees** only if a break run still takes more than about 15 minutes: run breaks in
+   two to four worktrees under `build/`, each with its own `TMPDIR`. No new dependency for it.
+
+Report the counts: applied, caught, survived and why, and rerun.
 
 ## Keeping these docs small
 
@@ -196,7 +226,8 @@ concrete contradiction.
 Follow the working principles in docs/handoff.md, and its "Keeping these docs small" rules when
 you update the docs. Pushing needs my explicit approval each time. No network, no new
 dependencies, no security changes. Synthetic data only. Use build/ for walkthroughs, breaks and
-benchmarks, with TMPDIR set to build/tmp. Gate commits on pytest's own exit code, and a test that
-fails on unbroken code proves nothing about a deliberate break. Check which test caught each
-break, and that a benchmark shape can reach the cost it claims to measure.
+benchmarks, with TMPDIR set to build/tmp. Gate commits on pytest's own exit code, as in its
+"Commit hygiene", and run deliberate breaks as in its "Testing for review". A test that fails on
+unbroken code proves nothing about a deliberate break. Check which test caught each break, and
+that a benchmark shape can reach the cost it claims to measure.
 ```
