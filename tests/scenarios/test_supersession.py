@@ -114,11 +114,11 @@ class TestChains:  # N1, N2, N3
         a, b, c = chain_of_three(ledger)
         # A superseded decision shows no token, and the refusal comes before any token check.
         before = ledger.dump()
-        code, _, err = ledger.undo(a, "d5-0000000000000000")
+        code, _, err = ledger.undo(a, "d6-0000000000000000")
         assert code == 2
         assert f"superseded by decision {b}, which is superseded in turn" in err
         assert f"Only the newest decision of the chain, {c}, can be undone" in err
-        code, _, err = ledger.undo(b, "d5-0000000000000000")
+        code, _, err = ledger.undo(b, "d6-0000000000000000")
         assert code == 2 and DECISION_SUPERSEDED.format(newer=c) in err
         assert ledger.dump() == before
 
@@ -129,7 +129,7 @@ class TestChains:  # N1, N2, N3
         code, _, err = ledger.run(
             "review", "confirm", item, "--account", "A", "--revision", ledger.revision(item),
             "--group", *ledger.transactions(item), "--supersedes", a,
-            "--supersedes-revision", "d5-0000000000000000",
+            "--supersedes-revision", "d6-0000000000000000",
         )
         assert code == 2 and f"Only the newest decision of the chain, {c}" in err
         assert ledger.dump() == before
@@ -137,7 +137,7 @@ class TestChains:  # N1, N2, N3
 
 class TestTokens:  # N14
     def test_the_version_is_pinned(self):
-        assert decision_evidence.DECISION_REVISION_VERSION == 5
+        assert decision_evidence.DECISION_REVISION_VERSION == 6
 
     def test_a_ledger_without_chains_keeps_its_digest(self, tmp_path, capsys):
         """d2-2a1e1dd2ac99de82 was computed for this ledger at 7551e18, before version 3, and held to
@@ -146,7 +146,7 @@ class TestTokens:  # N14
         item, one, two = pair_up(ledger)
         decision = ledger.reject_ok(item, (one, two))
         # The digest covers the rules fingerprint, so it changed with rules version 2 (D-052).
-        assert ledger.decision_revision(decision) == "d5-ecb0f4cc0ef102ac"
+        assert ledger.decision_revision(decision) == "d6-ecb0f4cc0ef102ac"
 
     def test_the_transaction_token_is_unchanged(self, ledger):
         """Computed for this ledger at 7551e18, before M2.5."""
@@ -279,7 +279,7 @@ class TestSeparatingAConfirmation:  # N4, N6
     def test_both_tokens_are_checked(self, ledger, stale):  # N5
         old, transaction, records = confirmed_pair(ledger)
         options = ({"revision": "t5-0000000000000000"} if stale == "transaction"
-                   else {"supersedes_revision": "d5-0000000000000000"})
+                   else {"supersedes_revision": "d6-0000000000000000"})
         before = ledger.dump()
         code, _, err = separate(ledger, transaction, [records["a.csv"]], [records["b.csv"]],
                                 supersedes=old, **options)

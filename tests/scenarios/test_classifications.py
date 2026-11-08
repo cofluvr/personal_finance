@@ -4,11 +4,11 @@ import re
 from dataclasses import replace
 
 import pytest
-from test_confirmations import confirm_ok
-from test_coverage_declarations import CoverageLedger
+from test_confirmations import confirm, confirm_ok
+from test_coverage_declarations import CoverageLedger, both_complete
 from test_decisions import CAFE, OTHER, SOURCE_TABLES, pair_up
 from test_resolutions import CAFE_NO_AMOUNT
-from test_separations import ID_ROW, merged_two
+from test_separations import ID_ROW, merged_three, merged_two
 from test_supersession import holding
 
 from personal_finance.reconcile.apply import load_constraints, load_evidence, reconcile_account
@@ -28,9 +28,16 @@ from personal_finance.reconcile.classifications import (
     TYPE_UNKNOWN,
     TYPE_UNSETTLED,
 )
-from personal_finance.reconcile.corrections import AGAINST_CLASSIFIED_DIRECTION
+from personal_finance.reconcile.corrections import (
+    AGAINST_CLASSIFIED_DIRECTION,
+    STALE_CORRECTION_REVISION,
+)
 from personal_finance.reconcile.cross_document import derive
-from personal_finance.reconcile.decisions import STALE_ACCOUNT
+from personal_finance.reconcile.decisions import (
+    LEAVES_CLASSIFICATION_UNSETTLED,
+    STALE_ACCOUNT,
+    STALE_DECISION_REVISION,
+)
 from personal_finance.reconcile.record_resolutions import COMPLETION_BOUND
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reports import classification_evidence
@@ -464,6 +471,99 @@ class TestDirection:
         ledger.correct_ok(transaction, "amount", "0.00")
         ledger.classify_ok(transaction, "refund")
         assert ledger.types()[0] == ("refund", "1", "0.00")
+
+
+class TestDecisionCommands:  # F9
+    def test_confirming_disagreeing_classifications_refuses(self, ledger):
+        item, one, two = pair_up(ledger)
+        ledger.classify_ok(one, "purchase")
+        ledger.classify_ok(two, "fee")
+        (item,) = ledger.items()
+        before = ledger.dump()
+        code, _, err = confirm(ledger, item, (one, two))
+        assert code == 2 and LEAVES_CLASSIFICATION_UNSETTLED in err
+        assert ledger.dump() == before
+
+    def test_separating_a_classification_s_records_refuses(self, ledger):
+        transaction, records = merged_three(ledger)
+        ledger.classify_ok(transaction, "purchase")
+        before = ledger.dump()
+        code, _, err = ledger.separate(transaction, [records["a.csv"]],
+                                       [records["b.csv"], records["c.csv"]])
+        assert code == 2 and LEAVES_CLASSIFICATION_UNSETTLED in err
+        assert ledger.dump() == before
+
+    def test_separating_records_a_classification_does_not_bind_is_allowed(self, ledger):
+        ledger.checking("a.csv", ID_ROW)
+        ledger.classify_ok(holding(ledger, "a.csv"), "purchase")
+        ledger.checking("b.csv", ID_ROW)
+        (transaction,) = ledger.merges()
+        records = ledger.records(transaction)
+        ledger.separate_ok(transaction, [records["a.csv"]], [records["b.csv"]])
+        assert ledger.outcomes() == [(("a.csv",), "applied", "purchase")]
+
+    def test_a_classification_made_since_makes_the_undo_token_stale(self, ledger):
+        item, one, two = pair_up(ledger)
+        decision = confirm_ok(ledger, item, (one, two))
+        old = ledger.decision_revision(decision)
+        shown = ledger.run("review", "decision", "show", decision)[1]
+        assert "Changes which classifications apply" not in shown
+        ledger.classify_ok(holding(ledger, "a.csv"), "purchase")
+        before = ledger.dump()
+        code, _, err = ledger.undo(decision, old)
+        assert code == 2 and STALE_DECISION_REVISION in err
+        assert ledger.dump() == before
+
+        shown = ledger.run("review", "decision", "show", decision)[1]
+        assert "Changes which classifications apply" in shown
+        code, out, _ = ledger.undo(decision)
+        assert code == 0 and "no longer fit the direction: 2" in out
+        assert ledger.outcomes() == [(("a.csv",), "basis_changed", None),
+                                     (("b.csv",), "basis_changed", None)]
+
+    def test_a_rejection_is_unaffected(self, ledger):
+        item, one, two = pair_up(ledger)
+        ledger.classify_ok(holding(ledger, "a.csv"), "purchase")
+        (item,) = ledger.items()
+        ledger.reject_ok(item, (one, two))
+        assert ledger.outcomes() == [(("a.csv",), "applied", "purchase")]
+
+    def test_withdrawing_coverage_reports_the_split(self, ledger):
+        both_complete(ledger)
+        ledger.classify_ok(holding(ledger, "a.csv"), "purchase")
+        code, out, err = ledger.declare("a.csv", "unknown")
+        assert code == 0, err
+        assert "no longer fit the direction: 2" in out
+        assert ledger.outcomes() == [(("a.csv",), "basis_changed", None),
+                                     (("b.csv",), "basis_changed", None)]
+
+
+class TestCorrectionTokens:
+    def test_a_classification_its_undo_would_turn_makes_the_correction_token_stale(self, ledger):
+        transaction = single(ledger)
+        correction = ledger.correct_ok(transaction, "amount", "6.50")
+        old = ledger.correction_revision(correction)
+        ledger.classify_ok(transaction, "refund")
+        assert ledger.correction_revision(correction) != old
+        before = ledger.dump()
+        code, _, err = ledger.undo_correction(correction, old)
+        assert code == 2 and STALE_CORRECTION_REVISION in err
+        assert ledger.dump() == before
+
+    def test_classifying_leaves_another_field_s_correction_token_unchanged(self, ledger):
+        transaction = single(ledger)
+        correction = ledger.correct_ok(transaction, "posting_date", "2026-01-11")
+        token = ledger.correction_revision(correction)
+        ledger.classify_ok(transaction, "purchase")
+        assert ledger.correction_revision(correction) == token
+
+    def test_an_amount_correction_s_token_is_unchanged_by_classifying_elsewhere(self, ledger):
+        ledger.card("a.csv", CAFE)
+        ledger.card("b.csv", OTHER)
+        correction = ledger.correct_ok(holding(ledger, "a.csv"), "amount", "-6.00")
+        token = ledger.correction_revision(correction)
+        ledger.classify_ok(holding(ledger, "b.csv"), "purchase")
+        assert ledger.correction_revision(correction) == token
 
 
 def chain_of_three(ledger):

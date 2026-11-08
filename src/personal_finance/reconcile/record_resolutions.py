@@ -16,6 +16,7 @@ from personal_finance.reconcile.apply import (
     is_current,
     reconcile_account,
 )
+from personal_finance.reconcile.classification_effects import unsettled_classifications
 from personal_finance.reconcile.correction_effects import unsettled_correction_fields
 from personal_finance.reconcile.corrections import parsed_typed_value
 from personal_finance.reconcile.decisions import (
@@ -85,6 +86,7 @@ class Resolved:
     transactions_after: int
     moved_records: int
     newly_unsettled_correction_fields: int
+    newly_unclassified_transactions: int
 
 
 @dataclass(frozen=True)
@@ -96,6 +98,7 @@ class ResolutionUndone:
     transactions_after: int
     moved_records: int
     newly_unsettled_correction_fields: int
+    newly_unclassified_transactions: int
 
 
 def complete_record(
@@ -155,6 +158,7 @@ def _resolve(conn, account_id, item_id, revision, kind, supplied_text_by_field, 
 
     before = account_movement(conn, account_id).transactions
     unsettled_before = unsettled_correction_fields(conn, account_id)
+    unclassified_before = unsettled_classifications(conn, account_id)
     resolution_id = str(uuid.uuid4())
     conn.execute(
         """INSERT INTO record_resolution (id, account_id, source_record_id, kind,
@@ -179,6 +183,7 @@ def _resolve(conn, account_id, item_id, revision, kind, supplied_text_by_field, 
         tuple(field for field, value in zip(COMPLETABLE_FIELDS, supplied) if value is not None),
         before, account_movement(conn, account_id).transactions, result.moved_records,
         len(unsettled_correction_fields(conn, account_id) - unsettled_before),
+        len(unsettled_classifications(conn, account_id) - unclassified_before),
     )
 
 
@@ -240,6 +245,7 @@ def _undo(conn, account_id, resolution_id, revision, rules) -> ResolutionUndone:
 
     before = account_movement(conn, account_id).transactions
     unsettled_before = unsettled_correction_fields(conn, account_id)
+    unclassified_before = unsettled_classifications(conn, account_id)
     _record_resolution_event(conn, resolution_id, "undone")
     (reason_code,) = conn.execute(
         """SELECT parse.reason_code FROM record_parse parse
@@ -256,6 +262,7 @@ def _undo(conn, account_id, resolution_id, revision, rules) -> ResolutionUndone:
         resolution.kind, issue_id, before, account_movement(conn, account_id).transactions,
         result.moved_records,
         len(unsettled_correction_fields(conn, account_id) - unsettled_before),
+        len(unsettled_classifications(conn, account_id) - unclassified_before),
     )
 
 

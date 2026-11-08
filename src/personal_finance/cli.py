@@ -1739,6 +1739,10 @@ def run_review_decision_show(args) -> int:
         print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
         if outlook.changes_corrected_values:
             print("  Changes which corrected values apply, or where. Run review corrections after.")
+        if outlook.changes_classifications:
+            print(
+                "  Changes which classifications apply, or where. Run review classifications after."
+            )
         print(f"  {UNDO_NOTICE}")
         if stale:
             print(
@@ -1759,6 +1763,7 @@ def run_review_undo(args) -> int:
     print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
     print(f"  Source memberships changed: {result.moved_records}")
     print_newly_unsettled(result.newly_unsettled_correction_fields)
+    print_newly_unclassified(result.newly_unclassified_transactions)
     print(f"  {UNDO_NOTICE}")
     return 0
 
@@ -2056,6 +2061,7 @@ def print_resolution_effect(result) -> None:
     print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
     print(f"  Source memberships changed: {result.moved_records}")
     print_newly_unsettled(result.newly_unsettled_correction_fields)
+    print_newly_unclassified(result.newly_unclassified_transactions)
 
 
 def run_review_resolutions(args) -> int:
@@ -2195,6 +2201,7 @@ def print_coverage_effect(result) -> None:
     print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
     print(f"  Source memberships changed: {result.moved_records}")
     print_newly_unsettled(result.newly_unsettled_correction_fields)
+    print_newly_unclassified(result.newly_unclassified_transactions)
 
 
 def run_review_coverage_history(args) -> int:

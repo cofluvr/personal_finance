@@ -657,7 +657,7 @@ class TestSuperseding:  # C10, C11
             message = STALE_REVISION
         else:
             result = confirm(ledger, item, (one, two), supersedes=old,
-                             supersedes_revision="d5-0000000000000000")
+                             supersedes_revision="d6-0000000000000000")
             message = STALE_DECISION_REVISION
         assert result[0] == 2 and message in result[2]
         assert ledger.dump() == before

@@ -9,7 +9,12 @@ import sqlite3
 from dataclasses import dataclass
 
 from personal_finance.reconcile.apply import load_evidence
+from personal_finance.reconcile.classification_effects import (
+    effective_classifications,
+    load_active_classifications,
+)
 from personal_finance.reconcile.correction_effects import (
+    FIELD_APPLIED,
     correction_chain_states,
     effective_field_corrections,
     load_active_corrections,
@@ -18,8 +23,9 @@ from personal_finance.reconcile.correction_effects import (
 from personal_finance.reconcile.supersession import successor_and_newest
 from personal_finance.reports.decision_evidence import BoundRecord
 
-# Bump whenever the material below changes, so an old token can never appear current.
-CORRECTION_REVISION_VERSION = 1
+# Bump whenever the material below changes, so an old token can never appear current. Version 2
+# adds the classifications of an amount's transactions, left out where there are none (D-053).
+CORRECTION_REVISION_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -124,6 +130,9 @@ def correction_undo_outlook(
     bound records and their documents are immutable, and another correction of the field reaching
     those transactions changes the outcomes, so neither is covered separately. Grouping is not
     recomputed: undoing a correction moves no record. An unrelated file leaves it unchanged.
+
+    An amount's sign decides whether a classification fits (D-053), so for an amount it also
+    covers the classifications of those transactions with and without it.
     """
     account_id = correction.account_id
     documents, records, _, _ = load_evidence(conn, account_id)
@@ -163,6 +172,32 @@ def correction_undo_outlook(
             for transaction in holding_transactions
         ),
     }
+    if correction.field == "amount":
+        classifications = load_active_classifications(conn, account_id)
+        if any(membership[record_id] in holding_transactions
+               for classification in classifications
+               for record_id in classification.bound_record_ids):
+            source_amounts = dict(conn.execute(
+                "SELECT id, amount_cents FROM ledger_transaction WHERE account_id = ?",
+                (account_id,),
+            ))
+
+            def classification_view(effects):
+                amounts = dict(source_amounts)
+                for (transaction, field), effect in effects.items():
+                    if field == "amount" and effect.state == FIELD_APPLIED:
+                        amounts[transaction] = effect.applied_value
+                outcomes = effective_classifications(classifications, membership, amounts)
+                return sorted(
+                    [keyed(records_by_transaction[transaction]), outcomes[transaction].state,
+                     outcomes[transaction].applied_value]
+                    for transaction in holding_transactions if transaction in outcomes
+                )
+
+            material["classifications"] = {
+                "with_correction": classification_view(effects_with_it),
+                "without_correction": classification_view(effects_without_it),
+            }
     field_state_by_transaction = tuple(sorted(
         (transaction,
          *(None if view is None else view[0]

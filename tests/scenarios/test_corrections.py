@@ -72,7 +72,7 @@ class CorrectionLedger(SeparationLedger):
         return out
 
     def correction_revision(self, correction):
-        return re.search(r"Revision: (c1-[0-9a-f]{16})", self.correction_show(correction))[1]
+        return re.search(r"Revision: (c2-[0-9a-f]{16})", self.correction_show(correction))[1]
 
     def correction_state(self, correction):
         return re.search(r"Status: (\S+)", self.correction_show(correction))[1]
@@ -316,8 +316,8 @@ class TestRefusals:  # V3
         correction = ledger.correct_ok(transaction, "amount", "-6.00")
         for attempt in (
             lambda: ledger.correct(transaction, "amount", "-5.00", supersedes=correction,
-                                   supersedes_revision="c1-0000000000000000"),
-            lambda: ledger.undo_correction(correction, "c1-0000000000000000"),
+                                   supersedes_revision="c2-0000000000000000"),
+            lambda: ledger.undo_correction(correction, "c2-0000000000000000"),
         ):
             self.nothing_changes(ledger, attempt, STALE_CORRECTION_REVISION)
 
@@ -582,13 +582,13 @@ class TestChains:  # V11
     def test_a_superseded_correction_names_the_newest(self, ledger):
         first, second, third = chain_of_three(ledger)
         before = ledger.dump()
-        code, _, err = ledger.undo_correction(first, "c1-0000000000000000")
+        code, _, err = ledger.undo_correction(first, "c2-0000000000000000")
         assert code == 2
         assert CORRECTION_SUPERSEDED_IN_CHAIN.format(newer=second, newest=third) in err
-        code, _, err = ledger.undo_correction(second, "c1-0000000000000000")
+        code, _, err = ledger.undo_correction(second, "c2-0000000000000000")
         assert code == 2 and CORRECTION_SUPERSEDED.format(newer=third) in err
         code, _, err = ledger.correct(holding(ledger, "a.csv"), "amount", "-3.00",
-                                      supersedes=first, supersedes_revision="c1-0")
+                                      supersedes=first, supersedes_revision="c2-0")
         assert code == 2 and f"newest correction of the chain, {third}" in err
         assert ledger.dump() == before
         shown = ledger.correction_show(first)
@@ -635,7 +635,7 @@ class TestUndo:  # V12
 
 class TestTokens:  # V13
     def test_the_versions_are_pinned(self):
-        assert correction_evidence.CORRECTION_REVISION_VERSION == 1
+        assert correction_evidence.CORRECTION_REVISION_VERSION == 2
 
     def test_the_correction_token_is_pinned(self, tmp_path, capsys):
         """Computed for this ledger when M2.6 was built, as a regression pin."""
@@ -703,7 +703,7 @@ class TestTokens:  # V13
         assert ledger.dump() == before
 
 # Set when M2.6 was built, after its immaterial inputs were removed (D-049).
-PINNED_CORRECTION_REVISION = "c1-e2235f95e29f164e"
+PINNED_CORRECTION_REVISION = "c2-e2235f95e29f164e"
 
 
 class TestPrivacy:  # V16
