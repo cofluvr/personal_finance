@@ -1189,7 +1189,7 @@ with M2.6 on 2026-11-08:
 - Equivalent corrections made at different points can bind different records, so the order test
   compares everything but revisions, and checks that records arriving later are never bound.
 
-## D-050 Resolving incomplete records — Approved, implemented in M2.7
+## D-050 Resolving incomplete records — Approved, implemented and accepted in M2.7
 
 Approved by the owner on 2026-11-08 with the M2.7 plan, taking every recommendation in it. Meets
 PRD §5's unresolved-import queue, D-024 and D-041's requirement that corrections stay distinguishable.
@@ -1277,8 +1277,8 @@ and nothing more. The work was not stopped. See [status.md](status.md).
 flagged against rows of its own document. Clearing a parsed value, supplying a status or an ID,
 superseding a resolution, and resolving several records at once.
 
-**How these were implemented,** where the rules above left a choice. They await the owner's review
-with M2.7:
+**How these were implemented,** where the rules above left a choice. The owner accepted all of them
+with M2.7 on 2026-11-08, including continuing past the stop rule under Cost:
 
 - Completed values are merged into the record inside `load_evidence`, so `derive()` sees one record
   marked `completed_by_hand`, and builds that record's blocker itself. Its signature is unchanged.
@@ -1300,7 +1300,7 @@ with M2.7:
   `d5-2a1e1dd2ac99de82` are the digests pinned before M2.7, unchanged.
 - `trace` now escapes descriptions, since a completed one is typed by a person.
 
-## D-051 Coverage correction with history — Approved, implemented in M2.8
+## D-051 Coverage correction with history — Approved, implemented and accepted in M2.8
 
 Approved by the owner on 2026-11-08, who asked for M2.8 to be built with the lead engineer's
 recommendations, recorded here before its code, and reviewed with M2.7 and M2.9. Replaces D-022's
@@ -1369,8 +1369,8 @@ document's exact pairs, against an import making the same merges.
 **Not in scope.** `partial` declarations, coverage for several documents at once, changing coverage
 a document's metadata states other than withdrawing it, and coverage of documents of other accounts.
 
-**How these were implemented,** where the rules above left a choice. They await the owner's review
-with M2.8:
+**How these were implemented,** where the rules above left a choice. The owner accepted all of them
+with M2.8 on 2026-11-08:
 
 - The declaration in effect is found with the shared chain rule (D-048), and `load_evidence` puts its
   kind, interval, basis and evidence in the document it gives `derive()`.
@@ -1386,7 +1386,7 @@ with M2.8:
 - A declaration of a basis the stored interpretation does not offer is refused before the metadata
   rule, so a metadata document asked for an impossible basis hears about the basis.
 
-## D-052 Pending to posted — Approved, implemented in M2.9
+## D-052 Pending to posted — Approved, implemented and accepted in M2.9
 
 Approved by the owner on 2026-11-08, who asked for M2.9 to be built with the lead engineer's
 recommendations, recorded here before its code, and reviewed with M2.7 and M2.8. Amends D-006 for
@@ -1441,8 +1441,8 @@ block. See [status.md](status.md).
 no posted counterpart ever arriving, automatic joining of same-document rows, and changed amounts
 under unreliable IDs.
 
-**How these were implemented,** where the rules above left a choice. They await the owner's review
-with M2.9:
+**How these were implemented,** where the rules above left a choice. The owner accepted all of them
+with M2.9 on 2026-11-08, including the amendment of A34:
 
 - For a reliable ID, a pending and a non-pending row are compatible when they agree in direction and
   in the transaction date where both have one. Two rows of the same status still need equal amounts.

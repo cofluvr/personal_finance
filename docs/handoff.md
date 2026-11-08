@@ -1,4 +1,4 @@
-# Session Handoff: M2.7, M2.8 and M2.9 Await Review
+# Session Handoff: M2 Complete and Accepted
 
 For a fresh session. Written 2026-11-08. **M1 is complete and accepted**, and its limitations and
 deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
@@ -11,15 +11,15 @@ D-047 and the limits in "M2.4 as built" below, with no changes. The owner accept
 2026-11-08, including the rules and implementation choices recorded in D-048 and the limits in
 "M2.5 as built" below, with no changes. The owner accepted M2.6 as built on 2026-11-08, including
 the rules and implementation choices recorded in D-049 and the limits in "M2.6 as built" below, with
-no changes. **M2.7, M2.8 and M2.9 are implemented and await the owner's review together (D-050,
-D-051, D-052). Do not start anything further.** On 2026-11-08 the owner asked for
-M2.7, M2.8 and M2.9 to be built in turn, each with the lead engineer's recommendations, and will
-review all three together. So each slice's plan is recorded as its own decision before its code, and
-none of the three is accepted yet. M2.7 to M2.9 were provisional, and each needs its own approval. M2.1's decisions are D-040 and
+no changes. On 2026-11-08 the owner asked for M2.7, M2.8 and M2.9 to be built in turn with the lead
+engineer's recommendations, each recorded as its own decision before its code, and **accepted all
+three as built the same day**, including the amendment of A34, continuing past D-050's stop rule, and
+the limits in "M2.7 as built" to "M2.9 as built" below. **M2 is complete and accepted. Nothing after
+it is planned or approved.** M2.1's decisions are D-040 and
 D-041, M2.2's rules are D-042 to D-045, with D-045 overriding the others where they differ, M2.3's are
 D-046, M2.4's are D-047, M2.5's are D-048, M2.6's are D-049, and M2.7's are D-050. The owner
 approved implementing M2.7 on 2026-11-08 with the lead engineer's recommendations, which are
-recorded as D-050. M2.8's rules will be D-051 and M2.9's D-052.
+recorded as D-050. M2.8's rules are D-051 and M2.9's D-052.
 
 ## Working principles
 
@@ -648,7 +648,7 @@ in `tests/scenarios/test_confirmations.py`, `test_confirmation_migration.py`,
 
 ## M2.9 as built
 
-Awaiting the owner's review, with M2.7 and M2.8. Scope and acceptance tests are in [plan.md](plan.md)
+Accepted as built by the owner on 2026-11-08, with these limits. Scope and acceptance tests are in [plan.md](plan.md)
 (Q1 to Q17), the rules and implementation choices in D-052. Tests are in
 `tests/scenarios/test_pending_posted.py`, `test_pending_posted_order.py` and
 `test_pending_posted_migration.py`, with rule tests in `tests/unit/test_cross_document.py` and
@@ -665,7 +665,7 @@ Awaiting the owner's review, with M2.7 and M2.8. Scope and acceptance tests are 
 
 ## M2.8 as built
 
-Awaiting the owner's review, with M2.7 and M2.9. Scope and acceptance tests are in
+Accepted as built by the owner on 2026-11-08, with these limits. Scope and acceptance tests are in
 [plan.md](plan.md) (K1 to K17), the rules and implementation choices in D-051. Tests are in
 `tests/scenarios/test_coverage_declarations.py`, `test_coverage_declaration_order.py` and
 `test_coverage_declaration_migration.py`. The benchmark is `measure_reconciliation.py --declared`.
@@ -681,7 +681,7 @@ Awaiting the owner's review, with M2.7 and M2.9. Scope and acceptance tests are 
 
 ## M2.7 as built
 
-Awaiting the owner's review, with M2.8 and M2.9. Scope and acceptance tests are in
+Accepted as built by the owner on 2026-11-08, with these limits. Scope and acceptance tests are in
 [plan.md](plan.md) (U1 to U19), the rules and implementation choices in D-050. Tests are in
 `tests/scenarios/test_resolutions.py`, `test_resolution_order.py` and `test_resolution_migration.py`.
 The benchmark is `tests/benchmarks/measure_reconciliation.py --resolved`.
@@ -864,6 +864,12 @@ rules and the choices made where they left one in D-047. Tests are in
   back.
 - pytest temporary files used `build/tmp`.
 
+## Boundary notes from the M2.7 to M2.9 review
+
+- The owner accepted all three with "I approve", taken as acceptance of the slices only. It was not
+  taken as approval to push, which stays separate.
+- pytest temporary files used `build/tmp`.
+
 ## Boundary notes from the M2.9 work
 
 - As for M2.7. Break worktrees were created and removed with `git worktree`, one with `--force` after
@@ -887,7 +893,7 @@ rules and the choices made where they left one in D-047. Tests are in
 
 ## Awaiting the owner
 
-- Review of M2.7, M2.8 and M2.9 together, including the A34 amendment and the D-050 stop rule.
+- Approval of a plan for what comes after M2. Nothing of it is built.
 - Pushing. Not authorized from here. The owner's own push is described under "Remote state".
 
 ## Recommended M2 scope
@@ -900,15 +906,15 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for M2.2's review outcome, M2.3, M2.3's review outcome, M2.4, M2.4's review outcome, M2.5, M2.5's review outcome, M2.6, M2.6's review outcome, M2.7, M2.8 and M2.9 | **Must be renewed** for anything further |
+| Local commits on `feature/m2-review` | Approved for M2.2's review outcome, M2.3, M2.3's review outcome, M2.4, M2.4's review outcome, M2.5, M2.5's review outcome, M2.6, M2.6's review outcome, M2.7, M2.8, M2.9 and their review outcome | **Must be renewed** for anything further |
 | M2.2 | Accepted as built, 2026-11-07 | None |
 | M2.3 | Accepted as built, 2026-11-07 | None |
 | M2.4 | Accepted as built, 2026-11-07 | None |
 | M2.5 | Accepted as built, 2026-11-08 | None |
 | M2.6 | Accepted as built, 2026-11-08 | None |
-| M2.7 | Plan approved 2026-11-08, taking every recommendation (D-050). Implemented | Owner reviews with M2.8 and M2.9 |
+| M2.7 | Accepted as built, 2026-11-08 | None |
 | Anything after M2.9 | Not planned or approved | Needs its own plan and approval |
-| M2.8 and M2.9 | Built on 2026-11-08 at the owner's request, with the lead engineer's recommendations recorded as D-051 and D-052 before their code | Owner reviews all three together |
+| M2.8 and M2.9 | Accepted as built, 2026-11-08 | None |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -934,12 +940,12 @@ Read docs/handoff.md first, then the files it lists. Confirm the branch is featu
 the working tree is clean, and run the test suite with a real exit code before changing
 anything. Do not contact GitHub.
 
-Review outcome for M2.7, M2.8 and M2.9:
-[PASTE IT HERE: accepted, or the changes you want, for each slice]
+Outcome of the plan for what comes after M2:
+[PASTE IT HERE: approved, or the changes you want]
 
-Task: record the review outcome, making any changes it asks for first as small gated commits.
-Do not reopen D-042 to D-052 unless you find a concrete contradiction. Then propose what comes
-after M2, and wait for my approval before implementing it.
+Task: record the plan's outcome as its own decision, then implement it as approved, as small
+gated commits. Do not reopen D-042 to D-052 unless you find a concrete contradiction. Stop for
+review when it is built.
 
 Follow the working principles in docs/handoff.md. Pushing needs my explicit approval each time.
 No network, no new dependencies, no security changes. Synthetic data only. Use build/ for walkthroughs, breaks and benchmarks, with TMPDIR set

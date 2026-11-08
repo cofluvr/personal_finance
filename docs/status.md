@@ -15,9 +15,10 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.4: separating machine-made merges | Accepted (D-047) |
 | M2.5: new evidence on decided records, and superseding chains | Accepted (D-048) |
 | M2.6: value corrections | Accepted (D-049) |
-| M2.7: resolving incomplete records | Implemented, awaiting review (D-050) |
-| M2.8: coverage correction with history | Implemented, awaiting review (D-051) |
-| M2.9: pending to posted | Implemented, awaiting review (D-052) |
+| M2.7: resolving incomplete records | Accepted (D-050) |
+| M2.8: coverage correction with history | Accepted (D-051) |
+| M2.9: pending to posted | Accepted (D-052) |
+| **M2 overall** | **Complete and accepted** |
 | M3 to M8 | Not started |
 
 ## What exists
