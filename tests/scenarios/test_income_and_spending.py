@@ -202,6 +202,13 @@ class TestSpendingAndIncome:  # T6
         ledger.classify_ok(holding(ledger, "a.csv"), "refund")
         assert "  Spending: 1 transactions, -60.00\n" in ledger.income_section()
 
+    def test_a_corrected_amount_counts(self, ledger):
+        ledger.card("a.csv", "01/10/2026,SYNTHETIC SHOP,50.00,")
+        transaction = holding(ledger, "a.csv")
+        ledger.classify_ok(transaction, "purchase")
+        ledger.correct_ok(transaction, "amount", "-45.00")
+        assert groups(ledger).spending == GroupTotal(1, 4500, 0)
+
     def test_a_transfer_in_is_not_income(self, ledger):
         ledger.card("a.csv", "01/10/2026,SYNTHETIC MOVE IN,,60.00")
         ledger.classify_ok(holding(ledger, "a.csv"), "transfer")
@@ -218,6 +225,17 @@ class TestDisclosure:  # T7
                "confirmed. Spending may be understated by up to 59.00 and income by up to 20.00, " \
                "the money out and in of transactions of a transfer kind not confirmed and of " \
                "unclassified transactions.\n" in ledger.totals()
+
+    def test_unconfirmed_money_in_counts_toward_the_income_bound(self, ledger):
+        ledger.card("a.csv", "01/10/2026,SYNTHETIC MOVE IN,,30.00")
+        ledger.classify_ok(holding(ledger, "a.csv"), "transfer")
+        assert "Spending may be understated by up to 0.00 and income by up to 30.00" in \
+            ledger.totals()
+
+    def test_unclassified_transactions_alone_are_disclosed(self, ledger):
+        ledger.card("a.csv", "01/10/2026,SYNTHETIC GROCER,9.00,")
+        assert "Spending may be understated by up to 9.00 and income by up to 0.00" in \
+            ledger.totals()
 
     def test_none_once_everything_is_classified_or_confirmed(self, ledger):
         stated(ledger)
@@ -258,6 +276,13 @@ class TestLoanPayments:  # T9
         ledger.one_sided_ok(transaction, "Loan")
         assert self.WARNING in ledger.totals()
         assert self.WARNING in ledger.run("totals", "--account", "Loan")[1]
+
+    def test_a_plain_transfer_to_a_loan_does_not_warn(self, ledger):
+        ledger.card("loan.csv", "01/20/2026,SYNTHETIC LOAN,40.00,")
+        transaction = holding(ledger, "loan.csv")
+        ledger.classify_ok(transaction, "transfer")
+        ledger.one_sided_ok(transaction, "Loan")
+        assert "loan payments" not in ledger.totals()
 
     def test_a_payment_received_on_the_loan_does_not_warn(self, ledger):
         ledger.card("loan.csv", "01/20/2026,SYNTHETIC PAYMENT,,40.00", account="Loan")
