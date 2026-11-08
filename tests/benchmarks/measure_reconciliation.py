@@ -8,8 +8,8 @@ Not part of the test suite. Run from the repository root:
     merge with rejection and partition, --superseded to compare a separation superseding a
     confirmation with a partition, --corrected for value corrections, --resolved for completing
     and dismissing unresolved rows, --declared for coverage declared after import, --pending for
-    pending rows posted at another amount, --classified for financial types, or rows per month such
-    as 200 1000 4000)
+    pending rows posted at another amount, --classified for financial types, --transfers for
+    transfer matches across two accounts, or rows per month such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
 one import_files call: reading and parsing the file, writing records, reconciling the
@@ -34,6 +34,7 @@ from personal_finance.cli import DIRECT_PAIRS_SHOWN
 from personal_finance.ingest.coverage import declare_complete
 from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1, SYNTHETIC_CHECKING_V1
 from personal_finance.ingest.pipeline import import_files
+from personal_finance.reconcile import apply as apply_module
 from personal_finance.reconcile.apply import decision_states, load_evidence
 from personal_finance.reconcile.classification_effects import (
     classification_chain_states,
@@ -74,7 +75,10 @@ from personal_finance.reports.coverage_evidence import (
     load_document_coverage,
 )
 from personal_finance.reports.resolution_evidence import load_resolution, resolution_undo_outlook
-from personal_finance.reports.totals import account_movement
+from personal_finance.reconcile.transfer_effects import transfer_candidates, write_transfer_effects
+from personal_finance.reconcile.transfers import match_transfer, undo_transfer
+from personal_finance.reports.totals import account_movement, transfer_summary
+from personal_finance.reports.transfer_evidence import load_match, match_revision
 from personal_finance.reports.review_evidence import (
     DecidedPair,
     DecidedRecord,
@@ -1209,6 +1213,162 @@ def pending_posted() -> None:
             measure_pending(pairs, one_block)
 
 
+def transfer_ledger(root: Path, outflows: list[int], inflows: list[int], one_day: bool = False):
+    """A checking account with one row per outflow, each classified as a transfer, written
+    directly, and a savings account with one row per inflow. Amounts are in cents. one_day puts
+    every row on one date, so that every pair is within the window."""
+    path = root / "ledger.db"
+    create_database(path)
+    conn = connect(path)
+    conn.execute("INSERT INTO account (id, display_name, account_type) "
+                 "VALUES ('out', 'out', 'checking'), ('in', 'in', 'savings')")
+    header = "Date,Description,Debit,Credit\n"
+    for account, name, amounts, column in (("out", "out.csv", outflows, 0),
+                                           ("in", "in.csv", inflows, 1)):
+        source = root / name
+        source.write_text(header + "".join(
+            f"01/{10 if one_day else 1 + number % 28:02}/2026,SYNTHETIC MOVE {number},"
+            + ("{0:.2f},".format(-cents / 100) if column == 0 else ",{0:.2f}".format(cents / 100))
+            + "\n"
+            for number, cents in enumerate(amounts)
+        ))
+        import_files(conn, [source], account_id=account, layout=SYNTHETIC_CARD_V1)
+    conn.execute("BEGIN")
+    for number, (transaction_id, record_id) in enumerate(conn.execute(
+        "SELECT transaction_id, source_record_id FROM transaction_source WHERE account_id = 'out' "
+        "ORDER BY source_record_id"
+    ).fetchall()):
+        classification_id = f"f{number:06}"
+        conn.execute(
+            """INSERT INTO type_classification (id, account_id, financial_type,
+                                                target_transaction_id, target_revision)
+               VALUES (?, 'out', 'transfer', ?, 't6-0')""",
+            (classification_id, transaction_id),
+        )
+        conn.execute("INSERT INTO type_classification_record VALUES (?, ?)",
+                     (classification_id, record_id))
+        conn.execute("INSERT INTO type_classification_event (classification_id, event) "
+                     "VALUES (?, 'made')", (classification_id,))
+    write_classification_effects(conn, "out")
+    conn.execute("COMMIT")
+    return conn
+
+
+def side_by_amount(conn, account):
+    return {
+        amount: (transaction_id, record_id)
+        for transaction_id, record_id, amount in conn.execute(
+            """SELECT link.transaction_id, link.source_record_id, entry.amount_cents
+               FROM transaction_source link
+               JOIN ledger_transaction entry ON entry.id = link.transaction_id
+               WHERE link.account_id = ?""",
+            (account,),
+        )
+    }
+
+
+def measure_many_matches(count: int) -> None:
+    """count applied matches, written directly, and one pair left to match. Every import,
+    decision, correction and classification in either account rewrites every match's outcome, so
+    the later import pays for all of them."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        amounts = [100 * (1 + number) for number in range(count + 1)]
+        conn = transfer_ledger(root, [-cents for cents in amounts], amounts)
+        outflows, inflows = side_by_amount(conn, "out"), side_by_amount(conn, "in")
+        conn.execute("BEGIN")
+        for number, cents in enumerate(amounts[1:]):
+            match_id = f"m{number:06}"
+            conn.execute("INSERT INTO transfer_match (id) VALUES (?)", (match_id,))
+            for side, account, (transaction_id, record_id) in (
+                    ("outflow", "out", outflows[-cents]), ("inflow", "in", inflows[cents])):
+                conn.execute("INSERT INTO transfer_match_side VALUES (?, ?, ?, ?, 't6-0')",
+                             (match_id, side, account, transaction_id))
+                conn.execute("INSERT INTO transfer_match_record VALUES (?, ?, ?)",
+                             (match_id, side, record_id))
+            conn.execute("INSERT INTO transfer_match_event (match_id, event) VALUES (?, 'made')",
+                         (match_id,))
+        write_transfer_effects(conn)
+        conn.execute("COMMIT")
+
+        conn.execute("BEGIN")
+        started = time.perf_counter()
+        write_transfer_effects(conn)
+        effects_seconds = time.perf_counter() - started
+        conn.execute("COMMIT")
+        started = time.perf_counter()
+        summary = transfer_summary(conn)
+        totals_seconds = time.perf_counter() - started
+        outflow, inflow = outflows[-amounts[0]][0], inflows[amounts[0]][0]
+        started = time.perf_counter()
+        made = match_transfer(
+            conn, "out", outflow, transaction_revision(load_merge_evidence(conn, outflow)),
+            "in", inflow, transaction_revision(load_merge_evidence(conn, inflow)))
+        match_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        token = match_revision(conn, load_match(conn, made.match_id))
+        undo_transfer(conn, "out", made.match_id, token)
+        undo_seconds = time.perf_counter() - started
+        later = root / "later.csv"
+        later.write_text("Date,Description,Debit,Credit\n03/20/2026,SYNTHETIC GROCER,9.00,\n")
+        # Count what the import rewrites, so that the timing is known to include every match.
+        rewritten = []
+
+        def counted(connection):
+            rewritten.append(connection.execute(
+                "SELECT COUNT(*) FROM transfer_match_effect").fetchone()[0])
+            write_transfer_effects(connection)
+
+        apply_module.write_transfer_effects = counted
+        started = time.perf_counter()
+        import_files(conn, [later], account_id="out", layout=SYNTHETIC_CARD_V1)
+        later_seconds = time.perf_counter() - started
+        apply_module.write_transfer_effects = write_transfer_effects
+        assert rewritten == [count], rewritten
+        applied = conn.execute(
+            "SELECT COUNT(*) FROM transfer_match_effect WHERE state = 'applied'").fetchone()[0]
+        assert summary.matches == count and applied == count, (summary, applied)
+        print(
+            f"many matches={count:6} rewrite={effects_seconds:7.3f}s totals={totals_seconds:7.3f}s "
+            f"show_and_match={match_seconds:7.3f}s show_and_undo={undo_seconds:7.3f}s "
+            f"later_import={later_seconds:7.3f}s applied={applied}",
+            flush=True,
+        )
+        conn.close()
+
+
+def measure_candidates(count: int, equal: bool) -> None:
+    """count transfer-kind outflows and count inflows, unmatched. Distinct amounts give count
+    candidates. Equal amounts on one day give count squared, the quadratic case."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        amounts = [500] * count if equal else [100 * (1 + number) for number in range(count)]
+        conn = transfer_ledger(root, [-cents for cents in amounts], amounts, one_day=equal)
+        started = time.perf_counter()
+        found = transfer_candidates(conn)
+        list_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        transfer_summary(conn)
+        totals_seconds = time.perf_counter() - started
+        expected = count * count if equal else count
+        assert len(found) == expected, (len(found), expected)
+        print(
+            f"candidates {'equal' if equal else 'distinct'}={count:5} list={list_seconds:7.3f}s "
+            f"totals={totals_seconds:7.3f}s candidates={len(found)}",
+            flush=True,
+        )
+        conn.close()
+
+
+def transfers() -> None:
+    for count in (100, 1000, 4000):
+        measure_many_matches(count)
+    for count in (1000, 4000):
+        measure_candidates(count, equal=False)
+    for count in (50, 200, 400):
+        measure_candidates(count, equal=True)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--worst"]:
         worst_cases()
@@ -1239,6 +1399,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--classified"]:
         classified()
+        return
+    if sys.argv[1:] == ["--transfers"]:
+        transfers()
         return
     sizes = [(24, 200), (24, 1000), (24, 4000)]
     if len(sys.argv) > 1:
