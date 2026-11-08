@@ -116,7 +116,12 @@ from personal_finance.reports.review_evidence import (
     rows_sharing_a_document,
     transaction_revision,
 )
-from personal_finance.reports.totals import account_movement, one_sided_summary, transfer_summary
+from personal_finance.reports.totals import (
+    account_movement,
+    income_and_spending,
+    one_sided_summary,
+    transfer_summary,
+)
 from personal_finance.reports.transfer_evidence import (
     list_matches,
     list_one_sided,
@@ -2576,6 +2581,8 @@ def run_totals(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
     movement = account_movement(conn, account_id)
+    # Before any output, so a broken invariant stops the report rather than truncating it.
+    groups = income_and_spending(conn, account_id)
 
     print(f"Account inflows: {format_cents(movement.inflow_cents)}")
     print(f"Account outflows: {format_cents(movement.outflow_cents)}")
@@ -2601,6 +2608,7 @@ def run_totals(args) -> int:
         f"  Of a transfer kind with no match, candidate or one-sided transfer: "
         f"{transfers.unpaired_transfer_kind} transactions"
     )
+    print_income_and_spending(groups)
     print("Disclosures:")
     print("- These are account movements. They include transfers and card payments.")
     print(f"- {MATCHING_NOTICE}")
@@ -2639,9 +2647,47 @@ def run_totals(args) -> int:
         print(f"- {line}")
     for line in (*describe_resolutions(movement), *describe_declarations(movement),
                  *describe_pending(movement), *describe_classifications(movement),
-                 *describe_transfers(transfers), *describe_one_sided(one_sided)):
+                 *describe_transfers(transfers), *describe_one_sided(one_sided),
+                 *describe_income_and_spending(groups)):
         print(f"- {line}")
     return 0
+
+
+def out_and_in(group) -> str:
+    return (f"{group.transactions} transactions, {format_cents(group.out_cents)} out and "
+            f"{format_cents(group.in_cents)} in")
+
+
+def print_income_and_spending(groups) -> None:
+    """Five groups, each transaction in one, adding to net account movement (D-056)."""
+    print("Income and spending, as you classified and matched them:")
+    income, spending = groups.income, groups.spending
+    print(f"  Income: {income.transactions} transactions, "
+          f"{format_cents(income.in_cents - income.out_cents)}")
+    print(f"  Spending: {spending.transactions} transactions, "
+          f"{format_cents(spending.out_cents - spending.in_cents)}")
+    for financial_type, group in groups.spending_by_type:
+        print(f"    {financial_type}: {group.transactions} transactions, "
+              f"{format_cents(group.out_cents - group.in_cents)}")
+    print(f"  Confirmed transfers: {out_and_in(groups.confirmed_transfers)}")
+    for financial_type, group in groups.confirmed_transfers_by_type:
+        print(f"    {financial_type}: {out_and_in(group)}")
+    print(f"  Of a transfer kind, not confirmed: {out_and_in(groups.unconfirmed_transfer_kinds)}")
+    print(f"  Unclassified: {out_and_in(groups.unclassified)}")
+
+
+def describe_income_and_spending(groups) -> list[str]:
+    """How far income and spending may be understated, from what they leave out (D-011, D-056)."""
+    unconfirmed, unclassified = groups.unconfirmed_transfer_kinds, groups.unclassified
+    if not (unconfirmed.transactions or unclassified.transactions):
+        return []
+    return [
+        "Income and spending count only what you classified, and leave out transfers you "
+        "confirmed. Spending may be understated by up to "
+        f"{format_cents(unconfirmed.out_cents + unclassified.out_cents)} and income by up to "
+        f"{format_cents(unconfirmed.in_cents + unclassified.in_cents)}, the money out and in of "
+        "transactions of a transfer kind not confirmed and of unclassified transactions."
+    ]
 
 
 def describe_transfers(transfers) -> list[str]:
@@ -2683,6 +2729,13 @@ def describe_one_sided(one_sided) -> list[str]:
             f"{one_sided.card_payments_without_history} card payments, "
             f"{format_cents(one_sided.card_payments_without_history_cents)}, go to a card whose "
             "purchases for those dates are not in the ledger, so spending on that card is "
+            "understated."
+        )
+    if one_sided.loan_payments_without_history:
+        lines.append(
+            f"{one_sided.loan_payments_without_history} loan payments, "
+            f"{format_cents(one_sided.loan_payments_without_history_cents)}, go to a loan whose "
+            "interest for those dates is not in the ledger, so spending on interest is "
             "understated."
         )
     lines += [

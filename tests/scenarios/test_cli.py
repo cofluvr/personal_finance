@@ -148,15 +148,19 @@ def test_totals_use_account_movement_terms(db, capsys):
     assert "Transactions: 4, of which pending: 1" in out
 
 
-def test_totals_never_claim_income_or_spending(db, capsys):
+def test_account_movement_never_claims_income_or_spending(db, capsys):
+    """D-010 binds account movement. Income and spending are their own section (D-056)."""
     import_checking(db, CHECKING)
     import_card(db)
     capsys.readouterr()
     main(["totals", "--db", db])
-    lowered = capsys.readouterr().out.lower()
+    out = capsys.readouterr().out
+    lowered = out.split("Income and spending, as you classified and matched them:")[0].lower()
     assert "income" not in lowered
     assert "spending" not in lowered
     assert "expense" not in lowered
+    # Nothing is classified, so nothing is income or spending.
+    assert "  Income: 0 transactions, 0.00\n  Spending: 0 transactions, 0.00\n" in out
 
 
 def test_totals_for_one_account(db, capsys):
