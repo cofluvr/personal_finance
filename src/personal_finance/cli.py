@@ -33,6 +33,12 @@ from personal_finance.reconcile.cross_document import (
     deciding_criterion,
     primary_rank,
 )
+from personal_finance.reconcile.classification_effects import (
+    FINANCIAL_TYPES,
+    TYPE_AGAINST_DIRECTION,
+    UNCLASSIFIED,
+)
+from personal_finance.reconcile.classifications import classify_transaction, undo_classification
 from personal_finance.reconcile.correction_effects import (
     FIELD_APPLIED,
     FIELD_BASIS_CHANGED,
@@ -55,6 +61,11 @@ from personal_finance.reconcile.decisions import (
     undo_decision,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reports.classification_evidence import (
+    classification_undo_outlook,
+    list_classifications,
+    load_classification,
+)
 from personal_finance.reports.correction_evidence import (
     correction_undo_outlook,
     list_corrections,
@@ -227,6 +238,31 @@ CORRECTION_UNDO_NOTICE = (
     "The source value applies again, or the correction this one superseded. Source values were "
     "never changed."
 )
+
+CLASSIFY_NOTICE = (
+    "Totals list each financial type apart. Account movement is unchanged, matching never reads "
+    "types, and new records are not bound, but a re-export that joins this transaction keeps the "
+    "type applied."
+)
+
+CLASSIFICATION_UNDO_NOTICE = (
+    "The transaction is unclassified again, or has the type of the classification this one "
+    "superseded."
+)
+
+# What each outcome of a classified transaction means (D-053).
+CLASSIFICATION_STATE_EXPLANATIONS = {
+    FIELD_APPLIED: "the stated type applies",
+    FIELD_IN_CONFLICT: "classifications disagree, so it is unclassified. Undo all but one to settle it",
+    FIELD_BASIS_CHANGED: (
+        "a classification binds records now in several transactions, so it is unclassified. Undo "
+        "it, then classify each transaction"
+    ),
+    TYPE_AGAINST_DIRECTION: (
+        "its amount now runs against the stated type, as after a correction, so it is "
+        "unclassified. Undo the classification, or the correction"
+    ),
+}
 
 COMPLETE_NOTICE = (
     "The row is now a transaction and is counted, using the values you supplied with those read "
@@ -427,7 +463,8 @@ def build_parser() -> argparse.ArgumentParser:
     transaction_commands = transaction.add_subparsers(dest="transaction_command", required=True)
     transaction_show = command(
         "show", transaction_commands, handler=run_review_transaction_show,
-        help="show one transaction's evidence and corrections, including amounts and descriptions",
+        help="show one transaction's evidence, corrections and classifications, including amounts "
+        "and descriptions",
     )
     transaction_show.add_argument("transaction_id", help="a transaction ID from transactions")
 
@@ -479,6 +516,57 @@ def build_parser() -> argparse.ArgumentParser:
     correction_undo.add_argument("--account", required=True, help="account name or ID")
     correction_undo.add_argument(
         "--revision", required=True, help="the revision from review correction show"
+    )
+
+    classify = command(
+        "classify", review_commands, handler=run_review_classify,
+        help="state the financial type of a transaction",
+    )
+    classify.add_argument("transaction_id", help="a transaction ID from transactions")
+    classify.add_argument("--account", required=True, help="account name or ID")
+    classify.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    classify.add_argument("--type", required=True, dest="financial_type",
+                          help=", ".join(FINANCIAL_TYPES))
+    classify.add_argument(
+        "--supersedes", metavar="CLASSIFICATION_ID",
+        help="the classification applying to this transaction now, which this one replaces",
+    )
+    classify.add_argument(
+        "--supersedes-revision", metavar="REVISION",
+        help="the revision from review classification show for the classification being replaced",
+    )
+
+    classifications = command(
+        "classifications", review_commands, handler=run_review_classifications,
+        help="list stored classifications",
+    )
+    classifications.add_argument("--account", help="account name or ID")
+
+    classification = review_commands.add_parser(
+        "classification", help="inspect or undo one classification"
+    )
+    classification_commands = classification.add_subparsers(
+        dest="classification_command", required=True
+    )
+    classification_show = command(
+        "show", classification_commands, handler=run_review_classification_show,
+        help="show what a classification binds and what undoing it would do",
+    )
+    classification_show.add_argument(
+        "classification_id", help="a classification ID from review classifications"
+    )
+    classification_undo = command(
+        "undo", classification_commands, handler=run_review_classification_undo,
+        help="stop a classification applying, keeping it on record",
+    )
+    classification_undo.add_argument(
+        "classification_id", help="a classification ID from review classifications"
+    )
+    classification_undo.add_argument("--account", required=True, help="account name or ID")
+    classification_undo.add_argument(
+        "--revision", required=True, help="the revision from review classification show"
     )
 
     complete = command(
@@ -756,7 +844,7 @@ def print_account_state(movement) -> None:
     for line in describe_corrections(movement):
         print(f"  {line}")
     for line in (*describe_resolutions(movement), *describe_declarations(movement),
-                 *describe_pending(movement)):
+                 *describe_pending(movement), *describe_classifications(movement)):
         print(f"  {line}")
     print(f"  Unresolved records, not included in totals: {movement.unresolved_records}")
 
@@ -788,6 +876,25 @@ def describe_corrections(movement) -> list[str]:
             f"several transactions: {movement.transactions_with_correction_basis_changed}. Run "
             "review corrections."
         )
+    return lines
+
+
+def describe_classifications(movement) -> list[str]:
+    """Transactions a disagreement leaves unclassified, on their own lines (D-053)."""
+    lines = []
+    for count, reason in (
+        (movement.transactions_with_classification_conflict, "classifications disagree"),
+        (movement.transactions_with_classification_basis_changed,
+         "a classification binds records now in several transactions"),
+        (movement.transactions_with_classification_against_direction,
+         "their amount runs against the stated type"),
+    ):
+        if count:
+            lines.append(
+                f"Transactions left unclassified because {reason}: {count}. These are not "
+                "possible duplicates, decision conflicts or corrections. Run review "
+                "classifications."
+            )
     return lines
 
 
@@ -1343,6 +1450,7 @@ def print_transaction_evidence(entry, shared) -> None:
     for record in entry.records:
         print_record_evidence(record, describe_role(record.record_id, primary_id, ranks), shared)
     print_corrections(entry)
+    print_classifications(entry)
 
 
 def _effective_rank_values(record):
@@ -1369,6 +1477,21 @@ def print_corrections(entry) -> None:
     state_by_field = {correction.field: correction.field_state for correction in entry.corrections}
     for field, state in sorted(state_by_field.items()):
         print(f"    {field}: {FIELD_STATE_EXPLANATIONS[state]}")
+
+
+def print_classifications(entry) -> None:
+    """Classifications stay apart from the source values, like corrections (D-053)."""
+    if not entry.classifications:
+        print(f"  Financial type: {UNCLASSIFIED}")
+        return
+    print("  Classifications:")
+    for classification in entry.classifications:
+        print(
+            f"    Classification {classification.classification_id}: "
+            f"{classification.financial_type}, binding {describe_side(classification.bound_records)}"
+        )
+    state = entry.classifications[0].state
+    print(f"    Financial type: {CLASSIFICATION_STATE_EXPLANATIONS[state]}")
 
 
 def shown_corrected_value(field, value) -> str:
@@ -1762,7 +1885,139 @@ def run_review_correction_undo(args) -> int:
     if result.restored:
         print(f"  Correction {result.restored}, which it superseded, applies again.")
     print_newly_unsettled(result.newly_unsettled_fields)
+    print_newly_unclassified(result.newly_unclassified_transactions)
     print(f"  {CORRECTION_UNDO_NOTICE}")
+    return 0
+
+
+def print_newly_unclassified(count) -> None:
+    if count:
+        print(
+            f"  Classified transactions now unclassified, because classifications disagree, lost "
+            f"their basis or no longer fit the direction: {count}. Run review classifications."
+        )
+
+
+def run_review_classify(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    result = classify_transaction(
+        conn, account_id, args.transaction_id, args.revision, args.financial_type,
+        supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
+    )
+
+    print(
+        f"Classification {result.classification_id} recorded: transaction {args.transaction_id} "
+        f"is a {result.financial_type}, binding {result.bound_record_count} records."
+    )
+    if args.supersedes:
+        print(f"  Supersedes classification {args.supersedes}. It stays on record.")
+    print(f"  {CLASSIFY_NOTICE}")
+    return 0
+
+
+def run_review_classifications(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_classifications(conn, account_id)
+    for classification_id, account, created_at, state, financial_type, bound_count in rows:
+        print(
+            f"Classification {classification_id}: {state}, {financial_type}, {bound_count} "
+            f"records, {shown(account)}, {created_at}"
+        )
+    print(f"Classifications: {len(rows)}")
+    unsettled = conn.execute(
+        """SELECT kind.transaction_id, kind.state FROM transaction_classification kind
+           JOIN ledger_transaction entry ON entry.id = kind.transaction_id
+           WHERE kind.state <> 'applied' AND (:account IS NULL OR entry.account_id = :account)
+           ORDER BY kind.transaction_id""",
+        {"account": account_id},
+    ).fetchall()
+    for transaction_id, state in unsettled:
+        print(f"Transaction {transaction_id}: {CLASSIFICATION_STATE_EXPLANATIONS[state]}")
+    if rows:
+        print("To see what a classification binds, run review classification show.")
+    return 0
+
+
+# How a classified transaction's outcome reads in an undo preview.
+CLASSIFICATION_PREVIEW_STATES = {
+    None: UNCLASSIFIED,
+    FIELD_APPLIED: "classified",
+    FIELD_IN_CONFLICT: "unclassified, classifications disagree",
+    FIELD_BASIS_CHANGED: "unclassified, basis changed",
+    TYPE_AGAINST_DIRECTION: "unclassified, against its direction",
+}
+
+
+def run_review_classification_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    classification = load_classification(conn, args.classification_id)
+    if classification is None:
+        raise CommandError("classification not found. Run review classifications.")
+
+    print(f"Classification {classification.classification_id}")
+    print(f"  Account: {shown(classification.account_name)} ({classification.account_id})")
+    print(f"  Type: {classification.financial_type}")
+    print(f"  Status: {classification.state}")
+    print(f"  Made: {classification.created_at}")
+    if classification.undone_at:
+        print(f"  Undone: {classification.undone_at}. It stays on record and no longer applies.")
+    if classification.superseded_by:
+        print(
+            f"  Superseded by classification {classification.superseded_by}. It stays on record "
+            "and no longer applies, unless that classification is undone."
+        )
+    if classification.newest_of_chain != classification.superseded_by:
+        print(
+            f"  Newest of its chain: classification {classification.newest_of_chain}, the only "
+            "one that can be undone. Each undo restores the classification before it."
+        )
+    if classification.supersedes_classification_id:
+        print(f"  Supersedes classification {classification.supersedes_classification_id}")
+    print(f"  From transaction: {classification.target_transaction_id}")
+    print("Bound records:")
+    for record in classification.bound_records:
+        where = record.transaction_id or "no transaction"
+        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
+
+    if classification.state == STATE_ACTIVE:
+        outlook = classification_undo_outlook(conn, classification)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this classification now:")
+        if classification.supersedes_classification_id:
+            print(
+                f"  Restores classification {classification.supersedes_classification_id}, which "
+                "it superseded"
+            )
+        for transaction_id, state_now, state_after in outlook.state_by_transaction:
+            print(
+                f"  Transaction {transaction_id}: {CLASSIFICATION_PREVIEW_STATES[state_now]} now, "
+                f"{CLASSIFICATION_PREVIEW_STATES[state_after]} after"
+            )
+        if stale_accounts(conn, DEFAULT_RULES, classification.account_id):
+            print(
+                "This account has not been reconciled under the current matching rules, so "
+                "undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
+def run_review_classification_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_classification(conn, account_id, args.classification_id, args.revision)
+
+    print(
+        f"Classification {args.classification_id} undone. It stays on record and no longer "
+        "applies."
+    )
+    if result.restored:
+        print(f"  Classification {result.restored}, which it superseded, applies again.")
+    print_newly_unclassified(result.newly_unclassified_transactions)
+    print(f"  {CLASSIFICATION_UNDO_NOTICE}")
     return 0
 
 
@@ -1847,11 +2102,16 @@ def run_review_resolution_show(args) -> int:
         print("Undoing this resolution now:")
         print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
         if resolution.kind == "completed":
-            decisions, corrections = binding_entries(conn, record.record_id)
+            decisions, corrections, classifications = binding_entries(conn, record.record_id)
             for decision in decisions:
                 print(f"  Refused while decision {decision} binds the record. Undo it first.")
             for correction in corrections:
                 print(f"  Refused while correction {correction} binds the record. Undo it first.")
+            for classification in classifications:
+                print(
+                    f"  Refused while classification {classification} binds the record. Undo it "
+                    "first."
+                )
         print(f"  {RESOLUTION_UNDO_NOTICE}")
         if stale_accounts(conn, DEFAULT_RULES, resolution.account_id):
             print(
@@ -1974,6 +2234,13 @@ def run_totals(args) -> int:
     print(f"Account outflows: {format_cents(movement.outflow_cents)}")
     print(f"Net account movement: {format_cents(movement.net_cents)}")
     print(f"Transactions: {movement.transactions}, of which pending: {movement.pending_transactions}")
+    print("By financial type, as you classified them:")
+    for financial_type, count, cents in movement.financial_types:
+        print(f"  {financial_type}: {count} transactions, {format_cents(cents)}")
+    print(
+        f"  {UNCLASSIFIED}: {movement.unclassified_transactions} transactions, "
+        f"{format_cents(movement.unclassified_cents)}"
+    )
     print("Disclosures:")
     print("- These are account movements. They include transfers and card payments.")
     print(f"- {MATCHING_NOTICE}")
@@ -2011,7 +2278,7 @@ def run_totals(args) -> int:
     for line in describe_corrections(movement):
         print(f"- {line}")
     for line in (*describe_resolutions(movement), *describe_declarations(movement),
-                 *describe_pending(movement)):
+                 *describe_pending(movement), *describe_classifications(movement)):
         print(f"- {line}")
     return 0
 

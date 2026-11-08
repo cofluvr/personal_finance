@@ -13,6 +13,10 @@ from datetime import date
 
 from personal_finance.money import MoneyParseError, parse_cents
 from personal_finance.reconcile.apply import is_current
+from personal_finance.reconcile.classification_effects import (
+    unsettled_classifications,
+    write_classification_effects,
+)
 from personal_finance.reconcile.correction_effects import (
     CORRECTABLE_FIELDS,
     FIELD_APPLIED,
@@ -79,6 +83,10 @@ SUPERSEDES_NOT_HERE = (
     "the correction named with --supersedes does not apply to this transaction. Nothing was "
     "changed."
 )
+AGAINST_CLASSIFIED_DIRECTION = (
+    "this corrected amount runs against the financial type stated for this transaction, which "
+    "would leave it unclassified. Nothing was changed. Undo or supersede its classification first."
+)
 STALE_CORRECTION_REVISION = (
     "this revision does not match the correction's current evidence. Nothing was changed. Run "
     "review correction show and check again."
@@ -100,6 +108,8 @@ class CorrectionUndone:
     restored: str | None
     # Fields of transactions that are left on their source value by this undo, and were not before.
     newly_unsettled_fields: int
+    # Transactions it leaves unclassified, as after a change of direction, and were not before.
+    newly_unclassified_transactions: int
 
 
 def parsed_corrected_value(field: str, value_text: str) -> int | str:
@@ -217,8 +227,12 @@ def _correct(conn, account_id, transaction_id, revision, field, value_text, rule
         "INSERT INTO value_correction_record (correction_id, source_record_id) VALUES (?, ?)",
         [(correction_id, record_id) for record_id in sorted(record_ids)],
     )
+    unclassified_before = unsettled_classifications(conn, account_id)
     _record_correction_event(conn, correction_id, "made")
     write_correction_effects(conn, account_id)
+    write_classification_effects(conn, account_id)
+    if unsettled_classifications(conn, account_id) - unclassified_before:
+        raise DecisionRefused(AGAINST_CLASSIFIED_DIRECTION)
     return CorrectionMade(correction_id, field, len(record_ids))
 
 
@@ -274,10 +288,14 @@ def _undo_correction(conn, account_id, correction_id, revision, rules) -> Correc
         raise DecisionRefused(STALE_ACCOUNT)
     correction = _checked_for_replacing(conn, account_id, correction_id, revision)
     unsettled_before = unsettled_correction_fields(conn, account_id)
+    unclassified_before = unsettled_classifications(conn, account_id)
     _record_correction_event(conn, correction_id, "undone")
     write_correction_effects(conn, account_id)
+    write_classification_effects(conn, account_id)
     newly_unsettled = unsettled_correction_fields(conn, account_id) - unsettled_before
-    return CorrectionUndone(correction.supersedes_correction_id, len(newly_unsettled))
+    newly_unclassified = unsettled_classifications(conn, account_id) - unclassified_before
+    return CorrectionUndone(correction.supersedes_correction_id, len(newly_unsettled),
+                            len(newly_unclassified))
 
 
 def _record_correction_event(conn, correction_id, event) -> None:

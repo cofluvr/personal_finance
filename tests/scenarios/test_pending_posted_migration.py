@@ -1,7 +1,9 @@
 """Migration 0012, the D-008 migration, on populated data (Q9, D-008, D-052).
 
 The ledger is built from the first 11 migrations and populated through the import API, which works
-on either form of transaction_source. Migration stops at 12, so that only 0012 is tested here.
+on either form of transaction_source. Reconciling writes the tables 0013 creates, so they are
+added by hand, leaving the version at 11. They refer to nothing 0012 rebuilds. Migration stops at 12,
+so that only 0012 is tested here.
 """
 
 import sqlite3
@@ -30,6 +32,7 @@ def at_version_11(tmp_path):
     path = tmp_path / "ledger.db"
     create_database(path, migrations_up_to(tmp_path / "eleven", 11))
     conn = connect(path)
+    conn.executescript(load_migrations()[12].path.read_text())
     conn.execute("INSERT INTO account (id, display_name, account_type) VALUES ('acct', 'A', 'checking')")
     month = declare_complete("2026-01-01", "2026-01-31", "posting")
     files = (

@@ -230,9 +230,11 @@ def _undo(conn, account_id, resolution_id, revision, rules) -> ResolutionUndone:
     if resolution_undo_outlook(conn, resolution, rules).revision != revision:
         raise DecisionRefused(STALE_RESOLUTION_REVISION)
     if resolution.kind == RESOLUTION_COMPLETED:
-        decisions, corrections = binding_entries(conn, resolution.record.record_id)
+        decisions, corrections, classifications = binding_entries(
+            conn, resolution.record.record_id)
         entries = [f"decision {entry}" for entry in decisions]
         entries += [f"correction {entry}" for entry in corrections]
+        entries += [f"classification {entry}" for entry in classifications]
         if entries:
             raise DecisionRefused(COMPLETION_BOUND.format(entries=", ".join(entries)))
 

@@ -8,6 +8,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from personal_finance.reconcile.apply import STATE_ACTIVE, decision_states, declared_coverage
+from personal_finance.reconcile.classification_effects import FINANCIAL_TYPES
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,16 @@ class AccountMovement:
     # transactions left long after the account's latest date (D-052).
     transactions_posted_at_changed_amount: int = 0
     stale_pending_transactions: int = 0
+    # Each financial type that some transaction has, in the order of FINANCIAL_TYPES, with its
+    # transaction count and effective amount, and the same for unclassified transactions (D-053).
+    financial_types: tuple[tuple[str, int, int], ...] = ()
+    unclassified_transactions: int = 0
+    unclassified_cents: int = 0
+    # Transactions left unclassified because classifications disagree, lost their basis, or no
+    # longer fit the transaction's direction (D-053).
+    transactions_with_classification_conflict: int = 0
+    transactions_with_classification_basis_changed: int = 0
+    transactions_with_classification_against_direction: int = 0
 
 
 def account_movement(conn: sqlite3.Connection, account_id: str | None = None) -> AccountMovement:
@@ -142,6 +153,41 @@ def account_movement(conn: sqlite3.Connection, account_id: str | None = None) ->
         inflow, outflow, net, transactions, pending, unresolved, groups, members, *conflicts,
         confirmed, _separated(conn, account_id), *corrections, *resolutions,
         _declared_documents(conn, account_id), *_pending_disclosures(conn, account_id),
+        *_classifications(conn, account_id),
+    )
+
+
+def _classifications(conn, account_id) -> tuple:
+    by_type = {
+        financial_type: (count, cents)
+        for financial_type, count, cents in conn.execute(
+            """SELECT kind.financial_type, COUNT(*),
+                      COALESCE(SUM(COALESCE(fix.corrected_amount_cents, entry.amount_cents)), 0)
+               FROM ledger_transaction entry
+               LEFT JOIN transaction_correction fix
+                   ON fix.transaction_id = entry.id AND fix.field = 'amount'
+                  AND fix.state = 'applied'
+               LEFT JOIN transaction_classification kind
+                   ON kind.transaction_id = entry.id AND kind.state = 'applied'
+               WHERE :account IS NULL OR entry.account_id = :account
+               GROUP BY kind.financial_type""",
+            {"account": account_id},
+        )
+    }
+    unclassified_count, unclassified_cents = by_type.pop(None, (0, 0))
+    unsettled = conn.execute(
+        """SELECT COUNT(CASE WHEN kind.state = 'conflict' THEN 1 END),
+                  COUNT(CASE WHEN kind.state = 'basis_changed' THEN 1 END),
+                  COUNT(CASE WHEN kind.state = 'against_direction' THEN 1 END)
+           FROM transaction_classification kind
+           JOIN ledger_transaction entry ON entry.id = kind.transaction_id
+           WHERE :account IS NULL OR entry.account_id = :account""",
+        {"account": account_id},
+    ).fetchone()
+    return (
+        tuple((financial_type, *by_type[financial_type])
+              for financial_type in FINANCIAL_TYPES if financial_type in by_type),
+        unclassified_count, unclassified_cents, *unsettled,
     )
 
 

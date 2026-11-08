@@ -24,6 +24,7 @@ from personal_finance.reconcile.cross_document import (
     UnresolvedRecord,
     derive,
 )
+from personal_finance.reconcile.classification_effects import write_classification_effects
 from personal_finance.reconcile.correction_effects import write_correction_effects
 from personal_finance.reconcile.rules import DEFAULT_RULES, RULES_VERSION, MatchingRules
 from personal_finance.reconcile.same_document import RULE_SAME_DOCUMENT_PENDING_POSTED
@@ -104,8 +105,10 @@ def reconcile_account(
     state.write_review_items()
     state.repoint_other_issues()
     state.retire_unused_transactions()
-    # After memberships are final, since corrections follow their records (D-049).
+    # After memberships are final, since corrections follow their records (D-049), and
+    # classifications after corrections, since a corrected amount gives the direction (D-053).
     write_correction_effects(conn, account_id)
+    write_classification_effects(conn, account_id)
     _write_marker(conn, account_id, rules)
     return ReconcileResult(derivation, moved)
 
