@@ -3,7 +3,7 @@
 **M1 is complete and accepted.** The owner gave final sign-off on 2026-11-06. The limits and
 deferred items below remain in force.
 
-Each criterion in [plan.md](plan.md) is listed with the tests that support it. One test can
+Each criterion in [archive/plan-m1-m2.md](archive/plan-m1-m2.md) is listed with the tests that support it. One test can
 support several criteria. `tests/unit/test_acceptance_matrix.py` fails if a criterion is
 missing here or a named test does not exist. It does not judge whether a test is sufficient.
 
@@ -65,11 +65,11 @@ missing here or a named test does not exist. It does not judge whether a test is
 
 ## Completion conditions
 
-From "M1 acceptance criteria" in [plan.md](plan.md).
+From "M1 acceptance criteria" in [archive/plan-m1-m2.md](archive/plan-m1-m2.md).
 
 | Condition | Status | Evidence |
 |---|---|---|
-| All tests pass | Passed | See "Tests actually executed" in [handoff.md](handoff.md) |
+| All tests pass | Passed | See "Tests actually executed" in [archive/handoff-history.md](archive/handoff-history.md) |
 | A new-setup run works from the README | Passed | Clean install on 2026-11-06. See "Clean-install verification" below |
 | The decision log records the database, parser and deduplication rules | Passed | D-001, D-018, D-005 to D-008 and D-026 to D-033 |
 
