@@ -20,6 +20,7 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.9: pending to posted | Accepted (D-052) |
 | **M2 overall** | **Complete and accepted** |
 | M3.1: financial types | Accepted (D-053) |
+| M3.2: transfers across accounts | Built, awaiting review (D-054) |
 | M3 to M8 | Not started |
 
 ## What exists
@@ -29,7 +30,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
-  `0011_coverage_declarations`, `0012_pending_posted_links` and `0013_type_classifications`,
+  `0011_coverage_declarations`, `0012_pending_posted_links`, `0013_type_classifications` and
+  `0014_transfer_matches`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
@@ -52,9 +54,13 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.reconcile.classification_effects` and `classifications`: which financial type
   applies to which transaction, sharing the corrections' effective-value rule, and classifying and
   undoing under one write lock (D-053).
+- `personal_finance.reconcile.transfer_effects` and `transfers`: which transfer matches apply and
+  which pairs are candidates, read after each account derives alone, and matching and undoing
+  under one write lock (D-054).
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
-- `personal_finance.reports.totals`: account inflows, outflows and net movement.
+- `personal_finance.reports.totals`: account inflows, outflows and net movement, types, and transfers
+  between accounts.
 - `personal_finance.reports.import_summary`: run-level import counts in explicit units (D-036).
 - `personal_finance.reports.review_evidence`: the evidence behind one review item or one
   transaction, and their revision tokens (D-040, D-047).
@@ -62,6 +68,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.reports.correction_evidence`: what a correction binds, and its undo token (D-049).
 - `personal_finance.reports.classification_evidence`: what a classification binds, and its undo
   token (D-053).
+- `personal_finance.reports.transfer_evidence`: what a transfer match binds, and its undo token
+  (D-054).
 - `personal_finance.reports.resolution_evidence`: what a resolution resolved, and its undo token
   (D-050).
 - `personal_finance.reports.coverage_evidence`: a document's claimed and declared coverage, and their
@@ -73,7 +81,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `review correction show`, `review correction undo`, `review complete`, `review dismiss`,
   `review resolutions`, `review resolution show`, `review resolution undo`, `review coverage show`,
   `review coverage declare`, `review coverage history`, `review coverage undo`, `review classify`,
-  `review classifications`, `review classification show`, `review classification undo`, `totals`, run
+  `review classifications`, `review classification show`, `review classification undo`,
+  `review transfers`, `review transfer match`, `review transfer show`, `review transfer undo`, `totals`, run
   through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
@@ -105,13 +114,25 @@ distinct spellings per block, and in the units of a group a decision touches.
 ## Known limitations
 
 - Only a person classifies, one transaction at a time. A type must fit the transaction's
-  direction, and on a card, loan or investment account a payment received is money in, so it can
-  only be stated as a `transfer` until M3.2 or M3.3 decides direction by account (D-053).
+  direction. A card, loan or investment payment may be money in on the account it pays, and interest
+  is money out only, so interest earned is `income` (D-053, D-054).
 - Disagreeing classifications, one whose records end up in several transactions, or one whose
   transaction's amount a correction's undo turns against it, leave the transaction unclassified
   until one is undone. There is no command to settle them other than undo.
-- `totals` lists financial types next to account movement. It is not yet income or spending:
-  transfers are not matched across accounts until M3.2, and reports wait for M3.4.
+- `totals` lists financial types and matched transfers next to account movement. It is not yet
+  income or spending, which wait for M3.4.
+- Only a person matches a transfer, one pair at a time, and only a candidate: a transfer-kind type
+  on one side, the exactly opposite amount in another account, and dates within 5 days. Fees apart
+  from the amount transferred, a transfer split over several transactions, and one-sided transfers
+  are not matched (M3.3) (D-054).
+- A match binds the records of both transactions when made, so a re-export that does not merge is
+  unmatched. A match is never superseded: undo it and match again.
+- A match whose side splits, that reaches a transaction another match reaches, whose amounts stop
+  offsetting or whose type stops fitting no longer applies until undone. `totals` discloses it, and
+  so do undos, but an import summary does not.
+- Candidates are computed whenever `review transfers` or `totals` runs, quadratic in transactions of
+  one amount on nearby dates. Every write rewrites every match's outcome, linear in matches. Both are
+  measured in [benchmarks.md](benchmarks.md).
 
 - Only `cross_document_candidates` items can be rejected, and only they and decision conflicts can
   be confirmed. External-ID and same-document items stay open.

@@ -1,9 +1,10 @@
-# Session Handoff: M3.1 Accepted, M3.2 Next
+# Session Handoff: M3.2 Built, Awaiting Review
 
-For a fresh session. Written 2026-11-08. **M1 and M2 are complete and accepted.** **M3.1, financial types
-(D-053), was accepted as built** on 2026-11-08 with no changes, including its points for review. Its
-limits are in "M3.1 as built" below. The owner asked for M3.2 on the lead engineer's
-recommendations.
+For a fresh session. Written 2026-11-08. **M1, M2 and M3.1 are complete and accepted.** The owner
+accepted M3.1 on 2026-11-08 with no changes, and asked for M3.2 to be built on the lead engineer's
+recommendations without a separate plan review. **M3.2, transfers across accounts (D-054), is
+built and awaits review**: the plan, the implementation choices and the points for review are all
+in D-054, and the limits in "M3.2 as built" below.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -30,7 +31,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`. M3.1 starts after `c25913f`, which records D-053's approval. Earlier markers are in the archive |
+| Latest commit | Run `git log -1`. M3.2 starts after `0a08cd5`, which proposes D-054, itself after `dd961a4`, which records M3.1's acceptance. Earlier markers are in the archive |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -41,45 +42,44 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 ## Read first
 
 1. This file.
-2. [decisions.md](decisions.md): the index, the rules in brief, and D-053 in full.
+2. [decisions.md](decisions.md): the index, the rules in brief, and D-054 in full.
 3. [plan.md](plan.md): milestones and the M3 plan.
 4. [status.md](status.md): what exists, and the known limitations.
 
 Then only what the task needs:
 
-- For M3.2, transfers across accounts: D-011, D-012, D-031, D-033 and D-034 in
-  [decisions-d001-d052.md](decisions-d001-d052.md), and the code in `reconcile/classifications.py`,
-  `reconcile/classification_effects.py`, `reconcile/cross_document.py`, `reconcile/apply.py`,
-  `reports/totals.py` and the newest migration in `db/migrations/`.
+- For changes to M3.2: `reconcile/transfer_effects.py`, `reconcile/transfers.py`,
+  `reports/transfer_evidence.py`, `reports/totals.py`, `db/migrations/0014_transfer_matches.sql` and
+  `tests/scenarios/test_transfers.py`.
+- For M3.3, card payments, one-sided transfers and coverage warnings: D-011, D-012 and D-053 in
+  [decisions-d001-d052.md](decisions-d001-d052.md), and the M3.2 files above.
 - Any other decision by its heading in [decisions-d001-d052.md](decisions-d001-d052.md).
 - [layouts.md](layouts.md) when a task touches parsing or layouts. [benchmarks.md](benchmarks.md)
   when it touches performance. [archive/plan-m1-m2.md](archive/plan-m1-m2.md) for the M1 and M2
   acceptance criteria.
 
-## M3.1 as built
+## M3.2 as built
 
-Built and accepted 2026-11-08. Scope and acceptance tests are in [plan.md](plan.md)
-(F1 to F14), the rules, implementation choices and points for review in D-053. Tests are in
-`tests/scenarios/test_classifications.py`, `test_classification_order.py` and
-`test_classification_migration.py`. The benchmark is `measure_reconciliation.py --classified`.
-The suite gating the last M3.1 commit, `735e010`, passed 1512 tests with exit code 0. Breaks,
-walkthrough and benchmark output are in `build/m3.1-breaks/`, `build/m3.1-walk/` and
-`build/m3.1-bench/`.
+Built 2026-11-08, awaiting the owner's review. Scope and acceptance tests are in [plan.md](plan.md)
+(X1 to X14), the rules, implementation choices and points for review in D-054. Tests are in
+`tests/scenarios/test_transfers.py`, `test_transfer_order.py` and `test_transfer_migration.py`, and
+the receiving-account direction in `test_classifications.py`. The benchmark is
+`measure_reconciliation.py --transfers`. The full suite on the last M3.2 code, `7d62447`, passed 1625 tests with exit code 0. Breaks and benchmark output are in
+`build/m3.2-breaks/` and `build/m3.2-bench/`.
 
-**Known limits of M3.1:**
+**Known limits of M3.2:**
 
-- Only a person classifies, one transaction at a time. No layout or rule suggests a type (D-014).
-- Each type but `transfer` fits one direction whatever the account, so a payment received on a card,
-  loan or investment account can only be a `transfer`, and interest earned only `income`.
-- A classification binds the records of its transaction when made. A re-export that does not merge
-  is unclassified, and a split leaves every part unclassified.
-- Disagreeing classifications, a changed basis, or a correction's undo turning the amount against
-  the type leave the transaction unclassified, with no command but undo to settle it.
-- A classified transaction can be superseded only while one classification applies there.
-- `totals` lists types beside account movement. It is not income or spending: transfers are not
-  matched across accounts until M3.2, and reports wait for M3.4.
-- `transactions` does not show types. `review transaction show` and `review classifications` do.
-- Lines read "1 transactions", as `review decisions` reads "1 pairs".
+- Only a person matches, one pair at a time, and only a candidate, which needs a transfer-kind type
+  stated on one side first. An unclassified transfer raises nothing.
+- Matching does not classify the other side, so "By financial type" lists it as unclassified until
+  classified.
+- Exact offsetting amounts only. Fees apart from the principal, a transfer split over several
+  transactions, and one-sided transfers wait for M3.3.
+- A match binds the records of both transactions when made, and is never superseded. A match that
+  stops applying is settled only by undo.
+- An import summary does not report matches the import leaves unsettled. `totals` does.
+- `totals` lists matched transfers beside account movement. It is not income or spending, which wait
+  for M3.4.
 
 The full list of limitations is in [status.md](status.md).
 
@@ -101,7 +101,9 @@ Pitfalls that recurred across M1 to M3.1:
   class imported by name changes the count.
 - **Benchmarks** must be able to reach the cost they claim to measure. Three documents, not two, are
   needed for a confirmation to link anything.
-- **Shell.** zsh has no `PIPESTATUS`, and an unquoted `--include=*.py` fails. `mktemp -d` ignores
+- **Shell.** zsh has no `PIPESTATUS`, so `pytest | tail && git commit` gates on `tail`: it
+  happened once in M3.2, at `1d1267d`, on a passing suite. An unquoted `--include=*.py` fails, and
+  `echo ====` is read as a command. `mktemp -d` ignores
   `TMPDIR` here. The harness refuses `rm -rf` of a `build/` folder, so use a new folder.
 
 ## Open follow-ups
@@ -175,18 +177,19 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- A plan for M3.2, transfers across accounts, which needs its own decision on reconciling two
-  accounts together. Not started.
+- Review of M3.2 as built, including the plan itself, which was approved in advance, and the
+  implementation choices and points for review at the end of D-054.
+- A plan for M3.3, card payments, one-sided transfers and coverage warnings. Not started.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved through D-053's outcome and M3.1 | **Must be renewed** for anything further |
-| M1 and M2 | Accepted as built | None |
-| M3.1 | Accepted as built, 2026-11-08 | None |
-| M3.2 to M3.4 | Provisional, not approved | Each needs its own plan and approval |
+| Local commits on `feature/m2-review` | Approved through M3.2 | **Must be renewed** for anything further |
+| M1, M2 and M3.1 | Accepted as built | None |
+| M3.2 | Plan D-054 approved in advance, 2026-11-08. Built, awaiting review | Owner accepts or asks for changes |
+| M3.3 and M3.4 | Provisional, not approved | Each needs its own plan and approval |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -213,12 +216,13 @@ this task. Open the archive and other decisions only when the task needs them. C
 branch is feature/m2-review, the working tree is clean, and run the test suite with a real exit
 code before changing anything. Do not contact GitHub.
 
-M3.1 review outcome (D-053, financial types, including its points for review):
+M3.2 review outcome (D-054, transfers across accounts, including the plan itself, its
+implementation choices and its points for review):
 [PASTE IT HERE: accepted, or the changes you want]
 
-Task: record the outcome in D-053 and the handoff. If changes are wanted, make them as small gated
-commits and stop for review again. If accepted, propose a plan for M3.2 as its own decision, and
-stop for approval before building any of it. Do not reopen D-042 to D-053 unless you find a
+Task: record the outcome in D-054 and the handoff. If changes are wanted, make them as small gated
+commits and stop for review again. If accepted, propose a plan for M3.3 as its own decision, and
+stop for approval before building any of it. Do not reopen D-042 to D-054 unless you find a
 concrete contradiction.
 
 Follow the working principles in docs/handoff.md, and its "Keeping these docs small" rules when

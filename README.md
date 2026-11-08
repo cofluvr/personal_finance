@@ -181,7 +181,7 @@ bin/pf trace --db "$DB" TRANSACTION_ID
 bin/pf reconcile --db "$DB"
 ```
 
-`transactions`, `trace`, `review show`, `review merge show` and `review transaction show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review confirm`, `review merges`, `review separate`, `review decisions`, `review decision show`, `review undo`, `review correct`, `review corrections`, `review correction show`, `review correction undo`, `review complete`, `review dismiss`, `review resolutions`, `review resolution show`, `review resolution undo`, `review coverage show`, `review coverage declare`, `review coverage history`, `review coverage undo`, `review classify`, `review classifications`, `review classification show` and `review classification undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
+`transactions`, `trace`, `review show`, `review merge show` and `review transaction show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review confirm`, `review merges`, `review separate`, `review decisions`, `review decision show`, `review undo`, `review correct`, `review corrections`, `review correction show`, `review correction undo`, `review complete`, `review dismiss`, `review resolutions`, `review resolution show`, `review resolution undo`, `review coverage show`, `review coverage declare`, `review coverage history`, `review coverage undo`, `review classify`, `review classifications`, `review classification show`, `review classification undo`, `review transfers`, `review transfer match`, `review transfer show` and `review transfer undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
 
 ## Reading a Review Item
 
@@ -292,7 +292,7 @@ An `unresolved_record` item is a row the parser could not read as a transaction.
 - Source cells and parsed values are kept. `review show`, `review transaction show` and `trace` show what you supplied apart from what was read, and `transactions` marks the transaction.
 - Matching never pairs a completed row on the values you typed. An identical row in another file is raised as a possible duplicate, and `review confirm` can join them. A row read from a file supplies the displayed values before one you completed.
 - An unresolved row can keep confident matches in its file from happening, because it could distort the count. A dismissed row no longer does, so totals can fall. A completed row still does wherever its values could match.
-- `review resolution undo` makes the row unresolved again. Undoing a completion is refused while a decision, correction or classification binds the row: undo those first. Completing it again brings back the same transaction ID. See [D-050](docs/decisions.md).
+- `review resolution undo` makes the row unresolved again. Undoing a completion is refused while a decision, correction, classification or transfer match binds the row: undo those first. Completing it again brings back the same transaction ID. See [D-050](docs/decisions.md).
 
 ## Correcting a Document's Coverage
 
@@ -334,13 +334,31 @@ bin/pf review classification show --db "$DB" CLASSIFICATION_ID
 bin/pf review classification undo --db "$DB" --account ACCOUNT CLASSIFICATION_ID --revision REVISION
 ```
 
-Every transaction is `unclassified` until you state its type: `purchase`, `refund`, `income`, `fee`, `interest`, `transfer`, `card_payment`, `loan_payment` or `investment_contribution`. A refund and income are money in, a transfer either, and the others money out, so a type against the transaction's direction is refused. The revision comes from `review transaction show`.
+Every transaction is `unclassified` until you state its type: `purchase`, `refund`, `income`, `fee`, `interest`, `transfer`, `card_payment`, `loan_payment` or `investment_contribution`. A refund and income are money in, a transfer either, and the others money out, so a type against the transaction's direction is refused. A card payment received on a credit card, a loan payment on a loan and an investment contribution on an investment or retirement account may also be money in. The revision comes from `review transaction show`.
 
 - `totals` lists each type with its count and amount, and the unclassified transactions, below account movement, which a type never changes. Matching never reads a type.
 - A classification binds the records the transaction holds when you make it, as a correction does. A re-export that merges with them keeps it applied.
 - To change a type, name the classification applying there with `--supersedes` and its revision from `review classification show`. Only the newest of a chain applies, and each undo restores the one before it.
 - If classifications that disagree end up in one transaction, a classification's records end up in several transactions, or undoing a correction turns the amount against the type, the transaction is unclassified and `totals` says so on its own line. Undo one classification to settle it. `review confirm`, `review separate` and `review correct` refuse to cause this.
-- Only you classify. Nothing suggests a type yet, and transfers are not yet matched across accounts. On a card, loan or investment account, a payment received is money in, so it can only be stated as a `transfer` for now. See [D-053](docs/decisions.md).
+- Only you classify. Nothing suggests a type yet. Interest is money out only, so interest earned is `income`. See [D-053](docs/decisions.md).
+
+## Matching Transfers Between Accounts
+
+```sh
+bin/pf review transfers --db "$DB" [--account ACCOUNT]
+bin/pf review transfer match --db "$DB" --account ACCOUNT TRANSACTION_ID --revision REVISION \
+   --counterpart COUNTERPART_ID --counterpart-account OTHER_ACCOUNT --counterpart-revision REVISION
+bin/pf review transfer show --db "$DB" MATCH_ID
+bin/pf review transfer undo --db "$DB" --account ACCOUNT MATCH_ID --revision REVISION
+```
+
+Equal amounts are not proof of a transfer, so you start one by classifying a side as `transfer`, `card_payment`, `loan_payment` or `investment_contribution`. `review transfers` then lists as candidates the transactions of other accounts with exactly the opposite amount, within 5 days on any date of either side, that are unclassified or of a type that fits. A card payment needs a credit card at one end, a loan payment a loan, and an investment contribution an investment or retirement account. Both revisions come from `review transaction show`.
+
+- Only a listed candidate can be matched. Matching changes no account movement and no type totals: `totals` lists matched pairs, transactions in a candidate pair and transfer-kind transactions with neither, in a section of their own. Income and spending reports come later.
+- Each account is still reconciled alone. Matching and undoing need both accounts reconciled under the current rules, and refuse otherwise without reconciling them.
+- A match binds the records both transactions hold when you make it. A re-export that merges with either side keeps it applied.
+- A match stops applying if a side's records end up in several transactions, two matches reach one transaction, the amounts stop offsetting, or a type stops fitting. `totals` says so, and undoing the match settles it. `review confirm`, `review separate`, `review correct` and `review classify` refuse to cause this, and undos say when they do.
+- A match is never superseded: undo it and match again. Fees apart from the amount transferred, a transfer split over several transactions and one-sided transfers are not matched yet. See [D-054](docs/decisions.md).
 
 ## Reading an Import Summary
 

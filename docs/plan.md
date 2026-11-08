@@ -64,7 +64,7 @@ own approval.
 | Slice | Scope | Status |
 |---|---|---|
 | M3.1 | Financial types, stated by a person (D-053) | Accepted |
-| M3.2 | Transfer candidates across accounts, and reconciling two accounts together (D-054) | Approved, building |
+| M3.2 | Transfer candidates across accounts, and reconciling two accounts together (D-054) | Built, awaiting review |
 | M3.3 | Card payments, one-sided transfers and coverage warnings (D-012) | Provisional |
 | M3.4 | Totals by financial type, with disclosures of unconfirmed candidates | Provisional |
 

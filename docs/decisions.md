@@ -73,7 +73,7 @@ index line.
 | D-051 | Coverage correction with history — Approved, implemented and accepted in M2.8 |
 | D-052 | Pending to posted — Approved, implemented and accepted in M2.9 |
 | D-053 | Financial types — Approved, implemented and accepted in M3.1 |
-| D-054 | Transfers across accounts — Approved, building in M3.2 |
+| D-054 | Transfers across accounts — Approved in advance, implemented in M3.2, awaiting review |
 
 ## Rules in brief
 
@@ -150,7 +150,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Transfer candidates | A person's transfer-kind type on one side, the exact opposite amount in another account, dates within 5 days. Never stored | D-054 |
 | Receiving accounts | Card, loan and investment payments may be money in on the account they pay | D-054 |
 
-## D-054 Transfers across accounts — Approved, building in M3.2
+## D-054 Transfers across accounts — Approved in advance, implemented in M3.2, awaiting review
 
 Proposed for M3.2 on 2026-11-08. The owner asked for M3.2 to be built on the lead engineer's
 recommendations without a separate plan review, so these are approved in advance and open to change
@@ -162,7 +162,7 @@ proposed for M3.2.
 ```sh
 pf review transfers --db DB [--account A]
 pf review transfer match --db DB --account A TRANSACTION_ID --revision t6-… \
-   --counterpart-account B COUNTERPART_ID --counterpart-revision t6-…
+   --counterpart COUNTERPART_ID --counterpart-account B --counterpart-revision t6-…
 pf review transfer show --db DB MATCH_ID
 pf review transfer undo --db DB --account A MATCH_ID --revision m1-…
 ```
@@ -206,8 +206,7 @@ pf review transfer undo --db DB --account A MATCH_ID --revision m1-…
    those kinds holding one, and `reconcile` settles them.
 8. **Tokens.** `r7` to `r8` and `t5` to `t6` add each transaction's active matches, with their state
    and both sides' bound records, left out while there are none, so digests are kept. `m1` is the
-   match undo token: its state and the transaction tokens of every transaction holding its bound
-   records. `d6`, `c2` and `f1` are unchanged: a match changes nothing a decision regroups, a
+   match undo token: the transaction tokens of every transaction holding its bound records. `d6`, `c2` and `f1` are unchanged: a match changes nothing a decision regroups, a
    correction corrects or a classification states, the commands that would unsettle one refuse, and
    the undos report it.
 9. **Privacy.** `review transfers` shows IDs, accounts, types and states, never amounts or
@@ -219,6 +218,42 @@ pf review transfer undo --db DB --account A MATCH_ID --revision m1-…
 and spending reports (M3.4).
 
 **Acceptance tests,** X1 to X14, are in [plan.md](plan.md).
+
+**How these were implemented,** where the rules above left a choice, for the owner's review with
+M3.2:
+
+- A candidate reads each transaction's effective amount and dates, corrected where a correction
+  applies (D-049), and its applied type. A transaction with no date is never a candidate. The outflow
+  side is the one with money out, whichever is named first.
+- `transfer_match_effect` has one row per active match, naming its two transactions only while it
+  applies. Two unique indexes make "no transaction is a side of two applied matches" a schema rule,
+  and triggers keep a match to two accounts and each side to its own account's records.
+- `review transfer match` checks, in order: two different accounts, both current, each transaction
+  found, in its account and at its token, then the candidate rules, each refused with its own
+  message.
+- `t6` adds, for each active match binding a transaction's records, its side, the outcome and both
+  sides' bound records. The other side's transaction ID is immaterial, as IDs are. `r8` follows
+  because items show transactions. `m1` covers the `t6` of every transaction holding a bound record,
+  so a change to either side changes it. The outcome is in those tokens, so a deliberate break
+  showed it covered twice, and it was removed.
+- `review transfer undo` takes `--account` naming either of the match's accounts. Undoing a match
+  only ever settles others, so it reports nothing more.
+- For one account, `totals` counts the matches with a side there, the account's own transactions
+  in a candidate pair, and the amount on the inflow side.
+- Migration 0014 clears the marker of a card, loan, investment or retirement account holding any
+  transaction against its direction, not only one of the three types, because the stored row no
+  longer says which type it was.
+
+**For the owner's review, found while building M3.2:**
+
+- **A candidate needs a person's type first.** Without one, equal amounts on nearby dates raise
+  nothing, so an unclassified transfer is invisible here. Raising candidates from amounts and dates
+  alone would be easier to use and noisier, against D-006.
+- **Matching does not classify the other side.** It stays unclassified in "By financial type" unless
+  classified. M3.4 needs to decide whether a matched side counts as a transfer either way.
+- The 5-day window is a constant, not part of `MatchingRules`, because candidates are never stored
+  and so need no fingerprint (D-033).
+- An import summary does not report matches the import leaves unsettled. `totals` does.
 
 ## Not yet decided
 
