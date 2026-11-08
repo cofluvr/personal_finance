@@ -1073,11 +1073,12 @@ with M2.5 on 2026-11-08:
 - The `d3` digest is unchanged for a ledger without chains: `d2-2a1e1dd2ac99de82` became
   `d3-2a1e1dd2ac99de82`, and a test pins it.
 
-## D-049 Value corrections — Approved, implemented in M2.6
+## D-049 Value corrections — Approved, implemented and accepted in M2.6
 
 Approved by the owner on 2026-11-08 with the M2.6 plan, taking every recommendation in it. Meets
 D-041's requirements on corrections, and extends D-030. Builds on D-009 and D-040, and changes none
-of D-042 to D-048.
+of D-042 to D-048. Accepted as built by the owner on 2026-11-08, including the implementation choices
+below, with the limits in the handoff's "M2.6 as built".
 
 ```sh
 pf review transaction show --db DB TRANSACTION_ID
@@ -1160,8 +1161,8 @@ constraint, so it touches no candidate group. It is measured on the dense constr
 derivation is quadratic, and on many corrections and long chains. If a correction costs more than a
 later import of the same account, the work stops and is reported.
 
-**How these were implemented,** where the rules above left a choice. They await the owner's review
-with M2.6:
+**How these were implemented,** where the rules above left a choice. The owner accepted all of them
+with M2.6 on 2026-11-08:
 
 - Fields are stored by their command names: `amount`, `transaction_date`, `posting_date` and
   `description`. An amount is integer cents in its own column, and the others are text, with checks
