@@ -16,7 +16,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.5: new evidence on decided records, and superseding chains | Accepted (D-048) |
 | M2.6: value corrections | Accepted (D-049) |
 | M2.7: resolving incomplete records | Implemented, awaiting review (D-050) |
-| M2.8 and M2.9 | Provisional, not approved |
+| M2.8: coverage correction with history | Approved, in progress (D-051) |
+| M2.9 | Approved to plan and build, not yet planned |
 | M3 to M8 | Not started |
 
 ## What exists

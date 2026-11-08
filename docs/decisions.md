@@ -1300,6 +1300,75 @@ with M2.7:
   `d5-2a1e1dd2ac99de82` are the digests pinned before M2.7, unchanged.
 - `trace` now escapes descriptions, since a completed one is typed by a person.
 
+## D-051 Coverage correction with history — Approved
+
+Approved by the owner on 2026-11-08, who asked for M2.8 to be built with the lead engineer's
+recommendations, recorded here before its code, and reviewed with M2.7 and M2.9. Replaces D-022's
+coverage limitation, keeps D-005, D-007 and D-027, and changes none of D-042 to D-050.
+
+```sh
+pf documents --db DB                       # now names each document's ID
+pf review coverage show --db DB DOCUMENT_ID
+pf review coverage declare --db DB --account A DOCUMENT_ID --revision v1-… \
+   --coverage-kind complete --coverage-start D --coverage-end D --coverage-basis posting
+pf review coverage declare --db DB --account A DOCUMENT_ID --revision v1-… --coverage-kind unknown
+pf review coverage history --db DB [--account A]
+pf review coverage undo --db DB --account A DECLARATION_ID --revision k1-…
+```
+
+**What is declared.** One document's coverage for one account, after import. `complete` with an
+inclusive interval and a date basis, as a declaration at import (D-005), or `unknown`, withdrawing a
+claim. `partial` is not offered: for matching it says what `unknown` says.
+
+**What a person may declare.**
+
+| Coverage at import | Allowed |
+|---|---|
+| `unknown`, or `complete` declared by a person | `complete` or `unknown` |
+| Stated by the document's metadata | `unknown` only. A person never claims more than the document states |
+
+The basis must be one the stored interpretation offers (D-026), and a declaration must change the
+effective coverage.
+
+**Storage.** Migration 0011 adds append-only `coverage_declaration` and `coverage_declaration_event`.
+`document_coverage` stays the claim made at import, unchanged. Each declaration supersedes the one in
+effect for that document, if any, and chains follow D-048: only the newest applies, undo steps back
+one link, and a superseded declaration is refused naming the newest of its chain. The effective
+coverage is the newest active declaration, else the claim at import.
+
+**Matching** reads the effective coverage through `load_evidence`, so `derive()` is unchanged. A
+declared `complete` has evidence `user_declared`, so D-027's restriction does not apply and D-007's
+rules do. Declaring and undoing re-derive the account, so they can merge or split, raise or lower
+totals, and change decision conflicts and correction states, which they report. They never refuse
+for that, as an import does not.
+
+**Repeat imports.** A declaration given with a repeat import is compared with the effective coverage:
+equal is `already_imported`, different is `coverage_conflict`, whose explanation now names
+`review coverage declare`.
+
+**Commands.** D-043's checks under one write lock: the account must be current, and account, document
+and token are checked together. Coverage is not a financial value, so the commands print intervals,
+and no amounts or descriptions.
+
+**Distinguishable (D-041).** `documents` and `review show` show declared coverage apart from the claim
+at import, and `totals` discloses documents whose coverage was declared after import on its own line.
+
+**Tokens (D-040).** A ledger without declarations keeps its digests.
+
+| Token | New inputs | Version |
+|---|---|---|
+| Item | Each document's declared coverage, and the effective end and pending rule from it | `r5` to `r6` |
+| Transaction | The same, for one transaction's documents | `t3` to `t4` |
+| Decision, correction and resolution undo | None: they read documents as matching does, now with effective coverage | `d5`, `c1`, `u1`, unchanged |
+| Document coverage, new | The document's effective coverage | `v1` |
+| Declaration undo, new | The review items derivation gives without it, for records whose items differ | `k1` |
+
+**Cost.** One derivation per command. Measured where declaring complete coverage unblocks a whole
+document's exact pairs, against an import making the same merges.
+
+**Not in scope.** `partial` declarations, coverage for several documents at once, changing coverage
+a document's metadata states other than withdrawing it, and coverage of documents of other accounts.
+
 ## Not yet decided
 
 From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend details

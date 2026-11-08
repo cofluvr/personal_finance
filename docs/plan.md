@@ -149,7 +149,7 @@ the decision log records the database, parser and deduplication rules.
 
 ## M2 plan
 
-M2.1, M2.2, M2.3 (D-046), M2.4 (D-047), M2.5 (D-048) and M2.6 (D-049) are accepted. M2.7 is implemented and awaits review (D-050). **M2.8 and M2.9 are provisional**:
+M2.1, M2.2, M2.3 (D-046), M2.4 (D-047), M2.5 (D-048) and M2.6 (D-049) are accepted. M2.7 is implemented and awaits review (D-050). M2.8 is approved (D-051). **M2.9 is provisional**:
 a direction, not approval to implement, and each needs its own approval. D-041 lists requirements
 they must meet.
 
@@ -162,7 +162,7 @@ they must meet.
 | M2.5 | New evidence that touches a decided record, and superseding a decision | Accepted (D-048) |
 | M2.6 | Correction overrides | Accepted (D-049) |
 | M2.7 | Resolving incomplete records | Implemented, awaiting review (D-050) |
-| M2.8 | Coverage correction with history | Provisional |
+| M2.8 | Coverage correction with history | Approved (D-051) |
 | M2.9 | Pending to posted, including tips, changed descriptions and the D-008 migration | Provisional |
 
 Direction from planning, not yet decisions:
@@ -418,6 +418,38 @@ an ID, superseding a resolution, resolving several records at once.
 | U17 | `totals` and import summaries disclose completed and dismissed records on their own lines |
 | U18 | S1 to S23, C1 to C21, P1 to P22, N1 to N18 and V1 to V18 still pass |
 | U19 | A dismissal unblocking a document's exact pairs, a completion, their undo and a later import are measured |
+
+### M2.8 scope
+
+The rules are D-051. Migration 0011, document IDs in `documents`, `review coverage show`,
+`review coverage declare`, `review coverage history` and `review coverage undo`, effective coverage in
+matching, repeat imports against it, tokens `r6`, `t4`, `v1` and `k1`, disclosure lines, and a
+benchmark with `--declared`.
+
+Deferred: `partial` declarations, several documents at once, anything but withdrawal for coverage a
+document's metadata states.
+
+### M2.8 acceptance criteria
+
+| ID | Test |
+|---|---|
+| K1 | Declaring complete coverage on an unknown document lets an exact pair merge. Totals fall by exactly one copy, and `document_coverage` is byte-identical |
+| K2 | Withdrawing a declaration made at import splits its merges, and totals rise |
+| K3 | A document whose metadata states coverage can only have it withdrawn |
+| K4 | Refused, with nothing changed: wrong account, unknown document, stale token, stale account, an invalid interval or basis, a basis the layout lacks, a declaration that changes nothing |
+| K5 | A stale account is not reconciled by the refused command |
+| K6 | Chains: only the newest applies, undo steps back one link, and a superseded declaration is refused naming the newest |
+| K7 | Undoing a declaration equals a ledger where it was never made, with and without imports since |
+| K8 | Declaring after import gives the ledger that declaring at import gives |
+| K9 | A repeat import with a declaration equal to the effective coverage is `already_imported`, and a different one is `coverage_conflict` naming `review coverage declare` |
+| K10 | Decision conflicts and correction states follow the new grouping, and the commands report unsettled corrections |
+| K11 | Tokens: `r6` and `t4` pinned, keeping digests without declarations, `v1` and `k1` pinned, stale tokens refused, and an unrelated file leaves `k1` unchanged |
+| K12 | Equivalent declarations made at different valid points in the import sequence give the same outcome, exhaustively for four files |
+| K13 | Migration 0011 works on a populated ledger, makes no account stale and is atomic on failure. Declaration tables are append-only |
+| K14 | Privacy: the coverage commands show no amounts or descriptions |
+| K15 | `documents`, `review show` and `totals` show declared coverage apart from the claim at import |
+| K16 | S, C, P, N, V and U still pass |
+| K17 | Declaring complete coverage that unblocks a document's exact pairs, its undo and a later import are measured against an import making the same merges |
 
 ## Backlog benchmarks
 
