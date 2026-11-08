@@ -14,12 +14,17 @@ from personal_finance.reconcile.apply import (
     load_evidence,
     superseded_by,
 )
+from personal_finance.reconcile.correction_effects import (
+    effective_field_corrections,
+    load_active_corrections,
+)
 from personal_finance.reconcile.cross_document import derive
 from personal_finance.reconcile.rules import MatchingRules
 
 # Bump whenever the material below changes, so an old token can never appear current. Version 3
-# restores only the decision just before this one, so a chain reads differently (D-048).
-DECISION_REVISION_VERSION = 3
+# restores only the decision just before this one, so a chain reads differently (D-048). Version 4
+# adds corrections binding records in scope, left out where there are none (D-049).
+DECISION_REVISION_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -74,6 +79,8 @@ class UndoOutlook:
     revision: str
     transactions_now: int
     transactions_after: int
+    # Whether undoing would change which corrected values apply, or where (D-049).
+    changes_corrected_values: bool = False
 
 
 def shown_kind(kind: str, target_kind: str) -> str:
@@ -252,7 +259,42 @@ def undo_outlook(
         "with_decision": view(now),
         "without_decision": view(after),
     }
-    return UndoOutlook(decision_revision(material), len(now.groups), len(after.groups))
+    active_corrections = load_active_corrections(conn, decision.account_id)
+    touching_corrections = [
+        correction for correction in active_corrections if correction.bound_record_ids & scope
+    ]
+    changes_corrected_values = False
+    if touching_corrections:
+        corrected_record_ids = set().union(
+            *(correction.bound_record_ids for correction in touching_corrections)
+        )
+
+        def correction_view(result):
+            group_by_record_id = {
+                record_id: index
+                for index, group in enumerate(result.groups) for record_id in group.record_ids
+            }
+            effects = effective_field_corrections(active_corrections, group_by_record_id)
+            return sorted(
+                [keyed(result.groups[index].record_ids), field, effect.state, effect.applied_value]
+                for (index, field), effect in effects.items()
+                if corrected_record_ids.intersection(result.groups[index].record_ids)
+            )
+
+        material["corrections"] = {
+            "bound": sorted(
+                [correction.field, correction.corrected_value,
+                 keyed(correction.bound_record_ids)]
+                for correction in touching_corrections
+            ),
+            "with_decision": correction_view(now),
+            "without_decision": correction_view(after),
+        }
+        changes_corrected_values = (
+            material["corrections"]["with_decision"] != material["corrections"]["without_decision"]
+        )
+    return UndoOutlook(decision_revision(material), len(now.groups), len(after.groups),
+                       changes_corrected_values)
 
 
 def decision_revision(material: dict) -> str:

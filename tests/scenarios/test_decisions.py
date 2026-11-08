@@ -47,7 +47,9 @@ SOURCE_TABLES = ("source_document", "source_record", "record_parse", "document_c
                  "document_interpretation", "source_record_origin")
 ALL_TABLES = (*SOURCE_TABLES, "ledger_transaction", "transaction_source", "review_issue",
               "review_issue_subject", "transaction_link_history", "transaction_identity_history",
-              "decision", "decision_constraint", "decision_event", "account_reconciliation")
+              "decision", "decision_constraint", "decision_event", "account_reconciliation",
+              "value_correction", "value_correction_record", "value_correction_event",
+              "transaction_correction")
 
 
 def declared(start, end):
@@ -79,7 +81,8 @@ class Ledger:
         self.capsys.readouterr()
         words = list(command)
         position = 2 if words[0] in ("account", "review") else 1
-        if words[:2] in (["review", "decision"], ["review", "merge"]):
+        if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
+                         ["review", "correction"]):
             position = 3
         words[position:position] = ["--db", self.db]
         code = main(words)
@@ -119,7 +122,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r3-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r4-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)
@@ -142,7 +145,7 @@ class Ledger:
 
     def decision_revision(self, decision):
         out = self.run("review", "decision", "show", decision)[1]
-        return re.search(r"Revision: (d3-[0-9a-f]{16})", out)[1]
+        return re.search(r"Revision: (d4-[0-9a-f]{16})", out)[1]
 
     def undo(self, decision, revision=None, account="A"):
         return self.run("review", "undo", decision, "--account", account,
@@ -1004,7 +1007,7 @@ class TestUndoToken:  # S21
 
     def test_the_token_has_the_documented_form(self, ledger):
         _, token = self.decided(ledger)
-        assert re.fullmatch(r"d3-[0-9a-f]{16}", token)
+        assert re.fullmatch(r"d4-[0-9a-f]{16}", token)
 
 
 class TestConstraintsApplied:

@@ -9,6 +9,7 @@ import pytest
 from personal_finance import cli
 from personal_finance.reports.review_evidence import (
     IMMATERIAL_FIELDS,
+    OMITTED_WHILE_EMPTY,
     REVISION_VERSION,
     DecidedPair,
     DecidedRecord,
@@ -108,8 +109,12 @@ def test_every_field_is_material_or_explicitly_exempt(name):
 def test_exempt_fields_are_identifiers_names_and_the_stale_warning_only():
     assert IMMATERIAL_FIELDS == {
         "issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
-        "account_name", "decision_id",
+        "account_name", "decision_id", "correction_id",
     }
+
+
+def test_only_corrections_are_left_out_while_empty():
+    assert OMITTED_WHILE_EMPTY == {"corrections"}
 
 
 @pytest.mark.parametrize("field", ["transactions", "unresolved", "documents", "decided"])
@@ -127,12 +132,12 @@ def test_moving_a_record_between_transactions_changes_the_revision():
 
 
 def test_the_definition_is_pinned_so_a_change_must_bump_the_version():
-    assert REVISION_VERSION == 3
-    assert review_revision(item()) == "r3-8f8c8b328e5b7256"
+    assert REVISION_VERSION == 4
+    assert review_revision(item()) == "r4-8f8c8b328e5b7256"
 
 
 def test_the_token_has_the_documented_form():
-    assert re.fullmatch(r"r3-[0-9a-f]{16}", review_revision(item()))
+    assert re.fullmatch(r"r4-[0-9a-f]{16}", review_revision(item()))
 
 
 def test_rows_sharing_a_document_ignores_documents_with_one_record():

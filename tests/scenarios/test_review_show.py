@@ -21,6 +21,8 @@ LEDGER_TABLES = (
     "ledger_transaction", "transaction_source", "transaction_link_history",
     "transaction_identity_history", "review_issue", "review_issue_subject",
     "account_reconciliation", "decision", "decision_constraint", "decision_event",
+    "value_correction", "value_correction_record", "value_correction_event",
+    "transaction_correction",
 )
 
 
@@ -88,7 +90,7 @@ def show(db, capsys):
 
 
 def revision_of(text):
-    return re.search(r"Revision: (r3-[0-9a-f]{16})", text)[1]
+    return re.search(r"Revision: (r4-[0-9a-f]{16})", text)[1]
 
 
 def section_order(text, *labels):

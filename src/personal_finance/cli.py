@@ -33,6 +33,12 @@ from personal_finance.reconcile.cross_document import (
     deciding_criterion,
     primary_rank,
 )
+from personal_finance.reconcile.correction_effects import (
+    FIELD_APPLIED,
+    FIELD_BASIS_CHANGED,
+    FIELD_IN_CONFLICT,
+)
+from personal_finance.reconcile.corrections import correct_value, undo_correction
 from personal_finance.reconcile.decisions import (
     DecisionRefused,
     confirm_groups,
@@ -43,6 +49,11 @@ from personal_finance.reconcile.decisions import (
     undo_decision,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reports.correction_evidence import (
+    correction_undo_outlook,
+    list_corrections,
+    load_correction,
+)
 from personal_finance.reports.decision_evidence import (
     list_decisions,
     load_decision,
@@ -174,6 +185,30 @@ UNDO_NOTICE = (
     "an earlier snapshot, so totals may differ from those before the decision if evidence "
     "has arrived since."
 )
+
+
+CORRECTION_NOTICE = (
+    "Totals and transactions use the corrected value. Source values stay unchanged, and matching "
+    "never reads corrections. New records are not bound, but a re-export that joins this "
+    "transaction keeps the correction applied."
+)
+
+CORRECTION_UNDO_NOTICE = (
+    "The source value applies again, or the correction this one superseded. Source values were "
+    "never changed."
+)
+
+# What each state of a corrected field means for the value used (D-049).
+FIELD_STATE_EXPLANATIONS = {
+    FIELD_APPLIED: "the corrected value is used",
+    FIELD_IN_CONFLICT: (
+        "corrections disagree, so the source value is used. Undo all but one to settle it"
+    ),
+    FIELD_BASIS_CHANGED: (
+        "a correction binds records now in several transactions, so the source value is used. "
+        "Undo it, then correct each transaction"
+    ),
+}
 
 
 class CommandError(Exception):
@@ -330,6 +365,64 @@ def build_parser() -> argparse.ArgumentParser:
     undo.add_argument("decision_id", help="a decision ID from review decisions")
     undo.add_argument("--account", required=True, help="account name or ID")
     undo.add_argument("--revision", required=True, help="the revision from review decision show")
+
+    transaction = review_commands.add_parser("transaction", help="inspect one transaction")
+    transaction_commands = transaction.add_subparsers(dest="transaction_command", required=True)
+    transaction_show = command(
+        "show", transaction_commands, handler=run_review_transaction_show,
+        help="show one transaction's evidence and corrections, including amounts and descriptions",
+    )
+    transaction_show.add_argument("transaction_id", help="a transaction ID from transactions")
+
+    correct = command(
+        "correct", review_commands, handler=run_review_correct,
+        help="record a corrected value for one field of a transaction, keeping its source value",
+    )
+    correct.add_argument("transaction_id", help="a transaction ID from transactions")
+    correct.add_argument("--account", required=True, help="account name or ID")
+    correct.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    correct.add_argument(
+        "--field", required=True,
+        help="amount, transaction_date, posting_date or description",
+    )
+    correct.add_argument(
+        "--value", required=True,
+        help="the corrected value: an amount such as --value=-12.50, negative for money out, a "
+        "date as YYYY-MM-DD, or a description",
+    )
+    correct.add_argument(
+        "--supersedes", metavar="CORRECTION_ID",
+        help="the correction applying to this field now, which this one replaces",
+    )
+    correct.add_argument(
+        "--supersedes-revision", metavar="REVISION",
+        help="the revision from review correction show for the correction being replaced",
+    )
+
+    corrections = command(
+        "corrections", review_commands, handler=run_review_corrections,
+        help="list stored corrections",
+    )
+    corrections.add_argument("--account", help="account name or ID")
+
+    correction = review_commands.add_parser("correction", help="inspect or undo one correction")
+    correction_commands = correction.add_subparsers(dest="correction_command", required=True)
+    correction_show = command(
+        "show", correction_commands, handler=run_review_correction_show,
+        help="show what a correction binds and what undoing it would do",
+    )
+    correction_show.add_argument("correction_id", help="a correction ID from review corrections")
+    correction_undo = command(
+        "undo", correction_commands, handler=run_review_correction_undo,
+        help="stop a correction applying, keeping it on record",
+    )
+    correction_undo.add_argument("correction_id", help="a correction ID from review corrections")
+    correction_undo.add_argument("--account", required=True, help="account name or ID")
+    correction_undo.add_argument(
+        "--revision", required=True, help="the revision from review correction show"
+    )
 
     totals = command("totals", handler=run_totals, help="show account movement")
     totals.add_argument("--account", help="account name or ID")
@@ -521,6 +614,8 @@ def print_account_state(movement) -> None:
     print(f"  {describe_open_groups(movement)}")
     for line in describe_conflicts(movement):
         print(f"  {line}")
+    for line in describe_corrections(movement):
+        print(f"  {line}")
     print(f"  Unresolved records, not included in totals: {movement.unresolved_records}")
 
 
@@ -529,6 +624,29 @@ def describe_open_groups(movement) -> str:
         f"Open review groups: {movement.candidate_groups}, covering "
         f"{movement.transactions_in_candidate_groups} distinct affected transactions."
     )
+
+
+def describe_corrections(movement) -> list[str]:
+    """Corrections on their own lines, apart from duplicates and conflicts (D-049)."""
+    lines = []
+    if movement.transactions_corrected:
+        lines.append(
+            f"Transactions using a corrected value: {movement.transactions_corrected}. Their "
+            "source values are kept, and undoing a correction restores them."
+        )
+    if movement.transactions_with_correction_conflict:
+        lines.append(
+            f"Transactions keeping a source value because corrections disagree: "
+            f"{movement.transactions_with_correction_conflict}. These are not possible duplicates "
+            "or decision conflicts. Run review corrections."
+        )
+    if movement.transactions_with_correction_basis_changed:
+        lines.append(
+            f"Transactions keeping a source value because a correction binds records now in "
+            f"several transactions: {movement.transactions_with_correction_basis_changed}. Run "
+            "review corrections."
+        )
+    return lines
 
 
 def describe_conflicts(movement) -> list[str]:
@@ -608,14 +726,40 @@ def run_documents(args) -> int:
 
 def run_transactions(args) -> int:
     conn = open_ledger(args.db, read_only=True)
+    # Effective values: a corrected value where one applies, else the source value (D-049).
     rows = conn.execute(
-        """SELECT id, COALESCE(transaction_date, posting_date), amount_cents,
-                  settlement_status, description
-           FROM ledger_transaction
-           ORDER BY COALESCE(transaction_date, posting_date), id"""
+        """SELECT entry.id,
+                  COALESCE(fixed_transaction_date.corrected_text, entry.transaction_date,
+                           fixed_posting_date.corrected_text, entry.posting_date) AS shown_date,
+                  COALESCE(fixed_amount.corrected_amount_cents, entry.amount_cents),
+                  entry.settlement_status,
+                  COALESCE(fixed_description.corrected_text, entry.description),
+                  EXISTS (SELECT 1 FROM transaction_correction fix
+                          WHERE fix.transaction_id = entry.id AND fix.state = 'applied')
+           FROM ledger_transaction entry
+           LEFT JOIN transaction_correction fixed_amount
+               ON fixed_amount.transaction_id = entry.id AND fixed_amount.field = 'amount'
+              AND fixed_amount.state = 'applied'
+           LEFT JOIN transaction_correction fixed_transaction_date
+               ON fixed_transaction_date.transaction_id = entry.id
+              AND fixed_transaction_date.field = 'transaction_date'
+              AND fixed_transaction_date.state = 'applied'
+           LEFT JOIN transaction_correction fixed_posting_date
+               ON fixed_posting_date.transaction_id = entry.id
+              AND fixed_posting_date.field = 'posting_date'
+              AND fixed_posting_date.state = 'applied'
+           LEFT JOIN transaction_correction fixed_description
+               ON fixed_description.transaction_id = entry.id
+              AND fixed_description.field = 'description'
+              AND fixed_description.state = 'applied'
+           ORDER BY shown_date, entry.id"""
     ).fetchall()
-    for transaction_id, when, cents, status, description in rows:
-        print(f"{transaction_id}  {when}  {format_cents(cents):>12}  {status:<8}  {description or ''}")
+    for transaction_id, when, cents, status, description, corrected in rows:
+        marker = "  (corrected)" if corrected else ""
+        print(
+            f"{transaction_id}  {when}  {format_cents(cents):>12}  {status:<8}  "
+            f"{shown(description) if description else ''}{marker}"
+        )
     if not rows:
         print("No transactions.")
     return 0
@@ -639,6 +783,19 @@ def run_trace(args) -> int:
     print(f"  Amount: {format_cents(cents)}")
     print(f"  Status: {status}")
     print(f"  Description: {description or 'missing'}")
+    corrected_fields = conn.execute(
+        """SELECT field, state, corrected_amount_cents, corrected_text FROM transaction_correction
+           WHERE transaction_id = ? ORDER BY field""",
+        (args.transaction_id,),
+    ).fetchall()
+    if corrected_fields:
+        print("Corrections, applied over the source values above:")
+    for field, state, corrected_amount_cents, corrected_text in corrected_fields:
+        if state == FIELD_APPLIED:
+            value = format_cents(corrected_amount_cents) if field == "amount" else shown(corrected_text)
+            print(f"  {field}: corrected to {value}")
+        else:
+            print(f"  {field}: {FIELD_STATE_EXPLANATIONS[state]}")
 
     sources = conn.execute(
         """SELECT document.file_name, document.content_sha256, document.layout_id,
@@ -945,6 +1102,27 @@ def print_transaction_evidence(entry, shared) -> None:
         print(f"    {primary.file_name} row {primary.row} supplies the values above")
     for record in entry.records:
         print_record_evidence(record, describe_role(record.record_id, primary_id, ranks), shared)
+    print_corrections(entry)
+
+
+def print_corrections(entry) -> None:
+    """Corrections stay apart from the source values above (D-049)."""
+    if not entry.corrections:
+        return
+    print("  Corrections, kept apart from the source values above:")
+    for correction in entry.corrections:
+        print(
+            f"    Correction {correction.correction_id}: {correction.field} corrected to "
+            f"{shown_corrected_value(correction.field, correction.corrected_value)}, binding "
+            f"{describe_side(correction.bound_records)}"
+        )
+    state_by_field = {correction.field: correction.field_state for correction in entry.corrections}
+    for field, state in sorted(state_by_field.items()):
+        print(f"    {field}: {FIELD_STATE_EXPLANATIONS[state]}")
+
+
+def shown_corrected_value(field, value) -> str:
+    return format_cents(value) if field == "amount" else shown(value)
 
 
 def print_record_evidence(record, role, shared) -> None:
@@ -1056,7 +1234,19 @@ def run_review_merge_show(args) -> int:
     merge = load_merge_evidence(conn, args.transaction_id)
     if merge is None:
         raise CommandError("transaction not found. Run review merges.")
+    return print_transaction_inspection(merge)
 
+
+def run_review_transaction_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    merge = load_merge_evidence(conn, args.transaction_id)
+    if merge is None:
+        raise CommandError("transaction not found. Run transactions.")
+    return print_transaction_inspection(merge)
+
+
+def print_transaction_inspection(merge) -> int:
+    """One transaction's evidence, as review merge show and review transaction show print it."""
     entry = merge.transaction
     print(f"Transaction {entry.transaction_id}")
     print(f"  Account: {shown(merge.account_name)} ({merge.account_id})")
@@ -1165,6 +1355,8 @@ def run_review_decision_show(args) -> int:
         if decision.supersedes_decision_id:
             print(f"  Restores decision {decision.supersedes_decision_id}, which it superseded")
         print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
+        if outlook.changes_corrected_values:
+            print("  Changes which corrected values apply, or where. Run review corrections after.")
         print(f"  {UNDO_NOTICE}")
         if stale:
             print(
@@ -1184,7 +1376,134 @@ def run_review_undo(args) -> int:
         print(f"  Decision {result.restored}, which it superseded, applies again.")
     print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
     print(f"  Source memberships changed: {result.moved_records}")
+    print_newly_unsettled(result.newly_unsettled_correction_fields)
     print(f"  {UNDO_NOTICE}")
+    return 0
+
+
+def print_newly_unsettled(count) -> None:
+    if count:
+        print(
+            f"  Corrected fields now using their source value, because corrections disagree or "
+            f"lost their basis: {count}. Run review corrections."
+        )
+
+
+def run_review_correct(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    result = correct_value(
+        conn, account_id, args.transaction_id, args.revision, args.field, args.value,
+        supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
+    )
+
+    print(
+        f"Correction {result.correction_id} recorded: the {result.field} of transaction "
+        f"{args.transaction_id}, binding {result.bound_record_count} records."
+    )
+    if args.supersedes:
+        print(f"  Supersedes correction {args.supersedes}. It stays on record.")
+    print(f"  {CORRECTION_NOTICE}")
+    return 0
+
+
+def run_review_corrections(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_corrections(conn, account_id)
+    for correction_id, account, created_at, state, field, bound_count in rows:
+        print(
+            f"Correction {correction_id}: {state}, {field}, {bound_count} records, "
+            f"{shown(account)}, {created_at}"
+        )
+    print(f"Corrections: {len(rows)}")
+    unsettled = conn.execute(
+        """SELECT fix.transaction_id, fix.field, fix.state FROM transaction_correction fix
+           JOIN ledger_transaction entry ON entry.id = fix.transaction_id
+           WHERE fix.state <> 'applied' AND (:account IS NULL OR entry.account_id = :account)
+           ORDER BY fix.transaction_id, fix.field""",
+        {"account": account_id},
+    ).fetchall()
+    for transaction_id, field, state in unsettled:
+        print(f"Transaction {transaction_id}, {field}: {FIELD_STATE_EXPLANATIONS[state]}")
+    if rows:
+        print("To see what a correction binds, run review correction show.")
+    return 0
+
+
+# How a field's state reads in an undo preview. None means no correction applies at all.
+PREVIEW_STATES = {
+    None: "source value, uncorrected",
+    FIELD_APPLIED: "corrected",
+    FIELD_IN_CONFLICT: "source value, corrections disagree",
+    FIELD_BASIS_CHANGED: "source value, basis changed",
+}
+
+
+def run_review_correction_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    correction = load_correction(conn, args.correction_id)
+    if correction is None:
+        raise CommandError("correction not found. Run review corrections.")
+
+    print(f"Correction {correction.correction_id}")
+    print(f"  Account: {shown(correction.account_name)} ({correction.account_id})")
+    print(f"  Field: {correction.field}")
+    print(f"  Status: {correction.state}")
+    print(f"  Made: {correction.created_at}")
+    if correction.undone_at:
+        print(f"  Undone: {correction.undone_at}. It stays on record and no longer applies.")
+    if correction.superseded_by:
+        print(
+            f"  Superseded by correction {correction.superseded_by}. It stays on record and no "
+            "longer applies, unless that correction is undone."
+        )
+    if correction.newest_of_chain != correction.superseded_by:
+        print(
+            f"  Newest of its chain: correction {correction.newest_of_chain}, the only one that "
+            "can be undone. Each undo restores the correction before it."
+        )
+    if correction.supersedes_correction_id:
+        print(f"  Supersedes correction {correction.supersedes_correction_id}")
+    print(f"  From transaction: {correction.target_transaction_id}")
+    print("Bound records:")
+    for record in correction.bound_records:
+        where = record.transaction_id or "no transaction"
+        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
+
+    if correction.state == STATE_ACTIVE:
+        outlook = correction_undo_outlook(conn, correction)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this correction now:")
+        if correction.supersedes_correction_id:
+            print(
+                f"  Restores correction {correction.supersedes_correction_id}, which it superseded"
+            )
+        for transaction_id, state_now, state_after in outlook.field_state_by_transaction:
+            print(
+                f"  Transaction {transaction_id}, {correction.field}: {PREVIEW_STATES[state_now]} "
+                f"now, {PREVIEW_STATES[state_after]} after"
+            )
+        if stale_accounts(conn, DEFAULT_RULES, correction.account_id):
+            print(
+                "This account has not been reconciled under the current matching rules, so "
+                "undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
+def run_review_correction_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_correction(conn, account_id, args.correction_id, args.revision)
+
+    print(f"Correction {args.correction_id} undone. It stays on record and no longer applies.")
+    if result.restored:
+        print(f"  Correction {result.restored}, which it superseded, applies again.")
+    print_newly_unsettled(result.newly_unsettled_fields)
+    print(f"  {CORRECTION_UNDO_NOTICE}")
     return 0
 
 
@@ -1231,6 +1550,8 @@ def run_totals(args) -> int:
             f"- {movement.transactions_separated} transactions hold records you separated from an "
             "automatic match, and each is counted. Undoing a separation can lower totals."
         )
+    for line in describe_corrections(movement):
+        print(f"- {line}")
     return 0
 
 

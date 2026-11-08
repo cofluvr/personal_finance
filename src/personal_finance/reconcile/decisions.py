@@ -19,6 +19,7 @@ from personal_finance.reconcile.apply import (
     load_evidence,
     reconcile_account,
 )
+from personal_finance.reconcile.correction_effects import unsettled_correction_fields
 from personal_finance.reconcile.cross_document import (
     RELATION_DIFFERENT,
     RELATION_SAME,
@@ -180,6 +181,16 @@ SPLITS_OTHERS = (
     "a group boundary would separate records that decision {decisions} confirmed as one event, "
     "and only the decision named with --supersedes can be replaced. Nothing was changed."
 )
+JOINS_DISAGREEING_CORRECTIONS = (
+    "this confirmation would join transactions whose corrections disagree, or split the records "
+    "one correction binds, so their source values would be used. It was not recorded and nothing "
+    "was changed. Undo one of those corrections first."
+)
+SPLITS_CORRECTED_RECORDS = (
+    "this separation would split the records that one correction binds, or join corrections "
+    "that disagree, so their source values would be used. It was not recorded and nothing was "
+    "changed. Undo that correction first, then correct each part."
+)
 WOULD_SPLIT_MORE = (
     "this separation would change more than the transaction it names, so it was not recorded "
     "and nothing was changed."
@@ -243,6 +254,8 @@ class Undo:
     moved_records: int
     # The decision this one superseded, which applies again.
     restored: str | None = None
+    # Fields of transactions left on their source value by this undo, and not before (D-049).
+    newly_unsettled_correction_fields: int = 0
 
 
 def undecided_direct_pairs(
@@ -432,6 +445,7 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
         kept = _account_for_pairs(replaced, overturned, replacing[2])
 
     before = _memberships(conn, account_id)
+    unsettled_before = unsettled_correction_fields(conn, account_id)
     expected = {
         records for transaction_id, records in before.items()
         if not any(transaction_id in group for group in groups)
@@ -457,6 +471,8 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
     after = _memberships(conn, account_id)
     if set(after.values()) != expected:
         raise DecisionRefused(WOULD_CHANGE_MORE)
+    if unsettled_correction_fields(conn, account_id) - unsettled_before:
+        raise DecisionRefused(JOINS_DISAGREEING_CORRECTIONS)
 
     still_open = conn.execute("SELECT 1 FROM review_issue WHERE id = ?", (item_id,)).fetchone()
     return Confirmation(
@@ -568,6 +584,7 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules, replaci
         kept = _account_for_pairs(replaced, overturned, replacing[2])
 
     before = _memberships(conn, account_id)
+    unsettled_before = unsettled_correction_fields(conn, account_id)
     expected = {records for key, records in before.items() if key != transaction_id}
     expected.update(frozenset(group) for group in groups)
 
@@ -589,6 +606,8 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules, replaci
         _in_open_conflict(conn, key) for key, held in after.items() if held & set(records)
     ):
         raise DecisionRefused(WOULD_SPLIT_MORE)
+    if unsettled_correction_fields(conn, account_id) - unsettled_before:
+        raise DecisionRefused(SPLITS_CORRECTED_RECORDS)
     return Separation(
         decision_id, len(groups), len(before), len(after), _overridden_guarantee(merge, groups),
         len(overturned), len(kept),
@@ -909,10 +928,12 @@ def _undo(conn, account_id, decision_id, revision, rules) -> Undo:
         raise DecisionRefused(RESTORE_CONTRADICTS.format(restored=restored))
 
     before = account_movement(conn, account_id).transactions
+    unsettled_before = unsettled_correction_fields(conn, account_id)
     _record_event(conn, decision_id, "undone", rules)
     result = reconcile_account(conn, account_id, rules, decision_id=decision_id)
     after = account_movement(conn, account_id).transactions
-    return Undo(before, after, result.moved_records, restored)
+    newly_unsettled = unsettled_correction_fields(conn, account_id) - unsettled_before
+    return Undo(before, after, result.moved_records, restored, len(newly_unsettled))
 
 
 def _inconsistent(conn, account_id, without) -> bool:
