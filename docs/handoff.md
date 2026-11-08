@@ -1,4 +1,4 @@
-# Session Handoff: M2.4 Accepted
+# Session Handoff: M2.5 Awaiting Review
 
 For a fresh session. Written 2026-11-07. **M1 is complete and accepted**, and its limitations and
 deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
@@ -7,10 +7,10 @@ deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
 the choices at the end of D-045, with no changes. The owner accepted M2.3 as built on 2026-11-07,
 including the rules and limits recorded in D-046 and "M2.3 as built" below, with no changes. The owner
 accepted M2.4 as built on 2026-11-07, including the rules and implementation choices recorded in
-D-047 and the limits in "M2.4 as built" below, with no changes. **The owner approved the M2.5 plan
-on 2026-11-07, taking every recommendation in it (D-048). M2.5 is in progress.** M2.6 to M2.9 are
-provisional, and each needs its own approval. M2.1's decisions are D-040 and D-041, M2.2's rules are D-042 to D-045, with D-045
-overriding the others where they differ, M2.3's are D-046, and M2.4's are D-047.
+D-047 and the limits in "M2.4 as built" below, with no changes. The owner approved the M2.5 plan on
+2026-11-07, taking every recommendation in it (D-048). **M2.5 is implemented and awaits the owner's
+review. Do not start M2.6.** M2.6 to M2.9 are provisional, and each needs its own approval. M2.1's decisions are D-040 and D-041, M2.2's rules are D-042 to D-045, with D-045
+overriding the others where they differ, M2.3's are D-046, M2.4's are D-047, and M2.5's are D-048.
 
 ## Current state
 
@@ -18,7 +18,7 @@ overriding the others where they differ, M2.3's are D-046, and M2.4's are D-047.
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review`. See "Remote state" |
-| Latest commit | Run `git log -1`: the commit recording M2.4's acceptance, whose parent is `55c008f`, the M2.4 handoff. M2.5 starts after it. M2.4 starts after `97f7296`, which records M2.3's acceptance. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a` |
+| Latest commit | Run `git log -1`: the commit recording this handoff. M2.5 starts after `d1feb30`, which records its plan's approval, itself after `7551e18`, which records M2.4's acceptance. M2.4 starts after `97f7296`, which records M2.3's acceptance. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a` |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -147,6 +147,40 @@ and `target_revision`, adds `target_kind`, and rebuilds `decision_constraint` wi
 that transaction. A `totals` line for separated transactions, and `measure_reconciliation.py
 --separated`. P1 to P22 pass, and S1 to S23 and C1 to C21 still pass.
 
+**M2.5:** migration 0008, which clears the reconciliation marker of accounts holding a superseding
+chain. The fix for F4: a decision stays superseded while anything superseding it has not been undone,
+and refusals name the newest of a chain. Undo token version 3. `review separate --supersedes`, so a
+separation can supersede a confirmation, a separation included. A listing in `review show` of records
+alike a decided record, which binds nothing. `measure_reconciliation.py --superseded`. N1 to N18
+pass, and S1 to S23, C1 to C21 and P1 to P22 still pass.
+
+**Found while building M2.5:**
+
+- F4, at the M2.4 review: a chain of two revived its first decision. A `derive()` check showed it
+  could change the ledger, not only the listed states: with the revived rejection, an automatic
+  merge into the confirmed unit was withheld with a conflict, and without it the merge joined. So
+  0008 makes such accounts stale rather than only changing how states are read.
+- Under the corrected rule a decision is superseded exactly when a decision not undone supersedes it,
+  so the recursive state walk became a direct lookup, linear in decisions.
+- `load_decision` unpacked exactly one active successor, which a chain of two would have broken. It now
+  names the immediate successor and the newest of the chain.
+- The tests of migration 0007 migrated to the latest version, so they would have started testing
+  0008. They now stop at 7.
+- Importing `TestConfirm` by name into a new test file made pytest collect its tests a second time.
+  The module is imported instead.
+- One test was written after a module-level function and became a nested function no one collects.
+  A count of the tests run showed it. It was moved into its class.
+- The alike listing first built every match before printing 50, a million on 2,000 lookalikes. It is
+  lazy now, and its cap is tested.
+- The order test's expected count was wrong at 120. All 60 valid cases matched, and the count was
+  corrected with its arithmetic.
+- A ledger's file padding depends on import count, so the order test writes fixed bytes per file.
+- Deliberate breaks left 4 of 31 surviving, all test gaps, now closed: separate's options checked
+  together, the listing's cap at exactly 50, a row of the same file offered as alike, and a record
+  differing only in description. The same-file test first passed without the check it claimed to
+  test, because the rejected row shared no item with its twin. A lookalike file now joins them. A fifth survivor was a filter for parsed records that could never
+  fire, and was removed. One break matched twice and did not apply, and was rerun with more context.
+
 **Found while building M2.4:**
 
 - A separation's two sides start in one transaction, which `decision_constraint`'s check refused.
@@ -177,6 +211,13 @@ that transaction. A `totals` line for separated transactions, and `measure_recon
 
 | Check | Result |
 |---|---|
+| The suite gating each M2.5 commit, last at `59b67ec` | 1190 passed, exit code 0 |
+| Targeted deliberate breaks, M2.5 | 31 breaks with an unbroken control passing (379 tests). 25 caught, each by a relevant test, 5 survived and 1 did not apply. 4 survivors were test gaps, now closed, and 1 was a filter that could never fire, removed. On the final code, 30 breaks with the control passing 384: all caught, after the same-file test was given a lookalike so that both rows of one file share an item. Script and results in `build/m2.5-breaks/`, ignored and may not survive |
+| The new scenario files repeated 3 times before the final commit | 47 passed each time, exit code 0 |
+| Order test for superseding separations | Exhaustive, not a property test: 60 cases, every valid point of every order of four files, all equal |
+| Walkthrough through `bin/pf`, ledger in `build/m2.5-walk` | Net movement -13.00, then -6.50 after confirming, -13.00 after a separation superseding it, -19.50 after a re-export listed as alike, and -13.00 after undoing the separation, which restored the confirmation. A stale undo token and undoing the superseded confirmation refused with exit code 2 |
+| Superseding measurements | See [status.md](status.md). A superseding separation costs what a partition costs |
+| Token pins | `d2-2a1e1dd2ac99de82`, `t1-4ae2352458f9c44c` and `r3-74d05de08ff20c6b` computed on unchanged code before M2.5's changes. The first now reads `d3-` with the same digest, and the others are unchanged |
 | `.venv/bin/python -m pytest -q` at the start of the M2.4 review session, `55c008f` | 1143 passed, exit code 0 |
 | The suite gating each M2.4 commit, last at `54b6dc2` | 1143 passed, exit code 0 |
 | Targeted deliberate breaks, M2.4 | 50 breaks with an unbroken control passing (320 tests). 43 caught, each by a relevant test, and 7 survived. No break failed to apply or caused a syntax error. After 7 new tests, the control passed 328 and all 7 were caught, one only after its test was made independent of ID order. Script and results in `build/m2.4-breaks/`, ignored and may not survive |
@@ -245,8 +286,8 @@ may not survive.
 - Coverage cannot be changed after import (M2.8, provisional).
 - Only candidate pairs can be rejected, and only candidate items and conflicts confirmed. See
   "Known limits of M2.3".
-- A separation names every record of one transaction and cannot split a confirmed core. See
-  "Known limits of M2.4".
+- A separation names every record of one transaction, and splits a confirmed core only by
+  superseding its confirmation. See "Known limits of M2.5".
 - A pending and a posted row with different amounts and no ID count twice with no flag.
 - The revision covers only inputs that exist today (D-040). Corrections must join it later.
 - Group recomputation is quadratic in a touched group. See [status.md](status.md).
@@ -317,6 +358,10 @@ may not survive.
 | What can be separated | Records joined automatically, including those a confirmed unit absorbed. Not a confirmed core, one record, or a transaction in an open conflict | D-047 |
 | Separation and the ledger | May raise totals. Changes only that transaction, raises no conflict, or refuses atomically | D-047 |
 | Transaction token | `t1`, over one transaction's material evidence. Item `r3` and undo `d2` unchanged | D-047 |
+| Superseding chains | Superseded while anything superseding it is not undone. Only the newest applies and can be undone, one link at a time. 0008 re-derives chain accounts | D-048 |
+| New evidence | No decision transfers to a new record. `review show` lists records alike a decided record, binding nothing | D-048 |
+| What supersedes what | A confirmation joins apart pairs, a separation splits a confirmation's pairs, a rejection supersedes nothing. One at a time | D-048 |
+| Undo token | `d3`, the same fields, so a ledger without chains keeps its digest | D-048 |
 
 ## Open follow-ups
 
@@ -336,7 +381,7 @@ or export presents legacy creation timestamps.**
 
 **F3. Merge-heavy benchmark. Backlog.** See "Backlog benchmarks" in [plan.md](plan.md).
 
-**F4. Supersession chains revived a superseded decision. Found at the M2.4 review, fixed in M2.5.**
+**F4. Supersession chains revived a superseded decision. Found at the M2.4 review, fixed in `425c684`.**
 In a chain A ← B ← C, where rejection A keeps X and Y apart, confirmation B joins them and supersedes
 A, and confirmation C supersedes B keeping its `same_event` pair, `review decisions` listed A as
 active once C was made. The ledger held X and Y together while A said they were different events,
@@ -418,6 +463,29 @@ in `tests/scenarios/test_confirmations.py`, `test_confirmation_migration.py`,
 - A partition, like a rejection, makes every later import of the account recompute the touched group
   quadratically. A plain confirmation does not.
 - `review decisions` says "1 pairs". The wording is unchanged from M2.2.
+
+## M2.5 as built
+
+Awaiting the owner's review. Scope and acceptance tests are in [plan.md](plan.md) (N1 to N18), the
+rules in D-048. Tests are in `tests/scenarios/test_supersession.py` and `test_chain_migration.py`.
+The benchmark is `tests/benchmarks/measure_reconciliation.py --superseded`.
+
+**Known limits of M2.5:**
+
+- One decision is superseded at a time. A rejection supersedes nothing, and a separation supersedes
+  only a confirmation, a separation included.
+- No decision transfers to a new record. A re-export that does not merge is reviewed again, and the
+  alike listing only helps. It lists records alike in every parsed value, so a re-export with a
+  changed description or date is not listed.
+- The listing names only decided records in the same item, and stops at 50.
+- Superseding a confirmation by a separation is done from the transaction. A confirmed core is not
+  listed by `review merges`, which lists automatic joins only. `review decision show` gives the
+  transaction a confirmed pair is now in.
+- Pair numbers for `--keep` are read from `review decision show`. A separation's follow record IDs.
+- Migration 0008 makes every account holding a chain of two or more stale, whether or not its ledger
+  differed, until `reconcile`.
+- An order test covers superseding separations exhaustively for four files. There is no new
+  property test.
 
 ## M2.4 as built
 
@@ -505,9 +573,17 @@ rules and the choices made where they left one in D-047. Tests are in
   of this file, was saved under `~/.claude` and not opened. This file was read directly instead.
 - pytest temporary files used `build/tmp`.
 
+## Boundary notes from the M2.5 session
+
+- The session read nothing outside this repository, and listed no parent or sibling directory.
+- Harness-managed, not the session's own action: background task output went to the system temporary
+  folder and was not opened. Break results were read from `build/m2.5-breaks/` only.
+- Probes, breaks, the walkthrough and the benchmark used `build/`, with `TMPDIR` set to `build/tmp`.
+  The break worktree was removed with `git worktree remove`.
+
 ## Awaiting the owner
 
-- Review of M2.5, once built.
+- Review of M2.5.
 - Pushing. Not authorized from here. The owner's own push is described under "Remote state".
 
 ## Recommended M2 scope
@@ -524,7 +600,7 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 | M2.2 | Accepted as built, 2026-11-07 | None |
 | M2.3 | Accepted as built, 2026-11-07 | None |
 | M2.4 | Accepted as built, 2026-11-07 | None |
-| M2.5 | Plan approved, 2026-11-07 (D-048). In progress | Owner reviews when built |
+| M2.5 | Implemented. Stopped for review | Owner reviews |
 | M2.6 | Provisional, not approved | Needs its own plan and approval |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
@@ -551,11 +627,13 @@ Read docs/handoff.md first, then the files it lists. Confirm the branch is featu
 the working tree is clean, and run the test suite with a real exit code before changing
 anything. Do not contact GitHub.
 
-M2.5 plan outcome:
-[PASTE IT HERE: approved, or the changes you want]
+M2.5 review outcome:
+[PASTE IT HERE: accepted, or the changes you want]
 
-Task: record the plan outcome, then implement M2.5 as approved, in small gated commits. Do not
-reopen D-042 to D-047 unless you find a concrete contradiction. Stop for review when M2.5 is built.
+Task: record the review outcome, making any changes it asks for first as small gated commits.
+Do not reopen D-042 to D-048 unless you find a concrete contradiction. Then propose a plan for
+M2.6, correction overrides, meeting D-041's requirement for several overrides on one transaction,
+and wait for my approval before implementing it.
 
 Pushing needs my explicit approval each time. No network, no new dependencies, no security
 changes. Synthetic data only. Use build/ for walkthroughs, breaks and benchmarks, with TMPDIR set

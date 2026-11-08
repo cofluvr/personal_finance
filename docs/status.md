@@ -13,7 +13,7 @@ Last updated: 2026-11-07. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.2: decision core, pair rejection and undo | Accepted |
 | M2.3: confirmation, partitions and superseding | Accepted (D-046) |
 | M2.4: separating machine-made merges | Accepted (D-047) |
-| M2.5: new evidence on decided records, and superseding chains | Approved, in progress (D-048) |
+| M2.5: new evidence on decided records, and superseding chains | Implemented, awaiting review (D-048) |
 | M2.6 to M2.9 | Provisional, not approved |
 | M3 to M8 | Not started |
 
@@ -22,7 +22,8 @@ Last updated: 2026-11-07. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.money`: exact parsing and formatting of amounts.
 - `personal_finance.db.migrate`: database creation, connections, migrations.
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
-  `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation` and `0007_separation`,
+  `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation` and
+  `0008_supersession_chains`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
@@ -34,7 +35,7 @@ Last updated: 2026-11-07. Branch: `feature/m2-review`, from `643e1b1`. The owner
   recording every source movement.
 - `personal_finance.reconcile.decisions`: rejecting pairs, confirming partitions, separating
   automatic merges, superseding and undoing decisions, each under one write lock (D-043, D-045,
-  D-046, D-047).
+  D-046, D-047, D-048).
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement.
@@ -206,16 +207,50 @@ refused (D-046). Smaller ledgers scale the same way, and the full output is in
 the quadratic recomputation worse** than a rejection or a partition, apart from the units it adds.
 Matching was not changed.
 
+**Superseding (N18),** measured 2026-11-08 on the same machine with
+`measure_reconciliation.py --superseded`. Three unmerged documents, so that a record separated from
+a confirmed pair still links with all of the third, in one group. A partition keeps a confirmed
+pair apart from a record of the third. A separation superseding a plain confirmation leaves only its
+pair of different events, which touches the group the same way.
+
+| Units in the group | One partition | One superseding separation | Partitions on 1 in 30 | Superseding on 1 in 30 | Pairs compared, superseding |
+|---|---|---|---|---|---|
+| 100 | 0.006s | 0.006s | 0.005s | 0.006s | 4,950 |
+| 500 | 0.131s | 0.128s | 0.120s | 0.128s | 124,750 |
+| 1,000 | 0.513s | 0.516s | 0.468s | 0.512s | 499,500 |
+| 2,000 | 2.412s | 2.100s | 1.887s | 2.077s | 1,999,000 |
+| 4,000 | 8.940s | 8.472s | 9.083s | 10.261s | 7,998,000 |
+
+Derivation alone. Partitions compare slightly fewer pairs because their confirmed pairs are one unit,
+while a superseding separation leaves both records as units.
+
+| Transactions | Decision | Whole decision command | Later import | Undo token and preview | Whole undo |
+|---|---|---|---|---|---|
+| 2,001 | Partition | 2.340s | 2.077s | 2.228s | 2.185s |
+| 2,001 | Superseding separation | 2.662s | 2.151s | 2.145s | 2.272s |
+
+Through a real ledger, under the write lock. The confirmation being superseded is made first and not
+timed. Smaller ledgers scale the same way, and the full output is in `build/m2.5-bench/superseded.txt`,
+which is ignored and may not survive. **A superseding separation does not make the quadratic
+recomputation worse** than a partition, within the variation of these runs. Matching was not changed.
+
+`decision_states` read 50 chained decisions in 0.0001s and 2,000 in 0.0016s, reading each decision
+once. The alike listing in `review show` stops at the 51 it needs: 0.0014s on 2,000 lookalike
+transactions and 0.023s on 20,000. Its first version built every match before printing 50, a million
+at 2,000 lookalikes taking 0.99s, and was made lazy.
+
 ## Known limitations
 
 - Only `cross_document_candidates` items can be rejected, and only they and decision conflicts can
   be confirmed. External-ID and same-document items stay open.
 - A group may hold one record per document, so two alike rows of one file are always separate
   transactions (D-008).
-- Superseding needs an open item holding the transactions. A rejection that closed its item must be
-  undone first. Only one decision can be superseded at a time, and only by a confirmation.
-- A decision binds the records it names. A re-export raises the question again, so overlapping
-  exports can bring repeat reviews.
+- Superseding by confirmation needs an open item holding the transactions. A rejection that closed
+  its item must be undone first. Only one decision can be superseded at a time, by a confirmation
+  or, for a confirmation, by a separation. A rejection supersedes nothing.
+- A decision binds the records it names, and no decision transfers to a new record. A re-export
+  raises the question again, so overlapping exports can bring repeat reviews. `review show` lists
+  records alike a decided record to help, and binds nothing.
 - Withholding can raise totals through new evidence, though it is disclosed. A decision conflict
   is settled by confirming a partition of all its transactions in one decision. A rejection never
   settles one.
@@ -236,9 +271,9 @@ Matching was not changed.
   columns is an application rule for M2, not something the database enforces.
 - The database cannot enforce that every transaction has at least one source.
   Tests check this after success, failure and crash.
-- A separation names every record of one transaction, at most 50. It cannot split records a
-  confirmation joined, which needs undo first, nor act on a transaction in an open conflict.
-  Superseding a confirmation by a separation is M2.5. Automatic moves are recorded in
+- A separation names every record of one transaction, at most 50. It splits records a
+  confirmation joined only by superseding that confirmation, and does not act on a transaction in
+  an open conflict. Automatic moves are recorded in
   `transaction_link_history`, and automatic splits happen only for machine-made merges.
 - A separation binds the records it names. A re-export of them is withheld and raised as a
   conflict, so overlapping exports can bring repeat reviews.

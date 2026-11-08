@@ -554,8 +554,15 @@ class TestAlikeListing:  # N11
         ))
         conn.close()
         decision = ledger.reject_ok(item, (rows["a.csv 1"], rows["b.csv 1"]))
+        # A lookalike keeps row 1 of a.csv in the same item as row 2.
+        ledger.card("c.csv", test_confirmations.CAFE)
         (item,) = ledger.items()
-        assert alike_lines(ledger.show(item)) == [("a.csv row 2 matches b.csv row 1", decision)]
+        assert len(ledger.transactions(item)) == 4
+        assert sorted(alike_lines(ledger.show(item))) == [
+            ("a.csv row 2 matches b.csv row 1", decision),
+            ("c.csv row 1 matches a.csv row 1", decision),
+            ("c.csv row 1 matches b.csv row 1", decision),
+        ]
 
     def test_a_record_differing_only_in_description_is_not_listed(self, ledger):
         item, one, two = pair_up(ledger)

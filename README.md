@@ -234,14 +234,15 @@ bin/pf review confirm --db "$DB" --account ACCOUNT ITEM_ID --revision REVISION -
 - Confirming every transaction of a conflict, in one decision, settles it. A rejection never does.
 - At most 50 transactions can be named in one decision.
 
-To replace an earlier rejection that a group contradicts, add `--supersedes DECISION_ID --supersedes-revision REVISION`, with the revision from `review decision show`. Every pair of the old decision must be either contradicted by the groups or kept with `--keep N`, using the pair numbers that `review decision show` prints. Undoing the new decision restores the old one, unless decisions made since contradict it. A superseded decision cannot be undone directly. When the rejection closed its item, there is nothing to confirm on: undo it, which raises the item again, then confirm. See [D-046](docs/decisions.md).
+To replace an earlier rejection that a group contradicts, add `--supersedes DECISION_ID --supersedes-revision REVISION`, with the revision from `review decision show`. Every pair of the old decision must be either contradicted by the groups or kept with `--keep N`, using the pair numbers that `review decision show` prints. Undoing the new decision restores the old one, unless decisions made since contradict it. A superseded decision cannot be undone directly. In a chain of several, only the newest applies and can be undone, and each undo restores the one before it. When the rejection closed its item, there is nothing to confirm on: undo it, which raises the item again, then confirm. See [D-046](docs/decisions.md).
 
 ## Separating an Automatic Merge
 
 ```sh
 bin/pf review merges --db "$DB" --account ACCOUNT
 bin/pf review merge show --db "$DB" TRANSACTION_ID
-bin/pf review separate --db "$DB" --account ACCOUNT TRANSACTION_ID --revision REVISION --group R1 R2 [--group R3]
+bin/pf review separate --db "$DB" --account ACCOUNT TRANSACTION_ID --revision REVISION --group R1 R2 [--group R3] \
+   [--supersedes DECISION_ID --supersedes-revision REVISION --keep N]
 ```
 
 A confident automatic merge raises no review item, so `review merges` lists the transactions holding records joined automatically, by a reliable ID or an exact pair under complete coverage. `review merge show` gives one transaction's evidence, the record IDs to name, and its revision.
@@ -250,9 +251,9 @@ A confident automatic merge raises no review item, so `review merges` lists the 
 
 - Every record of the transaction must be in exactly one group, and there must be at least two groups, so that nothing is separated without being stated.
 - Separating can raise the transaction count and totals. It changes nothing but this transaction, or it is refused. `totals` says how many transactions hold records you separated. A group of several records stays together as a confirmed transaction.
-- Records a confirmation joined must stay in one group. To split them, undo that confirmation. A transaction in an open decision conflict is settled through the conflict instead.
+- Records a confirmation joined must stay in one group, unless you name that confirmation with `--supersedes` and its revision from `review decision show`. Its pairs your groups split are contradicted, and every other pair must be kept with `--keep N`. `review decision show` gives the transaction a confirmed pair is now in. A transaction in an open decision conflict is settled through the conflict instead.
 - When the records shared an ID the source declares reliable, the output says that this decision overrides it.
-- The decision binds these records only. A later file holding the same event, such as a re-export with the same ID, is withheld and raised as a conflict, never merged silently.
+- The decision binds these records only. A later file holding the same event, such as a re-export with the same ID, is withheld and raised as a conflict, never merged silently. `review show` lists such records as alike a decided record, and you decide them by confirming a partition on that item. No decision transfers to a new record (D-048).
 - `review undo` lets the merge return if the evidence still supports it, so totals can fall. At most 50 records can be named. See [D-047](docs/decisions.md).
 
 ## Reading an Import Summary
