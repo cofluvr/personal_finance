@@ -206,14 +206,14 @@ class TestRefusals:  # F4
     def test_an_unknown_transaction(self, ledger):
         single(ledger)
         self.nothing_changes(
-            ledger, lambda: ledger.classify("nope", "purchase", revision="t6-0"),
+            ledger, lambda: ledger.classify("nope", "purchase", revision="t7-0"),
             TRANSACTION_NOT_FOUND,
         )
 
     def test_a_stale_token_and_one_of_the_last_version(self, ledger):
         transaction = single(ledger)
         last_version = "t5-" + ledger.transaction_revision(transaction)[3:]
-        for token in ("t6-0000000000000000", last_version):
+        for token in ("t7-0000000000000000", last_version):
             self.nothing_changes(
                 ledger, lambda: ledger.classify(transaction, "purchase", revision=token),
                 STALE_TRANSACTION_REVISION,
@@ -883,7 +883,7 @@ class TestPrivacy:
             outputs += [out, err]
         for code, out, err in (ledger.classify(transaction, "refund", supersedes=classification),
                                ledger.undo_classification(classification),
-                               ledger.classify(transaction, "fee", revision="t6-0")):
+                               ledger.classify(transaction, "fee", revision="t7-0")):
             outputs += [out, err]
         text = "".join(outputs)
         for sentinel in ("6.51", "SENTINEL"):

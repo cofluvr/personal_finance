@@ -26,7 +26,6 @@ from personal_finance.reconcile.transfer_effects import (
 )
 from personal_finance.reconcile.transfers import (
     MATCH_NOT_ACTIVE,
-    MATCH_NOT_FOUND,
     MATCH_WRONG_ACCOUNT,
     REFUSAL_BY_REASON,
     STALE_MATCH_REVISION,
@@ -281,10 +280,10 @@ class TestRefusals:  # X3, X4
 
     def test_an_unknown_transaction_on_either_side(self, ledger):
         outflow, inflow = sides(ledger)
-        self.nothing_changes(ledger, lambda: ledger.match("nope", inflow, revision="t6-0"),
+        self.nothing_changes(ledger, lambda: ledger.match("nope", inflow, revision="t7-0"),
                              TRANSACTION_NOT_FOUND.format(transaction="nope"))
         self.nothing_changes(ledger, lambda: ledger.match(outflow, "nope",
-                                                          counterpart_revision="t6-0"),
+                                                          counterpart_revision="t7-0"),
                              TRANSACTION_NOT_FOUND.format(transaction="nope"))
 
     def test_a_transaction_of_another_account_on_either_side(self, ledger):
@@ -302,7 +301,7 @@ class TestRefusals:  # X3, X4
 
     def test_a_stale_token_on_either_side(self, ledger):
         outflow, inflow = sides(ledger)
-        stale = "t6-0000000000000000"
+        stale = "t7-0000000000000000"
         last_version = "t5-" + ledger.transaction_revision(outflow)[3:]
         for token in (stale, last_version):
             self.nothing_changes(ledger, lambda: ledger.match(outflow, inflow, revision=token),
@@ -422,7 +421,8 @@ class TestOutcomes:  # X6, X7
             ledger.match_ok(holding(ledger, name), inflow)
         code, out, _ = ledger.undo(separation)
         assert code == 0
-        assert "Transfer matches that no longer apply" in out and "fits: 2." in out
+        assert "Transfer matches or one-sided transfers that no longer apply" in out
+        assert "is covered: 2." in out
         assert ledger.matches() == [("conflict", (), ()), ("conflict", (), ())]
         assert "2 transfer matches no longer apply, because a transaction holds records of two " \
                "matches" in ledger.totals()
@@ -436,8 +436,9 @@ class TestOutcomes:  # X6, X7
         ledger.match_ok(outflow, inflow)
         code, out, _ = ledger.undo_correction(correction)
         assert code == 0
-        assert "Transfer matches that no longer apply, because a side's records split or reach " \
-               "another match, the amounts no longer offset or a type no longer fits: 1" in out
+        assert "Transfer matches or one-sided transfers that no longer apply, because records " \
+               "split or reach another, amounts no longer offset, a type no longer fits, or a " \
+               "counterpart now shows or is covered: 1" in out
         assert ledger.matches() == [("amounts_differ", (), ())]
         assert "because the amounts no longer offset exactly" in ledger.totals()
 
@@ -468,7 +469,7 @@ class TestOutcomes:  # X6, X7
         transfer = ledger.classify_ok(outflow, "transfer", supersedes=purchase)
         ledger.match_ok(outflow, inflow)
         code, out, _ = ledger.undo_classification(transfer)
-        assert code == 0 and "Transfer matches that no longer apply" in out
+        assert code == 0 and "Transfer matches or one-sided transfers that no longer apply" in out
         assert ledger.matches() == [("type_differs", (), ())]
 
     def test_classifying_a_side_against_the_match_refuses(self, ledger):
@@ -542,7 +543,8 @@ class TestUndo:  # X9
         before = ledger.dump()
         token = ledger.match_revision(match)
         for (code, _, err), message in (
-            (ledger.undo_match("nope", revision="m1-0"), MATCH_NOT_FOUND),
+            (ledger.undo_match("nope", revision="m1-0"),
+             "transfer match or one-sided transfer not found"),
             (ledger.undo_match(match, account="T", revision=token), MATCH_WRONG_ACCOUNT),
             (ledger.undo_match(match, revision="m1-0000000000000000"), STALE_MATCH_REVISION),
         ):

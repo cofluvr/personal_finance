@@ -224,7 +224,7 @@ class TestRefusals:  # C5
     def test_an_old_token(self, ledger):
         item, one, two = pair_up(ledger)
         before = ledger.dump()
-        self.refused(ledger, confirm(ledger, item, (one, two), revision="r8-0000000000000000"),
+        self.refused(ledger, confirm(ledger, item, (one, two), revision="r9-0000000000000000"),
                      STALE_REVISION, before)
 
     def test_a_version_2_token_of_the_same_digest(self, ledger):
@@ -652,7 +652,7 @@ class TestSuperseding:  # C10, C11
         item, old, one, two, _ = self.rejected(ledger, ("one", "two"))
         before = ledger.dump()
         if stale == "item":
-            result = confirm(ledger, item, (one, two), revision="r8-0000000000000000",
+            result = confirm(ledger, item, (one, two), revision="r9-0000000000000000",
                              supersedes=old)
             message = STALE_REVISION
         else:

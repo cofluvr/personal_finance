@@ -728,7 +728,7 @@ def measure_many_corrections(count: int) -> None:
             conn.execute(
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  target_transaction_id, target_revision)
-                   VALUES (?, 'acct', 'amount', -1, ?, 't6-0')""",
+                   VALUES (?, 'acct', 'amount', -1, ?, 't7-0')""",
                 (correction_id, transaction_id),
             )
             conn.execute("INSERT INTO value_correction_record VALUES (?, ?)", (correction_id, record_id))
@@ -781,7 +781,7 @@ def measure_correction_chain(length: int) -> None:
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  target_transaction_id, target_revision,
                                                  supersedes_correction_id)
-                   VALUES (?, 'acct', 'amount', ?, ?, 't6-0', ?)""",
+                   VALUES (?, 'acct', 'amount', ?, ?, 't7-0', ?)""",
                 (correction_id, -1 - number, transaction_id,
                  f"c{number - 1:06}" if number else None),
             )
@@ -906,7 +906,7 @@ def measure_many_classifications(count: int) -> None:
             conn.execute(
                 """INSERT INTO type_classification (id, account_id, financial_type,
                                                     target_transaction_id, target_revision)
-                   VALUES (?, 'acct', 'purchase', ?, 't6-0')""",
+                   VALUES (?, 'acct', 'purchase', ?, 't7-0')""",
                 (classification_id, transaction_id),
             )
             conn.execute("INSERT INTO type_classification_record VALUES (?, ?)",
@@ -971,7 +971,7 @@ def measure_classification_chain(length: int) -> None:
                 """INSERT INTO type_classification (id, account_id, financial_type,
                                                     target_transaction_id, target_revision,
                                                     supersedes_classification_id)
-                   VALUES (?, 'acct', ?, ?, 't6-0', ?)""",
+                   VALUES (?, 'acct', ?, ?, 't7-0', ?)""",
                 (classification_id, ("purchase", "fee")[number % 2], transaction_id,
                  f"f{number - 1:06}" if number else None),
             )
@@ -1242,7 +1242,7 @@ def transfer_ledger(root: Path, outflows: list[int], inflows: list[int], one_day
         conn.execute(
             """INSERT INTO type_classification (id, account_id, financial_type,
                                                 target_transaction_id, target_revision)
-               VALUES (?, 'out', 'transfer', ?, 't6-0')""",
+               VALUES (?, 'out', 'transfer', ?, 't7-0')""",
             (classification_id, transaction_id),
         )
         conn.execute("INSERT INTO type_classification_record VALUES (?, ?)",
@@ -1282,7 +1282,7 @@ def measure_many_matches(count: int) -> None:
             conn.execute("INSERT INTO transfer_match (id) VALUES (?)", (match_id,))
             for side, account, (transaction_id, record_id) in (
                     ("outflow", "out", outflows[-cents]), ("inflow", "in", inflows[cents])):
-                conn.execute("INSERT INTO transfer_match_side VALUES (?, ?, ?, ?, 't6-0')",
+                conn.execute("INSERT INTO transfer_match_side VALUES (?, ?, ?, ?, 't7-0')",
                              (match_id, side, account, transaction_id))
                 conn.execute("INSERT INTO transfer_match_record VALUES (?, ?, ?)",
                              (match_id, side, record_id))

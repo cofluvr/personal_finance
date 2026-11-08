@@ -202,6 +202,21 @@ def load_active_one_sided(
     )
 
 
+def holds_active_one_sided(conn: sqlite3.Connection, transaction_id: str) -> bool:
+    """Whether the transaction holds a record bound by an active one-sided transfer."""
+    return conn.execute(
+        """SELECT EXISTS (
+               SELECT 1 FROM transaction_source link
+               JOIN one_sided_transfer_record bound
+                   ON bound.source_record_id = link.source_record_id
+               WHERE link.transaction_id = ?
+                 AND NOT EXISTS (SELECT 1 FROM one_sided_transfer_event undone
+                                 WHERE undone.one_sided_transfer_id = bound.one_sided_transfer_id
+                                   AND undone.event = 'undone'))""",
+        (transaction_id,),
+    ).fetchone()[0] == 1
+
+
 def load_active_matches(
     conn: sqlite3.Connection, treated_as_undone: str | None = None
 ) -> tuple[ActiveMatch, ...]:

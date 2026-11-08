@@ -139,7 +139,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r8-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r9-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)

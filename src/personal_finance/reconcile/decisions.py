@@ -204,11 +204,12 @@ LEAVES_CLASSIFICATION_UNSETTLED = (
     "would disagree, lose their basis or no longer fit its direction. It was not recorded and "
     "nothing was changed. Undo the classification first, then classify the result."
 )
-# Shared by every command that refuses to leave a transfer match unsettled (D-054).
+# Shared by every command that refuses to leave a transfer match or one-sided transfer unsettled
+# (D-054, D-055).
 LEAVES_TRANSFER_UNSETTLED = (
-    "this would stop a transfer match applying, because a side's records would split or reach "
-    "another match, its amounts would no longer offset, or a type would no longer fit. It was not "
-    "recorded and nothing was changed. Undo the transfer match first, with review transfer undo."
+    "this would stop a transfer match or one-sided transfer applying, because records would split "
+    "or reach another, amounts would no longer offset, or a type would no longer fit. It was not "
+    "recorded and nothing was changed. Undo the transfer first, with review transfer undo."
 )
 WOULD_SPLIT_MORE = (
     "this separation would change more than the transaction it names, so it was not recorded "
