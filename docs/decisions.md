@@ -901,10 +901,11 @@ for transactions holding records confirmed as one event. Undo says that totals m
 slower than M2.2's rejection, the work stops and is reported. Matching is not changed to meet a
 target.
 
-## D-047 Separating machine-made merges — Approved
+## D-047 Separating machine-made merges — Approved, implemented and accepted in M2.4
 
 Approved by the owner on 2026-11-07 with the M2.4 plan, taking every recommendation in it. Builds on
-D-029 and D-042 to D-046, and changes none of them.
+D-029 and D-042 to D-046, and changes none of them. Accepted as built by the owner on 2026-11-07,
+including the implementation choices below, with the limits in the handoff's "M2.4 as built".
 
 ```sh
 pf review merges --db DB --account A
@@ -972,8 +973,8 @@ measured on a shape where separated records still link with many others: two doc
 complete coverage that pair every row, and a third with unknown coverage holding the same rows. If
 it is materially slower than a partition on that shape, the work stops and is reported.
 
-**How these were implemented,** where the rules above left a choice. They await the owner's review
-with M2.4:
+**How these were implemented,** where the rules above left a choice. The owner accepted all of them
+with M2.4 on 2026-11-07:
 
 - One stated pair per record pair, with the lower group on the left, so stored rows never depend on
   which record ID sorts first. Pair numbers still follow record IDs, so `--keep` numbers are read

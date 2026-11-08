@@ -1,14 +1,14 @@
-# Session Handoff: M2.4 Awaiting Review
+# Session Handoff: M2.4 Accepted
 
 For a fresh session. Written 2026-11-07. **M1 is complete and accepted**, and its limitations and
 deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
 
-**M2.1, M2.2 and M2.3 are accepted.** The owner accepted M2.2 as built on 2026-11-07, including the
-choices at the end of D-045, with no changes. The owner accepted M2.3 as built on 2026-11-07,
+**M2.1, M2.2, M2.3 and M2.4 are accepted.** The owner accepted M2.2 as built on 2026-11-07, including
+the choices at the end of D-045, with no changes. The owner accepted M2.3 as built on 2026-11-07,
 including the rules and limits recorded in D-046 and "M2.3 as built" below, with no changes. The owner
-approved the M2.4 plan on 2026-11-07, taking every recommendation in it. **M2.4 is implemented and
-awaits the owner's review. Do not start M2.5.** M2.5 to M2.9 are provisional, and each needs its own
-approval. M2.1's decisions are D-040 and D-041, M2.2's rules are D-042 to D-045, with D-045
+accepted M2.4 as built on 2026-11-07, including the rules and implementation choices recorded in
+D-047 and the limits in "M2.4 as built" below, with no changes. **Do not start M2.5 until its plan
+is approved.** M2.5 to M2.9 are provisional, and each needs its own approval. M2.1's decisions are D-040 and D-041, M2.2's rules are D-042 to D-045, with D-045
 overriding the others where they differ, M2.3's are D-046, and M2.4's are D-047.
 
 ## Current state
@@ -17,7 +17,7 @@ overriding the others where they differ, M2.3's are D-046, and M2.4's are D-047.
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review`. See "Remote state" |
-| Latest commit | Run `git log -1`: the commit recording this handoff, whose parent is `54b6dc2`. M2.4 starts after `97f7296`, which records M2.3's acceptance. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a` |
+| Latest commit | Run `git log -1`: the commit recording M2.4's acceptance, whose parent is `55c008f`, the M2.4 handoff. M2.5 starts after it. M2.4 starts after `97f7296`, which records M2.3's acceptance. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a` |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -176,6 +176,7 @@ that transaction. A `totals` line for separated transactions, and `measure_recon
 
 | Check | Result |
 |---|---|
+| `.venv/bin/python -m pytest -q` at the start of the M2.4 review session, `55c008f` | 1143 passed, exit code 0 |
 | The suite gating each M2.4 commit, last at `54b6dc2` | 1143 passed, exit code 0 |
 | Targeted deliberate breaks, M2.4 | 50 breaks with an unbroken control passing (320 tests). 43 caught, each by a relevant test, and 7 survived. No break failed to apply or caused a syntax error. After 7 new tests, the control passed 328 and all 7 were caught, one only after its test was made independent of ID order. Script and results in `build/m2.4-breaks/`, ignored and may not survive |
 | The new scenario files repeated 3 times at `54b6dc2` | 83 passed each time, exit code 0 |
@@ -412,7 +413,8 @@ in `tests/scenarios/test_confirmations.py`, `test_confirmation_migration.py`,
 
 ## M2.4 as built
 
-Awaiting the owner's review. Scope and acceptance tests are in [plan.md](plan.md) (P1 to P22), the
+Accepted as built by the owner on 2026-11-07, including the rules and implementation choices in
+D-047, with these limits. Scope and acceptance tests are in [plan.md](plan.md) (P1 to P22), the
 rules and the choices made where they left one in D-047. Tests are in
 `tests/scenarios/test_separations.py`, `test_separation_migration.py`, `test_decision_order.py` and
 `tests/unit/test_constraints.py`. The benchmark is `tests/benchmarks/measure_reconciliation.py
@@ -487,14 +489,22 @@ rules and the choices made where they left one in D-047. Tests are in
 - Walkthroughs, breaks, the benchmark and a throwaway worktree used `build/`, with `TMPDIR` set to
   `build/tmp`. The worktree was removed with `git worktree remove`.
 
+## Boundary notes from the M2.4 review session
+
+- The session read nothing outside this repository, and listed no parent or sibling directory.
+- Harness-managed, not the session's own action: the harness attached a user-level memory index to
+  the session's context, unasked. It was not acted on. One oversized output, the session's own read
+  of this file, was saved under `~/.claude` and not opened. This file was read directly instead.
+- pytest temporary files used `build/tmp`.
+
 ## Awaiting the owner
 
-- Review of M2.4.
+- Approval of the M2.5 plan.
 - Pushing. Not authorized from here. The owner's own push is described under "Remote state".
 
 ## Recommended M2 scope
 
-See "M2 plan" in [plan.md](plan.md). M2.3 to M2.9 are provisional, and each needs approval.
+See "M2 plan" in [plan.md](plan.md). M2.5 to M2.9 are provisional, and each needs approval.
 Still open: whether grouped review of long runs
 belongs in M2, and F2's stored marker if any new command shows legacy creation timestamps.
 
@@ -502,10 +512,10 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for M2.2's review outcome, M2.3, M2.3's review outcome and M2.4 | **Must be renewed** for anything further |
+| Local commits on `feature/m2-review` | Approved for M2.2's review outcome, M2.3, M2.3's review outcome, M2.4 and M2.4's review outcome | **Must be renewed** for anything further |
 | M2.2 | Accepted as built, 2026-11-07 | None |
 | M2.3 | Accepted as built, 2026-11-07 | None |
-| M2.4 | Implemented. Stopped for review | Owner reviews |
+| M2.4 | Accepted as built, 2026-11-07 | None |
 | M2.5 | Provisional, not approved | Needs its own plan and approval |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
@@ -532,13 +542,11 @@ Read docs/handoff.md first, then the files it lists. Confirm the branch is featu
 the working tree is clean, and run the test suite with a real exit code before changing
 anything. Do not contact GitHub.
 
-M2.4 review outcome:
-[PASTE IT HERE: accepted, or the changes you want]
+M2.5 plan outcome:
+[PASTE IT HERE: approved, or the changes you want]
 
-Task: record the review outcome, making any changes it asks for first as small gated commits.
-Do not reopen D-042 to D-047 unless you find a concrete contradiction. Then propose a plan for
-M2.5, new evidence that touches a decided record and superseding a decision, and wait for my
-approval before implementing it.
+Task: record the plan outcome, then implement M2.5 as approved, in small gated commits. Do not
+reopen D-042 to D-047 unless you find a concrete contradiction. Stop for review when M2.5 is built.
 
 Pushing needs my explicit approval each time. No network, no new dependencies, no security
 changes. Synthetic data only. Use build/ for walkthroughs, breaks and benchmarks, with TMPDIR set

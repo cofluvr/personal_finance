@@ -12,7 +12,7 @@ Last updated: 2026-11-07. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.1: review evidence and revision tokens | Accepted |
 | M2.2: decision core, pair rejection and undo | Accepted |
 | M2.3: confirmation, partitions and superseding | Accepted (D-046) |
-| M2.4: separating machine-made merges | Implemented, awaiting review (D-047) |
+| M2.4: separating machine-made merges | Accepted (D-047) |
 | M2.5 to M2.9 | Provisional, not approved |
 | M3 to M8 | Not started |
 
