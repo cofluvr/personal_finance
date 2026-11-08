@@ -149,9 +149,8 @@ the decision log records the database, parser and deduplication rules.
 
 ## M2 plan
 
-M2.1, M2.2, M2.3 (D-046), M2.4 (D-047), M2.5 (D-048) and M2.6 (D-049) are accepted. M2.7 is implemented and awaits review (D-050). M2.8 is approved (D-051). **M2.9 is provisional**:
-a direction, not approval to implement, and each needs its own approval. D-041 lists requirements
-they must meet.
+M2.1, M2.2, M2.3 (D-046), M2.4 (D-047), M2.5 (D-048) and M2.6 (D-049) are accepted. M2.7 is implemented and awaits review (D-050). M2.8 (D-051) and M2.9 (D-052)
+are approved, to be reviewed with M2.7. D-041 lists requirements they must meet.
 
 | Slice | Scope | Status |
 |---|---|---|
@@ -163,7 +162,7 @@ they must meet.
 | M2.6 | Correction overrides | Accepted (D-049) |
 | M2.7 | Resolving incomplete records | Implemented, awaiting review (D-050) |
 | M2.8 | Coverage correction with history | Approved (D-051) |
-| M2.9 | Pending to posted, including tips, changed descriptions and the D-008 migration | Provisional |
+| M2.9 | Pending to posted, including tips, changed descriptions and the D-008 migration | Approved (D-052) |
 
 Direction from planning, not yet decisions:
 
@@ -450,6 +449,37 @@ document's metadata states.
 | K15 | `documents`, `review show` and `totals` show declared coverage apart from the claim at import |
 | K16 | S, C, P, N, V and U still pass |
 | K17 | Declaring complete coverage that unblocks a document's exact pairs, its undo and a later import are measured against an import making the same merges |
+
+### M2.9 scope
+
+The rules are D-052. Rules version 2, reliable-ID pending-to-posted merges, changed-amount
+candidates, migration 0012 for D-008, confirming same-document pending and posted rows, stale pending
+and changed amount disclosure lines, and a benchmark with `--pending`.
+
+Deferred: same-document pairs without a D-021 flag, automatic same-document joining, changed amounts
+under unreliable IDs.
+
+### M2.9 acceptance criteria
+
+| ID | Test |
+|---|---|
+| Q1 | A pending and a posted row sharing a reliable ID merge, counted once, with the posted row's values |
+| Q2 | The same with a changed amount: counted once at the posted amount, and disclosed |
+| Q3 | Transaction dates that disagree, or two different IDs, still keep them apart |
+| Q4 | Without an ID, a pending 20.00 and a posted 24.00 alike in description and date raise a candidate with reason `pending_amount_changed`, and never merge by themselves |
+| Q5 | Confirming that candidate counts it once, at the posted amount, and undo restores both |
+| Q6 | Opposite directions, dissimilar descriptions or dates outside the window raise nothing |
+| Q7 | A same-document pending and posted pair can be confirmed into one transaction, which closes its item, and undo reopens it |
+| Q8 | No other two records of one document can be confirmed together, and automatic matching never joins them |
+| Q9 | Migration 0012 keeps every link on a populated ledger, enforces the partial index, and is atomic on failure |
+| Q10 | After upgrading, accounts read as not current until `reconcile`, which gives the version 2 ledger |
+| Q11 | Stale pending transactions are disclosed and left unchanged |
+| Q12 | Refused, with nothing changed: a same-document group that is not one pending and one posted row, or that names other transactions |
+| Q13 | Pins: the rules fingerprint and `d5` digests, which change with the rules version |
+| Q14 | Equivalent outcomes for every import order of pending and posted exports, exhaustively for four files |
+| Q15 | Privacy: the new lines show counts only |
+| Q16 | S, C, P, N, V, U and K still pass |
+| Q17 | Many pending and posted rows of one description block, with changed amounts, are measured against a later import |
 
 ## Backlog benchmarks
 

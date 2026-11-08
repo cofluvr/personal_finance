@@ -16,8 +16,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.5: new evidence on decided records, and superseding chains | Accepted (D-048) |
 | M2.6: value corrections | Accepted (D-049) |
 | M2.7: resolving incomplete records | Implemented, awaiting review (D-050) |
-| M2.8: coverage correction with history | Approved, in progress (D-051) |
-| M2.9 | Approved to plan and build, not yet planned |
+| M2.8: coverage correction with history | Implemented, awaiting review (D-051) |
+| M2.9: pending to posted | Approved, in progress (D-052) |
 | M3 to M8 | Not started |
 
 ## What exists
@@ -26,7 +26,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.db.migrate`: database creation, connections, migrations.
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
-  `0008_supersession_chains`, `0009_value_corrections` and `0010_record_resolutions`,
+  `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions` and
+  `0011_coverage_declarations`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
@@ -44,6 +45,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `reconcile.supersession` holds the chain rule that decisions and corrections share (D-048).
 - `personal_finance.reconcile.record_resolutions`: completing and dismissing unresolved records, and
   undoing that, under one write lock (D-050).
+- `personal_finance.reconcile.coverage_declarations`: declaring a document's coverage after import,
+  and undoing that, under one write lock (D-051).
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement.
@@ -54,13 +57,16 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.reports.correction_evidence`: what a correction binds, and its undo token (D-049).
 - `personal_finance.reports.resolution_evidence`: what a resolution resolved, and its undo token
   (D-050).
+- `personal_finance.reports.coverage_evidence`: a document's claimed and declared coverage, and their
+  tokens (D-051). `reports.undo_items` computes the undo token both share.
 - CLI: `init`, `migrate`, `account add`, `import`, `reconcile`, `documents`, `transactions`,
   `trace`, `review list`, `review show`, `review reject`, `review confirm`, `review merges`,
   `review merge show`, `review separate`, `review decisions`, `review decision show`,
   `review undo`, `review transaction show`, `review correct`, `review corrections`,
   `review correction show`, `review correction undo`, `review complete`, `review dismiss`,
-  `review resolutions`, `review resolution show`, `review resolution undo`, `totals`, run through
-  the `bin/pf` launcher (D-038).
+  `review resolutions`, `review resolution show`, `review resolution undo`, `review coverage show`,
+  `review coverage declare`, `review coverage history`, `review coverage undo`, `totals`, run
+  through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
 
@@ -308,6 +314,21 @@ splits it causes cost.** The later import in the table merges nothing, so it is 
 D-050's stop rule compared against that import, which this shows to be the wrong comparison.
 Matching was not changed.
 
+**Coverage declarations (K17),** measured 2026-11-08 on the same machine with
+`measure_reconciliation.py --declared`. Two exports of the same purchases, the first of unknown
+coverage and the second complete. Declaring the first complete pays for every merge that makes, and
+the shape asserts it: merged and split equal the pairs. The last column imports the second export into
+a ledger where the first was declared complete at import, which makes the same merges. Full output is
+in `build/m2.8-bench/declared.txt`, which is ignored and may not survive.
+
+| Pairs | Coverage show | Declare | Later import | Undo show | Undo | Merging import |
+|---|---|---|---|---|---|---|
+| 500 | 0.000s | 0.060s | 0.017s | 0.029s | 0.104s | 0.073s |
+| 2,000 | 0.000s | 0.298s | 0.067s | 0.112s | 0.492s | 0.439s |
+| 5,000 | 0.000s | 0.864s | 0.165s | 0.308s | 1.415s | 1.892s |
+
+**A declaration costs no more than an import making the same merges.** Matching was not changed.
+
 ## Known limitations
 
 - Only `cross_document_candidates` items can be rejected, and only they and decision conflicts can
@@ -391,10 +412,10 @@ Matching was not changed.
 - `review show` needs the full item ID. A later import can replace an item, and the ID then
   reads as not found.
 - `review show` escapes descriptions and IDs, but prints file names as typed (D-037).
-- Coverage cannot be changed after import. A file imported with unknown coverage
-  cannot be declared complete later. The attempt fails with `coverage_conflict`,
-  existing data stays unchanged, and the message explains the limitation. M2 adds
-  the correction and history workflow.
+- Coverage can be declared after import with `review coverage declare`, complete or unknown only.
+  Coverage a document's metadata states can only be withdrawn. One document at a time (D-051). A
+  repeat import with a different declaration still fails with `coverage_conflict`, which names the
+  command.
 - The original file is not kept. Row contents and the file's hash are stored, and
   archiving arrives at M5.
 - Pending and posted rows are only flagged when amount and description match. A

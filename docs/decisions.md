@@ -1300,7 +1300,7 @@ with M2.7:
   `d5-2a1e1dd2ac99de82` are the digests pinned before M2.7, unchanged.
 - `trace` now escapes descriptions, since a completed one is typed by a person.
 
-## D-051 Coverage correction with history — Approved
+## D-051 Coverage correction with history — Approved, implemented in M2.8
 
 Approved by the owner on 2026-11-08, who asked for M2.8 to be built with the lead engineer's
 recommendations, recorded here before its code, and reviewed with M2.7 and M2.9. Replaces D-022's
@@ -1368,6 +1368,71 @@ document's exact pairs, against an import making the same merges.
 
 **Not in scope.** `partial` declarations, coverage for several documents at once, changing coverage
 a document's metadata states other than withdrawing it, and coverage of documents of other accounts.
+
+**How these were implemented,** where the rules above left a choice. They await the owner's review
+with M2.8:
+
+- The declaration in effect is found with the shared chain rule (D-048), and `load_evidence` puts its
+  kind, interval, basis and evidence in the document it gives `derive()`.
+- `documents` now starts each line with `Document <ID>:`, and shows the coverage in effect, adding
+  `declared after import, claimed at import: <kind>` when it differs from the claim.
+- `review coverage show` gives `v1` to declare with, and while a declaration applies, its `k1` to undo
+  it with, as `review show` gives `r6` and `review decision show` gives `d5`.
+- `v1` covers the effective coverage only. The claim, the interpretation and the document never
+  change. `v1-bb1b708a2ff2dd50` and `k1-141e501092a4533f` are pinned for fixed ledgers.
+- `k1` and `u1` are computed by one helper, `reports/undo_items.py`. `u1-eef46741adfc3a9f` is
+  unchanged by that.
+- `r6-` and `t4-` read the digests pinned before M2.8.
+- A declaration of a basis the stored interpretation does not offer is refused before the metadata
+  rule, so a metadata document asked for an impossible basis hears about the basis.
+
+## D-052 Pending to posted — Approved
+
+Approved by the owner on 2026-11-08, who asked for M2.9 to be built with the lead engineer's
+recommendations, recorded here before its code, and reviewed with M2.7 and M2.8. Amends D-006 for
+pending and posted rows sharing a reliable ID, carries out D-008's migration, and meets D-016.
+Changes none of D-042 to D-051.
+
+**Matching, rules version 2.** Each change is a change of behaviour the settings do not show, so
+`RULES_VERSION` becomes 2 and every account reads as not current until `reconcile` (D-033).
+
+| Evidence | Before | Now |
+|---|---|---|
+| Same reliable ID, one row pending and the other not, transaction dates agreeing where both are present | Possible duplicate, a status conflict | Confident duplicate, merged. The amount may differ, as with a tip, and the posted row supplies the values (D-030). A changed amount is disclosed |
+| No reliable ID, one row pending and the other posted, in different documents, dates within the window, similar descriptions, the same direction, different amounts | Not a candidate | Candidate, with reason `pending_amount_changed`. Review only: `review confirm` joins them |
+| A pending and a posted row of one document, flagged under D-021 | Cannot be acted on | `review confirm` can join them, the only way one transaction holds two records of one document |
+
+A reliable ID under `stable_unique` already proves the rows are one event (D-026), so only status
+and amount stood in the way. Without an ID, amount was the evidence that ruled pairs out, so a tip
+gave a pending 20.00 and a posted 24.00 counted as 44.00 with no flag. It now raises a candidate and
+never merges by itself.
+
+**The D-008 migration.** Migration 0012 rebuilds `transaction_source`, replacing
+`UNIQUE (transaction_id, source_document_id)` with a partial unique index exempting links with rule
+`confirmed_same_event`. A confirmed unit may then hold two records of one document only when one is
+pending and the other is not. Automatic matching still never does, and every other confirmation
+rule of D-046 stands. A test shows the migration on populated data, as D-008 requires.
+
+**Same-document items.** `review confirm` accepts a `same_document_pending_posted` item, with one
+group holding a pending and a posted transaction of its document. Such an item stays open while its
+records are in several transactions and is resolved while they are in one, so undoing the
+confirmation reopens it.
+
+**Stale pending (D-016).** A pending transaction dated more than 10 days before the latest date in
+its account's records is disclosed in `totals` on its own line, and is never removed or changed.
+
+**Disclosure (D-041).** `totals` and import summaries disclose transactions whose posted amount
+differs from their pending amount, and stale pending transactions, on their own lines.
+
+**Tokens (D-040).** No token's inputs change. The decision undo token covers the rules fingerprint,
+so `d5` digests change with the rules version, keeping `d5`.
+
+**Cost.** Pending rows are compared with posted rows in the date window only. Measured with many
+pending and posted rows of one description block, against a later import.
+
+**Not in scope.** Pending and posted rows of one document without a D-021 flag, a pending row with
+no posted counterpart ever arriving, automatic joining of same-document rows, and changed amounts
+under unreliable IDs.
 
 ## Not yet decided
 

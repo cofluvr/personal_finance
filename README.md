@@ -181,7 +181,7 @@ bin/pf trace --db "$DB" TRANSACTION_ID
 bin/pf reconcile --db "$DB"
 ```
 
-`transactions`, `trace`, `review show`, `review merge show` and `review transaction show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review confirm`, `review merges`, `review separate`, `review decisions`, `review decision show`, `review undo`, `review correct`, `review corrections`, `review correction show`, `review correction undo`, `review complete`, `review dismiss`, `review resolutions`, `review resolution show` and `review resolution undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
+`transactions`, `trace`, `review show`, `review merge show` and `review transaction show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review confirm`, `review merges`, `review separate`, `review decisions`, `review decision show`, `review undo`, `review correct`, `review corrections`, `review correction show`, `review correction undo`, `review complete`, `review dismiss`, `review resolutions`, `review resolution show`, `review resolution undo`, `review coverage show`, `review coverage declare`, `review coverage history` and `review coverage undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
 
 ## Reading a Review Item
 
@@ -293,6 +293,25 @@ An `unresolved_record` item is a row the parser could not read as a transaction.
 - Matching never pairs a completed row on the values you typed. An identical row in another file is raised as a possible duplicate, and `review confirm` can join them. A row read from a file supplies the displayed values before one you completed.
 - An unresolved row can keep confident matches in its file from happening, because it could distort the count. A dismissed row no longer does, so totals can fall. A completed row still does wherever its values could match.
 - `review resolution undo` makes the row unresolved again. Undoing a completion is refused while a decision or correction binds the row: undo those first. Completing it again brings back the same transaction ID. See [D-050](docs/decisions.md).
+
+## Correcting a Document's Coverage
+
+```sh
+bin/pf documents --db "$DB"
+bin/pf review coverage show --db "$DB" DOCUMENT_ID
+bin/pf review coverage declare --db "$DB" --account ACCOUNT DOCUMENT_ID --revision REVISION \
+   --coverage-kind complete --coverage-start YYYY-MM-DD --coverage-end YYYY-MM-DD --coverage-basis posting
+bin/pf review coverage declare --db "$DB" --account ACCOUNT DOCUMENT_ID --revision REVISION --coverage-kind unknown
+bin/pf review coverage history --db "$DB" --account ACCOUNT
+bin/pf review coverage undo --db "$DB" --account ACCOUNT DECLARATION_ID --revision REVISION
+```
+
+Coverage given at import can be changed later. `documents` lists each document's ID, and `review coverage show` gives the revision to declare with and, while a declaration applies, the revision to undo it.
+
+- `complete` states, as at import, that nothing in the interval is missing on that date basis. `unknown` withdraws a claim. A document that states its own coverage can only have it withdrawn.
+- The claim made at import is kept. `documents` and `review show` show the declared coverage apart from it, and `totals` counts documents with declared coverage.
+- Matching uses the declared coverage from then on, so rows can merge or split and totals can change. The output says how many transactions there were before and after.
+- Each declaration replaces the one before it. Undo restores that one, or the claim at import. A repeat import with a declaration is compared with the coverage in effect. See [D-051](docs/decisions.md).
 
 ## Reading an Import Summary
 

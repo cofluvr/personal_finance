@@ -1,4 +1,4 @@
-# Session Handoff: M2.7 Built, M2.8 Next
+# Session Handoff: M2.7 and M2.8 Built, M2.9 Next
 
 For a fresh session. Written 2026-11-08. **M1 is complete and accepted**, and its limitations and
 deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
@@ -11,7 +11,7 @@ D-047 and the limits in "M2.4 as built" below, with no changes. The owner accept
 2026-11-08, including the rules and implementation choices recorded in D-048 and the limits in
 "M2.5 as built" below, with no changes. The owner accepted M2.6 as built on 2026-11-08, including
 the rules and implementation choices recorded in D-049 and the limits in "M2.6 as built" below, with
-no changes. **M2.7 is implemented and awaits review (D-050).** On 2026-11-08 the owner asked for
+no changes. **M2.7 and M2.8 are implemented and await review (D-050, D-051).** On 2026-11-08 the owner asked for
 M2.7, M2.8 and M2.9 to be built in turn, each with the lead engineer's recommendations, and will
 review all three together. So each slice's plan is recorded as its own decision before its code, and
 none of the three is accepted yet. M2.7 to M2.9 were provisional, and each needs its own approval. M2.1's decisions are D-040 and
@@ -299,10 +299,37 @@ pass.
   give the grouping, so the groups were removed in `6067cf3` and the `u1` breaks rerun there: all
   caught by `test_a_related_file_changes_it`.
 
+**M2.8:** migration 0011, with append-only `coverage_declaration` and `coverage_declaration_event`.
+`review coverage show`, `declare`, `history` and `undo`. Matching uses the declaration in effect,
+else the claim at import, which stays unchanged. A document stating its own coverage can only have it
+withdrawn. Chains follow D-048. Repeat imports compare with the coverage in effect. `documents` names
+document IDs. Tokens `r6` and `t4` keep their digests, and `v1` and `k1` are new.
+`measure_reconciliation.py --declared`. K1 to K17 pass, and S, C, P, N, V and U still pass.
+
+**Found while building M2.8:**
+
+- `review show` built each document's evidence from the claim alone. Its effective end and pending
+  rule now follow the declaration, and the claim stays shown as stored.
+- The `coverage_conflict` explanation said coverage was fixed at import and pointed at "M2". It now
+  names `review coverage declare`, and its test was rewritten for that.
+- A first `v1` passed a dataclass to `list()` and failed on every show. Reproducing it took a probe
+  through `bin/pf` in a new `build/` folder, after the harness refused an `rm -rf` of the old one.
+- The benchmark first reused a loop variable named like the result, and stopped before printing.
+- The migration tests of 0008 to 0010 now drop 0011's tables too.
+- Deliberate breaks: 32 applied, with an unbroken control passing 286. 29 caught, none only by a pin.
+  3 survived: 2 test gaps, now closed, a chain of three and the evidence's effective end, and 1
+  equivalent: leaving superseded declarations in the lookup gives the same result, because rows come
+  back in insertion order and the newest is last. The filter stays.
+
 ## Tests actually executed
 
 | Check | Result |
 |---|---|
+| The suite gating each M2.8 commit | 1379 passed at `9b97453`, exit code 0. See the commit recording M2.8 for the last |
+| Targeted deliberate breaks, M2.8 | 32 breaks with an unbroken control passing (286 tests): 29 caught, none only by a pin, 2 test gaps closed, 1 equivalent. Script and results in `build/m2.8-breaks/`, ignored and may not survive |
+| Order test for declarations | Exhaustive: 60 cases, every valid point of every order of four files, all equal |
+| Walkthrough through `bin/pf`, ledger in `build/m2.8-walk` | Net -31.00, -24.50 after declaring January complete, -15.50 after declaring both months, -24.50 and -31.00 after undoing each. A basis the layout lacks, an old `v1`, undoing a superseded declaration refused with exit code 2, and a repeat import with other coverage failed with exit code 1 |
+| Declaration measurements | See [status.md](status.md). A declaration costs no more than an import making the same merges |
 | The suite gating each M2.7 commit, last at `6067cf3` | 1335 passed, exit code 0 |
 | Targeted deliberate breaks, M2.7 | 54 breaks with an unbroken control passing (320 tests). 7 survived: 5 test gaps, now closed, 1 redundant step, removed, 1 equivalent. On `9878d67`, 49 breaks with the control passing 321: 48 caught and the equivalent one surviving. The `u1` breaks on `6067cf3`: all caught by a relevant test. Script and results in `build/m2.7-breaks/`, ignored and may not survive |
 | Order test for resolutions | Exhaustive: 60 cases each for a dismissal and a completion, every valid point of every order of four files, all equal |
@@ -580,6 +607,22 @@ in `tests/scenarios/test_confirmations.py`, `test_confirmation_migration.py`,
   quadratically. A plain confirmation does not.
 - `review decisions` says "1 pairs". The wording is unchanged from M2.2.
 
+## M2.8 as built
+
+Awaiting the owner's review, with M2.7 and M2.9. Scope and acceptance tests are in
+[plan.md](plan.md) (K1 to K17), the rules and implementation choices in D-051. Tests are in
+`tests/scenarios/test_coverage_declarations.py`, `test_coverage_declaration_order.py` and
+`test_coverage_declaration_migration.py`. The benchmark is `measure_reconciliation.py --declared`.
+
+**Known limits of M2.8:**
+
+- Only `complete` and `unknown` can be declared, one document at a time.
+- Coverage a document's metadata states can only be withdrawn, never strengthened or narrowed.
+- `v1` covers only the effective coverage, so declaring and undoing back to the same coverage gives
+  the token it had.
+- The README's runnable example has no overlapping files to show this, so the commands are in its
+  reference section.
+
 ## M2.7 as built
 
 Awaiting the owner's review, with M2.8 and M2.9. Scope and acceptance tests are in
@@ -765,6 +808,12 @@ rules and the choices made where they left one in D-047. Tests are in
   back.
 - pytest temporary files used `build/tmp`.
 
+## Boundary notes from the M2.8 work
+
+- As for M2.7. The harness's safety check refused one `rm -rf` of a `build/` probe folder's contents.
+  Nothing was removed, and a new folder was used instead. The empty `build/m2.8-probe/` is left for
+  the owner to remove if wanted.
+
 ## Boundary notes from the M2.7 session
 
 - The session read nothing outside this repository, and listed no parent or sibling directory.
@@ -823,10 +872,9 @@ Read docs/handoff.md first, then the files it lists. Confirm the branch is featu
 the working tree is clean, and run the test suite with a real exit code before changing
 anything. Do not contact GitHub.
 
-Task: M2.7 is built. Continue as I asked on 2026-11-08: build M2.8 and then M2.9 with your
-recommendations. Before each slice's code, record its plan as its own decision (D-051, D-052)
-with scope and acceptance tests, as small gated commits. Do not reopen D-042 to D-050 unless
-you find a concrete contradiction. Stop when all three are built, for my review of M2.7, M2.8
+Task: M2.7 and M2.8 are built, and M2.9's plan is recorded as D-052. Continue as I asked on
+2026-11-08: build M2.9 as D-052 says, as small gated commits. Do not reopen D-042 to D-050 unless
+you find a concrete contradiction. Do not reopen D-051 or D-052 either. Stop when all three are built, for my review of M2.7, M2.8
 and M2.9 together.
 
 Follow the working principles in docs/handoff.md. Pushing needs my explicit approval each time.

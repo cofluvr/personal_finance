@@ -194,6 +194,15 @@ class TestChains:  # K6, K7
         history = ledger.run("review", "coverage", "history")[1]
         assert history.count(": undone, ") == 2
 
+    def test_a_refusal_names_the_newest_of_a_longer_chain(self, ledger):
+        unknown_beside_complete(ledger)
+        first = ledger.declare_ok("a.csv", **MONTH)
+        second = ledger.declare_ok("a.csv", "unknown")
+        third = ledger.declare_ok("a.csv", start="2026-01-02", end="2026-01-20", basis="posting")
+        code, _, err = ledger.undo_declaration(first, "k1-0000000000000000")
+        assert code == 2 and DECLARATION_SUPERSEDED.format(newest=third) in err
+        assert second not in err
+
     def test_undo_refusals(self, ledger):
         unknown_beside_complete(ledger)
         declaration = ledger.declare_ok("a.csv", **MONTH)
@@ -322,6 +331,10 @@ class TestDisplays:  # K14, K15
         shown = ledger.show(item)
         assert "Declared after import, which matching uses: complete 2026-02-01 to 2026-02-20" in shown
         assert "Coverage kind: unknown" in shown
+        # What matching relies on follows the declaration, and the claim stays as stored.
+        a_section = shown.split("  a.csv\n")[1].split("\n  b.csv")[0]
+        assert "Last date matching relies on: 2026-02-20" in a_section
+        assert "Claimed interval: missing to missing" in a_section
         documents = ledger.run("documents")[1]
         assert "coverage complete 2026-02-01 to 2026-02-20, posting basis, evidence user_declared" in documents
         assert "declared after import, claimed at import: unknown" in documents
