@@ -355,3 +355,28 @@ both kinds share, and stays linear.
 counterparts.** Coverage spans add little, because they are read once per counterpart. Only many
 equal amounts in one counterpart make it quadratic, and a date filter on the search would remove
 that, if needed.
+
+**Income and spending (T12),** measured 2026-11-08 on the same machine with
+`measure_reconciliation.py --income`. Full output is in `build/m3.4-bench/`, which is ignored and
+may not survive.
+
+Count matched pairs, one-sided transfers, unconfirmed transfer kinds, purchases, income and
+unclassified inflows, written directly, with amounts that differ by group so nothing is a candidate.
+The groups ask, for each transaction, whether an applied match or one-sided transfer names it. The
+shape asserts every group's count, that every match and statement applies, and no candidates.
+"Transfers" is the existing transfer summary, which runs the candidate search.
+
+| Count | Transactions | Applied effects | Groups | Account movement | Transfers |
+|---|---|---|---|---|---|
+| 1,000 | 7,000 | 2,000 | 0.017s | 0.011s | 0.034s |
+| 4,000 | 28,000 | 8,000 | 0.088s | 0.052s | 0.166s |
+| 8,000 | 56,000 | 16,000 | 0.243s | 0.186s | 0.410s |
+
+**The groups are linear,** and grow as account movement does. A lookup that cannot use the effect
+indexes, tried as a deliberate break, took 0.722s and 11.359s at 1,000 and 4,000, so the shape
+reaches the quadratic cost it guards against.
+
+**Writes fail above 32,766 transactions bound by transfers.** At 16,000 matches and 16,000 one-sided
+transfers, building the shape failed in `write_transfer_effects` with SQLite's "too many SQL
+variables", because it passes one per bound transaction. This is M3.2 and M3.3 code, left for the
+owner's review with M3.4.

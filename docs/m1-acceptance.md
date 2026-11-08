@@ -40,7 +40,7 @@ missing here or a named test does not exist. It does not judge whether a test is
 | A22 | Passed | `a22_a_single_day_overlap_stays_flagged_when_declared` | |
 | A23 | Passed | `rows_never_become_coverage`, `inferred_is_not_an_accepted_evidence_type` | |
 | A24 | Passed | `a24_different_date_bases_are_flagged` | |
-| A25 | Passed | `totals_use_account_movement_terms`, `totals_never_claim_income_or_spending`, `summaries_do_not_use_the_retired_vocabulary` | |
+| A25 | Passed | `totals_use_account_movement_terms`, `account_movement_never_claims_income_or_spending`, `summaries_do_not_use_the_retired_vocabulary` | |
 | A26 | Passed | `a_declaration_is_recorded_as_user_supplied`, `a_declaration_must_be_complete_and_explicit` | |
 | A27 | Passed | `a27_rows_without_a_counterpart_are_not_flagged` | |
 | A28 | Passed | `a28_overlapping_items_count_distinct_transactions_and_show_no_adjustment` | |
