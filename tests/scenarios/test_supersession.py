@@ -501,6 +501,17 @@ class TestAlikeListing:  # N11
         assert "\x1b" not in section
         assert "matches a.csv row 1" in section
 
+    def test_a_long_listing_stops_at_fifty(self, ledger):
+        item, one, two = pair_up(ledger)
+        ledger.reject_ok(item, (one, two))
+        for number in range(26):
+            ledger.card(f"again{number:02}.csv", test_confirmations.CAFE)
+        (again,) = ledger.items("cross_document_candidates")
+        out = ledger.show(again)
+        # 26 lookalikes, each alike both decided records.
+        assert len(alike_lines(out)) == 50
+        assert "  Only the first 50 are listed." in out
+
 
 class TestChainsAreEquivalentToTheirNewest:  # N15
     @staticmethod
@@ -605,3 +616,4 @@ def test_a_superseding_separation_at_any_point_in_any_order(tmp_path, capsys):  
             compared += 1
     # 4, 8 and 12 orders have a and b in by file 2, 3 and 4, with 6, 3 and 1 points each.
     assert compared == 60
+

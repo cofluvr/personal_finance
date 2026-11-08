@@ -884,6 +884,7 @@ def print_decided_pairs(item) -> None:
 
 def print_alike_records(alike) -> None:
     """Evidence that a record repeats a decided one. It binds nothing (D-048)."""
+    alike = list(islice(alike, DIRECT_PAIRS_SHOWN + 1))
     if not alike:
         return
     print("Alike a decided record, and not bound by any decision:")

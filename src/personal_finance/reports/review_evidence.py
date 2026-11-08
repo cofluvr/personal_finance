@@ -8,6 +8,7 @@ import hashlib
 import json
 import sqlite3
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 
 from personal_finance.ingest.coverage import effective_end
@@ -189,11 +190,12 @@ class AlikeRecord:
     decision_ids: tuple[str, ...]
 
 
-def alike_decided_records(item: ReviewEvidence) -> tuple[AlikeRecord, ...]:
+def alike_decided_records(item: ReviewEvidence) -> Iterator[AlikeRecord]:
     """Records in an item that look like a re-export of a decided record (D-048).
 
     Evidence only, as fingerprints are (D-009): it binds nothing. It reads nothing but the
     item's own evidence, which its revision already covers, so the revision is unchanged.
+    Lazy, because a group of lookalikes holds quadratically many.
     """
     bound = defaultdict(set)
     for pair in item.decided:
@@ -205,7 +207,7 @@ def alike_decided_records(item: ReviewEvidence) -> tuple[AlikeRecord, ...]:
     for record in sorted(parsed, key=_record_key):
         if _record_key(record) in bound:
             by_values[_parsed_values(record)].append(record)
-    return tuple(
+    return (
         AlikeRecord(record, other, tuple(sorted(bound[_record_key(other)])))
         for record in sorted(parsed, key=_record_key) if _record_key(record) not in bound
         for other in by_values.get(_parsed_values(record), ())
