@@ -14,7 +14,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.3: confirmation, partitions and superseding | Accepted (D-046) |
 | M2.4: separating machine-made merges | Accepted (D-047) |
 | M2.5: new evidence on decided records, and superseding chains | Accepted (D-048) |
-| M2.6 to M2.9 | Provisional, not approved |
+| M2.6: value corrections | Implemented, awaiting review (D-049) |
+| M2.7 to M2.9 | Provisional, not approved |
 | M3 to M8 | Not started |
 
 ## What exists
@@ -22,8 +23,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.money`: exact parsing and formatting of amounts.
 - `personal_finance.db.migrate`: database creation, connections, migrations.
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
-  `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation` and
-  `0008_supersession_chains`,
+  `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
+  `0008_supersession_chains` and `0009_value_corrections`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
@@ -36,6 +37,9 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.reconcile.decisions`: rejecting pairs, confirming partitions, separating
   automatic merges, superseding and undoing decisions, each under one write lock (D-043, D-045,
   D-046, D-047, D-048).
+- `personal_finance.reconcile.correction_effects` and `corrections`: which corrected values apply
+  to which transactions, and correcting and undoing values under one write lock (D-049).
+  `reconcile.supersession` holds the chain rule that decisions and corrections share (D-048).
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement.
@@ -43,10 +47,12 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.reports.review_evidence`: the evidence behind one review item or one
   transaction, and their revision tokens (D-040, D-047).
 - `personal_finance.reports.decision_evidence`: what a decision binds, and the undo token (D-045).
+- `personal_finance.reports.correction_evidence`: what a correction binds, and its undo token (D-049).
 - CLI: `init`, `migrate`, `account add`, `import`, `reconcile`, `documents`, `transactions`,
   `trace`, `review list`, `review show`, `review reject`, `review confirm`, `review merges`,
   `review merge show`, `review separate`, `review decisions`, `review decision show`,
-  `review undo`, `totals`, run through the `bin/pf` launcher (D-038).
+  `review undo`, `review transaction show`, `review correct`, `review corrections`,
+  `review correction show`, `review correction undo`, `totals`, run through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
 
@@ -239,6 +245,38 @@ once. The alike listing in `review show` stops at the 51 it needs: 0.0014s on 2,
 transactions and 0.023s on 20,000. Its first version built every match before printing 50, a million
 at 2,000 lookalikes taking 0.99s, and was made lazy.
 
+**Corrections (V18),** measured 2026-11-08 on the same machine with
+`measure_reconciliation.py --corrected`. Full output is in `build/m2.6-bench/corrected.txt`, which is
+ignored and may not survive.
+
+First, three unmerged files of one dense group with a partition touching it, the shape where
+derivation is quadratic. A correction moves no record, so it does not derive, while the later import
+pays derivation in full. This shape reaches that cost: the later import takes 2.1s at 2,000.
+
+| Transactions | Transaction show and token | Correct | Later import | Correction show and token | Undo |
+|---|---|---|---|---|---|
+| 98 | 0.000s | 0.001s | 0.010s | 0.001s | 0.001s |
+| 500 | 0.000s | 0.002s | 0.137s | 0.002s | 0.003s |
+| 998 | 0.000s | 0.002s | 0.523s | 0.003s | 0.006s |
+| 2,000 | 0.001s | 0.003s | 2.104s | 0.007s | 0.012s |
+
+Second, one account where every transaction but one has an active amount correction. Every
+correction and every reconcile rewrites the account's derived rows, which is linear in corrections.
+
+| Corrections | Rewrite of derived rows | Totals | Transaction show and one correction | Later import |
+|---|---|---|---|---|
+| 99 | 0.002s | 0.000s | 0.003s | 0.005s |
+| 499 | 0.010s | 0.001s | 0.016s | 0.023s |
+| 999 | 0.013s | 0.001s | 0.032s | 0.032s |
+| 1,999 | 0.022s | 0.002s | 0.048s | 0.060s |
+| 3,999 | 0.065s | 0.006s | 0.113s | 0.152s |
+
+A chain of 50 corrections reads its states in 0.0001s and 2,000 in 0.0017s, and correction show on
+the newest of 2,000 takes 0.011s. **Corrections add no quadratic recomputation.** A correction stays
+below a later import of the same account in every row, though with thousands of corrections and
+nothing else to derive the two are close, because both rewrite every derived row. Matching was not
+changed.
+
 ## Known limitations
 
 - Only `cross_document_candidates` items can be rejected, and only they and decision conflicts can
@@ -268,7 +306,16 @@ at 2,000 lookalikes taking 0.99s, and was made lazy.
   and stored. The argument parser also echoes invalid option values.
 - An interrupted import leaves earlier files in the run committed, with no summary.
 - `ledger_transaction` values can be updated. Keeping corrections out of base
-  columns is an application rule for M2, not something the database enforces.
+  columns is an application rule, not something the database enforces. Corrections live in their
+  own tables, and `ledger_transaction` keeps the primary source's values (D-049).
+- Only amount, transaction date, posting date and description can be corrected, and no value can
+  be cleared. Unresolved records cannot be corrected (M2.7).
+- A correction binds the records of its transaction when made. One made after a merge binds more
+  records, so a later split gives it `basis_changed` where an earlier correction would not. Item
+  and transaction tokens then differ too, because they cover the bound records.
+- Disagreeing corrections, or one whose records end up in several transactions, use the source
+  value until one is undone. There is no command to settle them other than undo.
+- Every correction and reconcile rewrites the account's derived correction rows.
 - The database cannot enforce that every transaction has at least one source.
   Tests check this after success, failure and crash.
 - A separation names every record of one transaction, at most 50. It splits records a

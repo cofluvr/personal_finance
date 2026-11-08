@@ -28,18 +28,34 @@ class AccountMovement:
     transactions_confirmed: int = 0
     # Transactions holding records a separation keeps apart from an automatic match (D-047).
     transactions_separated: int = 0
+    # Transactions using at least one corrected value, and those where corrections leave a field
+    # on its source value because they disagree or lost their basis (D-049).
+    transactions_corrected: int = 0
+    transactions_with_correction_conflict: int = 0
+    transactions_with_correction_basis_changed: int = 0
 
 
 def account_movement(conn: sqlite3.Connection, account_id: str | None = None) -> AccountMovement:
-    """Summarise every logical transaction, or those of one account."""
+    """Summarise every logical transaction, or those of one account.
+
+    Amounts are effective: a corrected amount where one applies, else the source value (D-049).
+    """
     inflow, outflow, net, transactions, pending = conn.execute(
-        """SELECT COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents END), 0),
-                  COALESCE(-SUM(CASE WHEN amount_cents < 0 THEN amount_cents END), 0),
-                  COALESCE(SUM(amount_cents), 0),
+        """SELECT COALESCE(SUM(CASE WHEN effective_amount_cents > 0
+                                    THEN effective_amount_cents END), 0),
+                  COALESCE(-SUM(CASE WHEN effective_amount_cents < 0
+                                     THEN effective_amount_cents END), 0),
+                  COALESCE(SUM(effective_amount_cents), 0),
                   COUNT(*),
                   COUNT(CASE WHEN settlement_status = 'pending' THEN 1 END)
-           FROM ledger_transaction
-           WHERE :account IS NULL OR account_id = :account""",
+           FROM (SELECT COALESCE(fix.corrected_amount_cents, entry.amount_cents)
+                            AS effective_amount_cents,
+                        entry.settlement_status
+                 FROM ledger_transaction entry
+                 LEFT JOIN transaction_correction fix
+                     ON fix.transaction_id = entry.id AND fix.field = 'amount'
+                    AND fix.state = 'applied'
+                 WHERE :account IS NULL OR entry.account_id = :account)""",
         {"account": account_id},
     ).fetchone()
 
@@ -88,9 +104,20 @@ def account_movement(conn: sqlite3.Connection, account_id: str | None = None) ->
         {"account": account_id},
     ).fetchone()[0]
 
+    corrections = conn.execute(
+        """SELECT COUNT(DISTINCT CASE WHEN fix.state = 'applied' THEN fix.transaction_id END),
+                  COUNT(DISTINCT CASE WHEN fix.state = 'conflict' THEN fix.transaction_id END),
+                  COUNT(DISTINCT CASE WHEN fix.state = 'basis_changed'
+                                      THEN fix.transaction_id END)
+           FROM transaction_correction fix
+           JOIN ledger_transaction entry ON entry.id = fix.transaction_id
+           WHERE :account IS NULL OR entry.account_id = :account""",
+        {"account": account_id},
+    ).fetchone()
+
     return AccountMovement(
         inflow, outflow, net, transactions, pending, unresolved, groups, members, *conflicts,
-        confirmed, _separated(conn, account_id),
+        confirmed, _separated(conn, account_id), *corrections,
     )
 
 

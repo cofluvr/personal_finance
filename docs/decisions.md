@@ -1073,6 +1073,121 @@ with M2.5 on 2026-11-08:
 - The `d3` digest is unchanged for a ledger without chains: `d2-2a1e1dd2ac99de82` became
   `d3-2a1e1dd2ac99de82`, and a test pins it.
 
+## D-049 Value corrections — Approved, implemented in M2.6
+
+Approved by the owner on 2026-11-08 with the M2.6 plan, taking every recommendation in it. Meets
+D-041's requirements on corrections, and extends D-030. Builds on D-009 and D-040, and changes none
+of D-042 to D-048.
+
+```sh
+pf review transaction show --db DB TRANSACTION_ID
+pf review correct --db DB --account A TRANSACTION_ID --revision t2-… --field amount --value=-12.50 \
+   [--supersedes C --supersedes-revision c1-…]
+pf review corrections --db DB [--account A]
+pf review correction show --db DB CORRECTION_ID
+pf review correction undo --db DB --account A CORRECTION_ID --revision c1-…
+```
+
+**What can be corrected.** `amount`, `transaction_date`, `posting_date` and `description`, each set to
+a concrete value. Nothing can be cleared. Settlement status is M2.9's, and changes the pending count.
+An external ID is identity evidence (D-026). One correction holds one field.
+
+**Storage.** Migration 0009 adds append-only `value_correction`, `value_correction_record`, the
+records it binds, and `value_correction_event`, plus a derived `transaction_correction` that every
+reconcile and correction rewrites. `ledger_transaction` keeps D-030's primary-source values exactly,
+so corrections never enter base columns.
+
+**Matching never reads them.** `derive()` reads `record_parse` only, and its signature is unchanged.
+A corrected value that could merge or split records would be an identity decision bypassing D-042 to
+D-048's checks, membership would depend on corrections anchored on membership, and stored
+interpretation (D-026) and fingerprints as evidence only (D-009) would no longer hold.
+
+**Effective value.** For a transaction and a field, take every active correction of that field
+binding any record now in the transaction:
+
+| Corrections | State | Value that totals and display use |
+|---|---|---|
+| None | | The primary source's (D-030) |
+| All give the same value | `applied` | That value |
+| Values differ | `conflict` | The primary source's |
+| One binds records now in another transaction | `basis_changed` | The primary source's |
+
+"Neither chosen silently" is not enough on its own because totals must add some number. This one is
+deterministic and independent of order, never chooses between two statements a person made, applies
+nothing twice, and is disclosed on its own line with no adjustment figure. Undo settles it.
+
+**Anchoring.** A correction binds every record of its transaction when made. The transaction ID is a
+snapshot.
+
+| Event | Outcome |
+|---|---|
+| A re-export merges automatically | Still applied. The new record is not bound |
+| `review confirm` would join disagreeing corrections, or `review separate` would split a correction's records | Refuses atomically. D-047's "raises no conflict" holds |
+| An automatic split, or an undo that splits or joins | `basis_changed` or `conflict`, disclosed |
+
+A correction made after a merge binds more records, so a later split gives `basis_changed` where an
+earlier one would not. This is how a decision binds records at decision time too.
+
+**Superseding and undo.** Correcting a corrected field needs `--supersedes` naming the one correction
+applying there, with its `c1` token. A field in `conflict` or `basis_changed`, or with several
+corrections applying, refuses superseding: undo one first, one at a time as in D-048. Chains follow
+D-048: only the newest applies, undo steps back one link, and refusing a superseded correction names
+the newest of its chain. Corrections constrain no identity, so undo never refuses for contradiction,
+and says when it leaves a field unsettled. A correction and a decision never supersede each other.
+
+**Distinguishable (D-041).** Corrections never raise or close a `review_issue`, so no count of possible
+duplicates or decision conflicts can include them. `totals` and import summaries disclose corrected
+and unsettled transactions on their own lines. `review show` gives them a separate section,
+`transactions` marks corrected values, and `trace` shows source and corrected values.
+
+**Commands.** D-043's checks under one write lock: the account must be current, and account,
+transaction and token are checked together. A correction changes no membership, so the command
+rewrites `transaction_correction` without deriving. Routine output, `review correct`,
+`review corrections` and `review correction show` print no amounts or descriptions.
+
+**Tokens (D-040).** A ledger without corrections keeps its digests, because the new fields are left out
+while empty.
+
+| Token | New inputs | Version |
+|---|---|---|
+| Item | Each transaction's active corrections: field, value, state and bound records by file and row | `r3` to `r4` |
+| Transaction | The same, for one transaction | `t1` to `t2` |
+| Decision undo | Corrections binding records in its scope, and their states with and without it | `d3` to `d4` |
+| Correction undo, new | Its field, value, the transactions holding its bound records, and the field's outcome there with and without it | `c1` |
+
+**Cost.** Applying corrections is linear in bound records and transactions. A correction adds no
+constraint, so it touches no candidate group. It is measured on the dense constrained group, where
+derivation is quadratic, and on many corrections and long chains. If a correction costs more than a
+later import of the same account, the work stops and is reported.
+
+**How these were implemented,** where the rules above left a choice. They await the owner's review
+with M2.6:
+
+- Fields are stored by their command names: `amount`, `transaction_date`, `posting_date` and
+  `description`. An amount is integer cents in its own column, and the others are text, with checks
+  that each value fits its field.
+- `transaction_correction` is rewritten whole for the account by every reconcile and correction, after
+  memberships are final, and loses a retired transaction's rows by `ON DELETE CASCADE`.
+- Several corrections applying to one field refuse superseding even when they agree, since replacing
+  one would leave the other: undo all but one first.
+- `review confirm` and `review separate` compare the account's unsettled fields before and after,
+  keyed by the records of each transaction, and refuse if any is new. Decision undo reports the new
+  ones and never refuses for them.
+- `review correction show` prints no values, which is stricter than D-037 requires, like
+  `review decision show`. `review transaction show` and `review merge show` share one display.
+  `transactions` now escapes descriptions, since a corrected one is typed by a person.
+- The chain rule moved to `reconcile/supersession.py`, now shared by decisions and corrections.
+- `c1` was first built also covering its state, the bound records' evidence and other corrections of
+  the field. Deliberate breaks showed only the pin noticed any of them: only an active correction has
+  a token, the records and documents are immutable, and another correction reaching those
+  transactions changes the outcomes. Both were removed before
+  review, keeping version 1, since no `c1` token had been shown outside this slice.
+- `c1-e2235f95e29f164e` is pinned for a fixed ledger as computed when built. The digests
+  `r4-d41e2251fcd3a611`, `r4-74d05de08ff20c6b`, `r4-8f8c8b328e5b7256`, `t2-4ae2352458f9c44c` and
+  `d4-2a1e1dd2ac99de82` are the version 3, 1 and 3 digests pinned before M2.6, unchanged.
+- Equivalent corrections made at different points can bind different records, so the order test
+  compares everything but revisions, and checks that records arriving later are never bound.
+
 ## Not yet decided
 
 From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend details

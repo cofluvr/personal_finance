@@ -149,7 +149,7 @@ the decision log records the database, parser and deduplication rules.
 
 ## M2 plan
 
-M2.1, M2.2, M2.3 (D-046), M2.4 (D-047) and M2.5 (D-048) are accepted. **M2.6 to M2.9 are provisional**:
+M2.1, M2.2, M2.3 (D-046), M2.4 (D-047) and M2.5 (D-048) are accepted. M2.6 is implemented and awaits review (D-049). **M2.7 to M2.9 are provisional**:
 a direction, not approval to implement, and each needs its own approval. D-041 lists requirements
 they must meet.
 
@@ -160,7 +160,7 @@ they must meet.
 | M2.3 | Confirm, including part of a group | Accepted |
 | M2.4 | Separating machine-made merges | Accepted (D-047) |
 | M2.5 | New evidence that touches a decided record, and superseding a decision | Accepted (D-048) |
-| M2.6 | Correction overrides | Provisional |
+| M2.6 | Correction overrides | Implemented, awaiting review (D-049) |
 | M2.7 | Resolving incomplete records | Provisional |
 | M2.8 | Coverage correction with history | Provisional |
 | M2.9 | Pending to posted, including tips, changed descriptions and the D-008 migration | Provisional |
@@ -353,6 +353,38 @@ and same-document items.
 | N16 | Equivalent superseding separations made at different valid points in the import sequence give the same outcome |
 | N17 | S1 to S23, C1 to C21 and P1 to P22 still pass |
 | N18 | A superseding separation, its undo and a later import are measured on three unmerged documents |
+
+### M2.6 scope
+
+The rules are D-049. Migration 0009, the effective-value rule, `review transaction show`,
+`review correct`, `review corrections`, `review correction show` and `review correction undo`,
+tokens `r4`, `t2`, `d4` and `c1`, disclosure lines, and a benchmark with `--corrected`.
+
+Deferred: correcting status or an external ID, clearing a value, correcting unresolved records
+(M2.7), superseding several corrections at once.
+
+### M2.6 acceptance criteria
+
+| ID | Test |
+|---|---|
+| V1 | Correcting an amount changes totals by exactly the difference. Source evidence and `ledger_transaction` are byte-identical |
+| V2 | `derive()` output is identical with and without corrections. A correction making two rows alike merges nothing |
+| V3 | Refused, with nothing changed: wrong account, unknown transaction, stale token of any kind, stale account, an unsupported field, an invalid value, a value changing nothing, a corrected field without `--supersedes`, superseding a correction superseded, undone, unsettled, of another field or not applying here |
+| V4 | A stale account is not reconciled by the refused command |
+| V5 | A correction survives repeat imports, `reconcile`, unrelated files and a rules change |
+| V6 | A re-export that merges keeps the correction applied and binds nothing new |
+| V7 | Agreeing corrections apply once. Disagreeing ones use the source value, disclosed apart from possible duplicates and decision conflicts |
+| V8 | An automatic split of a correction's records gives `basis_changed` in every part, using source values |
+| V9 | `review confirm` joining disagreeing corrections and `review separate` splitting a correction's records refuse atomically |
+| V10 | An undo that changes correction states says so, and a correction made since makes its `d4` token stale |
+| V11 | Chains: only the newest applies, undo steps back one link, and a superseded correction is refused naming the newest |
+| V12 | Undoing a correction equals a ledger built without it, with and without imports since |
+| V13 | Tokens: versions pinned, digests kept on ledgers without corrections, `c1` pinned, a correction changes the tokens of its transaction and items, and an unrelated file leaves `c1` unchanged |
+| V14 | Equivalent corrections made at different valid points in the import sequence give the same outcome, exhaustively for four files |
+| V15 | Migration 0009 works on a populated ledger and is atomic on failure. Correction tables are append-only |
+| V16 | Privacy: routine correction commands show no amounts or descriptions. Displays escape descriptions |
+| V17 | S1 to S23, C1 to C21, P1 to P22 and N1 to N18 still pass |
+| V18 | A correction, its undo and a later import are measured on the dense constrained group, and on many corrections and long chains |
 
 ## Backlog benchmarks
 

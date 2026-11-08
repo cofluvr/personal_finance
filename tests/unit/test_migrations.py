@@ -53,7 +53,11 @@ def test_new_database_has_the_expected_tables(conn):
         "source_record_origin",
         "transaction_identity_history",
         "transaction_link_history",
+        "transaction_correction",
         "transaction_source",
+        "value_correction",
+        "value_correction_event",
+        "value_correction_record",
     }
 
 

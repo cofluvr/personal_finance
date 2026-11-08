@@ -23,15 +23,19 @@ from personal_finance.reconcile.cross_document import (
     UnresolvedRecord,
     derive,
 )
+from personal_finance.reconcile.correction_effects import write_correction_effects
 from personal_finance.reconcile.rules import DEFAULT_RULES, RULES_VERSION, MatchingRules
+from personal_finance.reconcile.supersession import (
+    STATE_ACTIVE,
+    STATE_SUPERSEDED,
+    STATE_UNDONE,
+    supersession_chain_states,
+)
 
 MANAGED_RULES = (RULE_CANDIDATES, RULE_EXTERNAL_ID, RULE_DECISION)
 KIND_DUPLICATE = "possible_duplicate"
 KIND_CONFLICT = "decision_conflict"
 
-STATE_ACTIVE = "active"
-STATE_UNDONE = "undone"
-STATE_SUPERSEDED = "superseded"
 
 
 @dataclass(frozen=True)
@@ -93,6 +97,8 @@ def reconcile_account(
     state.write_review_items()
     state.repoint_other_issues()
     state.retire_unused_transactions()
+    # After memberships are final, since corrections follow their records (D-049).
+    write_correction_effects(conn, account_id)
     _write_marker(conn, account_id, rules)
     return ReconcileResult(derivation, moved)
 
@@ -125,41 +131,22 @@ def decision_states(conn, account_id, without: str | None = None) -> dict[str, s
     that one is active or superseded in turn, so only the newest of a chain is active. without
     is treated as undone, to see what undoing it would leave.
     """
-    undone, replacing = _supersession(conn, account_id, without)
-    states = {}
-    for decision, gone in undone.items():
-        if gone:
-            states[decision] = STATE_UNDONE
-        elif decision in replacing:
-            states[decision] = STATE_SUPERSEDED
-        else:
-            states[decision] = STATE_ACTIVE
-    return states
+    return supersession_chain_states(_decision_chain_rows(conn, account_id), without)[0]
 
 
 def superseded_by(conn, account_id) -> dict[str, str]:
     """For each superseded decision, the decision superseding it now."""
-    return _supersession(conn, account_id, None)[1]
+    return supersession_chain_states(_decision_chain_rows(conn, account_id))[1]
 
 
-def _supersession(conn, account_id, without):
-    """Whether each decision is undone, and for each superseded one, its successor.
-
-    Only an active decision can be superseded, so at most one decision not undone supersedes
-    any other.
-    """
-    rows = conn.execute(
+def _decision_chain_rows(conn, account_id):
+    return conn.execute(
         """SELECT decision.id, decision.supersedes_decision_id,
                   EXISTS (SELECT 1 FROM decision_event undone
                           WHERE undone.decision_id = decision.id AND undone.event = 'undone')
            FROM decision WHERE decision.account_id = ?""",
         (account_id,),
     ).fetchall()
-    undone = {decision: bool(gone) or decision == without for decision, _, gone in rows}
-    replacing = {
-        old: decision for decision, old, _ in rows if old is not None and not undone[decision]
-    }
-    return undone, replacing
 
 
 def load_constraints(conn, account_id, without: str | None = None) -> tuple[Constraint, ...]:

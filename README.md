@@ -193,7 +193,7 @@ bin/pf trace --db "$DB" TRANSACTION_ID
 bin/pf reconcile --db "$DB"
 ```
 
-`transactions`, `trace`, `review show` and `review merge show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review confirm`, `review merges`, `review separate`, `review decisions`, `review decision show` and `review undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
+`transactions`, `trace`, `review show`, `review merge show` and `review transaction show` show descriptions and amounts because that is their purpose. `import`, `reconcile`, `documents`, `review list`, `review reject`, `review confirm`, `review merges`, `review separate`, `review decisions`, `review decision show`, `review undo`, `review correct`, `review corrections`, `review correction show` and `review correction undo` do not, and `totals` shows only aggregates. The application writes no logs: output goes to the terminal, and the ledger is the only file it writes.
 
 ## Reading a Review Item
 
@@ -267,6 +267,24 @@ A confident automatic merge raises no review item, so `review merges` lists the 
 - When the records shared an ID the source declares reliable, the output says that this decision overrides it.
 - The decision binds these records only. A later file holding the same event, such as a re-export with the same ID, is withheld and raised as a conflict, never merged silently. `review show` lists such records as alike a decided record, and you decide them by confirming a partition on that item. No decision transfers to a new record (D-048).
 - `review undo` lets the merge return if the evidence still supports it, so totals can fall. At most 50 records can be named. See [D-047](docs/decisions.md).
+
+## Correcting a Value
+
+```sh
+bin/pf review transaction show --db "$DB" TRANSACTION_ID
+bin/pf review correct --db "$DB" --account ACCOUNT TRANSACTION_ID --revision REVISION \
+   --field amount --value=-12.50 [--supersedes CORRECTION_ID --supersedes-revision REVISION]
+bin/pf review corrections --db "$DB" --account ACCOUNT
+bin/pf review correction show --db "$DB" CORRECTION_ID
+bin/pf review correction undo --db "$DB" --account ACCOUNT CORRECTION_ID --revision REVISION
+```
+
+`review correct` records a corrected value for one field of a transaction: `amount`, `transaction_date`, `posting_date` or `description`. Write a negative amount as `--value=-12.50`, so that it is not read as an option, and a date as `YYYY-MM-DD`. The revision comes from `review transaction show`.
+
+- The source values are kept. Totals and `transactions` use the corrected value, `trace` and `review show` show both, and matching never reads a correction, so it never merges or splits anything.
+- A correction binds the records the transaction holds when you make it. A re-export that merges with them later keeps it applied. A new record that does not merge is not corrected.
+- To change a corrected field again, name the correction applying there with `--supersedes` and its revision from `review correction show`. Only the newest of a chain applies, and each undo restores the one before it.
+- If corrections that disagree end up in one transaction, or a correction's records end up in several transactions, the source value is used and `totals` says so on its own line. Undo one correction to settle it. `review confirm` and `review separate` refuse to cause either. See [D-049](docs/decisions.md).
 
 ## Reading an Import Summary
 
