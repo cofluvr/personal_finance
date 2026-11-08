@@ -337,11 +337,9 @@ def undo_outlook(
                 if classified_record_ids.intersection(result.groups[index].record_ids)
             )
 
+        # The outcome of every group holding a classified record, either side, is what undo would
+        # change, so the classifications themselves are not covered separately.
         material["classifications"] = {
-            "bound": sorted(
-                [classification.corrected_value, keyed(classification.bound_record_ids)]
-                for classification in touching_classifications
-            ),
             "with_decision": classification_view(now),
             "without_decision": classification_view(after),
         }

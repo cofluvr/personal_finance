@@ -7,7 +7,7 @@ import pytest
 from test_confirmations import confirm, confirm_ok
 from test_coverage_declarations import CoverageLedger, both_complete
 from test_decisions import CAFE, OTHER, SOURCE_TABLES, pair_up
-from test_resolutions import CAFE_NO_AMOUNT
+from test_resolutions import CAFE_NO_AMOUNT, blocked_pair
 from test_separations import ID_ROW, merged_three, merged_two
 from test_supersession import holding
 
@@ -302,6 +302,25 @@ class TestRefusals:  # F4
                         lambda: ledger.classify(transaction, "fee")):
             self.nothing_changes(ledger, attempt, TYPE_UNSETTLED.split("{")[0])
 
+    def test_superseding_one_of_two_agreeing_classifications(self, ledger):
+        item, one, two = pair_up(ledger)
+        first = ledger.classify_ok(one, "purchase")
+        ledger.classify_ok(two, "purchase")
+        (item,) = ledger.items()
+        confirm_ok(ledger, item, (one, two))
+        assert ledger.outcomes() == [(("a.csv", "b.csv"), "applied", "purchase")]
+        self.nothing_changes(
+            ledger, lambda: ledger.classify(holding(ledger, "a.csv"), "fee", supersedes=first),
+            TYPE_UNSETTLED.split("{")[0],
+        )
+
+    def test_superseding_one_against_its_direction(self, ledger):
+        transaction, refund = against_its_direction(ledger)
+        assert "its amount now runs against the stated type" in ledger.transaction_show(transaction)
+        for attempt in (lambda: ledger.classify(transaction, "purchase", supersedes=refund),
+                        lambda: ledger.classify(transaction, "purchase")):
+            self.nothing_changes(ledger, attempt, TYPE_UNSETTLED.split("{")[0])
+
     def test_supersedes_needs_its_revision(self, ledger):
         transaction = single(ledger)
         classification = ledger.classify_ok(transaction, "purchase")
@@ -311,6 +330,16 @@ class TestRefusals:  # F4
             "--supersedes", classification,
         )
         assert code == 2 and "must be given together" in err
+
+
+def against_its_direction(ledger):
+    """A refund of a corrected amount, left against its direction by undoing the correction."""
+    transaction = single(ledger)
+    correction = ledger.correct_ok(transaction, "amount", "6.50")
+    refund = ledger.classify_ok(transaction, "refund")
+    assert ledger.undo_correction(correction)[0] == 0
+    assert ledger.outcomes() == [(("a.csv",), "against_direction", None)]
+    return transaction, refund
 
 
 def disagreeing_after_undo(ledger):
@@ -539,6 +568,25 @@ class TestDecisionCommands:  # F9
 
 
 class TestCorrectionTokens:
+    def correction_left_against(self, tmp_path, capsys, name, financial_type):
+        """A correction to 7.00 in, superseded by one to 7.00 out, a classification fitting that,
+        and the superseding correction undone, which leaves the type against its direction."""
+        folder = tmp_path / name
+        folder.mkdir()
+        ledger = ClassificationLedger(folder, capsys)
+        transaction = single(ledger)
+        first = ledger.correct_ok(transaction, "amount", "7.00")
+        second = ledger.correct_ok(transaction, "amount", "-7.00", supersedes=first)
+        ledger.classify_ok(transaction, financial_type)
+        assert ledger.undo_correction(second)[0] == 0
+        assert ledger.outcomes() == [(("a.csv",), "against_direction", None)]
+        return ledger.correction_revision(first)
+
+    def test_what_its_undo_would_apply_is_covered_where_nothing_applies_now(self, tmp_path, capsys):
+        """Both are against their direction now, and undoing the correction applies either type."""
+        assert self.correction_left_against(tmp_path, capsys, "purchase", "purchase") != (
+            self.correction_left_against(tmp_path, capsys, "fee", "fee"))
+
     def test_a_classification_its_undo_would_turn_makes_the_correction_token_stale(self, ledger):
         transaction = single(ledger)
         correction = ledger.correct_ok(transaction, "amount", "6.50")
@@ -662,6 +710,26 @@ class TestCompletions:
         assert ledger.undo_resolution(resolution)[0] == 0
 
 
+class TestResolutions:
+    def test_a_dismissal_joining_disagreeing_classifications_says_so(self, ledger):
+        item = blocked_pair(ledger)
+        ledger.classify_ok(holding(ledger, "a.csv"), "purchase")
+        ledger.classify_ok(holding(ledger, "b.csv"), "fee")
+        code, out, err = ledger.dismiss(item)
+        assert code == 0, err
+        assert "no longer fit the direction: 1" in out
+        assert ledger.outcomes() == [(("a.csv", "b.csv"), "conflict", None)]
+
+    def test_undoing_a_dismissal_that_splits_a_classified_merge_says_so(self, ledger):
+        resolution = ledger.dismiss_ok(blocked_pair(ledger))
+        ledger.classify_ok(holding(ledger, "a.csv"), "purchase")
+        code, out, err = ledger.undo_resolution(resolution)
+        assert code == 0, err
+        assert "no longer fit the direction: 2" in out
+        assert ledger.outcomes() == [(("a.csv",), "basis_changed", None),
+                                     (("b.csv",), "basis_changed", None)]
+
+
 class TestTokens:  # F11
     def test_the_version_is_pinned(self):
         assert classification_evidence.CLASSIFICATION_REVISION_VERSION == 1
@@ -709,6 +777,24 @@ class TestTokens:  # F11
         assert ledger.undo_classification(fee)[0] == 0
         assert ledger.classification_revision(purchase) != token
 
+    def test_undoing_an_agreeing_classification_changes_what_undo_would_leave(self, ledger):
+        """Both apply the same type, so only the outcome after this one's undo differs."""
+        item, one, two = pair_up(ledger)
+        first = ledger.classify_ok(one, "purchase")
+        second = ledger.classify_ok(two, "purchase")
+        (item,) = ledger.items()
+        confirm_ok(ledger, item, (one, two))
+        token = ledger.classification_revision(first)
+        assert "classified now, classified after" in ledger.classification_show(first)
+        assert ledger.undo_classification(second)[0] == 0
+        assert ledger.outcomes() == [(("a.csv", "b.csv"), "applied", "purchase")]
+        assert ledger.classification_revision(first) != token
+        assert "classified now, unclassified after" in ledger.classification_show(first)
+        before = ledger.dump()
+        code, _, err = ledger.undo_classification(first, token)
+        assert code == 2 and STALE_CLASSIFICATION_REVISION in err
+        assert ledger.dump() == before
+
     def test_a_correction_turning_its_direction_changes_it(self, ledger):
         transaction = single(ledger)
         correction = ledger.correct_ok(transaction, "amount", "6.50")
@@ -725,8 +811,8 @@ class TestTokens:  # F11
         assert ledger.classification_revision(classification) == token
 
 
-# Set when M3.1 was built.
-PINNED_CLASSIFICATION_REVISION = "f1-59e403f8f1819f1c"
+# Set when M3.1 was built, after its immaterial inputs were removed (D-053).
+PINNED_CLASSIFICATION_REVISION = "f1-d981b70d43d9af68"
 
 
 class TestPrivacy:

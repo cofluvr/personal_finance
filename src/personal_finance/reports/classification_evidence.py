@@ -118,11 +118,11 @@ def classification_undo_outlook(
 ) -> ClassificationUndoOutlook:
     """The undo token, and the outcome either side of an undo, as for corrections (D-049).
 
-    Only an active classification has one, so its state is not covered. Covers its type, the
-    transactions holding the records it binds, and their outcome with and without it, with anything
-    it superseded restored. The bound records are immutable, and another classification reaching
-    those transactions or a change of direction changes the outcomes, so neither is covered
-    separately. Undoing a classification moves no record and changes no amount. An unrelated file
+    Only an active classification has one, so its state is not covered. Covers the transactions
+    holding the records it binds, and their outcome with and without it, with anything it
+    superseded restored. Its type and bound records never change, and another classification
+    reaching those transactions or a change of direction changes the outcomes, so none of them is
+    covered separately. Undoing a classification moves no record and changes no amount. An unrelated file
     leaves it unchanged.
     """
     account_id = classification.account_id
@@ -156,7 +156,6 @@ def classification_undo_outlook(
         return None if effect is None else [effect.state, effect.applied_value]
 
     material = {
-        "type": classification.financial_type,
         "transactions": sorted(
             [keyed(records_by_transaction[transaction]),
              effect_view(effects_with_it, transaction),

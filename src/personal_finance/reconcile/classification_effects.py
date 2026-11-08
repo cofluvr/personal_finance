@@ -137,11 +137,8 @@ def write_classification_effects(conn: sqlite3.Connection, account_id: str) -> N
                (SELECT id FROM ledger_transaction WHERE account_id = ?)""",
         (account_id,),
     )
-    active_classifications = load_active_classifications(conn, account_id)
-    if not active_classifications:
-        return
     effects = effective_classifications(
-        active_classifications, transaction_by_record_id(conn, account_id),
+        load_active_classifications(conn, account_id), transaction_by_record_id(conn, account_id),
         effective_amount_by_transaction(conn, account_id),
     )
     conn.executemany(

@@ -45,7 +45,8 @@ class AccountMovement:
     transactions_posted_at_changed_amount: int = 0
     stale_pending_transactions: int = 0
     # Each financial type that some transaction has, in the order of FINANCIAL_TYPES, with its
-    # transaction count and effective amount, and the same for unclassified transactions (D-053).
+    # transaction count and effective amount, and the same for unclassified transactions (D-053). A
+    # derived row holds a type only while it applies.
     financial_types: tuple[tuple[str, int, int], ...] = ()
     unclassified_transactions: int = 0
     unclassified_cents: int = 0
@@ -168,7 +169,7 @@ def _classifications(conn, account_id) -> tuple:
                    ON fix.transaction_id = entry.id AND fix.field = 'amount'
                   AND fix.state = 'applied'
                LEFT JOIN transaction_classification kind
-                   ON kind.transaction_id = entry.id AND kind.state = 'applied'
+                   ON kind.transaction_id = entry.id
                WHERE :account IS NULL OR entry.account_id = :account
                GROUP BY kind.financial_type""",
             {"account": account_id},
