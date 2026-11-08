@@ -202,14 +202,16 @@ def alike_decided_records(item: ReviewEvidence) -> Iterator[AlikeRecord]:
         for record in (*pair.left, *pair.right):
             bound[_decided_key(record)].add(pair.decision_id)
 
-    parsed = [record for record in item.records if record.parsed.status == "parsed"]
+    # Records of transactions only: an item holding one never holds an unresolved record.
+    records = sorted((record for entry in item.transactions for record in entry.records),
+                     key=_record_key)
     by_values = defaultdict(list)
-    for record in sorted(parsed, key=_record_key):
+    for record in records:
         if _record_key(record) in bound:
             by_values[_parsed_values(record)].append(record)
     return (
         AlikeRecord(record, other, tuple(sorted(bound[_record_key(other)])))
-        for record in sorted(parsed, key=_record_key) if _record_key(record) not in bound
+        for record in records if _record_key(record) not in bound
         for other in by_values.get(_parsed_values(record), ())
         if other.content_sha256 != record.content_sha256
     )

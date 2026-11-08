@@ -379,6 +379,23 @@ class TestSeparatingASeparation:  # N7
         assert len(relations) == 3
 
 
+class TestSupersedingOptions:
+    @pytest.mark.parametrize("words, message", [
+        (["--keep", "1"], "--keep needs --supersedes"),
+        (["--supersedes", "x"], "must be given together"),
+    ])
+    def test_separate_checks_its_options_together(self, ledger, words, message):
+        transaction, records = merged_two(ledger)
+        before = ledger.dump()
+        code, _, err = ledger.run(
+            "review", "separate", transaction, "--account", "A", "--revision",
+            ledger.merge_revision(transaction), "--group", records["a.csv"],
+            "--group", records["b.csv"], *words,
+        )
+        assert code == 2 and message in err
+        assert ledger.dump() == before
+
+
 class TestRejectionsSupersedeNothing:  # N8
     def test_reject_takes_no_supersedes(self, ledger):
         item, one, two = pair_up(ledger)
@@ -512,6 +529,41 @@ class TestAlikeListing:  # N11
         assert len(alike_lines(out)) == 50
         assert "  Only the first 50 are listed." in out
 
+
+    def test_exactly_fifty_says_nothing_about_stopping(self, ledger):
+        item, one, two = pair_up(ledger)
+        ledger.reject_ok(item, (one, two))
+        for number in range(25):
+            ledger.card(f"again{number:02}.csv", test_confirmations.CAFE)
+        (again,) = ledger.items("cross_document_candidates")
+        out = ledger.show(again)
+        assert len(alike_lines(out)) == 50
+        assert "Only the first" not in out.split("Alike a decided record")[1].split("Direct")[0]
+
+    def test_a_row_of_the_same_file_is_never_offered(self, ledger):
+        """Two alike rows of one file are different events (D-008)."""
+        ledger.card("a.csv", test_confirmations.CAFE, test_confirmations.CAFE)
+        ledger.card("b.csv", test_confirmations.CAFE)
+        (item,) = ledger.items()
+        conn = ledger.conn()
+        rows = dict(conn.execute(
+            """SELECT document.file_name || ' ' || record.record_index, link.transaction_id
+               FROM transaction_source link
+               JOIN source_record record ON record.id = link.source_record_id
+               JOIN source_document document ON document.id = record.source_document_id"""
+        ))
+        conn.close()
+        decision = ledger.reject_ok(item, (rows["a.csv 1"], rows["b.csv 1"]))
+        (item,) = ledger.items()
+        assert alike_lines(ledger.show(item)) == [("a.csv row 2 matches b.csv row 1", decision)]
+
+    def test_a_record_differing_only_in_description_is_not_listed(self, ledger):
+        item, one, two = pair_up(ledger)
+        ledger.reject_ok(item, (one, two))
+        ledger.card("again.csv", "01/10/2026,SYNTHETIC CAFE.,6.50,")
+        (again,) = ledger.items("cross_document_candidates")
+        assert len(ledger.transactions(again)) == 3
+        assert alike_lines(ledger.show(again)) == []
 
 class TestChainsAreEquivalentToTheirNewest:  # N15
     @staticmethod
