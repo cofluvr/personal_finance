@@ -120,6 +120,12 @@ These features are not part of the initial release unless explicitly reprioritiz
 - Use exact monetary arithmetic.
 - Require tests for duplicates, transfers, and financial allocations.
 - Keep operational maintenance low.
+- - Don't build it until you need it.
+- Extract patterns after second duplication, not before.
+- Explicit errors beat silent failures (fail fast).
+- Write the obvious solution and optimize only if needed.
+- Delete aggressively - less code = fewer bugs.
+- Focus on semantic naming: always name variables, parameters, and api endpoints with verbose, self-documenting names that optimize for comprehension by both humans and llms not brevity.
 
 ## Project Status
 
