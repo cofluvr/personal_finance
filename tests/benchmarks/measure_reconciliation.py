@@ -7,7 +7,8 @@ Not part of the test suite. Run from the repository root:
     --confirmed to compare confirmation with rejection, --separated to compare separating a
     merge with rejection and partition, --superseded to compare a separation superseding a
     confirmation with a partition, --corrected for value corrections, --resolved for completing
-    and dismissing unresolved rows, or rows per month such as 200 1000 4000)
+    and dismissing unresolved rows, --declared for coverage declared after import, or rows per
+    month such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
 one import_files call: reading and parsing the file, writing records, reconciling the
@@ -40,6 +41,7 @@ from personal_finance.reconcile.correction_effects import (
 )
 from personal_finance.reconcile.corrections import correct_value, undo_correction
 from personal_finance.reconcile.cross_document import Constraint, Document, Record, derive
+from personal_finance.reconcile.coverage_declarations import declare_coverage, undo_declaration
 from personal_finance.reconcile.record_resolutions import (
     complete_record,
     dismiss_record,
@@ -54,6 +56,12 @@ from personal_finance.reconcile.decisions import (
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reports.correction_evidence import correction_undo_outlook, load_correction
 from personal_finance.reports.decision_evidence import load_decision, undo_outlook
+from personal_finance.reports.coverage_evidence import (
+    declaration_undo_outlook,
+    document_coverage_revision,
+    load_declaration,
+    load_document_coverage,
+)
 from personal_finance.reports.resolution_evidence import load_resolution, resolution_undo_outlook
 from personal_finance.reports.totals import account_movement
 from personal_finance.reports.review_evidence import (
@@ -705,7 +713,7 @@ def measure_many_corrections(count: int) -> None:
             conn.execute(
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  target_transaction_id, target_revision)
-                   VALUES (?, 'acct', 'amount', -1, ?, 't3-0')""",
+                   VALUES (?, 'acct', 'amount', -1, ?, 't4-0')""",
                 (correction_id, transaction_id),
             )
             conn.execute("INSERT INTO value_correction_record VALUES (?, ?)", (correction_id, record_id))
@@ -758,7 +766,7 @@ def measure_correction_chain(length: int) -> None:
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  target_transaction_id, target_revision,
                                                  supersedes_correction_id)
-                   VALUES (?, 'acct', 'amount', ?, ?, 't3-0', ?)""",
+                   VALUES (?, 'acct', 'amount', ?, ?, 't4-0', ?)""",
                 (correction_id, -1 - number, transaction_id,
                  f"c{number - 1:06}" if number else None),
             )
@@ -863,6 +871,77 @@ def resolved() -> None:
             measure_resolving(rows_per_file, kind)
 
 
+def measure_declaring(rows_per_file: int) -> None:
+    """Two exports of the same rows_per_file purchases, the first of unknown coverage and the second
+    declared complete at import. Declaring the first complete afterwards pays for every merge that
+    makes, and undoing it for every split. It is compared with importing the second export into a
+    ledger where the first was declared complete at import, which makes the same merges (D-051)."""
+    header = "Date,Description,Debit,Credit\n"
+    rows = "".join(
+        f"01/{1 + number % 28:02}/2026,SYNTHETIC SHOP {number},{1 + number}.00,\n"
+        for number in range(rows_per_file)
+    )
+    whole = declare_complete("2026-01-01", "2026-01-31", "posting")
+    seconds = {}
+    for at_import in (False, True):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            conn = new_ledger(root)
+            for name, content, coverage in (("a.csv", header + rows, whole if at_import else None),
+                                            ("b.csv", header + " " + rows, whole)):
+                source = root / name
+                source.write_text(content)
+                started = time.perf_counter()
+                (result,) = import_files(conn, [source], account_id="acct",
+                                         layout=SYNTHETIC_CARD_V1, declared_coverage=coverage)
+                seconds[at_import, name] = time.perf_counter() - started
+                assert result.outcome == "imported", result
+            if at_import:
+                assert account_movement(conn, "acct").transactions == rows_per_file
+                conn.close()
+                continue
+            assert account_movement(conn, "acct").transactions == 2 * rows_per_file
+            (document_id,) = conn.execute(
+                "SELECT id FROM source_document WHERE file_name = 'a.csv'"
+            ).fetchone()
+            started = time.perf_counter()
+            token = document_coverage_revision(load_document_coverage(conn, document_id))
+            show_seconds = time.perf_counter() - started
+            started = time.perf_counter()
+            declared = declare_coverage(conn, "acct", document_id, token, "complete",
+                                        "2026-01-01", "2026-01-31", "posting")
+            declare_seconds = time.perf_counter() - started
+            assert declared.transactions_after == rows_per_file, declared
+
+            later = root / "later.csv"
+            later.write_text(header + "03/20/2026,SYNTHETIC GROCER,9.00,\n")
+            started = time.perf_counter()
+            import_files(conn, [later], account_id="acct", layout=SYNTHETIC_CARD_V1)
+            later_seconds = time.perf_counter() - started
+
+            declaration = load_declaration(conn, declared.declaration_id)
+            started = time.perf_counter()
+            revision = declaration_undo_outlook(conn, declaration, DEFAULT_RULES).revision
+            outlook_seconds = time.perf_counter() - started
+            started = time.perf_counter()
+            undone = undo_declaration(conn, "acct", declared.declaration_id, revision)
+            undo_seconds = time.perf_counter() - started
+            assert undone.transactions_after == 2 * rows_per_file + 1, undone
+            conn.close()
+    print(
+        f"pairs={rows_per_file:5} merged={declared.moved_records:5} coverage_show={show_seconds:7.3f}s "
+        f"declare={declare_seconds:7.3f}s later_import={later_seconds:7.3f}s "
+        f"undo_show={outlook_seconds:7.3f}s undo={undo_seconds:7.3f}s split={undone.moved_records:5} "
+        f"merging_import={seconds[True, 'b.csv']:7.3f}s",
+        flush=True,
+    )
+
+
+def declared() -> None:
+    for rows_per_file in (500, 2000, 5000):
+        measure_declaring(rows_per_file)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--worst"]:
         worst_cases()
@@ -884,6 +963,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--resolved"]:
         resolved()
+        return
+    if sys.argv[1:] == ["--declared"]:
+        declared()
         return
     sizes = [(24, 200), (24, 1000), (24, 4000)]
     if len(sys.argv) > 1:

@@ -18,7 +18,7 @@ from personal_finance.ingest.coverage import Coverage
 from personal_finance.ingest.csv_reader import RawRecord, read_document
 from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import Layout, ParsedRow
-from personal_finance.reconcile.apply import is_current, reconcile_account
+from personal_finance.reconcile.apply import declared_coverage, is_current, reconcile_account
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reconcile.same_document import find_candidate_groups
 from personal_finance.reports.import_summary import consolidated_records, final_transactions
@@ -235,7 +235,12 @@ def _repeat_import(
     if row is None:
         raise ImportFailure("account_mismatch")
 
+    # Compared with the coverage in effect, which a declaration since import can change (D-051).
     stored = Coverage(*row)
+    declaration = declared_coverage(conn, account_id).get(document_id)
+    if declaration is not None:
+        stored = Coverage(declaration.kind, declaration.start, declaration.end,
+                          declaration.date_basis, declaration.evidence)
     if declared is not None and declared != stored:
         raise ImportFailure("coverage_conflict")
 

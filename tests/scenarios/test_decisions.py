@@ -49,9 +49,11 @@ ALL_TABLES = (*SOURCE_TABLES, "ledger_transaction", "transaction_source", "revie
               "review_issue_subject", "transaction_link_history", "transaction_identity_history",
               "decision", "decision_constraint", "decision_event", "account_reconciliation",
               "value_correction", "value_correction_record", "value_correction_event",
-              "transaction_correction", "record_resolution", "record_resolution_event")
-# Created by 0010, children first (D-050).
+              "transaction_correction", "record_resolution", "record_resolution_event",
+              "coverage_declaration", "coverage_declaration_event")
+# Created by 0010 and 0011, children first (D-050, D-051).
 RESOLUTION_TABLES = ("record_resolution_event", "record_resolution")
+DECLARATION_TABLES = ("coverage_declaration_event", "coverage_declaration")
 
 
 def declared(start, end):
@@ -84,7 +86,8 @@ class Ledger:
         words = list(command)
         position = 2 if words[0] in ("account", "review") else 1
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
-                         ["review", "correction"], ["review", "resolution"]):
+                         ["review", "correction"], ["review", "resolution"],
+                         ["review", "coverage"]):
             position = 3
         words[position:position] = ["--db", self.db]
         code = main(words)
@@ -124,7 +127,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r5-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r6-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)

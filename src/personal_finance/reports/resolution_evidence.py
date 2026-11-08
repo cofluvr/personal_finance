@@ -4,16 +4,13 @@
 Everything here reads the ledger and nothing writes to it.
 """
 
-import hashlib
-import json
 import sqlite3
 from dataclasses import dataclass
 
-from personal_finance.reconcile.apply import load_constraints, load_evidence
-from personal_finance.reconcile.cross_document import derive
 from personal_finance.reconcile.rules import MatchingRules
 from personal_finance.reconcile.supersession import STATE_ACTIVE, STATE_UNDONE
 from personal_finance.reports.decision_evidence import BoundRecord
+from personal_finance.reports.undo_items import items_left_by_undo
 
 # Bump whenever the material below changes, so an old token can never appear current.
 RESOLUTION_REVISION_VERSION = 1
@@ -123,53 +120,12 @@ def resolution_undo_outlook(
 ) -> ResolutionUndoOutlook:
     """The undo token, and the transaction counts either side of an undo (D-050).
 
-    It covers the review items derivation would give without this resolution, for the records
-    whose items differ with and without it and their transactions. That is all an undo does. Only an
-    active resolution has a token, and its kind, values and record never change, so none of them
-    is covered. A rules change reaches the token through derivation once reconciled, and is refused
-    before. Evidence that cannot affect the undo leaves it unchanged, so an unrelated file does not
-    force another inspection.
+    It covers the review items an undo would leave, for its record and the records whose items it
+    changes. Only an active resolution has a token, and its kind, values and record never change,
+    so none of them is covered.
     """
-    account_id = resolution.account_id
-    documents, records, unresolved, _ = load_evidence(conn, account_id)
-    _, records_after, unresolved_after, _ = load_evidence(conn, account_id, resolution.resolution_id)
-    constraints = load_constraints(conn, account_id)
-    now = derive(documents, records, unresolved, rules, constraints)
-    after = derive(documents, records_after, unresolved_after, rules, constraints)
-
-    keys = _record_keys(conn, account_id)
-    # A change of grouping always changes the items too, so the items decide the scope.
-    scope = {resolution.record.record_id}
-    for changed in set(now.items) ^ set(after.items):
-        scope.update(record for member in changed.members for record in member)
-
-    def keyed(record_ids):
-        return sorted(keys[record_id] for record_id in record_ids)
-
-    # An item's members are its transactions' records, so the items also give their grouping.
-    material = {
-        "items": sorted(
-            [item.rule, sorted(map(keyed, item.members)), list(item.reasons),
-             item.date_start, item.date_end]
-            for item in after.items
-            if scope.intersection(record for member in item.members for record in member)
-        ),
-    }
-    text = json.dumps(material, sort_keys=True, separators=(",", ":"))
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-    return ResolutionUndoOutlook(f"u{RESOLUTION_REVISION_VERSION}-{digest}", len(now.groups),
-                                 len(after.groups))
-
-
-def _record_keys(conn, account_id) -> dict[str, list]:
-    """Every record of the account as document hash and row, never by generated ID."""
-    return {
-        record_id: [digest, index]
-        for record_id, digest, index in conn.execute(
-            """SELECT record.id, document.content_sha256, record.record_index
-               FROM source_record record
-               JOIN source_document document ON document.id = record.source_document_id
-               WHERE record.account_id = ?""",
-            (account_id,),
-        )
-    }
+    left = items_left_by_undo(conn, resolution.account_id, rules,
+                              frozenset({resolution.record.record_id}),
+                              without_resolution=resolution.resolution_id)
+    return ResolutionUndoOutlook(f"u{RESOLUTION_REVISION_VERSION}-{left.digest}",
+                                 left.transactions_now, left.transactions_after)

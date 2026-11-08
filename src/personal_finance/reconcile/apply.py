@@ -1,4 +1,5 @@
-"""Applies a derivation to one account. See decisions.md D-029, D-033, D-042 to D-045 and D-050.
+"""Applies a derivation to one account. See decisions.md D-029, D-033, D-042 to D-045, D-050 and
+D-051.
 
 Every function here runs inside the caller's database transaction, so an import and
 its reconciliation commit together or not at all. Source evidence is only read.
@@ -184,6 +185,51 @@ def load_constraints(conn, account_id, without: str | None = None) -> tuple[Cons
     )
 
 
+@dataclass(frozen=True)
+class DeclaredCoverage:
+    """A person's coverage for one document, declared after import (D-051)."""
+
+    declaration_id: str
+    kind: str
+    start: str | None
+    end: str | None
+    date_basis: str | None
+
+    @property
+    def evidence(self) -> str | None:
+        return "user_declared" if self.kind == "complete" else None
+
+
+def coverage_declaration_states(conn, account_id, treated_as_undone: str | None = None):
+    """Each declaration's state, and each superseded one's successor, under D-048's rule."""
+    rows = conn.execute(
+        """SELECT declaration.id, declaration.supersedes_declaration_id,
+                  EXISTS (SELECT 1 FROM coverage_declaration_event undone
+                          WHERE undone.declaration_id = declaration.id
+                            AND undone.event = 'undone')
+           FROM coverage_declaration declaration WHERE declaration.account_id = ?""",
+        (account_id,),
+    ).fetchall()
+    return supersession_chain_states(rows, treated_as_undone)
+
+
+def declared_coverage(conn, account_id, treated_as_undone: str | None = None
+                      ) -> dict[str, DeclaredCoverage]:
+    """The declaration in effect for each document that has one. Each declaration supersedes the
+    one in effect, so at most one per document is active (D-051)."""
+    states, _ = coverage_declaration_states(conn, account_id, treated_as_undone)
+    return {
+        document_id: DeclaredCoverage(declaration_id, *values)
+        for declaration_id, document_id, *values in conn.execute(
+            """SELECT id, source_document_id, coverage_kind, coverage_start, coverage_end,
+                      date_basis
+               FROM coverage_declaration WHERE account_id = ?""",
+            (account_id,),
+        )
+        if states[declaration_id] == STATE_ACTIVE
+    }
+
+
 def active_resolutions(conn, account_id, treated_as_undone: str | None = None) -> dict[str, tuple]:
     """Each resolved record's resolution: its ID, kind and completed values (D-050).
 
@@ -212,12 +258,15 @@ def completed_values(parsed_values, completion) -> tuple:
                  for parsed, supplied in zip(parsed_values, completion))
 
 
-def load_evidence(conn, account_id, without_resolution: str | None = None):
+def load_evidence(conn, account_id, without_resolution: str | None = None,
+                  without_declaration: str | None = None):
     """Read stored interpretation only, never the current Python layouts (D-026).
 
     A completed record is a record with its completed values, and a dismissed one is neither a
-    record nor a blocker (D-050). without_resolution leaves one resolution out, as if undone.
+    record nor a blocker (D-050). A document's coverage is the declaration in effect, else the claim
+    at import (D-051). without_resolution and without_declaration leave one out, as if undone.
     """
+    declared = declared_coverage(conn, account_id, without_declaration)
     documents, imported = [], {}
     for row in conn.execute(
         """SELECT document.id, document.content_sha256, document.generated_on,
@@ -233,6 +282,11 @@ def load_evidence(conn, account_id, without_resolution: str | None = None):
     ):
         (document_id, digest, generated_on, imported_at, kind, start, end, basis, evidence,
          namespace, guarantee, pending_transaction, pending_posting) = row
+        declaration = declared.get(document_id)
+        if declaration is not None:
+            kind, start, end, basis, evidence = (declaration.kind, declaration.start,
+                                                 declaration.end, declaration.date_basis,
+                                                 declaration.evidence)
         pending = pending_transaction if basis == "transaction" else pending_posting
         documents.append(
             Document(document_id, digest, kind, start, end, basis, evidence, generated_on,

@@ -39,6 +39,7 @@ from personal_finance.reconcile.correction_effects import (
     FIELD_IN_CONFLICT,
 )
 from personal_finance.reconcile.corrections import correct_value, undo_correction
+from personal_finance.reconcile.coverage_declarations import declare_coverage, undo_declaration
 from personal_finance.reconcile.record_resolutions import (
     complete_record,
     dismiss_record,
@@ -64,6 +65,13 @@ from personal_finance.reports.decision_evidence import (
     load_decision,
     shown_kind,
     undo_outlook,
+)
+from personal_finance.reports.coverage_evidence import (
+    declaration_undo_outlook,
+    document_coverage_revision,
+    list_declarations,
+    load_declaration,
+    load_document_coverage,
 )
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.resolution_evidence import (
@@ -123,9 +131,9 @@ FAILURE_EXPLANATIONS = {
         "Existing data is unchanged. A change of meaning needs a new layout version."
     ),
     "coverage_conflict": (
-        "Coverage is fixed when a document is first imported, and a declaration cannot replace "
-        "coverage the document states. Existing data is unchanged. Correcting coverage needs "
-        "the history workflow planned for M2."
+        "This declaration differs from the coverage the document already has, or replaces "
+        "coverage the document states. Existing data is unchanged. To change a document's "
+        "coverage, find its ID with documents and use review coverage declare."
     ),
 }
 
@@ -231,6 +239,16 @@ DISMISS_NOTICE = (
 RESOLUTION_UNDO_NOTICE = (
     "This re-derives from the evidence held now, without this resolution, and the row is "
     "unresolved again. It does not restore an earlier snapshot."
+)
+
+COVERAGE_NOTICE = (
+    "Matching uses the declared coverage from now on, so totals can change. The claim made at "
+    "import is kept, and undoing this declaration restores the coverage before it."
+)
+
+COVERAGE_UNDO_NOTICE = (
+    "This re-derives from the evidence held now, with the coverage before this declaration. It "
+    "does not restore an earlier snapshot."
 )
 
 # What each state of a corrected field means for the value used (D-049).
@@ -504,6 +522,43 @@ def build_parser() -> argparse.ArgumentParser:
         "--revision", required=True, help="the revision from review resolution show"
     )
 
+    coverage = review_commands.add_parser("coverage", help="inspect or declare a document's coverage")
+    coverage_commands = coverage.add_subparsers(dest="coverage_command", required=True)
+    coverage_show = command(
+        "show", coverage_commands, handler=run_review_coverage_show,
+        help="show a document's coverage: the claim at import and any declaration since",
+    )
+    coverage_show.add_argument("document_id", help="a document ID from documents")
+    coverage_declare = command(
+        "declare", coverage_commands, handler=run_review_coverage_declare,
+        help="declare a document's coverage after import, keeping the claim at import",
+    )
+    coverage_declare.add_argument("document_id", help="a document ID from documents")
+    coverage_declare.add_argument("--account", required=True, help="account name or ID")
+    coverage_declare.add_argument(
+        "--revision", required=True, help="the revision from review coverage show"
+    )
+    coverage_declare.add_argument(
+        "--coverage-kind", required=True, help="complete, or unknown to withdraw a claim"
+    )
+    coverage_declare.add_argument("--coverage-start", help="first covered date, inclusive (YYYY-MM-DD)")
+    coverage_declare.add_argument("--coverage-end", help="last covered date, inclusive (YYYY-MM-DD)")
+    coverage_declare.add_argument("--coverage-basis", help="transaction or posting")
+    coverage_history = command(
+        "history", coverage_commands, handler=run_review_coverage_history,
+        help="list coverage declared after import",
+    )
+    coverage_history.add_argument("--account", help="account name or ID")
+    coverage_undo = command(
+        "undo", coverage_commands, handler=run_review_coverage_undo,
+        help="stop a coverage declaration applying, keeping it on record",
+    )
+    coverage_undo.add_argument("declaration_id", help="a declaration ID from review coverage history")
+    coverage_undo.add_argument("--account", required=True, help="account name or ID")
+    coverage_undo.add_argument(
+        "--revision", required=True, help="the revision from review coverage show"
+    )
+
     totals = command("totals", handler=run_totals, help="show account movement")
     totals.add_argument("--account", help="account name or ID")
     return parser
@@ -696,7 +751,7 @@ def print_account_state(movement) -> None:
         print(f"  {line}")
     for line in describe_corrections(movement):
         print(f"  {line}")
-    for line in describe_resolutions(movement):
+    for line in (*describe_resolutions(movement), *describe_declarations(movement)):
         print(f"  {line}")
     print(f"  Unresolved records, not included in totals: {movement.unresolved_records}")
 
@@ -729,6 +784,17 @@ def describe_corrections(movement) -> list[str]:
             "review corrections."
         )
     return lines
+
+
+def describe_declarations(movement) -> list[str]:
+    """Coverage declared after import, on its own line (D-051)."""
+    if not movement.documents_with_declared_coverage:
+        return []
+    return [
+        f"Documents whose coverage you declared after import: "
+        f"{movement.documents_with_declared_coverage}. Matching uses that coverage. Run review "
+        "coverage history."
+    ]
 
 
 def describe_resolutions(movement) -> list[str]:
@@ -797,7 +863,7 @@ def run_reconcile(args) -> int:
 def run_documents(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     rows = conn.execute(
-        """SELECT document.file_name, document.layout_id, account.display_name,
+        """SELECT document.id, document.file_name, document.layout_id, account.display_name,
                   coverage_kind, coverage_start, coverage_end, date_basis, evidence,
                   (SELECT COUNT(*) FROM source_record record
                    WHERE record.source_document_id = document.id),
@@ -809,17 +875,32 @@ def run_documents(args) -> int:
            JOIN account ON account.id = coverage.account_id
            ORDER BY document.imported_at, document.file_name"""
     ).fetchall()
-    for name, layout_id, account, kind, start, end, basis, evidence, records, pending in rows:
+    for document_id, name, layout_id, account, kind, start, end, basis, evidence, records, _ in rows:
         line = f"{name}: {records} records, account {account}, layout {layout_id}, "
-        line += f"coverage {kind}"
-        if kind != "unknown":
-            line += f" {start or '?'} to {end or '?'}, {basis or 'no'} basis, evidence {evidence}"
-        if kind == "complete":
-            line += f", pending {'included' if pending else 'excluded'}"
-        print(line)
+        document = load_document_coverage(conn, document_id)
+        line += describe_coverage_kind(document.effective, document)
+        if document.declaration_id:
+            line += f", declared after import, claimed at import: {kind}"
+        print(f"Document {document_id}: {line}")
     if not rows:
         print("No documents.")
     return 0
+
+
+def describe_coverage_kind(coverage, document) -> str:
+    """One coverage as documents prints it. Pending treatment follows its basis (D-026)."""
+    line = f"coverage {coverage.kind}"
+    if coverage.kind != "unknown":
+        line += (f" {coverage.start or '?'} to {coverage.end or '?'}, {coverage.date_basis or 'no'}"
+                 f" basis, evidence {coverage.evidence}")
+    if coverage.kind == "complete":
+        pending = document_pending_included(document, coverage.date_basis)
+        line += f", pending {'included' if pending else 'excluded'}"
+    return line
+
+
+def document_pending_included(document, basis) -> bool:
+    return dict(document.pending_included_by_basis)[basis]
 
 
 def run_transactions(args) -> int:
@@ -1304,6 +1385,11 @@ def print_document_evidence(document) -> None:
     print(f"    Date basis: {shown(document.date_basis)}")
     print(f"    Coverage evidence: {shown(document.coverage_evidence)}")
     print(f"    Generated on: {shown(document.generated_on)}")
+    if document.declared is not None:
+        declared = document.declared
+        interval = (f" {declared.coverage_start} to {declared.coverage_end}, "
+                    f"{declared.date_basis} basis" if declared.coverage_kind == "complete" else "")
+        print(f"    Declared after import, which matching uses: {declared.coverage_kind}{interval}")
     if document.effective_end is not None:
         print(f"    Last date matching relies on: {document.effective_end}")
         print(f"    Pending rows: {'included' if document.pending_covered else 'excluded'}")
@@ -1765,6 +1851,98 @@ def run_review_resolution_undo(args) -> int:
     return 0
 
 
+def run_review_coverage_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    document = load_document_coverage(conn, args.document_id)
+    if document is None:
+        raise CommandError("document not found. Run documents.")
+
+    print(f"Document {document.document_id}: {shown(document.file_name)}")
+    print(f"  Account: {shown(document.account_name)} ({document.account_id})")
+    print(f"  Layout: {document.layout_id}")
+    print(f"  Document SHA-256: {document.content_sha256}")
+    print(f"  Claimed at import: {describe_coverage_kind(document.claimed, document)}")
+    if document.declaration_id:
+        print(f"  Declared after import: {describe_coverage_kind(document.effective, document)}, "
+              f"declaration {document.declaration_id}")
+    print(f"  Matching uses: {describe_coverage_kind(document.effective, document)}")
+    print(f"  Date bases this layout offers: {', '.join(document.offered_bases) or 'none'}")
+    print(f"  Revision: {document_coverage_revision(document)}")
+    if document.claimed.evidence == "document_metadata":
+        print("  The document states this coverage itself, so it can only be withdrawn.")
+
+    history = [row for row in list_declarations(conn, document.account_id)
+               if load_declaration(conn, row[0]).document_id == document.document_id]
+    if history:
+        print("Declarations, oldest first:")
+    for declaration_id, _, created_at, state, kind, _ in history:
+        print(f"  Declaration {declaration_id}: {state}, {kind}, {created_at}")
+    if document.declaration_id:
+        declaration = load_declaration(conn, document.declaration_id)
+        outlook = declaration_undo_outlook(conn, declaration, DEFAULT_RULES)
+        print(f"Undoing declaration {declaration.declaration_id} now:")
+        print(f"  Revision: {outlook.revision}")
+        restored = declaration.supersedes_declaration_id
+        print(f"  Restores {f'declaration {restored}' if restored else 'the claim at import'}")
+        print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
+    if stale_accounts(conn, DEFAULT_RULES, document.account_id):
+        print(
+            "This account has not been reconciled under the current matching rules, so "
+            "declaring and undoing will be refused until it is. Run reconcile."
+        )
+    return 0
+
+
+def run_review_coverage_declare(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = declare_coverage(
+        conn, account_id, args.document_id, args.revision, args.coverage_kind,
+        args.coverage_start, args.coverage_end, args.coverage_basis,
+    )
+
+    print(f"Declaration {result.declaration_id} recorded for document {args.document_id}.")
+    if result.other_declaration_id:
+        print(f"  Supersedes declaration {result.other_declaration_id}. It stays on record.")
+    print_coverage_effect(result)
+    print(f"  {COVERAGE_NOTICE}")
+    return 0
+
+
+def print_coverage_effect(result) -> None:
+    print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
+    print(f"  Source memberships changed: {result.moved_records}")
+    print_newly_unsettled(result.newly_unsettled_correction_fields)
+
+
+def run_review_coverage_history(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_declarations(conn, account_id)
+    for declaration_id, account, created_at, state, kind, file_name in rows:
+        print(
+            f"Declaration {declaration_id}: {state}, {kind}, {shown(file_name)}, {shown(account)}, "
+            f"{created_at}"
+        )
+    print(f"Coverage declarations: {len(rows)}")
+    if rows:
+        print("To see a document's coverage and undo its declaration, run review coverage show.")
+    return 0
+
+
+def run_review_coverage_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_declaration(conn, account_id, args.declaration_id, args.revision)
+
+    print(f"Declaration {args.declaration_id} undone. It stays on record and no longer applies.")
+    restored = result.other_declaration_id
+    print(f"  {f'Declaration {restored}' if restored else 'The claim at import'} applies again.")
+    print_coverage_effect(result)
+    print(f"  {COVERAGE_UNDO_NOTICE}")
+    return 0
+
+
 def run_totals(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
@@ -1810,7 +1988,7 @@ def run_totals(args) -> int:
         )
     for line in describe_corrections(movement):
         print(f"- {line}")
-    for line in describe_resolutions(movement):
+    for line in (*describe_resolutions(movement), *describe_declarations(movement)):
         print(f"- {line}")
     return 0
 

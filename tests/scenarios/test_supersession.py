@@ -149,7 +149,7 @@ class TestTokens:  # N14
     def test_the_transaction_token_is_unchanged(self, ledger):
         """Computed for this ledger at 7551e18, before M2.5."""
         transaction, _ = merged_two(ledger)
-        assert ledger.merge_revision(transaction) == "t3-4ae2352458f9c44c"
+        assert ledger.merge_revision(transaction) == "t4-4ae2352458f9c44c"
 
     def test_undoing_the_newest_previews_the_decision_before_it(self, ledger):
         _, b, c = chain_of_three(ledger)
@@ -276,7 +276,7 @@ class TestSeparatingAConfirmation:  # N4, N6
     @pytest.mark.parametrize("stale", ["transaction", "decision"])
     def test_both_tokens_are_checked(self, ledger, stale):  # N5
         old, transaction, records = confirmed_pair(ledger)
-        options = ({"revision": "t3-0000000000000000"} if stale == "transaction"
+        options = ({"revision": "t4-0000000000000000"} if stale == "transaction"
                    else {"supersedes_revision": "d5-0000000000000000"})
         before = ledger.dump()
         code, _, err = separate(ledger, transaction, [records["a.csv"]], [records["b.csv"]],
@@ -495,7 +495,7 @@ class TestAlikeListing:  # N11
         assert alike_lines(ledger.show(again))
         assert ledger.dump() == before
         # Computed for this ledger at b55e31b, before the listing existed.
-        assert ledger.revision(again) == "r5-74d05de08ff20c6b"
+        assert ledger.revision(again) == "r6-74d05de08ff20c6b"
 
     def test_records_a_decision_binds_are_not_listed(self, ledger):
         decision, again = rejected_then_re_exported(ledger)

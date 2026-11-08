@@ -114,7 +114,7 @@ def test_a_file_for_another_account_is_rejected_not_skipped(db, capsys):
     assert "Files attempted: 1 (0 imported, 0 already imported, 1 failed)" in out
 
 
-def test_a_coverage_conflict_explains_the_limitation_and_changes_nothing(db, capsys):
+def test_a_coverage_conflict_explains_the_way_to_declare_and_changes_nothing(db, capsys):
     import_card(db)
     capsys.readouterr()
     main(["totals", "--db", db])
@@ -126,9 +126,9 @@ def test_a_coverage_conflict_explains_the_limitation_and_changes_nothing(db, cap
 
     out = capsys.readouterr().out
     assert "failed (coverage_conflict)" in out
-    assert "Coverage is fixed when a document is first imported" in out
+    assert "differs from the coverage the document already has" in out
     assert "Existing data is unchanged" in out
-    assert "M2" in out
+    assert "review coverage declare" in out
     assert "delete" not in out.lower()
     assert "sql" not in out.lower()
     main(["totals", "--db", db])

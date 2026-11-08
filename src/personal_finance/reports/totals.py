@@ -7,7 +7,7 @@ transfers and card payments.
 import sqlite3
 from dataclasses import dataclass
 
-from personal_finance.reconcile.apply import STATE_ACTIVE, decision_states
+from personal_finance.reconcile.apply import STATE_ACTIVE, decision_states, declared_coverage
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,8 @@ class AccountMovement:
     # (D-050).
     transactions_completed: int = 0
     records_dismissed: int = 0
+    # Documents whose coverage a person declared after import (D-051).
+    documents_with_declared_coverage: int = 0
 
 
 def account_movement(conn: sqlite3.Connection, account_id: str | None = None) -> AccountMovement:
@@ -135,7 +137,17 @@ def account_movement(conn: sqlite3.Connection, account_id: str | None = None) ->
     return AccountMovement(
         inflow, outflow, net, transactions, pending, unresolved, groups, members, *conflicts,
         confirmed, _separated(conn, account_id), *corrections, *resolutions,
+        _declared_documents(conn, account_id),
     )
+
+
+def _declared_documents(conn, account_id) -> int:
+    accounts = [row[0] for row in conn.execute(
+        """SELECT DISTINCT account_id FROM coverage_declaration
+           WHERE :account IS NULL OR account_id = :account""",
+        {"account": account_id},
+    )]
+    return sum(len(declared_coverage(conn, account)) for account in accounts)
 
 
 def _separated(conn, account_id) -> int:

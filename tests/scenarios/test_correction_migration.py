@@ -1,7 +1,7 @@
 """Migration 0009 on a populated ledger, and its append-only tables (V15, D-049).
 
-A ledger built at the latest version, with the empty tables of 0009 and 0010 dropped and set back to
-version 8, is a version 8 ledger: both only create tables. Migration stops at 9, so that only 0009 is
+A ledger built at the latest version, with the empty tables of 0009 to 0011 dropped and set back to
+version 8, is a version 8 ledger: they only create tables. Migration stops at 9, so that only 0009 is
 tested here.
 """
 
@@ -10,12 +10,13 @@ import sqlite3
 import pytest
 from test_confirmations import confirm_ok
 from test_corrections import CORRECTION_TABLES, CorrectionLedger, single
-from test_decisions import ALL_TABLES, CAFE, RESOLUTION_TABLES, pair_up
+from test_decisions import ALL_TABLES, CAFE, DECLARATION_TABLES, RESOLUTION_TABLES, pair_up
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 
 VERSION_8_TABLES = tuple(table for table in ALL_TABLES
-                         if table not in (*CORRECTION_TABLES, *RESOLUTION_TABLES))
+                         if table not in (*CORRECTION_TABLES, *RESOLUTION_TABLES,
+                                          *DECLARATION_TABLES))
 
 
 def up_to_version_9(folder):
@@ -27,7 +28,8 @@ def up_to_version_9(folder):
 
 def set_back_to_version_8(path) -> None:
     conn = connect(path)
-    for table in (*RESOLUTION_TABLES, "transaction_correction", "value_correction_event",
+    for table in (*DECLARATION_TABLES, *RESOLUTION_TABLES, "transaction_correction",
+                  "value_correction_event",
                   "value_correction_record", "value_correction"):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
@@ -129,7 +131,7 @@ class TestAppendOnly:
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  corrected_text, target_transaction_id,
                                                  target_revision)
-                   VALUES ('x', (SELECT id FROM account), ?, ?, ?, 't', 't3-0')""",
+                   VALUES ('x', (SELECT id FROM account), ?, ?, ?, 't', 't4-0')""",
                 (field, amount, text),
             )
         conn.close()
@@ -142,7 +144,7 @@ class TestAppendOnly:
                 """INSERT INTO value_correction (id, account_id, field, corrected_text,
                                                  target_transaction_id, target_revision,
                                                  supersedes_correction_id)
-                   VALUES ('x', (SELECT id FROM account), 'description', 'CAFE', 't', 't3-0', ?)""",
+                   VALUES ('x', (SELECT id FROM account), 'description', 'CAFE', 't', 't4-0', ?)""",
                 (correction,),
             )
         conn.close()

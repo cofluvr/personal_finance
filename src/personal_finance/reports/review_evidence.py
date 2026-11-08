@@ -12,16 +12,17 @@ from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 
 from personal_finance.ingest.coverage import effective_end
-from personal_finance.reconcile.apply import load_constraints, stale_accounts
+from personal_finance.reconcile.apply import declared_coverage, load_constraints, stale_accounts
 from personal_finance.reconcile.correction_effects import load_active_corrections
 from personal_finance.reconcile.rules import DEFAULT_RULES
 
 # Bump whenever the material evidence changes, so an old token can never appear current. Version
-# 4 adds corrections (D-049), and version 5 completed values (D-050).
-REVISION_VERSION = 5
+# 4 adds corrections (D-049), version 5 completed values (D-050), and version 6 declared coverage
+# (D-051).
+REVISION_VERSION = 6
 # The same, for one transaction's evidence, which a separation or correction names (D-047, D-049,
-# D-050).
-TRANSACTION_REVISION_VERSION = 3
+# D-050, D-051).
+TRANSACTION_REVISION_VERSION = 4
 
 # Fields left out of a revision. Random IDs and names say where evidence is stored or how
 # it is labelled, not what it says. Records are identified by document hash and row
@@ -33,7 +34,7 @@ IMMATERIAL_FIELDS = frozenset(
 )
 # Fields left out while empty, so that evidence holding none keeps the digest it had before they
 # existed (D-049).
-OMITTED_WHILE_EMPTY = frozenset({"corrections", "completion"})
+OMITTED_WHILE_EMPTY = frozenset({"corrections", "completion", "declared"})
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,17 @@ class TransactionEvidence:
 
 
 @dataclass(frozen=True)
+class DeclaredCoverageEvidence:
+    """Coverage a person declared for a document after import, which matching uses instead of the
+    claim at import (D-051)."""
+
+    coverage_kind: str
+    coverage_start: str | None
+    coverage_end: str | None
+    date_basis: str | None
+
+
+@dataclass(frozen=True)
 class DocumentEvidence:
     content_sha256: str
     file_name: str
@@ -126,12 +138,14 @@ class DocumentEvidence:
     coverage_end: str | None
     date_basis: str | None
     coverage_evidence: str | None
-    # What matching relies on, which can end earlier than the claim (D-027).
+    # What matching relies on, which can end earlier than the claim (D-027), from the declared
+    # coverage when there is one (D-051).
     effective_end: str | None
     # Whether pending rows fall inside a complete claim. None without one.
     pending_covered: bool | None
     id_namespace: str | None
     id_guarantee: str
+    declared: DeclaredCoverageEvidence | None = None
 
 
 @dataclass(frozen=True)
@@ -277,14 +291,14 @@ def load_review_evidence(conn: sqlite3.Connection, issue_id: str) -> ReviewEvide
     kind, rule, status, evidence = issue
     details = json.loads(evidence)
 
-    linked, unresolved, documents, accounts = {}, [], {}, set()
+    linked, unresolved, documents, accounts = {}, [], set(), set()
     for row in conn.execute(_RECORDS, (issue_id,)):
         transaction_id, record, document, account_id = _record_of(row)
         if transaction_id is None:
             unresolved.append(record)
         else:
             linked.setdefault(transaction_id, []).append(record)
-        documents[document.content_sha256] = document
+        documents.add(document)
         accounts.add(account_id)
 
     account_id = next(iter(accounts))
@@ -301,7 +315,7 @@ def load_review_evidence(conn: sqlite3.Connection, issue_id: str) -> ReviewEvide
         details.get("date_end"),
         _transactions(conn, issue_id, linked, corrections_by_transaction),
         tuple(sorted(unresolved, key=_record_key)),
-        tuple(documents[digest] for digest in sorted(documents)),
+        _documents(conn, account_id, documents),
         bool(accounts & set(stale_accounts(conn, DEFAULT_RULES))),
         account_id,
         conn.execute("SELECT display_name FROM account WHERE id = ?", (account_id,)).fetchone()[0],
@@ -312,11 +326,11 @@ def load_review_evidence(conn: sqlite3.Connection, issue_id: str) -> ReviewEvide
 def load_merge_evidence(conn: sqlite3.Connection, transaction_id: str) -> MergeEvidence | None:
     """Everything one transaction rests on. Amounts and descriptions are loaded, so only an
     explicit inspection or a decision on this transaction may call this."""
-    linked, documents, accounts = [], {}, set()
+    linked, documents, accounts = [], set(), set()
     for row in conn.execute(_MERGE_RECORDS, (transaction_id,)):
         _, record, document, account_id = _record_of(row)
         linked.append(record)
-        documents[document.content_sha256] = document
+        documents.add(document)
         accounts.add(account_id)
     if not linked:
         return None
@@ -327,7 +341,7 @@ def load_merge_evidence(conn: sqlite3.Connection, transaction_id: str) -> MergeE
     return MergeEvidence(
         _transaction_entry(row, linked_by_transaction,
                            _corrections_by_transaction(conn, account_id, linked_by_transaction)),
-        tuple(documents[digest] for digest in sorted(documents)),
+        _documents(conn, account_id, documents),
         account_id in stale_accounts(conn, DEFAULT_RULES, account_id),
         account_id,
         conn.execute("SELECT display_name FROM account WHERE id = ?", (account_id,)).fetchone()[0],
@@ -340,13 +354,22 @@ def _record_of(row):
     account."""
     (transaction_id, link_rule, record_id, account_id, index, raw_json, file_name, digest,
      *rest) = row
-    completed, *supplied = rest[20:]
+    completed, *supplied, document_id = rest[20:]
     record = RecordEvidence(
         record_id, digest, file_name, index, tuple(json.loads(raw_json)),
         ParsedValues(*rest[:8]), link_rule,
         CompletedValues(*supplied) if completed else None,
     )
-    return transaction_id, record, _document(digest, file_name, rest[8:20]), account_id
+    return transaction_id, record, (document_id, digest, file_name, tuple(rest[8:20])), account_id
+
+
+def _documents(conn, account_id, raw_documents) -> tuple["DocumentEvidence", ...]:
+    """Each document once, by hash, with its declared coverage (D-051)."""
+    declared = declared_coverage(conn, account_id)
+    return tuple(
+        _document(digest, file_name, values, declared.get(document_id))
+        for document_id, digest, file_name, values in sorted(set(raw_documents), key=lambda raw: raw[1])
+    )
 
 
 def _decided_pairs(conn, account_id, held) -> tuple[DecidedPair, ...]:
@@ -470,18 +493,26 @@ def _transaction_order(entry: TransactionEvidence):
     return day, [_record_key(record) for record in entry.records]
 
 
-def _document(digest, file_name, values) -> DocumentEvidence:
+def _document(digest, file_name, values, declaration) -> DocumentEvidence:
     (layout_id, generated_on, parser_version, namespace, guarantee, pending_transaction,
      pending_posting, kind, start, end, basis, evidence) = values
-    complete = kind == "complete"
-    pending = pending_transaction if basis == "transaction" else pending_posting
+    # The claim at import stays as stored, and matching uses the declaration in effect (D-051).
+    used = (kind, end, basis, evidence)
+    if declaration is not None:
+        used = (declaration.kind, declaration.end, declaration.date_basis, declaration.evidence)
+    used_kind, used_end, used_basis, used_evidence = used
+    complete = used_kind == "complete"
+    pending = pending_transaction if used_basis == "transaction" else pending_posting
     return DocumentEvidence(
         digest, file_name, layout_id, parser_version, generated_on, kind, start, end, basis,
         evidence,
-        effective_end(end, evidence, generated_on) if complete else None,
+        effective_end(used_end, used_evidence, generated_on) if complete else None,
         bool(pending) if complete else None,
         namespace,
         guarantee,
+        None if declaration is None else DeclaredCoverageEvidence(
+            declaration.kind, declaration.start, declaration.end, declaration.date_basis
+        ),
     )
 
 
@@ -497,7 +528,7 @@ _RECORD_FIELDS = """
     coverage.date_basis, coverage.evidence,
     completion.id IS NOT NULL, completion.completed_amount_cents,
     completion.completed_transaction_date, completion.completed_posting_date,
-    completion.completed_description"""
+    completion.completed_description, document.id"""
 
 # What a record row needs once its source_record is joined.
 _RECORD_DETAILS = """
