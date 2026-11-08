@@ -72,7 +72,7 @@ index line.
 | D-050 | Resolving incomplete records — Approved, implemented and accepted in M2.7 |
 | D-051 | Coverage correction with history — Approved, implemented and accepted in M2.8 |
 | D-052 | Pending to posted — Approved, implemented and accepted in M2.9 |
-| D-053 | Financial types — Approved, implemented in M3.1, awaiting review |
+| D-053 | Financial types — Approved, implemented and accepted in M3.1 |
 
 ## Rules in brief
 
@@ -146,7 +146,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Type totals | Account movement unchanged. One line per type and one for unclassified | D-053 |
 | Classification tokens | `r7`, `t5`, `d6` and `c2` add classifications, keeping digests. `f1` for undo | D-053 |
 
-## D-053 Financial types — Approved, implemented in M3.1, awaiting review
+## D-053 Financial types — Approved, implemented and accepted in M3.1
 
 Proposed for M3.1 on 2026-11-08, and approved by the owner the same day with no changes. Meets PRD §7 and §9's requirement that
 income, spending, transfers, debt principal and investment contributions stay distinct, and D-014,
@@ -237,6 +237,11 @@ M3.1:
   type decide the direction of those three.
 - `interest` is money out only, so interest earned on savings can only be `income`.
 - The acceptance tests F1 to F14 share letters with follow-ups F1 to F4 in the handoff.
+
+**Accepted** by the owner on 2026-11-08 as built, with no changes, including the implementation
+choices and the three points above. The owner asked for M3.2 to follow the lead engineer's
+recommendations, so direction on the receiving account is taken up there. Interest stays money out
+only. Later acceptance tests use letters no follow-up uses.
 
 ## Not yet decided
 

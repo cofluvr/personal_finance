@@ -1,9 +1,9 @@
-# Session Handoff: M3.1 Built, Awaiting Review
+# Session Handoff: M3.1 Accepted, M3.2 Next
 
-For a fresh session. Written 2026-11-08. **M1 and M2 are complete and accepted.** The owner approved
-the M3.1 plan, financial types, as D-053 with no changes on 2026-11-08. **M3.1 is built and awaits
-review**, with the implementation choices and the points for review at the end of D-053, and the
-limits in "M3.1 as built" below. M3.2 is not started.
+For a fresh session. Written 2026-11-08. **M1 and M2 are complete and accepted.** **M3.1, financial types
+(D-053), was accepted as built** on 2026-11-08 with no changes, including its points for review. Its
+limits are in "M3.1 as built" below. The owner asked for M3.2 on the lead engineer's
+recommendations.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -58,7 +58,7 @@ Then only what the task needs:
 
 ## M3.1 as built
 
-Built 2026-11-08, awaiting the owner's review. Scope and acceptance tests are in [plan.md](plan.md)
+Built and accepted 2026-11-08. Scope and acceptance tests are in [plan.md](plan.md)
 (F1 to F14), the rules, implementation choices and points for review in D-053. Tests are in
 `tests/scenarios/test_classifications.py`, `test_classification_order.py` and
 `test_classification_migration.py`. The benchmark is `measure_reconciliation.py --classified`.
@@ -175,8 +175,6 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Review of M3.1 as built, including the implementation choices and the points for review at the
-  end of D-053: direction on the receiving account, interest as money out only, and the F labels.
 - A plan for M3.2, transfers across accounts, which needs its own decision on reconciling two
   accounts together. Not started.
 - Pushing. Not authorized from here.
@@ -187,7 +185,7 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 |---|---|---|
 | Local commits on `feature/m2-review` | Approved through D-053's outcome and M3.1 | **Must be renewed** for anything further |
 | M1 and M2 | Accepted as built | None |
-| M3.1 | Plan D-053 approved, 2026-11-08. Built, awaiting review | Owner accepts or asks for changes |
+| M3.1 | Accepted as built, 2026-11-08 | None |
 | M3.2 to M3.4 | Provisional, not approved | Each needs its own plan and approval |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
