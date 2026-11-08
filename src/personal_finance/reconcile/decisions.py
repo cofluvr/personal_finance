@@ -151,7 +151,8 @@ TRANSACTION_WRONG_ACCOUNT = "this transaction belongs to another account. Nothin
 ONE_RECORD = "this transaction holds one record, so there is nothing to separate. Nothing was changed."
 NOTHING_AUTOMATIC = (
     "every record here was confirmed as one event, so nothing in this transaction was joined "
-    "automatically. Nothing was changed. To separate it, undo that confirmation."
+    "automatically. Nothing was changed. To separate it, name that confirmation with "
+    "--supersedes, or undo it."
 )
 IN_CONFLICT = (
     "this transaction is in an open decision conflict, which is settled through that item. "
@@ -173,7 +174,11 @@ ONE_GROUP = (
 )
 SPLITS_CONFIRMED = (
     "a group boundary would separate records that decision {decisions} confirmed as one event. "
-    "Nothing was changed. Keep them in one group, or undo that confirmation first."
+    "Nothing was changed. Keep them in one group, or name that confirmation with --supersedes."
+)
+SPLITS_OTHERS = (
+    "a group boundary would separate records that decision {decisions} confirmed as one event, "
+    "and only the decision named with --supersedes can be replaced. Nothing was changed."
 )
 WOULD_SPLIT_MORE = (
     "this separation would change more than the transaction it names, so it was not recorded "
@@ -226,6 +231,9 @@ class Separation:
     transactions_after: int
     # The guarantee of an ID that records in different groups share, which this overrides.
     overridden_id_guarantee: str | None = None
+    # The pairs of a superseded confirmation that this one contradicts, and those it keeps.
+    contradicted_pairs: int = 0
+    kept_pairs: int = 0
 
 
 @dataclass(frozen=True)
@@ -420,7 +428,8 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
         others = contradicted - {replaced.decision_id}
         if others:
             raise DecisionRefused(CONTRADICTS_OTHERS.format(decisions=", ".join(sorted(others))))
-        kept, overturned = _account_for_pairs(replaced, groups, members, replacing[2])
+        overturned = _joined_pairs(replaced, groups, members)
+        kept = _account_for_pairs(replaced, overturned, replacing[2])
 
     before = _memberships(conn, account_id)
     expected = {
@@ -504,15 +513,21 @@ def separate_records(
     revision: str,
     groups: list[list[str]],
     rules: MatchingRules = DEFAULT_RULES,
+    supersedes: str | None = None,
+    supersedes_revision: str | None = None,
+    keep: tuple[int, ...] = (),
 ) -> Separation:
     """Record an explicit partition of every record of one transaction (D-047).
 
     Records in one group are one event, and records in different groups different events.
-    Whole-group withholding then keeps the automatic merge apart.
+    Whole-group withholding then keeps the automatic merge apart. supersedes names a
+    confirmation whose one-event pairs these groups split, with its undo token, and keep the
+    numbers of its other pairs, all of which carry over (D-048).
     """
+    replacing = (supersedes, supersedes_revision, tuple(keep)) if supersedes else None
     conn.execute("BEGIN IMMEDIATE")
     try:
-        result = _separate(conn, account_id, transaction_id, revision, groups, rules)
+        result = _separate(conn, account_id, transaction_id, revision, groups, rules, replacing)
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
@@ -520,7 +535,7 @@ def separate_records(
     return result
 
 
-def _separate(conn, account_id, transaction_id, revision, groups, rules) -> Separation:
+def _separate(conn, account_id, transaction_id, revision, groups, rules, replacing) -> Separation:
     if not is_current(conn, account_id, rules):
         raise DecisionRefused(STALE_ACCOUNT)
     merge = load_merge_evidence(conn, transaction_id)
@@ -532,13 +547,25 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules) -> Sepa
     if len(records) < 2:
         raise DecisionRefused(ONE_RECORD)
     root = _same_event_roots(load_constraints(conn, account_id))
-    if len({root.get(record, record) for record in records}) < 2:
+    # Splitting a confirmed core is what superseding is for, so the core alone is enough then.
+    if replacing is None and len({root.get(record, record) for record in records}) < 2:
         raise DecisionRefused(NOTHING_AUTOMATIC)
     if _in_open_conflict(conn, transaction_id):
         raise DecisionRefused(IN_CONFLICT)
     if transaction_revision(merge) != revision:
         raise DecisionRefused(STALE_TRANSACTION_REVISION)
-    _check_record_groups(conn, account_id, records, groups)
+    replaced = _replaced(conn, account_id, replacing, rules) if replacing else None
+    _check_record_groups(records, groups)
+    split = _split_cores(conn, account_id, groups)
+    if replaced is None and split:
+        raise DecisionRefused(SPLITS_CONFIRMED.format(decisions=", ".join(sorted(split))))
+    kept = overturned = ()
+    if replaced is not None:
+        others = split - {replaced.decision_id}
+        if others:
+            raise DecisionRefused(SPLITS_OTHERS.format(decisions=", ".join(sorted(others))))
+        overturned = _split_pairs(replaced, groups)
+        kept = _account_for_pairs(replaced, overturned, replacing[2])
 
     before = _memberships(conn, account_id)
     expected = {records for key, records in before.items() if key != transaction_id}
@@ -546,11 +573,14 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules) -> Sepa
 
     decision_id = str(uuid.uuid4())
     conn.execute(
-        """INSERT INTO decision (id, account_id, target_id, target_revision, kind, target_kind)
-           VALUES (?, ?, ?, ?, 'confirm', 'transaction')""",
-        (decision_id, account_id, transaction_id, revision),
+        """INSERT INTO decision (id, account_id, target_id, target_revision, kind, target_kind,
+                                 supersedes_decision_id)
+           VALUES (?, ?, ?, ?, 'confirm', 'transaction', ?)""",
+        (decision_id, account_id, transaction_id, revision, replaced and replaced.decision_id),
     )
-    _write_record_partition(conn, decision_id, transaction_id, groups)
+    written = _write_record_partition(conn, decision_id, transaction_id, groups)
+    if kept:
+        _copy_pairs(conn, replaced.decision_id, kept, decision_id, written)
     _record_event(conn, decision_id, "made", rules)
 
     reconcile_account(conn, account_id, rules, decision_id=decision_id)
@@ -560,11 +590,12 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules) -> Sepa
     ):
         raise DecisionRefused(WOULD_SPLIT_MORE)
     return Separation(
-        decision_id, len(groups), len(before), len(after), _overridden_guarantee(merge, groups)
+        decision_id, len(groups), len(before), len(after), _overridden_guarantee(merge, groups),
+        len(overturned), len(kept),
     )
 
 
-def _check_record_groups(conn, account_id, records, groups) -> None:
+def _check_record_groups(records, groups) -> None:
     named = [record for group in groups for record in group]
     if len(named) != len(set(named)):
         raise DecisionRefused(RECORD_REPEATED)
@@ -576,16 +607,18 @@ def _check_record_groups(conn, account_id, records, groups) -> None:
         raise DecisionRefused(RECORD_UNNAMED)
     if len(groups) < 2:
         raise DecisionRefused(ONE_GROUP)
+
+
+def _split_cores(conn, account_id, groups) -> set[str]:
+    """Active decisions with one-event pairs that a group boundary would split."""
     group_of = {record: number for number, group in enumerate(groups) for record in group}
-    split = {
+    return {
         constraint.decision_id
         for constraint in load_constraints(conn, account_id)
         if constraint.relation == RELATION_SAME
         and len({group_of[record] for record in (*constraint.left, *constraint.right)
                  if record in group_of}) > 1
     }
-    if split:
-        raise DecisionRefused(SPLITS_CONFIRMED.format(decisions=", ".join(sorted(split))))
 
 
 def _in_open_conflict(conn, transaction_id) -> bool:
@@ -602,7 +635,7 @@ def _write_record_partition(conn, decision_id, transaction_id, groups) -> None:
     """Every record pair, written out: one event within a group, different events between.
 
     Both sides start in one transaction, so the group numbers tell them apart. The lower group
-    is always on the left.
+    is always on the left. Returns how many pairs were written.
     """
     part = {record: number for number, group in enumerate(groups, start=1) for record in group}
     pairs = sorted(
@@ -621,6 +654,7 @@ def _write_record_partition(conn, decision_id, transaction_id, groups) -> None:
             for number, (left, right) in enumerate(pairs, start=1)
         ],
     )
+    return len(pairs)
 
 
 def _overridden_guarantee(merge, groups) -> str | None:
@@ -665,11 +699,8 @@ def _check_active(decision) -> None:
         raise DecisionRefused(DECISION_NOT_ACTIVE)
 
 
-def _account_for_pairs(replaced, groups, members, keep):
-    """Every pair of the old decision is contradicted or kept, and nothing is dropped silently.
-
-    Returns the pair numbers kept and those contradicted.
-    """
+def _joined_pairs(replaced, groups, members) -> set[int]:
+    """Numbers of the old decision's different_event pairs that a confirmation's groups join."""
     held = [{row.id for transaction_id in group for row in members[transaction_id]}
             for group in groups]
     overturned = set()
@@ -680,6 +711,26 @@ def _account_for_pairs(replaced, groups, members, keep):
             records & left and records & right for records in held
         ):
             overturned.add(number)
+    return overturned
+
+
+def _split_pairs(replaced, groups) -> set[int]:
+    """Numbers of the old decision's same_event pairs that a separation's groups split (D-048)."""
+    group_of = {record: number for number, group in enumerate(groups) for record in group}
+    return {
+        number for number, pair in enumerate(replaced.pairs, start=1)
+        if pair.relation == RELATION_SAME
+        and len({group_of[record.record_id] for record in (*pair.left, *pair.right)
+                 if record.record_id in group_of}) > 1
+    }
+
+
+def _account_for_pairs(replaced, overturned, keep):
+    """Every pair of the old decision is contradicted or kept, and nothing is dropped silently.
+
+    overturned holds the numbers of the pairs the new decision contradicts. Returns the numbers
+    kept.
+    """
     if not overturned:
         raise DecisionRefused(SUPERSEDES_NOTHING)
     for number in sorted(keep):
@@ -690,7 +741,7 @@ def _account_for_pairs(replaced, groups, members, keep):
     for number in range(1, len(replaced.pairs) + 1):
         if number not in overturned and number not in keep:
             raise DecisionRefused(PAIR_UNACCOUNTED.format(number=number))
-    return tuple(sorted(set(keep))), overturned
+    return tuple(sorted(set(keep)))
 
 
 def _copy_pairs(conn, old_id, numbers, new_id, after) -> None:
@@ -867,8 +918,8 @@ def _undo(conn, account_id, decision_id, revision, rules) -> Undo:
 def _inconsistent(conn, account_id, without) -> bool:
     """Whether the decisions left after undoing one would join records kept apart.
 
-    A restored decision adds no same_event pair, because superseding had to keep every one
-    of them (D-046), so only its different_event pairs can contradict.
+    A restored decision can add different_event pairs, and a confirmation restored from under a
+    separation its same_event pairs too (D-048), so every pair left is checked.
     """
     constraints = load_constraints(conn, account_id, without=without)
     _, records, _, _ = load_evidence(conn, account_id)

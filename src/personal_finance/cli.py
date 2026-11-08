@@ -296,6 +296,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="record IDs that are one event. Repeat for each group: groups are different events, "
         "and every record of the transaction must be in one",
     )
+    separate.add_argument(
+        "--supersedes", metavar="DECISION_ID",
+        help="a confirmation whose one-event records these groups split, which this one replaces",
+    )
+    separate.add_argument(
+        "--supersedes-revision", metavar="REVISION",
+        help="the revision from review decision show for the decision being replaced",
+    )
+    separate.add_argument(
+        "--keep", type=int, action="append", default=[], metavar="N",
+        help="a pair number of the replaced decision to carry over. Repeat for each pair",
+    )
 
     decisions = command(
         "decisions", review_commands, handler=run_review_decisions, help="list stored decisions"
@@ -966,13 +978,25 @@ def run_review_reject(args) -> int:
     return 0
 
 
-def run_review_confirm(args) -> int:
-    conn = open_ledger(args.db)
-    account_id = find_account(conn, args.account)
+def check_superseding(args) -> None:
     if bool(args.supersedes) != bool(args.supersedes_revision):
         raise CommandError("--supersedes and --supersedes-revision must be given together.")
     if args.keep and not args.supersedes:
         raise CommandError("--keep needs --supersedes.")
+
+
+def print_superseding(args, result) -> None:
+    if args.supersedes:
+        print(
+            f"  Supersedes decision {args.supersedes}: {result.contradicted_pairs} of its pairs "
+            f"contradicted, {result.kept_pairs} kept. It stays on record."
+        )
+
+
+def run_review_confirm(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    check_superseding(args)
     result = confirm_groups(
         conn, account_id, args.item_id, args.revision, args.group,
         supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
@@ -980,11 +1004,7 @@ def run_review_confirm(args) -> int:
     )
 
     print(f"Decision {result.decision_id} recorded: {result.groups} groups confirmed.")
-    if args.supersedes:
-        print(
-            f"  Supersedes decision {args.supersedes}: {result.contradicted_pairs} of its pairs "
-            f"contradicted, {result.kept_pairs} kept. It stays on record."
-        )
+    print_superseding(args, result)
     print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
     print("  Transactions left out stay undecided. New records are not bound.")
     print(f"  {CONFIRM_NOTICE}")
@@ -1039,9 +1059,15 @@ def run_review_merge_show(args) -> int:
 def run_review_separate(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
-    result = separate_records(conn, account_id, args.transaction_id, args.revision, args.group)
+    check_superseding(args)
+    result = separate_records(
+        conn, account_id, args.transaction_id, args.revision, args.group,
+        supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
+        keep=tuple(args.keep),
+    )
 
     print(f"Decision {result.decision_id} recorded: {result.groups} groups separated.")
+    print_superseding(args, result)
     print(f"  Transactions: {result.transactions_before} before, {result.transactions_after} now.")
     print("  New records are not bound, so a later file can raise the question again.")
     if result.overridden_id_guarantee:
