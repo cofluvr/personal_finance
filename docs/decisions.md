@@ -1386,7 +1386,7 @@ with M2.8:
 - A declaration of a basis the stored interpretation does not offer is refused before the metadata
   rule, so a metadata document asked for an impossible basis hears about the basis.
 
-## D-052 Pending to posted — Approved
+## D-052 Pending to posted — Approved, implemented in M2.9
 
 Approved by the owner on 2026-11-08, who asked for M2.9 to be built with the lead engineer's
 recommendations, recorded here before its code, and reviewed with M2.7 and M2.8. Amends D-006 for
@@ -1430,9 +1430,38 @@ so `d5` digests change with the rules version, keeping `d5`.
 **Cost.** Pending rows are compared with posted rows in the date window only. Measured with many
 pending and posted rows of one description block, against a later import.
 
+As first built, every pending unit was compared with every posted unit in its window, whatever the
+description: 2,000 pairs on one day took 35s to derive, and every later import paid it again. Since
+descriptions can only be similar within a block (D-032), a pending unit is now compared only with
+posted units sharing its description or its block. Distinct merchants are then linear. Many alike
+descriptions in one block stay quadratic, as candidate discovery already is in distinct spellings per
+block. See [status.md](status.md).
+
 **Not in scope.** Pending and posted rows of one document without a D-021 flag, a pending row with
 no posted counterpart ever arriving, automatic joining of same-document rows, and changed amounts
 under unreliable IDs.
+
+**How these were implemented,** where the rules above left a choice. They await the owner's review
+with M2.9:
+
+- For a reliable ID, a pending and a non-pending row are compatible when they agree in direction and
+  in the transaction date where both have one. Two rows of the same status still need equal amounts.
+- A unit is pending when all its rows are, and posted when any is, so a pending and a posted row
+  already merged under one ID count as posted.
+- One function decides the pending-to-posted link for discovery and for the direct-link check, so
+  `review confirm` accepts exactly what discovery raised. Discovery looks it up by day and by
+  description or block, and the direct-link check applies the same conditions.
+- A same-document item is confirmed as exactly one group of two transactions, each one row, one
+  pending and one not. Anything else, including a posted row already merged with another document,
+  is refused with one message.
+- `repoint_other_issues` resolves a same-document pending item while its records share a transaction,
+  and reopens it when they do not.
+- Stale pending uses 10 days, against the latest transaction or posting date of the account's
+  transactions.
+- A34, an accepted M1 criterion, said a status conflict was flagged. Its test and wording now say that
+  holds for dates, and that D-052 made a pending and a posted row with one ID one event.
+- The `d5` pin moved from `d5-2a1e1dd2ac99de82` to `d5-ecb0f4cc0ef102ac` only because it covers the
+  rules fingerprint, checked by computing it under rules version 1. Every other pin is unchanged.
 
 ## Not yet decided
 

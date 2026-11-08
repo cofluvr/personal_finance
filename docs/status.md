@@ -17,7 +17,7 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.6: value corrections | Accepted (D-049) |
 | M2.7: resolving incomplete records | Implemented, awaiting review (D-050) |
 | M2.8: coverage correction with history | Implemented, awaiting review (D-051) |
-| M2.9: pending to posted | Approved, in progress (D-052) |
+| M2.9: pending to posted | Implemented, awaiting review (D-052) |
 | M3 to M8 | Not started |
 
 ## What exists
@@ -26,8 +26,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.db.migrate`: database creation, connections, migrations.
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
-  `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions` and
-  `0011_coverage_declarations`,
+  `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
+  `0011_coverage_declarations` and `0012_pending_posted_links`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
@@ -329,6 +329,27 @@ in `build/m2.8-bench/declared.txt`, which is ignored and may not survive.
 
 **A declaration costs no more than an import making the same merges.** Matching was not changed.
 
+**Pending to posted (Q17),** measured 2026-11-08 on the same machine with
+`measure_reconciliation.py --pending`. A pending export and a posted export of the same purchases on
+one day, each posted at another amount. The shape asserts that it raises pending-to-posted
+candidates. Full output is in `build/m2.9-bench/pending.txt`, which is ignored and may not survive.
+
+| Descriptions | Pairs | Items | Steps | Posted import | Derive | Later import |
+|---|---|---|---|---|---|---|
+| Distinct merchants | 100 | 100 | 100 | 0.018s | 0.005s | 0.010s |
+| Distinct merchants | 500 | 500 | 500 | 0.082s | 0.031s | 0.045s |
+| Distinct merchants | 2,000 | 2,000 | 2,000 | 0.470s | 0.153s | 0.214s |
+| One block | 100 | 1 | 10,000 | 0.066s | 0.057s | 0.064s |
+| One block | 500 | 1 | 250,000 | 1.462s | 1.491s | 1.435s |
+| One block | 2,000 | 1 | 4,000,000 | 24.021s | 40.590s | 30.960s |
+
+The first version compared every pending unit with every posted unit in its window, so distinct
+merchants cost what one block now costs: 4,000,000 steps and 35s at 2,000. **Distinct merchants are now
+linear.** In one block every description is alike under D-032, so every pending row really is related
+to every posted row, the output is one item of 4,000 transactions, and the cost is quadratic and paid
+by every later import. That is the documented limit of distinct spellings per block, reached here
+through amounts that differ.
+
 ## Known limitations
 
 - Only `cross_document_candidates` items can be rejected, and only they and decision conflicts can
@@ -418,8 +439,11 @@ in `build/m2.8-bench/declared.txt`, which is ignored and may not survive.
   command.
 - The original file is not kept. Row contents and the file's hash are stored, and
   archiving arrives at M5.
-- Pending and posted rows are only flagged when amount and description match. A
-  tip or a changed description is not detected in one document until M2.
+- A pending and a posted row with one reliable ID merge whatever their amount. Without one, a changed
+  amount raises a candidate for review, never a merge, and many alike descriptions in one block make
+  that quadratic. Within one document, only rows D-021 flags, with equal amounts, can be confirmed
+  together (D-052).
+- After upgrading to rules version 2, every account reads as not current until `reconcile`.
 - Identical rows in one document are always separate. This is true of the invented
   layouts and must be proven for each real layout.
 - Failed attempts may go unrecorded if the database stays busy. The CLI still

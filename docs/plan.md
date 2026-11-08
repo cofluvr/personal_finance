@@ -149,8 +149,8 @@ the decision log records the database, parser and deduplication rules.
 
 ## M2 plan
 
-M2.1, M2.2, M2.3 (D-046), M2.4 (D-047), M2.5 (D-048) and M2.6 (D-049) are accepted. M2.7 is implemented and awaits review (D-050). M2.8 (D-051) and M2.9 (D-052)
-are approved, to be reviewed with M2.7. D-041 lists requirements they must meet.
+M2.1, M2.2, M2.3 (D-046), M2.4 (D-047), M2.5 (D-048) and M2.6 (D-049) are accepted. M2.7, M2.8 and M2.9 are implemented and await
+review together (D-050, D-051, D-052). D-041 lists requirements they must meet.
 
 | Slice | Scope | Status |
 |---|---|---|
@@ -161,8 +161,8 @@ are approved, to be reviewed with M2.7. D-041 lists requirements they must meet.
 | M2.5 | New evidence that touches a decided record, and superseding a decision | Accepted (D-048) |
 | M2.6 | Correction overrides | Accepted (D-049) |
 | M2.7 | Resolving incomplete records | Implemented, awaiting review (D-050) |
-| M2.8 | Coverage correction with history | Approved (D-051) |
-| M2.9 | Pending to posted, including tips, changed descriptions and the D-008 migration | Approved (D-052) |
+| M2.8 | Coverage correction with history | Implemented, awaiting review (D-051) |
+| M2.9 | Pending to posted, including tips, changed descriptions and the D-008 migration | Implemented, awaiting review (D-052) |
 
 Direction from planning, not yet decisions:
 

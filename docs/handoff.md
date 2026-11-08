@@ -1,4 +1,4 @@
-# Session Handoff: M2.7 and M2.8 Built, M2.9 Next
+# Session Handoff: M2.7, M2.8 and M2.9 Await Review
 
 For a fresh session. Written 2026-11-08. **M1 is complete and accepted**, and its limitations and
 deferred benchmarks still stand. See [m1-acceptance.md](m1-acceptance.md).
@@ -11,7 +11,8 @@ D-047 and the limits in "M2.4 as built" below, with no changes. The owner accept
 2026-11-08, including the rules and implementation choices recorded in D-048 and the limits in
 "M2.5 as built" below, with no changes. The owner accepted M2.6 as built on 2026-11-08, including
 the rules and implementation choices recorded in D-049 and the limits in "M2.6 as built" below, with
-no changes. **M2.7 and M2.8 are implemented and await review (D-050, D-051).** On 2026-11-08 the owner asked for
+no changes. **M2.7, M2.8 and M2.9 are implemented and await the owner's review together (D-050,
+D-051, D-052). Do not start anything further.** On 2026-11-08 the owner asked for
 M2.7, M2.8 and M2.9 to be built in turn, each with the lead engineer's recommendations, and will
 review all three together. So each slice's plan is recorded as its own decision before its code, and
 none of the three is accepted yet. M2.7 to M2.9 were provisional, and each needs its own approval. M2.1's decisions are D-040 and
@@ -321,10 +322,47 @@ document IDs. Tokens `r6` and `t4` keep their digests, and `v1` and `k1` are new
   equivalent: leaving superseded declarations in the lookup gives the same result, because rows come
   back in insertion order and the newest is last. The filter stays.
 
+**M2.9:** rules version 2, so every account is stale until `reconcile`. A pending and a posted row
+sharing a reliable ID merge whatever their amount. Without an ID, a pending and a posted row alike but
+for their amount raise a candidate with reason `pending_amount_changed`. Migration 0012 is the D-008
+migration: `transaction_source` is rebuilt with a partial unique index exempting confirmed links, and
+`review confirm` can join a same-document pending and posted pair. `totals` discloses changed amounts
+and stale pending. `measure_reconciliation.py --pending`. Q1 to Q17 pass, and S, C, P, N, V, U and K
+still pass.
+
+**Found while building M2.9:**
+
+- **A34, an accepted M1 criterion, changed.** It said a status conflict under one reliable ID is
+  flagged. D-006 itself said "until M2", and D-052 makes such a pending and posted pair one event. The
+  test and A34's wording now say it holds for dates. For the owner's review.
+- The `d5` pin changed with the rules fingerprint it covers. Computing it under rules version 1 gave
+  the old digest, so nothing else moved.
+- Changed-amount discovery first compared every pending unit with every posted unit in its window:
+  2,000 pairs took 35s, paid by every later import. It now looks posted units up by description and
+  block (D-032), which is linear for distinct merchants and quadratic only in one block of alike
+  descriptions.
+- A reason-explanation test reads reason names from source text, and took `keys.add(("block", ...))`
+  for a reason. The code was written as one set expression instead.
+- New unit tests first passed an amount as `row()`'s third positional argument, which is the row
+  number, so they compared equal amounts. Caught when they failed, and rewritten with keywords.
+- Deliberate breaks: 27 applied, with an unbroken control passing 340. 18 caught by relevant tests, 2
+  did not apply, and 7 survived, all test gaps, now closed. A rerun found the window and description
+  checks of the pending link surviving, reachable only through a confirmation's direct-link check, and
+  a test of a chain of three closed both. **The description break was twice credited with 279 and
+  281 failures**: its replacement renamed a function, a bad break. Applied by hand it failed nothing
+  relevant, and once fixed it was caught by the new test.
+
 ## Tests actually executed
 
 | Check | Result |
 |---|---|
+| The suite gating each M2.9 commit, last at `9708bc6` | 1410 passed, exit code 0 |
+| Targeted deliberate breaks, M2.9 | 27 breaks with an unbroken control passing (340 tests). 18 caught, 2 did not apply, 7 survived, all test gaps, closed. Reruns on `a2330ab` and `9708bc6`: all caught by relevant tests, after a bad break that renamed a function was fixed. Script and results in `build/m2.9-breaks/`, ignored and may not survive |
+| Order test for pending and posted exports | Exhaustive: all 24 orders of four files, equal |
+| Migration 0012 on populated data | Built from the first 11 migrations: every link kept, version 11 refuses the confirmed link 0012 allows, and a failure leaves version 11 |
+| Walkthrough through `bin/pf`, ledger in `build/m2.9-walk` | Net -108.00, -151.50 after the cafe posted with a tip under its ID, -143.50 after confirming the bakery's pending and posted rows, -103.50 after confirming the garage's rows of one file, -143.50 after undoing that, which reopened its item. A same-document group of one row refused with exit code 2 |
+| Pending measurements | See [status.md](status.md). Linear for distinct merchants, quadratic in one block of alike descriptions |
+| Rules and token pins | Rules fingerprint `e50fad61…` at version 2. `d5-ecb0f4cc0ef102ac`, checked to differ from `d5-2a1e1dd2ac99de82` only by the rules fingerprint |
 | The suite gating each M2.8 commit | 1379 passed at `9b97453`, exit code 0. See the commit recording M2.8 for the last |
 | Targeted deliberate breaks, M2.8 | 32 breaks with an unbroken control passing (286 tests): 29 caught, none only by a pin, 2 test gaps closed, 1 equivalent. Script and results in `build/m2.8-breaks/`, ignored and may not survive |
 | Order test for declarations | Exhaustive: 60 cases, every valid point of every order of four files, all equal |
@@ -424,7 +462,8 @@ may not survive.
   "Known limits of M2.3".
 - A separation names every record of one transaction, and splits a confirmed core only by
   superseding its confirmation. See "Known limits of M2.5".
-- A pending and a posted row with different amounts and no ID count twice with no flag.
+- A pending and a posted row with different amounts and no ID are raised for review if their
+  descriptions are alike, and count twice with no flag if not (D-052).
 - The revision covers only inputs that exist today (D-040). Corrections joined it in M2.6. Corrected
   coverage must join it later.
 - Corrections cover amount, dates and description only, and disagreeing ones use the source value
@@ -606,6 +645,23 @@ in `tests/scenarios/test_confirmations.py`, `test_confirmation_migration.py`,
 - A partition, like a rejection, makes every later import of the account recompute the touched group
   quadratically. A plain confirmation does not.
 - `review decisions` says "1 pairs". The wording is unchanged from M2.2.
+
+## M2.9 as built
+
+Awaiting the owner's review, with M2.7 and M2.8. Scope and acceptance tests are in [plan.md](plan.md)
+(Q1 to Q17), the rules and implementation choices in D-052. Tests are in
+`tests/scenarios/test_pending_posted.py`, `test_pending_posted_order.py` and
+`test_pending_posted_migration.py`, with rule tests in `tests/unit/test_cross_document.py` and
+`test_constraints.py`. The benchmark is `measure_reconciliation.py --pending`.
+
+**Known limits of M2.9:**
+
+- Every account is stale after upgrading until `reconcile`.
+- Without a reliable ID, a changed amount is only a candidate, and unalike descriptions still count
+  twice with no flag. Many alike descriptions in one block make discovery quadratic.
+- Within one document, only a D-021 flag, which needs equal amounts, lets a pending and a posted row
+  be confirmed together, and only as single rows.
+- Stale pending is a disclosure at a fixed 10 days. Nothing is removed or acted on.
 
 ## M2.8 as built
 
@@ -808,6 +864,11 @@ rules and the choices made where they left one in D-047. Tests are in
   back.
 - pytest temporary files used `build/tmp`.
 
+## Boundary notes from the M2.9 work
+
+- As for M2.7. Break worktrees were created and removed with `git worktree`, one with `--force` after
+  a hand-applied break. A throwaway check of the `d5` digest is in `build/m2.9-check/`.
+
 ## Boundary notes from the M2.8 work
 
 - As for M2.7. The harness's safety check refused one `rm -rf` of a `build/` probe folder's contents.
@@ -826,7 +887,7 @@ rules and the choices made where they left one in D-047. Tests are in
 
 ## Awaiting the owner
 
-- Review of M2.7, M2.8 and M2.9 together, once all three are built.
+- Review of M2.7, M2.8 and M2.9 together, including the A34 amendment and the D-050 stop rule.
 - Pushing. Not authorized from here. The owner's own push is described under "Remote state".
 
 ## Recommended M2 scope
@@ -846,7 +907,8 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 | M2.5 | Accepted as built, 2026-11-08 | None |
 | M2.6 | Accepted as built, 2026-11-08 | None |
 | M2.7 | Plan approved 2026-11-08, taking every recommendation (D-050). Implemented | Owner reviews with M2.8 and M2.9 |
-| M2.8 and M2.9 | The owner asked on 2026-11-08 for both to be built with the lead engineer's recommendations, recorded as D-051 and D-052 before their code | Owner reviews all three together |
+| Anything after M2.9 | Not planned or approved | Needs its own plan and approval |
+| M2.8 and M2.9 | Built on 2026-11-08 at the owner's request, with the lead engineer's recommendations recorded as D-051 and D-052 before their code | Owner reviews all three together |
 | Pushing | Not approved. The earlier push was the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -872,10 +934,12 @@ Read docs/handoff.md first, then the files it lists. Confirm the branch is featu
 the working tree is clean, and run the test suite with a real exit code before changing
 anything. Do not contact GitHub.
 
-Task: M2.7 and M2.8 are built, and M2.9's plan is recorded as D-052. Continue as I asked on
-2026-11-08: build M2.9 as D-052 says, as small gated commits. Do not reopen D-042 to D-050 unless
-you find a concrete contradiction. Do not reopen D-051 or D-052 either. Stop when all three are built, for my review of M2.7, M2.8
-and M2.9 together.
+Review outcome for M2.7, M2.8 and M2.9:
+[PASTE IT HERE: accepted, or the changes you want, for each slice]
+
+Task: record the review outcome, making any changes it asks for first as small gated commits.
+Do not reopen D-042 to D-052 unless you find a concrete contradiction. Then propose what comes
+after M2, and wait for my approval before implementing it.
 
 Follow the working principles in docs/handoff.md. Pushing needs my explicit approval each time.
 No network, no new dependencies, no security changes. Synthetic data only. Use build/ for walkthroughs, breaks and benchmarks, with TMPDIR set
