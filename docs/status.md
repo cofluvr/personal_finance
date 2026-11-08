@@ -12,7 +12,8 @@ Last updated: 2026-11-07. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M2.1: review evidence and revision tokens | Accepted |
 | M2.2: decision core, pair rejection and undo | Accepted |
 | M2.3: confirmation, partitions and superseding | Accepted (D-046) |
-| M2.4 to M2.9 | Provisional, not approved |
+| M2.4: separating machine-made merges | Implemented, awaiting review (D-047) |
+| M2.5 to M2.9 | Provisional, not approved |
 | M3 to M8 | Not started |
 
 ## What exists
@@ -20,8 +21,8 @@ Last updated: 2026-11-07. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.money`: exact parsing and formatting of amounts.
 - `personal_finance.db.migrate`: database creation, connections, migrations.
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
-  `0004_identity_and_primary`, `0005_decisions` and `0006_confirmation`, applied by `init` and
-  `migrate` only (D-035).
+  `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation` and `0007_separation`,
+  applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
 - `personal_finance.reconcile.same_document`: flags possible duplicates within one
@@ -30,24 +31,26 @@ Last updated: 2026-11-07. Branch: `feature/m2-review`, from `643e1b1`. The owner
   review items as a pure function of its stored evidence.
 - `personal_finance.reconcile.apply`: applies that result atomically with the import,
   recording every source movement.
-- `personal_finance.reconcile.decisions`: rejecting pairs, confirming partitions, superseding and
-  undoing decisions, each under one write lock (D-043, D-045, D-046).
+- `personal_finance.reconcile.decisions`: rejecting pairs, confirming partitions, separating
+  automatic merges, superseding and undoing decisions, each under one write lock (D-043, D-045,
+  D-046, D-047).
 - `personal_finance.reconcile.rules` and `similarity`: the versioned matching
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement.
 - `personal_finance.reports.import_summary`: run-level import counts in explicit units (D-036).
-- `personal_finance.reports.review_evidence`: the evidence behind one review item and its
-  revision token (D-040).
+- `personal_finance.reports.review_evidence`: the evidence behind one review item or one
+  transaction, and their revision tokens (D-040, D-047).
 - `personal_finance.reports.decision_evidence`: what a decision binds, and the undo token (D-045).
 - CLI: `init`, `migrate`, `account add`, `import`, `reconcile`, `documents`, `transactions`,
-  `trace`, `review list`, `review show`, `review reject`, `review confirm`, `review decisions`,
-  `review decision show`, `review undo`, `totals`, run through the `bin/pf` launcher (D-038).
+  `trace`, `review list`, `review show`, `review reject`, `review confirm`, `review merges`,
+  `review merge show`, `review separate`, `review decisions`, `review decision show`,
+  `review undo`, `totals`, run through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
 
 No real institution layout is supported. **It must not be used with real financial
-data** (M5 gate). Only candidate items and decision conflicts can be acted on. Machine-made merges
-cannot be separated yet (M2.4).
+data** (M5 gate). Only candidate items, decision conflicts and automatically merged transactions
+can be acted on.
 
 ## Acceptance criteria progress
 
@@ -172,6 +175,36 @@ is in `build/m2.3-bench/confirmed.txt`, which is ignored and may not survive. **
 not make the quadratic recomputation worse.** A partition costs what a rejection costs, within the
 variation of these runs, and a plain confirmation costs far less. Matching was not changed.
 
+**Separation (P19),** measured 2026-11-07 on the same machine with
+`measure_reconciliation.py --separated`. Two documents with complete coverage pair every row exactly,
+and a third of unknown coverage holds the same rows, so every merge and every separated record
+links with all of the third, in one group. With only the two merging documents a separated record
+would link with nothing, which would make separating look far cheaper than it is.
+
+| Merges | Units in the group | One rejection | One partition | One separation | Separations on 10% | Pairs compared, one separation | On 10% |
+|---|---|---|---|---|---|---|---|
+| 50 | 100 | 0.005s | 0.005s | 0.005s | 0.005s | 5,050 | 5,460 |
+| 250 | 500 | 0.110s | 0.112s | 0.122s | 0.127s | 125,250 | 137,550 |
+| 500 | 1,000 | 0.444s | 0.523s | 0.436s | 0.495s | 500,500 | 550,725 |
+| 1,000 | 2,000 | 1.720s | 1.706s | 1.664s | 1.881s | 2,001,000 | 2,203,950 |
+| 2,000 | 4,000 | 6.957s | 6.817s | 6.614s | 7.726s | 8,002,000 | 8,817,900 |
+
+Derivation alone. A rejection and a partition compare n(n − 1)/2 pairs for n units. A separation
+touches the group the same way and adds one unit for each record it takes out of a merge, so ten
+percent of merges separated makes about ten percent more units and about ten percent more pairs.
+
+| Transactions | Decision | Whole decision command | Later import | Undo token and preview | Whole undo |
+|---|---|---|---|---|---|
+| 2,000 | Rejection | 1.892s | 1.740s | 1.754s | 1.764s |
+| 2,000 | Separation | 1.690s | 1.740s | 1.812s | 1.783s |
+
+Through a real ledger, under the write lock. A rejection of the merged transaction against a row of
+the third file is the baseline, since a partition into single transactions on a candidate item is
+refused (D-046). Smaller ledgers scale the same way, and the full output is in
+`build/m2.4-bench/separated.txt`, which is ignored and may not survive. **Separating does not make
+the quadratic recomputation worse** than a rejection or a partition, apart from the units it adds.
+Matching was not changed.
+
 ## Known limitations
 
 - Only `cross_document_candidates` items can be rejected, and only they and decision conflicts can
@@ -202,8 +235,13 @@ variation of these runs, and a plain confirmation costs far less. Matching was n
   columns is an application rule for M2, not something the database enforces.
 - The database cannot enforce that every transaction has at least one source.
   Tests check this after success, failure and crash.
-- Users cannot separate machine-made merges until M2.4. Automatic moves are recorded in
+- A separation names every record of one transaction, at most 50. It cannot split records a
+  confirmation joined, which needs undo first, nor act on a transaction in an open conflict.
+  Superseding a confirmation by a separation is M2.5. Automatic moves are recorded in
   `transaction_link_history`, and automatic splits happen only for machine-made merges.
+- A separation binds the records it names. A re-export of them is withheld and raised as a
+  conflict, so overlapping exports can bring repeat reviews.
+- `review decision show` lists every record pair of a separation, up to 1,225 for 50 records.
 - Import holds the write lock through reconciliation. At about 100,000 rows in one
   account that can exceed the 5-second wait, so a concurrent writer reports
   `database_busy`. It explains what to do, leaves nothing partial, and a retry succeeds.

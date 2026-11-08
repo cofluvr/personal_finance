@@ -972,6 +972,28 @@ measured on a shape where separated records still link with many others: two doc
 complete coverage that pair every row, and a third with unknown coverage holding the same rows. If
 it is materially slower than a partition on that shape, the work stops and is reported.
 
+**How these were implemented,** where the rules above left a choice. They await the owner's review
+with M2.4:
+
+- One stated pair per record pair, with the lower group on the left, so stored rows never depend on
+  which record ID sorts first. Pair numbers still follow record IDs, so `--keep` numbers are read
+  from `review decision show`.
+- `review merges` lists only transactions with something joined automatically: records forming
+  more than one confirmed core, a record no `same_event` pair binds counting as its own.
+- The override notice names the stored guarantee. No production layout declares plain `stable`,
+  so one message covers both rather than a second wording that could never be printed.
+- The `totals` line counts transactions holding a record of an active separation's
+  `different_event` pairs, so a kept group of several records is counted there and as confirmed.
+  The lines are never presented as disjoint (D-045).
+- Refusing a transaction in an open conflict, and the check after re-deriving that no open conflict
+  holds its records, are tested by inserting a conflict directly. A transaction can be in a conflict
+  when a confirmed unit has absorbed one automatic merge while a rejection withholds another merge
+  holding one of its records, which takes four documents and two layouts to build.
+- The tests of migrations 0005 and 0006 now migrate only to their own version, and map the renamed
+  columns when they copy rows from a current ledger. They assert nothing new.
+- The item token was checked unchanged by the shared loading code: a fixed ledger gives
+  `r3-d41e2251fcd3a611` both at `3a765fe` and after, and a test pins it.
+
 ## Not yet decided
 
 From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend details

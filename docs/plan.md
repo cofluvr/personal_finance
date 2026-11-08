@@ -149,7 +149,7 @@ the decision log records the database, parser and deduplication rules.
 
 ## M2 plan
 
-M2.1, M2.2 and M2.3 are accepted (D-046). M2.4 is approved (D-047). **M2.5 to M2.9 are provisional**:
+M2.1, M2.2 and M2.3 are accepted (D-046). M2.4 is implemented and awaits review (D-047). **M2.5 to M2.9 are provisional**:
 a direction, not approval to implement, and each needs its own approval. D-041 lists requirements
 they must meet.
 
@@ -158,7 +158,7 @@ they must meet.
 | M2.1 | Review evidence: `review list` IDs, `review show`, revision tokens. Read-only, no migration | Accepted |
 | M2.2 | Decision core: stable-ID storage, precedence over automatic reconciliation, pair rejection and undo | Accepted |
 | M2.3 | Confirm, including part of a group | Accepted |
-| M2.4 | Separating machine-made merges | Approved (D-047), in progress |
+| M2.4 | Separating machine-made merges | Implemented, awaiting review (D-047) |
 | M2.5 | New evidence that touches a decided record, and superseding a decision | Provisional |
 | M2.6 | Correction overrides | Provisional |
 | M2.7 | Resolving incomplete records | Provisional |
