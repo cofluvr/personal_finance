@@ -3,7 +3,8 @@
 The write lock is held from the duplicate check to the commit, so concurrent
 imports of one file cannot both succeed, and a failure leaves nothing behind. Each
 row first becomes its own transaction, then the account is reconciled inside the
-same database transaction.
+same database transaction. A real ledger also archives each new document's original, as the last
+step before the commit, so no document is kept without it (D-058 point 5).
 """
 
 import hashlib
@@ -13,6 +14,7 @@ import uuid
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from personal_finance.db.originals import archive_original
 from personal_finance.ingest import coverage as coverage_rules
 from personal_finance.ingest.coverage import Coverage
 from personal_finance.ingest.csv_reader import RawRecord, read_document
@@ -68,12 +70,15 @@ def import_files(
     layout: Layout,
     declared_coverage: Coverage | None = None,
     rules: MatchingRules = DEFAULT_RULES,
+    originals_folder: Path | None = None,
 ) -> list[FileResult]:
-    """Import each file independently. One failure never stops the others."""
+    """Import each file independently. One failure never stops the others. Given an originals
+    folder, each new document's bytes are archived there before its import commits."""
     run_id = _new_id()
     conn.execute("INSERT INTO import_run (id) VALUES (?)", (run_id,))
     results = [
-        _import_file(conn, run_id, path, account_id, layout, declared_coverage, rules)
+        _import_file(conn, run_id, path, account_id, layout, declared_coverage, rules,
+                     originals_folder)
         for path in paths
     ]
     _write_if_possible(
@@ -85,7 +90,7 @@ def import_files(
 
 
 def _import_file(
-    conn, run_id, path, account_id, layout, declared, rules=DEFAULT_RULES
+    conn, run_id, path, account_id, layout, declared, rules=DEFAULT_RULES, originals_folder=None
 ) -> FileResult:
     digest = None
     progress = _Progress()
@@ -98,6 +103,8 @@ def _import_file(
             conn, run_id, path.name, content, digest, account_id, layout, declared, rules, progress
         )
         result = replace(result, net_transactions=_live_transactions(conn, account_id) - before)
+        if originals_folder is not None and result.outcome == "imported":
+            archive_original(originals_folder, content, digest)
         conn.execute("COMMIT")
         return result
     except ImportFailure as failure:

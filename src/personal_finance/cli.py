@@ -22,6 +22,11 @@ from personal_finance.db.migrate import (
     migrate,
     schema_version,
 )
+from personal_finance.db.originals import (
+    originals_folder_beside,
+    prepare_originals_folder,
+    verify_originals,
+)
 from personal_finance.db.real_ledger import (
     UnsafeLocation,
     check_real_ledger_on_open,
@@ -133,6 +138,7 @@ from personal_finance.reports.review_evidence import (
     rows_sharing_a_document,
     transaction_revision,
 )
+from personal_finance.reports.storage import storage_by_kind
 from personal_finance.reports.totals import (
     account_movement,
     income_and_spending,
@@ -187,6 +193,11 @@ FAILURE_EXPLANATIONS = {
     "layout_definition_changed": (
         "This layout's definition differs from the one stored for earlier documents. "
         "Existing data is unchanged. A change of meaning needs a new layout version."
+    ),
+    "archive_failed": (
+        "The original could not be kept in originals/ beside the ledger, or a different file "
+        "already holds its name, so this file was not imported and nothing from it was kept. "
+        "Run pf archive verify to check the archive."
     ),
     "coverage_conflict": (
         "This declaration differs from the coverage the document already has, or replaces "
@@ -453,6 +464,13 @@ def build_parser() -> argparse.ArgumentParser:
     importer.add_argument("--coverage-end", help="last covered date, inclusive (YYYY-MM-DD)")
     importer.add_argument("--coverage-basis", choices=DATE_BASES)
     importer.add_argument("files", nargs="+", type=Path, metavar="FILE")
+
+    archive = commands.add_parser("archive", help="check the originals a real ledger keeps")
+    archive_commands = archive.add_subparsers(dest="archive_command", required=True)
+    command("verify", archive_commands, handler=run_archive_verify,
+            help="rehash every original, and list missing, altered and unreferenced ones")
+    command("storage", handler=run_storage,
+            help="show software, database, originals and backups storage apart")
 
     reconcile = command(
         "reconcile", handler=run_reconcile, help="re-derive accounts under the current rules"
@@ -987,16 +1005,19 @@ def describe_coverage(coverage) -> str:
 def run_import(args) -> int:
     declared = declared_coverage(args)
     conn = open_ledger(args.db)
-    if is_real_ledger(conn):
+    real = is_real_ledger(conn)
+    if real:
         for import_path in args.files:
             refuse_import_from_git_work_tree(import_path)
     account_id = find_account(conn, args.account)
+    originals_folder = prepare_originals_folder(args.db) if real else None
     results = import_files(
         conn,
         args.files,
         account_id=account_id,
         layout=LAYOUTS[args.layout],
         declared_coverage=declared,
+        originals_folder=originals_folder,
     )
 
     if len(results) > 1:
@@ -1193,6 +1214,44 @@ def describe_conflicts(movement) -> list[str]:
             f"{movement.transactions_with_changed_basis}."
         )
     return lines
+
+
+def run_archive_verify(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    if not is_real_ledger(conn):
+        raise CommandError("a synthetic ledger keeps no originals, so there is nothing to verify")
+    verification = verify_originals(conn, originals_folder_beside(args.db))
+    print(f"Originals intact: {len(verification.intact)}")
+    for heading, originals in (("Missing", verification.missing),
+                               ("Altered", verification.altered)):
+        print(f"{heading}: {len(originals)}")
+        for original in originals:
+            print(f"  {original.content_sha256}, document {original.source_document_id}")
+    print(f"Not referenced: {len(verification.unreferenced_entry_names)}")
+    for entry_name in verification.unreferenced_entry_names:
+        print(f"  {shown(entry_name)}")
+    print("The archive is intact." if verification.passed else "The archive is not intact.")
+    return 0 if verification.passed else 1
+
+
+def shown_files(stored) -> str:
+    return f"{stored.byte_count} bytes in {stored.file_count} files"
+
+
+def run_storage(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    originals_folder = originals_folder_beside(args.db) if is_real_ledger(conn) else None
+    storage = storage_by_kind(conn, args.db, originals_folder)
+    print(f"Software: {shown_files(storage.software)} (the personal_finance package; the Python "
+          "interpreter and its environment are not counted)")
+    print(f"Database: {shown_files(storage.database)} (the ledger with its journal)")
+    if originals_folder is None:
+        print("Originals: none, a synthetic ledger archives nothing")
+    else:
+        print(f"Originals: {shown_files(storage.referenced_originals)} referenced, "
+              f"{shown_files(storage.unreferenced_originals)} not referenced")
+    print("Backups: none recorded (backup create arrives in M5.4)")
+    return 0
 
 
 def run_reconcile(args) -> int:
