@@ -12,9 +12,9 @@ Status values:
 Status of the code behind each decision is in [status.md](status.md).
 
 The full text of D-001 to D-056 is in [decisions-d001-d052.md](decisions-d001-d052.md). This file
-holds the index, the rules in brief, and the newest decisions in full, once there are any. When a decision here is
-accepted and the next one is written, move its full text to the end of that file and keep its
-index line.
+holds the index, the rules in brief, and the newest decisions in full, once there are any. When a
+decision here is accepted and the next one is written, move its full text to the end of that file
+and keep its index line.
 
 ## Index
 
