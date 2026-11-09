@@ -19,6 +19,7 @@ from personal_finance import cli
 from personal_finance.cli import BUSY_EXPLANATION, UNEXPECTED_ERROR, main
 from personal_finance.db.migrate import connect
 from personal_finance.ingest import pipeline
+from personal_finance.reports import report_text
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "src" / "personal_finance"
@@ -224,9 +225,10 @@ class TestFilesLeftBehind:
         crash = (
             "import sys\n"
             "from personal_finance import cli\n"
+            "from personal_finance.reports import report_text\n"
             "def crash(*args, **kwargs):\n"
             f"    raise ValueError('{MERCHANT} {AMOUNT}')\n"
-            "cli.account_movement = crash\n"
+            "report_text.account_movement = crash\n"
             "sys.exit(cli.main(sys.argv[1:]))\n"
         )
         result = run_process(["totals", "--db", db], workspace, code=crash)
@@ -308,7 +310,7 @@ class TestCliBoundary:
         self, db, capsys, caplog, monkeypatch
     ):
         caplog.set_level(logging.DEBUG)
-        monkeypatch.setattr(cli, "load_review_evidence", raises(sensitive()))
+        monkeypatch.setattr(report_text, "load_review_evidence", raises(sensitive()))
 
         assert main(["review", "show", "--db", db, "some-item"]) == 2
 

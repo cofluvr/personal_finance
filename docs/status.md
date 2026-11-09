@@ -45,7 +45,12 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M7.3: CSV and PDF counting once | Complete, on D-006 unchanged, against a test-only CSV layout (D-060) |
 | M7.4 and M7.5 | Not built: one card per printout, and the owner holds no Capital One card PDF |
 | **M7 overall** | **Complete,** recorded by the owner on 2026-11-09 |
-| M8 | Not started |
+| M8.1: one builder per report | Complete (D-062) |
+| M8.2: `pf ui`, the loopback server, totals and monthly pages | Complete (D-062) |
+| M8.3: import results, transactions, review queue and item pages | Complete (D-062) |
+| M8.4: decisions from the browser | Not built: the owner chose a read-only M8 |
+| **M8 overall** | **Complete,** verified by the owner in a browser on 2026-11-09 |
+| M9: spending categories | Planned in D-063, pending the owner's review. Nothing built |
 
 ## What exists
 
@@ -56,6 +61,10 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   import checks every open of a real ledger runs, with its temporary files kept in memory (D-058).
 - `personal_finance.db.originals`: archiving a real ledger's originals on import, and verifying
   them (D-017, D-058).
+- `personal_finance.reports.report_text`: the text of `totals`, `report monthly`, `documents`,
+  `transactions`, `review list` and `review show`, built as lines that the CLI prints (D-062).
+- `personal_finance.ui.server`: `pf ui`'s read-only pages on 127.0.0.1, and their protections
+  (D-062).
 - `personal_finance.reports.storage`: software, database, originals and backups storage apart
   (D-058).
 - `personal_finance.db.backups`: backing up a ledger with a manifest and logical digest, checking a
@@ -154,6 +163,11 @@ Stated here once (D-058 point 9, W2).
   `/usr/sbin/diskutil info -plist` and `/usr/bin/hdiutil info -plist`, for a real ledger only,
   with a 30-second timeout. `tests/unit/test_no_network_imports.py` parses every module and fails
   on any added use. Every command works with no network connection (PRD §21).
+- **One listening socket, on loopback only** (D-062 point 1). `pf ui` serves read-only pages from
+  `ui/server.py`, the one module W1 allows to import from `http`, and only `http.server`'s
+  `BaseHTTPRequestHandler` and `HTTPServer`. It binds `127.0.0.1` at a port the system picks, with
+  no option to change it, looks up no name, and connects to nothing. A request needs the exact
+  Host, and the cookie from that launch's one-use key, and only `GET` is answered.
 - **One runtime dependency: pypdf 6.21.2** (D-060 point 1, as amended), pure Python and BSD-3-Clause,
   with no dependency of its own on Python 3.12. Pinned by version and hash in `requirements.txt`,
   installed with `--require-hashes`, and imported by `ingest/pdf_reader.py` alone. W1 parses its
@@ -194,6 +208,15 @@ rewriting 20,000 match outcomes (D-057).
 
 ## Known limitations
 
+- The local UI is read-only, and shows six commands' output only. It searches nothing, imports
+  nothing, exports nothing and shows no `trace` or decision history, which carry creation
+  timestamps (F2). Decisions are made with `pf review` in the terminal (D-062).
+- `pf ui` cannot stop what the browser keeps: history (addresses with IDs and months, a fixed
+  title) and session-restore snapshots. It asks for a private window. Cookies are not kept apart by
+  port, so a page served by another local user on another loopback port, opened while `pf ui`
+  runs, receives its cookie. Anything running as the owner can read the ledger anyway.
+- A control or format character in a file name shows escaped on a page and as typed in the CLI.
+- `pf ui` answers one request at a time, and reruns a real ledger's two volume probes for each.
 - Only a person classifies, one transaction at a time. A type must fit the transaction's
   direction. A card, loan or investment payment may be money in on the account it pays, and interest
   is money out only, so interest earned is `income` (D-053, D-054).

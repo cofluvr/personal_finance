@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from personal_finance import cli
+from personal_finance.reports import report_text
 from personal_finance.reports.review_evidence import (
     IMMATERIAL_FIELDS,
     OMITTED_WHILE_EMPTY,
@@ -216,5 +217,5 @@ def test_every_reason_derive_can_give_has_an_explanation():
     reasons |= set(re.findall(r'^REASON_[A-Z_]+ = "([a-z_]+)"', text, re.MULTILINE))
     reasons |= {"similar_description", "external_id_conflict", "external_id_repeated"}
     reasons -= {"pending", "not_pending"}
-    assert reasons <= set(cli.REASON_EXPLANATIONS)
+    assert reasons <= set(report_text.REASON_EXPLANATIONS)
     assert len(reasons) >= 10

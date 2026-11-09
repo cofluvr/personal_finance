@@ -11,7 +11,7 @@ Status values:
 
 Status of the code behind each decision is in [status.md](status.md).
 
-The full text of D-001 to D-060 is in [decisions-d001-d052.md](decisions-d001-d052.md). This file
+The full text of D-001 to D-062 is in [decisions-d001-d052.md](decisions-d001-d052.md). This file
 holds the index, the rules in brief, and the newest decisions in full, once there are any. When a
 decision here is accepted and the next one is written, move its full text to the end of that file
 and keep its index line.
@@ -81,6 +81,8 @@ and keep its index line.
 | D-059 | M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6 |
 | D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, implemented in M7 |
 | D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
+| D-062 | M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8, verified by the owner |
+| D-063 | M9 plan: spending categories — Pending, for the owner's review |
 
 ## Rules in brief
 
@@ -175,6 +177,9 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Account number in rows | A layout whose rows name the account's last four digits refuses a file naming another, or an account with none registered, importing nothing | D-061 |
 | PDF layouts | A layout groups a PDF's lines into rows, keeping each. A line it does not know is an unresolved row, never skipped. A document stating no period takes a declaration, as a CSV | D-060 |
 | CSV and PDF | One event in both counts once only by D-006's exact rule, unchanged. An ID-bearing row against an ID-less one stays a possible duplicate | D-006, D-026, D-060 |
+| Report text | `totals`, `report monthly`, `documents`, `transactions`, `review list` and `review show` are built as lines in `reports/report_text.py`, which the CLI prints and the UI renders. A page computes nothing of its own | D-062 |
+| Local UI | `pf ui` serves read-only pages on `127.0.0.1` at a port the system picks, with no option to change it. Exact Host, a one-use launch key for an `HttpOnly`, `SameSite=Strict` cookie, `GET` only, no script, no logging, the ledger opened read-only through the gate on every request. Decisions stay in the terminal | D-062 |
+| W1 and `http` | Only `ui/server.py` imports from `http`, and only `http.server`'s `BaseHTTPRequestHandler` and `HTTPServer` | D-058, D-062 |
 | PDF text | pypdf alone reads it, pinned by hash, imported by `ingest/pdf_reader.py` only, with `jbig2dec` unset and its log silenced. W1 parses pypdf too, allowing only its JBIG2 decoder's `subprocess` | D-020, D-060 |
 | Backups | A new folder, on a mounted volume other than a real ledger's and gated as its folder is, holding the ledger, its referenced originals and a manifest of hashes, sizes, versions and a logical digest. Restore never overwrites, and checks every file, integrity, foreign keys, schema and digest first | D-058 |
 
@@ -184,39 +189,140 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-061 Capital One bank format confirmed, and its rows' account number checked — Approved, implemented
+## D-063 M9 plan: spending categories — Pending, for the owner's review
 
-Directed by the owner on 2026-11-09, outside M7's slices, with the header and two rows of each of
-two real Capital One exports, a 360 Performance Savings account and a 360 Checking account. No
-value from them is kept in this repository: the fixtures invent every value, keeping the format.
+Proposed on 2026-11-09. **M1 to M8 deliver every Phase 1A item** of PRD-backend §3, so M9 opens
+Phase 1B, which plan.md leaves to be planned once Phase 1A passes (point 1). M9 is the first of its
+features, and the one the rest stand on: **categories** (PRD §10), stated by a person and totalled
+within spending, so that budgets, goals and reserves later have something to count. Builds on D-053's
+financial types and D-056's spending group, as D-014 ordered: type before category. Changes none of
+D-042 to D-062. **No security control changes,** no dependency is added, and the UI stays read-only.
+Plan only: nothing is built until it is approved, and then each slice separately. Acceptance tests,
+CA1 to CC5, are in [plan.md](plan.md).
 
-**The format matches `capital_one_bank_v1` as built,** so no parser changed: the exact header,
-`MM/DD/YY` dates, `Transaction Amount` never negative with `Transaction Type` `Debit` or `Credit`
-giving its direction, and `Balance` a running balance after each row, newest first. Amounts drop
-trailing zeros (`1400`, `14.1`), which the parser already read. The fixture now lists newest first
-in that style, with a Zelle receipt and a web payment in the wording the exports showed. Still
-assumed: the date is the transaction date, and the export holds posted transactions only, which
-D-059 point F checks.
+```sh
+pf category add  --db DB NAME [--parent NAME]
+pf category list --db DB
+pf review categorize --db DB --account A TRANSACTION_ID --revision t…  --category NAME \
+   [--supersedes CATEGORIZATION_ID --supersedes-revision g1-…]
+pf review categorizations      --db DB [--account A]
+pf review categorization show  --db DB CATEGORIZATION_ID
+pf review categorization undo  --db DB --account A CATEGORIZATION_ID --revision g1-…
+pf totals / pf report monthly       # gain "Spending by category"
+```
 
-**The owner's choices on the account layer,** each recommended by the lead engineer:
+**Slices:**
 
-1. **The Account Number is checked.** Each row names its account's last four digits. A layout may
-   name such a column, and `capital_one_bank_v1` names `Account Number`. Every row of a new
-   document must name the importing account's registered last four digits (`pf account add
-   --last4`), or the file fails as `account_number_mismatch`, importing nothing, so the savings
-   export cannot import into checking. A row too short to hold the column is unresolved as before,
-   and is not checked. An account registered without last four digits fails the file as
-   `account_number_unknown`: nothing would show which account the file belongs to. A repeat import
-   of identical bytes is unchanged (D-022). Files that pass are read exactly as before, so the
-   layout keeps its ID and parser version: the check refuses files, and changes no meaning.
-2. **A transfer between the two accounts uses M3.2 unchanged.** The savings export's "Withdrawal
-   to 360 Checking" row, classified `transfer`, is a candidate against the checking deposit of the
-   opposite amount, and `review transfer match` matches them (D-054). A scenario test shows it on
-   invented exports. The checking side's wording is a guess, which matching never reads.
+| Slice | Scope |
+|---|---|
+| M9.1 | The category list: migration 0019, PRD §10's starting set, `pf category add` and `list` |
+| M9.2 | Categorizing one transaction: D-053's model, extracted to serve types and categories alike (point 4), migration 0020, tokens, `review show` |
+| M9.3 | Spending by category in `totals` and `report monthly`, and so on the UI's pages |
 
-**Open:** `pf` has no command to change an account, so an account added without last four digits
-cannot gain them. If the real ledger holds such a Capital One bank account, setting them once, never
-changing them after, is a follow-up for the owner's approval.
+**Recommendations, each with its alternatives:**
 
-**Tests:** `tests/scenarios/test_capital_one_accounts.py`, and the layout's J1 to J7 case on the
-new fixture, with its account's last four digits. Seven deliberate breaks of the check, all caught.
+1. **Phase 1A passes, and M9 starts Phase 1B.** CSV and PDF ingestion, account identification,
+   normalization, deduplication, transfers and card payments, the review interface, and balances and
+   reports are M1 to M8. Of §21's criteria, five are Phase 1B's (splits, annual reserves, third
+   paychecks, goal allocations and graduated payments), and "backups restore records, rules,
+   corrections, and goals" holds for all but goals, which do not exist yet. The rest pass. Still open, and not blocking categories: point F
+   on one real file of each layout (D-059), which only the owner can run. Alternatively **an M9 of
+   Phase 1A hardening** (point F for every layout first, and any correction it finds) before any
+   Phase 1B work: recommended only if the owner wants real-file confidence before new features.
+
+2. **Phase 1B, in the order each needs the last,** as a proposed sequence, each milestone planned
+   on its own as M9 is here:
+
+   | Milestone | Scope | Needs first |
+   |---|---|---|
+   | M9 | Spending categories, by a person | Financial types (D-053) |
+   | M10 | Categorization rules: future and historical matches, preview, undo, a person's category first (PRD §10) | M9 |
+   | M11 | Household members, attribution by account and transaction, splits by amount or percentage summing exactly (PRD §6, §21) | M9, and the owner's household and account assignments (§22) |
+   | M12 | Budgets, spending allowances and safe-to-spend (PRD §12) | M9 to M11, and shared-contract §6's safe-to-spend decision |
+   | M13 | Goals, the emergency fund, annual and irregular reserves (PRD §13) | M12 |
+   | M14 | Graduated loans, scenarios and the tax reserve (PRD §14 to §16) | M12, M13, and the owner's loan documents (§22) |
+
+   Only M9 is proposed for approval now. Alternatively **household first** (M11 as M9), if
+   attribution matters more to the owner than categories: it needs the owner's household and
+   account assignments before it can start.
+
+3. **A category list, stored, starting from PRD §10.**
+   - Migration 0019 adds `category`: an internal ID, a unique name, an optional parent, and when it
+     was made. Append-only: no rename, merge or delete in M9, so every assignment keeps meaning what
+     it meant (principle 1: those wait until needed, each with its own rules for history).
+   - It starts with PRD §10's list: Housing, Utilities and communications, Food, Transportation,
+     Health, Shopping and household, Entertainment, Travel, Gifts and donations, Insurance, Interest
+     and financial fees, and Other. "Uncategorized" is never stored: it is the absence of a category
+     that applies, as `unclassified` is (D-053).
+   - `pf category add NAME [--parent NAME]` adds one, one level deep: a subcategory's parent is a
+     top-level category. Names are compared exactly, shown as typed and escaped as D-040.
+   - Alternatively **an empty list,** every category added by the owner: no assumed names, but a
+     ledger with no categories until set up. Or **a fixed list in code,** with no `category` table:
+     less schema, but PRD §10 asks for configurable subcategories.
+
+4. **A categorization is D-053's classification of a second field,** and its code is extracted, not
+   copied (principle 2: this is the second use).
+   - It binds the records of its transaction when made, applies after derivation, is never read by
+     matching, and follows D-049's rules: agreeing categorizations apply, disagreeing ones or one
+     whose records split leave the transaction uncategorized and disclosed, chains follow D-048,
+     undo never refuses, and `review confirm` and `review separate` refuse to leave one unsettled.
+   - **Only spending is categorized:** a transaction whose applied type is `purchase`, `fee`,
+     `interest` or `refund` and that is in D-056's spending group. Anything else is refused,
+     changing nothing. If its type later changes, or it becomes a confirmed transfer, the
+     categorization stays on record and does not apply, in a fifth state, `not_spending`, disclosed
+     like D-053's `against_direction`. Income categories, such as salary and side income, belong to
+     PRD §11's later work.
+   - **Stored apart:** migration 0020, with M9.2, adds append-only `category_assignment`,
+     `category_assignment_record` and `category_assignment_event`, and a derived
+     `transaction_category`, mirroring 0013's tables. M9.1's 0019 adds only `category`, so no table
+     waits unused for a slice not yet approved.
+     `type_classification` is not widened, since changing its checks means rebuilding tables others
+     reference (D-053 point 4).
+   - **The extraction:** `reconcile/classifications.py`, `classification_effects.py` and
+     `reports/classification_evidence.py` become one implementation taking a description of the
+     field (its tables, its values, its fit rule), used for types and categories. Every types
+     command's output, token and refusal must stay byte for byte as now, compared on every ledger the
+     suite builds, as M8.1 did.
+   - **Tokens:** `r`, `t`, `d` and `c` add each transaction's categorizations, left out while empty
+     so existing digests are kept, with their versions bumped. `g1` is the new categorization undo
+     token: `b`, `c`, `d`, `f`, `k`, `m`, `o`, `r`, `t`, `u` and `v` are taken.
+   - Alternatively **one assignment to a category per transaction, overwritten:** far less code, but
+     no history, no undo and no protection against stale evidence, which D-043 and D-049 require of
+     every decision.
+
+5. **Spending by category, adding exactly to spending.** `totals` and `report monthly` gain, under
+   Spending, one line per category with a categorized transaction, subcategories indented under
+   their parent and included in its line, then an `uncategorized` line. Their sum is D-056's
+   Spending exactly, for the ledger, one account and each month, tested as M3.4's and M4.3's
+   invariants are, on generated ledgers. A disclosure gives the count and amount of uncategorized
+   spending, and the categorizations that do not apply, by reason. Nothing else in either report
+   changes. The UI's pages show them with no UI change, through the builders, and M8's parity tests
+   are run on categorized ledgers too.
+
+6. **What does not change, and the security boundaries.**
+   - No security control changes: W1, the UI, the gate and D-037 are untouched. The UI stays
+     read-only, so categorizing is a terminal command, with D-043's checks.
+   - A category name is the owner's label, like an account name: routine output may show it, and
+     amounts by category are aggregates, as `totals` already shows (D-037). Names are escaped
+     wherever printed.
+   - Migrations 0019 and 0020 are explicit (D-035). On the real ledger the owner runs `pf backup
+     create`, then `pf migrate`. Backups and restore cover the new tables with no change, since the manifest's
+     logical digest hashes every table.
+   - No dependency, no network, synthetic fixtures only.
+
+**Not in M9:** rules and bulk categorization (M10), household attribution and splits (M11), tags,
+fixed and discretionary classes, income categories, renaming, merging or deleting a category,
+categorizing from the UI, a normalized merchant, local AI (PRD §10), and budgets. Categorizing is
+one transaction at a time, which is slow for a real ledger's history until M10's rules.
+
+**Inputs needed from the owner** (PRD §22): whether PRD §10's starting list stands as named in
+point 3, and any subcategories wanted at the start.
+
+**For the owner's decision, with the lead engineer's recommendation first:**
+
+- **A. Phase 1A passes, and M9 is spending categories** (points 1 and 2). Alternatively Phase 1A
+  hardening first, or household first.
+- **B. A stored list starting from PRD §10,** append-only, one level of subcategories (point 3).
+- **C. Categorizations as D-053's model, extracted for both fields,** only on spending (point 4).
+- **D. Spending by category in `totals` and `report monthly`** (point 5).
+- **E. The slices M9.1 to M9.3,** in that order.

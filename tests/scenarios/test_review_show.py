@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from personal_finance import cli
-from personal_finance.cli import DUPLICATE_NOTICE, UNRESOLVED_NOTICE, main
+from personal_finance.cli import main
+from personal_finance.reports.report_text import (
+    DUPLICATE_NOTICE,
+    RULE_EXPLANATIONS,
+    UNRESOLVED_NOTICE,
+)
 from personal_finance.db.migrate import connect
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "synthetic"
@@ -210,7 +215,7 @@ class TestSupportedItems:
         out = show(item)
 
         assert f"Rule: {rule}" in out
-        assert cli.RULE_EXPLANATIONS[rule] in out
+        assert RULE_EXPLANATIONS[rule] in out
         assert "a.csv: rows 1, 2" in out
 
     def test_a_merged_transaction_explains_its_primary_source(self, checking, items, show):

@@ -1,6 +1,6 @@
-# Decision Log: Full Text of D-001 to D-060
+# Decision Log: Full Text of D-001 to D-062
 
-Moved out of [decisions.md](decisions.md) on 2026-11-08, unchanged, D-053 once D-054 was written, D-058 once D-059 was, D-059 once D-060 was, and D-060 once D-061 was. The index, the rules in brief and
+Moved out of [decisions.md](decisions.md) on 2026-11-08, unchanged, D-053 once D-054 was written, D-058 once D-059 was, D-059 once D-060 was, D-060 once D-061 was, D-061 once D-062 was, and D-062 once D-063 was. The index, the rules in brief and
 the newest decisions are in decisions.md. Status values are defined there. Read a decision here
 when a task touches it: search for its heading, such as `## D-049`.
 
@@ -2735,3 +2735,293 @@ count once. The owner holds no Capital One card PDF, so M7.5 is not built, and M
 The CSV the owner sampled last is a Capital One card export, matching `capital_one_card_v1` as
 built. `us_bank_card_activity_pdf_v1` stays unverified until D-059 point F passes on a real
 printout.
+
+## D-061 Capital One bank format confirmed, and its rows' account number checked — Approved, implemented
+
+Directed by the owner on 2026-11-09, outside M7's slices, with the header and two rows of each of
+two real Capital One exports, a 360 Performance Savings account and a 360 Checking account. No
+value from them is kept in this repository: the fixtures invent every value, keeping the format.
+
+**The format matches `capital_one_bank_v1` as built,** so no parser changed: the exact header,
+`MM/DD/YY` dates, `Transaction Amount` never negative with `Transaction Type` `Debit` or `Credit`
+giving its direction, and `Balance` a running balance after each row, newest first. Amounts drop
+trailing zeros (`1400`, `14.1`), which the parser already read. The fixture now lists newest first
+in that style, with a Zelle receipt and a web payment in the wording the exports showed. Still
+assumed: the date is the transaction date, and the export holds posted transactions only, which
+D-059 point F checks.
+
+**The owner's choices on the account layer,** each recommended by the lead engineer:
+
+1. **The Account Number is checked.** Each row names its account's last four digits. A layout may
+   name such a column, and `capital_one_bank_v1` names `Account Number`. Every row of a new
+   document must name the importing account's registered last four digits (`pf account add
+   --last4`), or the file fails as `account_number_mismatch`, importing nothing, so the savings
+   export cannot import into checking. A row too short to hold the column is unresolved as before,
+   and is not checked. An account registered without last four digits fails the file as
+   `account_number_unknown`: nothing would show which account the file belongs to. A repeat import
+   of identical bytes is unchanged (D-022). Files that pass are read exactly as before, so the
+   layout keeps its ID and parser version: the check refuses files, and changes no meaning.
+2. **A transfer between the two accounts uses M3.2 unchanged.** The savings export's "Withdrawal
+   to 360 Checking" row, classified `transfer`, is a candidate against the checking deposit of the
+   opposite amount, and `review transfer match` matches them (D-054). A scenario test shows it on
+   invented exports. The checking side's wording is a guess, which matching never reads.
+
+**Open:** `pf` has no command to change an account, so an account added without last four digits
+cannot gain them. If the real ledger holds such a Capital One bank account, setting them once, never
+changing them after, is a follow-up for the owner's approval.
+
+**Tests:** `tests/scenarios/test_capital_one_accounts.py`, and the layout's J1 to J7 case on the
+new fixture, with its account's last four digits. Seven deliberate breaks of the check, all caught.
+
+## D-062 M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8, verified by the owner
+
+Proposed on 2026-11-09. Delivers plan.md's M8 row (loopback-only import results, review queue and
+transactions; tested by Host and CSRF checks, and UI totals matching the CLI) against PRD-backend §18
+and §19 ("local UI bound to loopback", "sensitive descriptions excluded from routine logs", "security
+controls must be verified"). Changes none of D-042 to D-061. **Point 1 changes a security control**
+(W1, D-058 point 9), and point 3's alternative would add a write path from a browser: both are marked
+below, and neither is approved. No dependency is added. Plan only: nothing is built until it is
+approved, and then each slice separately. Acceptance tests, UA1 to UD4, are in [plan.md](plan.md).
+
+```sh
+pf ui --db DB      # prints http://127.0.0.1:PORT/start?key=..., serves until Ctrl-C
+```
+
+**Slices:**
+
+| Slice | Scope |
+|---|---|
+| M8.1 | One builder per report: the text of `totals`, `report monthly`, `documents`, `transactions`, `review list` and `review show` built as lines in one module, the CLI printing them byte for byte as now (point 6). No server |
+| M8.2 | `pf ui`: the loopback server, its protections (points 1, 4 and 5), and the totals and monthly pages |
+| M8.3 | Import results (`documents`), transactions, the review queue and one review item, read-only |
+| M8.4 | Only if the owner chooses point 3's alternative: review decisions from the browser |
+
+**Recommendations, each with its alternatives:**
+
+1. **Serving pages: `http.server`, fenced as pypdf was. Changes a security control.**
+   - `ui/server.py` alone may write `from http.server import BaseHTTPRequestHandler, HTTPServer`,
+     and nothing else from `http`, `socket` or `socketserver`. W1 gains the allowance
+     `("ui/server.py", "http")`, and a test pins that module's imports of `http` to exactly those two
+     names, as `volume_probes.py`'s `subprocess` is pinned to `run`. `SimpleHTTPRequestHandler`
+     (serves the working directory), `CGIHTTPRequestHandler` (runs programs) and
+     `ThreadingHTTPServer` stay refused by that pin. Every other module keeps every refusal, and
+     `http.client`, `urllib` and the rest stay refused in `ui/server.py` too. W1 still does not parse
+     the standard library, as now, so what `http.server` imports itself (`socket`, `socketserver`,
+     `http.client`, `urllib.parse`) is trusted as Python's own, not checked.
+   - **Loopback only, with no option to change it.** The server binds the constant `"127.0.0.1"`
+     with port 0, so the system picks a free port each launch, over IPv4 (`AF_INET`, HTTPServer's
+     default), with `allow_reuse_address` off. `pf ui` has no `--host` or `--port`. `HTTPServer`'s
+     `server_bind` calls `socket.getfqdn`, a reverse name lookup: the subclass skips it and names
+     itself `127.0.0.1`, so launching consults no resolver. One request at a time
+     (`HTTPServer`, not threading), HTTP/1.0 so each connection closes, and a 10-second socket
+     timeout, so one stalled client delays the owner by at most that.
+   - **How a test shows it:** W1's AST check that the only server construction passes the constant
+     tuple `("127.0.0.1", 0)`; a launch in the test whose `socket.getsockname()` is `127.0.0.1` and
+     whose family is `AF_INET`, with `socket.getfqdn` and `gethostbyaddr` replaced by failures.
+     Binding calls no `connect`, so the suite's socket guard (A19) stays exactly as it is. Requests
+     reach the handler over `socket.socketpair()`, which needs no `connect` either: the real
+     `http.server` parsing runs, and no test touches the network guard.
+   - Alternatives: **a WSGI server from `wsgiref`** is also standard library but needs the same
+     allowance (it imports `http.server`) and adds a layer. **A dependency** (Flask, Starlette with
+     uvicorn) is a D-020 decision, brings far more code than the few routes need, and is not
+     proposed. **Static HTML files written by the CLI** need no server and no allowance, but write
+     financial data to disk (D-037) and cannot show live review state. **A Unix domain socket**
+     would let file permissions stop other users, but browsers cannot connect to one.
+
+2. **PRD §18's sections: part of 2 and 3 only.**
+   - **In M8:** totals and the monthly report (the only aggregates the CLI has, standing in for no
+     "dashboard"), import results as `documents` shows them, transactions as `transactions` lists
+     them, the review queue (`review list`) and one item (`review show`).
+   - **Left out:** 1 Dashboard, 5 Budgets, goals and planned expenses, and 6 Scenarios need Phase 1B
+     features that do not exist (safe-to-spend, budgets, goals). 4 Accounts and household members:
+     the CLI has no account list or household model, and adding accounts is a write. 7 Settings and
+     backups: backups are writes to another volume, gated as D-058 sets out, and stay in the CLI.
+     Search in section 2: no CLI command searches, and description search is a new rule over
+     sensitive text (principle 1). Every required visual: categories and goals do not exist, and
+     spending over time is the monthly report's numbers, so a chart would add only drawing code. A
+     server-drawn SVG of it is a later slice on request. Importing through the browser: uploads are
+     writes and file handling. CSV export (PRD's proposed scope) writes a file (D-037). `trace` and
+     every decision history: they show creation timestamps (point 7).
+
+3. **Read-only. Decisions stay in the CLI.**
+   - The review item page shows the account ID, item ID and revision token, and the `pf review`
+     command that decides it, for the owner to run in the terminal, where D-043's checks already
+     hold. So M2.1's qualifications 1 and 2 hold unchanged, and qualification 3 by point 4's
+     escaping.
+   - No route writes: the server answers `GET` alone and opens every ledger connection read-only
+     (`mode=ro`), so a forged request, or a bug, cannot change the ledger. plan.md's "CSRF checks"
+     are then the refusal of every other method and of a foreign `Origin`, and a ledger unchanged by
+     any request (UB5).
+   - **Alternative, M8.4: decisions from the browser. Adds a write path, a security change.** Each
+     form posts the account ID, item ID and revision token that the page was rendered with, and the
+     server calls the very functions the CLI calls (`reject_pairs`, `confirm_groups`), which run
+     D-043's order under one write lock: current account first, evidence recomputed inside the
+     lock, then account, item ID and token together. Qualification 1 holds since the form carries
+     all three and no route takes a token alone. Qualification 2: the UI never reconciles, has no
+     reconcile button, and a token from a page rendered before any change (an import, a reconcile,
+     another decision, which version 2 tokens cover) refuses, changing nothing. The refusal page
+     links to the item again, which renders a fresh token for the owner to read before deciding:
+     nothing is resubmitted or accepted for them. A resubmitted form refuses for the same reason.
+     The write connection is opened per `POST`, through the same gate. CSRF, on top of point 4: a
+     per-session form token in a hidden field, compared in constant time; `Origin` required and
+     equal to `http://127.0.0.1:<port>`; a `Sec-Fetch-Site` other than `same-origin` refused when
+     present; form encoding only, and a body of at most 8 KB. Recommended against for now: the CLI decides already, and each decision kind
+     (reject, confirm with superseding, separate, correct, classify, match, resolve, undo) would
+     need its own form, refusals and tests.
+
+4. **Protections, on every response, and who provides them.** `http.server` provides request
+   parsing, header limits (100 lines of 65,536 bytes) and nothing else used here: its defaults are
+   overridden where they leak (point 5's logging and errors). The standard library provides
+   `secrets` (random values), `hmac.compare_digest` (constant-time comparison) and `html.escape`.
+   Everything below is written in `ui/server.py`, each with its test:
+
+   | Threat | Protection | Test |
+   |---|---|---|
+   | DNS rebinding, a foreign Host | `Host` must equal `127.0.0.1:<port>` exactly, the address `pf ui` printed. A missing, repeated, other-port, `localhost`, uppercase-variant, trailing-dot or foreign Host gets a fixed `421` page, before any cookie or ledger is read | UB3 |
+   | Other users on this Mac, and other local programs | A per-launch secret: `pf ui` prints `/start?key=<32 random bytes>`. That key works once, for a cookie holding a second random value, `HttpOnly; SameSite=Strict; Path=/`, and redirects to `/`, so the key leaves the address bar. Every other request needs that cookie, compared in constant time, else a fixed `403` with no data. A relaunch makes both values new | UB4 |
+   | CSRF, and cross-site reads | `GET` only; every other method `405` with its body unread. `SameSite=Strict` keeps the cookie off cross-site requests. A request whose `Origin` is present and not `http://127.0.0.1:<port>` is refused. Read-only connections (point 3) | UB5 |
+   | Injection from a cell | Every value is passed through `shown()` (D-040's escaping of control and format characters, U+202E included) and then `html.escape(quote=True)`, in one rendering function. No data reaches an attribute but an ID, a month or an account ID already validated | UC2 |
+   | Scripts, framing, outside assets | `Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`, and `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Cross-Origin-Resource-Policy: same-origin`. No JavaScript at all. One stylesheet, a string in the package served at `/style.css`. No page names any address but a path on this server, so it works offline | UB6 |
+   | Browser disk cache | `Cache-Control: no-store` on every response | UB6 |
+
+   **Residual, disclosed rather than solved:** anything running as the owner can read the ledger
+   anyway (D-058 point A's limit), and could read the cookie from the browser. Cookies are not
+   scoped by port, so if the owner, while `pf ui` runs, opens a page served on another loopback port
+   by another local user, that server receives the cookie. The browser may keep history (addresses
+   carry IDs and months, never amounts or descriptions, and titles are fixed) and session-restore
+   snapshots, outside the application: `pf ui` says to use a private window.
+
+5. **D-037 and D-058 on every request.**
+   - **No request logging.** The handler overrides `log_message` (which `log_request` and
+     `log_error` call) to do nothing, `send_error` to send a fixed page that repeats nothing from the
+     request, `version_string` to say `pf` rather than Python's version, and the server's
+     `handle_error`, which by default prints a traceback to stderr, to send the fixed unexpected-error
+     page. Expected errors map as `main` does, by one shared function (principle 2's second use):
+     `CommandError` and `UnsafeLocation` show their sanitized messages, a busy ledger
+     `BUSY_EXPLANATION`, anything else `UNEXPECTED_ERROR`. Only the CLI prints: `pf ui` prints the
+     address, then nothing until Ctrl-C, which stops it with exit code 0.
+   - **Nothing on disk.** The server writes no file. Each request opens the ledger read-only and
+     closes it. A real ledger's journal and temporary-store rules are unchanged (D-058 point 4).
+   - **The gate on every open.** Each request calls `open_ledger(path, read_only=True)`, so a real
+     ledger's location and encrypted-volume checks run per request, as they do per CLI command. `pf
+     ui` opens the ledger once before binding, so an unsafe ledger is refused before any port opens.
+     Each request runs `diskutil` and `hdiutil` again: that cost is accepted, so an image unmounted
+     mid-session refuses the next page.
+
+6. **UI totals match the CLI: one builder per report, the CLI printing its lines.**
+   - M8.1 moves each command's output into `reports/report_text.py`: `totals_report_lines`,
+     `monthly_report_lines`, `document_list_lines`, `transaction_list_lines`, `review_queue_lines`
+     and `review_item_lines`, each taking a connection and the command's validated options and
+     returning a list of `ReportLine(text, linked_review_item_id=None)`. Each `run_*` handler opens
+     the ledger, calls its builder and prints each line's text. The CLI's output must stay byte for
+     byte what it is now: captured in `build/` from the commit before M8.1 on every scenario ledger
+     and generated ledgers, and compared after. Nothing about what is computed changes.
+   - The UI renders the same lines, one element each, keeping indentation, with an item ID linked to
+     its page. `ui/server.py` imports the builders and `open_ledger`, and no computation from
+     `reports/` or `reconcile/`, and a test pins that, so the UI cannot total anything itself.
+   - **The tests:** the visible text of each page, parsed with `html.parser` and unescaped, equals
+     the command's stdout line for line, for the whole ledger, each account and month ranges, on the
+     scenario ledgers of M3.4, M4.3 and M7.3 and on the generated ledgers M5.4's restore test builds.
+   - Alternatives: **the UI calls each `run_*` with stdout redirected** guarantees equality with no
+     move, but redirects a process-wide stream inside a server and finds IDs to link by parsing
+     text. **Structured results rendered twice** (tables in HTML, text in the CLI) allow richer pages
+     but leave two renderings to agree, comparing numbers rather than output.
+
+7. **No creation timestamps, so F2 does not come first.** None of the six commands prints one: D-040
+   keeps timestamps out of review evidence, `transactions` and `documents` print none, and totals and
+   reports are aggregates. `trace` and the decision histories print them, and stay out (point 2). A
+   test builds a ledger with an ID retired before migration 0004 and finds no timestamp on any page.
+   A later slice showing `trace` needs F2's marker first.
+
+8. **Acceptance IDs: two letters, `U` then the slice.** Every single letter is taken. No acceptance ID has two
+   letters, and two capitals followed by a number appear in `docs/`, `src/` and `tests/` only as
+   `AA11` and `RC4`, neither a criterion, checked on 2026-11-09. M8.1 is UA, M8.2 UB, M8.3 UC and M8.4 UD.
+
+**Not in M8:** point 2's sections and visuals, search, browser imports, exports, decisions unless
+point 3's alternative is chosen, `trace`, account management, backups, any address but `127.0.0.1`,
+HTTPS (no certificate is needed on loopback, and one would be a secret to keep), access from another
+device (Phase 1C's sync), JavaScript, a dependency, F2, F3, and the security proposal (D-025).
+
+**For the owner's decision, with the lead engineer's recommendation first:**
+
+- **A. Point 1's W1 allowance, a security change:** `http.server`'s two classes in `ui/server.py`
+  alone, bound to `127.0.0.1` with no option. Alternatively no server, and no M8 as planned.
+- **B. Read-only (point 3).** Alternatively M8.4, decisions from the browser, a second security
+  change.
+- **C. Point 4's cookie from a single-use launch key.** Alternatively the secret in every address
+  (`/<secret>/...`), simpler, but kept in history and on every link; or HTTP Basic authentication,
+  whose password the browser offers to store.
+- **D. Point 6's line builders,** a refactor of the CLI's output gated on byte-identical output.
+- **E. The scope of point 2,** and the slices M8.1 to M8.3 in that order.
+
+**The owner's review, on 2026-11-09.** A to E approved as recommended: W1's allowance for
+`http.server` in `ui/server.py`, a read-only M8 with decisions left to `pf review` in the terminal
+(M8.4 not built), the launch key and cookie, the line builders, and the scope. M8.1 to M8.3
+approved to build in order, each gated on the full suite and committed locally.
+
+**How M8.1 was implemented:**
+
+- `reports/report_text.py` holds the six builders, `account_choices` for the UI, and everything
+  their text needs, moved from `cli.py` unchanged but for `print` becoming `out.add`: the notices
+  and explanations, the `describe_*` helpers, and the `print_*` helpers, renamed `add_*` since they
+  print nothing. `trace`, `review merge show`, `review transaction show` and the import summary use
+  the moved helpers and still print. `review_item_report` also returns the item's ID, kind, account
+  ID and revision token, for the item page's terminal commands.
+- **Compared byte for byte:** the suite was run on the code before M8.1 with `--basetemp` in
+  `build/`, keeping every ledger it built, 2,284 of them. The six commands, with each account,
+  three month ranges and every review item, made 30,302 runs on those files before the move and
+  again after. 30,300 are identical. The other two are `totals` on a ledger built to overflow
+  SQLite's integer range, where an unexpected error used to follow one printed line and now follows
+  none: a builder computes everything before anything is printed. That is the one change, as
+  intended by the comment `run_totals` already carried.
+- Tests that patched `cli.account_movement`, `cli.load_review_evidence` or `cli.DIRECT_PAIRS_SHOWN`
+  to reach `totals` or `review show` now patch `report_text`, and tests importing the moved notices
+  import them from there.
+- **A test gap closed:** nothing checked that a report for one account leaves another account's
+  staleness out. `test_report_text.py` now does, for `totals` and `report monthly`.
+
+**How M8.2 was implemented:**
+
+- **W1's allowance names a module, not a package:** `("ui/server.py", "http.server")`, so `import
+  http.client` or `from http import client` there is still refused. Tests pin that module's
+  network imports to the two classes, and its one address to `(LOOPBACK_ADDRESS, 0)` with that
+  name the constant `127.0.0.1`.
+- **What `http.server` needed overriding,** beyond point 5's list: it answers a request it cannot
+  read as HTTP/0.9, which has no status line or headers, so the handler's default version is
+  HTTP/1.0 and every refusal carries the security headers. Any `do_<METHOD>` lookup but `do_GET`
+  returns the refusal, so an unknown method gets `405` too, not `501`.
+- **Addresses:** a page takes only the parameters it names, each at most once, each value up to
+  100 letters, digits, `-` or `_`, else a `400` before the ledger is opened, so no address is
+  decoded. Accounts are chosen by ID in a form that reloads the page by `GET`. An expected error
+  shows its message with `400`, and the unexpected one `500`, through `explained_error`, now shared
+  with `main`.
+- **`pf ui`** opens the ledger through its gate, then binds, prints the one-use address and asks
+  for a private window. Ctrl-C stops it with exit code 0: it is how the server ends, so it is not
+  the cancellation D-037 leaves uncaught.
+- **Tests** (`test_local_ui.py`) send real requests over `socket.socketpair()`, so the handler's
+  parsing is real and nothing connects. The pages equal `totals` and `report monthly` on a ledger
+  with duplicates, types, a one-sided transfer and a stale account, on M7.3's CSV and PDF counting
+  once, and on M4.3's generated ledgers, whose builder is now `generated_ledger()` for both tests.
+- **Three test gaps closed** by deliberate breaks: `handle_error`'s traceback, HTML in account names
+  on these pages, and a refused address told apart from an unknown account.
+
+**How M8.3 was implemented:**
+
+- Four pages, each a builder's lines: import results (`documents`), transactions, the review queue
+  (`review list`), whose item IDs link to `/review/item?id=`, and one item (`review show`). The
+  item page adds the terminal commands that decide it, naming the ledger, account ID, item ID and
+  revision token: `confirm` and `reject`, or `complete` and `dismiss` for an unresolved row. It
+  holds no form.
+- **One difference from the CLI, by design:** D-037 prints file names as typed, so a control or
+  format character in one reaches the terminal. A page writes it escaped, as `shown()` does, so
+  its text then differs from the CLI's in that character alone. A test pins it.
+- **No creation timestamps** (point 7): a test retires an ID with its identity history removed, as
+  before migration 0004, revives it, and finds no timestamp on any page, while `trace` shows one.
+- **A test gap closed:** the ledger path in the item page's commands, shown as typed, is escaped,
+  shown with a ledger in a folder named with HTML.
+- Not done: a look at `pf ui` in a browser. No session opens a browser or connects to the server,
+  so that is the owner's, under "Awaiting the owner" in the handoff.
+
+**The owner's verification, on 2026-11-09.** The owner ran `pf ui` on a throwaway synthetic ledger:
+it launched, exchanged the one-use launch key for the session cookie, showed reports matching the
+CLI line for line, and stopped as expected. M8 is complete.
