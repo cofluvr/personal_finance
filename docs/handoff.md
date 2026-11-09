@@ -1,11 +1,9 @@
-# Session Handoff: M4.4 Built, Awaiting Acceptance
+# Session Handoff: M5.1 Accepted, M5.2 Next
 
-For a fresh session. Written 2026-11-08. **M1, M2 and M3 are complete and accepted.** The owner
-approved the M4 plan, D-057 in [decisions.md](decisions.md), with the lead engineer's
-recommendations, including points A to E. M4.1 to M4.3 (the variable limit, balance observations
-and monthly reports) were accepted as built. **M4.4, the 100,000-transaction benchmark, is built and
-awaits acceptance, which completes M4.** The next milestone is M5, the real-data gate, which needs
-its own plan as D-058. Slices and acceptance criteria are in [plan.md](plan.md).
+For a fresh session. Written 2026-11-08. **M1 to M4 are complete and accepted.** The owner approved
+the M5 plan, D-058 in [decisions.md](decisions.md), with the lead engineer's recommendations,
+including points A to F. **M5.1, real ledgers and their location, is built and accepted.** M5.2 to M5.5 each need their own approval, and M5.2 and M5.4 also
+need the owner's inputs named in D-058. Slices and acceptance criteria are in [plan.md](plan.md).
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -32,9 +30,11 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`: it records M4.4, built. Earlier markers are in the archive |
-| Latest gating run | Full suite, 1881 passed, exit code 0, gating the commit recording M4.4 |
+| Latest commit | Run `git log -1`. M5.1 is committed only once the owner renews commit approval |
+| Latest gating run | Full suite, 1940 passed, exit code 0, on M5.1 as built (uncommitted) |
 | Python | 3.12.6, project `.venv` already present |
+| macOS | Golden Gate 27.2, as stated by the owner (an input for M5.2) |
+| Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads or lists. `ledger/` (`0700`) was made for the real ledger on 2026-11-08. Backups go on a separate encrypted drive, chosen in M5.4 (D-058 point 7) |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
 | Entry point | `bin/pf`, using this checkout's `.venv`. An installed `pf` script also works |
@@ -44,30 +44,23 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 ## Read first
 
 1. This file.
-2. [decisions.md](decisions.md): the index, the rules in brief, and D-057 in full. Every earlier
+2. [decisions.md](decisions.md): the index, the rules in brief, and D-058 in full. Every earlier
    decision is accepted, and their full text is in [decisions-d001-d052.md](decisions-d001-d052.md).
-3. [plan.md](plan.md): milestones and the M4 plan.
+3. [plan.md](plan.md): milestones and the M5 plan.
 4. [status.md](status.md): what exists, and the known limitations.
 
 Then only what the task needs:
 
-- For planning M5: its row in [plan.md](plan.md), PRD-backend §19 and §21, D-002, D-017, D-019
-  and D-025 in [decisions-d001-d052.md](decisions-d001-d052.md), and
-  [security-controls-proposal.md](security-controls-proposal.md), which stays unapplied until the
-  owner approves a plan. Once M4.4 is accepted, move D-057's full text to
-  [decisions-d001-d052.md](decisions-d001-d052.md) before writing D-058.
-- For changes to M4.4: `scale_ledger` and `measure_scale` in
-  `tests/benchmarks/measure_reconciliation.py` (`--scale`), the M4.4 section of
-  [benchmarks.md](benchmarks.md), and "How M4.4 was implemented" under D-057.
-- For changes to M4.3: `reports/monthly.py`, `IncomeAndSpendingTally` in `reports/totals.py`,
-  `run_report_monthly` and `print_month` in `cli.py`, `tests/scenarios/test_monthly_report.py`,
-  the `outcome()` of both order tests, and "How M4.3 was implemented" under D-057.
-- For changes to M4.2: `reports/balances.py`, `reconcile/balance_observations.py`, the `balance`
-  commands in `cli.py`, migration 0016, `tests/scenarios/test_balance_observations.py`,
-  `tests/scenarios/test_balance_observation_migration.py`, and "How M4.2 was implemented" under
-  D-057.
-- For changes to M4.1: `db/id_lists.py`, its four callers (`transaction_facts`, `_separated`, and
-  both queries in `reports/import_summary.py`), and `tests/scenarios/test_id_lists.py`.
+- For changes to M5.1: `db/real_ledger.py`, `run_init`, `open_ledger`, `run_migrate` and
+  `run_import` in `cli.py`, migration 0017, `tests/scenarios/test_real_ledger.py`,
+  `tests/scenarios/test_real_ledger_migration.py`, and "How M5.1 was implemented" under D-058.
+- For building M5.2 to M5.5: their recommendations and criteria in D-058 and [plan.md](plan.md),
+  D-002, D-017, D-019 and D-025 in [decisions-d001-d052.md](decisions-d001-d052.md), PRD-backend
+  §19 to §21, and [security-controls-proposal.md](security-controls-proposal.md), which stays
+  unapplied (point E).
+- For changes to M4: the M4 slice's code, its scenario tests, and its "How M4.n was implemented"
+  under D-057 in [decisions-d001-d052.md](decisions-d001-d052.md). M4.4's benchmark is `--scale` in
+  `tests/benchmarks/measure_reconciliation.py`, with figures in [benchmarks.md](benchmarks.md).
 - For changes to M3.4 (D-056): `reports/totals.py`, `run_totals`, `print_income_and_spending`
   and `describe_income_and_spending` in `cli.py`, `tests/scenarios/test_income_and_spending.py`,
   and "M3.4 as built" in the archive.
@@ -96,6 +89,9 @@ Pitfalls that recurred across M1 to M3.4:
   before, ran that one's stale `.pyc` and credited a catch to the wrong break.
 - **Closed review items.** D-045 closes an item by removing it. Only D-052's same-document
   pending and posted items stay as `resolved` rows, so a test about resolved items needs that shape.
+- **A broader refusal can stand in for the one under test.** In M5.1 the trigger refusing a mark
+  on a ledger with an account refused `INSERT OR REPLACE` first, hiding a missing no-replace
+  trigger. Test each refusal on a state where it alone applies.
 - **Tests that pass for the wrong reason.** Give each schema refusal a control insert that succeeds.
   Pass test helper arguments by keyword. Count the tests actually run: a nested function or a test
   class imported by name changes the count.
@@ -187,19 +183,19 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Acceptance of M4.4 as built, including the choices under "How M4.4 was implemented" in D-057,
-  which completes M4.
-- A plan for M5, the real-data gate, as D-058, when asked.
+- Renewed approval for local commits: M5.1 and the D-057 and D-058 docs are uncommitted until then.
+- Approval of M5.2. Before it is built: is iCloud's Desktop and Documents sync off, since the
+  data folder is under `~/Documents`? Does a FileVault-encrypted startup volume satisfy point A,
+  or does the ledger move into an encrypted disk image? M5.4 needs the backup drive.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved through M4.4 | **Must be renewed** for anything further |
-| M1, M2 and M3 | Accepted as built | None |
-| M4 | Plan approved (D-057). M4.1 to M4.3 accepted as built. M4.4 built, awaiting acceptance | Acceptance of M4.4 |
-| M5 | Not planned | A plan as D-058, and its approval, before any of it is built |
+| Local commits on `feature/m2-review` | Approved through M4.4. Not renewed for D-058 or M5.1 | **Must be renewed** before committing them |
+| M1 to M4 | Accepted as built | None |
+| M5 | Plan approved (D-058). M5.1 accepted as built | Approval of each later slice |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -227,11 +223,11 @@ branch is feature/m2-review, the working tree is clean, and run the test suite w
 code before changing anything. Do not contact GitHub.
 
 Next task, from the owner:
-[PASTE IT HERE: for example, propose a plan for M5, the real-data gate]
+[PASTE IT HERE: for example, plan M5.2's details and build it]
 
-Task: do only what the owner asks. A new milestone, such as M5, needs its own plan as a new
-decision, D-058, and approval before any of it is built. Each slice of it then needs its own
-approval. Do not reopen D-042 to D-057 unless you find a concrete contradiction.
+Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as a new
+decision, D-059, and approval before any of it is built. Each slice of it then needs its own
+approval. Do not reopen D-042 to D-058 unless you find a concrete contradiction.
 
 Follow the working principles in docs/handoff.md, and its "Keeping these docs small" rules when
 you update the docs. Pushing needs my explicit approval each time. No network, no new

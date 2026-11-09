@@ -27,20 +27,25 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M4.1: the 32,766-variable limit | Accepted (D-057) |
 | M4.2: balance observations and statement reconciliation | Accepted (D-057) |
 | M4.3: monthly reports with disclosures | Accepted (D-013, D-057) |
-| M4.4: the 100,000-transaction benchmark | Built, awaiting acceptance (D-057) |
-| **M4 overall** | **Built. Complete once M4.4 is accepted** |
-| M5 to M8 | Not started |
+| M4.4: the 100,000-transaction benchmark | Accepted (D-057) |
+| **M4 overall** | **Complete and accepted** |
+| M5.1: real ledgers, their location and file permissions | Accepted (D-058) |
+| M5.2 to M5.5 | Planned in D-058, not started |
+| M6 to M8 | Not started |
 
 ## What exists
 
 - `personal_finance.money`: exact parsing and formatting of amounts.
 - `personal_finance.db.migrate`: database creation, connections, migrations.
 - `personal_finance.db.id_lists`: any number of IDs as one SQL parameter (D-057).
+- `personal_finance.db.real_ledger`: the real-ledger mark, and the location and import checks every
+  open of a real ledger runs (D-058).
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
   `0011_coverage_declarations`, `0012_pending_posted_links`, `0013_type_classifications`,
-  `0014_transfer_matches`, `0015_one_sided_transfers` and `0016_balance_observations`,
+  `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations` and
+  `0017_real_ledger`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
@@ -89,7 +94,7 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   (D-050).
 - `personal_finance.reports.coverage_evidence`: a document's claimed and declared coverage, and their
   tokens (D-051). `reports.undo_items` computes the undo token both share.
-- CLI: `init`, `migrate`, `account add`, `import`, `reconcile`, `documents`, `transactions`,
+- CLI: `init` (with `--real`), `migrate`, `account add`, `import`, `reconcile`, `documents`, `transactions`,
   `trace`, `review list`, `review show`, `review reject`, `review confirm`, `review merges`,
   `review merge show`, `review separate`, `review decisions`, `review decision show`,
   `review undo`, `review transaction show`, `review correct`, `review corrections`,
@@ -105,7 +110,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 ## What does not exist yet
 
 No real institution layout is supported. **It must not be used with real financial
-data** (M5 gate). Only candidate items, decision conflicts and automatically merged transactions
+data** (M5 gate). A real ledger's location is checked (M5.1), but nothing is encrypted, archived or
+backed up yet, and the gate stays closed until M5.5's checklist is run. Only candidate items, decision conflicts and automatically merged transactions
 can be acted on.
 
 ## Acceptance criteria progress
@@ -277,7 +283,12 @@ rewriting 20,000 match outcomes (D-057).
 - `create_database` leaves its file behind if a migration fails, and a later
   attempt then refuses to overwrite it.
 - Edited migration files are not detected. Only the version number is tracked.
-- The database is not encrypted, and `0600` is only applied at creation.
+- The database is not encrypted. A synthetic ledger gets `0600` at creation only. A real ledger is
+  checked for privacy on every open, and refused rather than repaired.
+- A real ledger cannot detect iCloud's Desktop and Documents sync, which leaves `~/Desktop` and
+  `~/Documents` synced with nothing in the path to show it (D-058).
+- A ledger is real or synthetic from `init`. A synthetic ledger is never checked, never promoted,
+  and nothing stops real data being put in one: that rests on the owner.
 - The test network guard covers Python sockets in the test process. It does not
   cover subprocesses or native code.
 - Uppercase extensions such as `.CSV` are ignored only because git sets
