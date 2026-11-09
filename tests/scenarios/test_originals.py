@@ -433,7 +433,7 @@ class TestStorage:
             f"Database: {ledger.path.stat().st_size} bytes in 1 files (the ledger with its "
             "journal)",
             "Originals: none, a synthetic ledger archives nothing",
-            "Backups: none recorded (backup create arrives in M5.4)",
+            "Backups: none recorded",
         ]
         assert ledger.dump() == before
 
@@ -471,7 +471,7 @@ class TestStorage:
         out = ledger.run("storage")[1]
         assert (f"Originals: {referenced} bytes in 2 files referenced, {5 + link_size} bytes in 2 "
                 "files not referenced") in out
-        assert "Backups: none recorded (backup create arrives in M5.4)" in out
+        assert "Backups: none recorded" in out
 
     def test_a_real_ledger_before_any_import_has_no_originals(self, vault, capsys):
         ledger = RealLedger(vault, capsys)

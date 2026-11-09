@@ -14,6 +14,14 @@ import uuid
 from itertools import islice
 from pathlib import Path
 
+from personal_finance.db.backups import (
+    BackupNotIntact,
+    BackupRefused,
+    CheckedBackup,
+    check_backup,
+    create_backup,
+    restore_backup,
+)
 from personal_finance.db.migrate import (
     MigrationError,
     connect,
@@ -138,7 +146,7 @@ from personal_finance.reports.review_evidence import (
     rows_sharing_a_document,
     transaction_revision,
 )
-from personal_finance.reports.storage import storage_by_kind
+from personal_finance.reports.storage import StoredFiles, storage_by_kind
 from personal_finance.reports.totals import (
     account_movement,
     income_and_spending,
@@ -471,6 +479,25 @@ def build_parser() -> argparse.ArgumentParser:
             help="rehash every original, and list missing, altered and unreferenced ones")
     command("storage", handler=run_storage,
             help="show software, database, originals and backups storage apart")
+
+    backup = commands.add_parser("backup", help="back up a ledger, check a backup, or restore one")
+    backup_commands = backup.add_subparsers(dest="backup_command", required=True)
+    backup_create = command("create", backup_commands, handler=run_backup_create,
+                            help="write a backup of the ledger into a new folder")
+    backup_create.add_argument("--to", required=True, type=Path, dest="backup_folder",
+                               help="the new backup folder, which must not exist yet")
+    backup_verify = backup_commands.add_parser(
+        "verify", help="check a backup as a restore would, restoring nothing")
+    backup_verify.add_argument("--from", required=True, type=Path, dest="backup_folder",
+                               help="a backup folder written by backup create")
+    backup_verify.set_defaults(handler=run_backup_verify)
+    backup_restore = backup_commands.add_parser(
+        "restore", help="restore a backup to a new ledger path")
+    backup_restore.add_argument("--from", required=True, type=Path, dest="backup_folder",
+                                help="a backup folder written by backup create")
+    backup_restore.add_argument("--to", required=True, type=Path, dest="restored_db",
+                                help="the restored ledger's path, which must not exist yet")
+    backup_restore.set_defaults(handler=run_backup_restore)
 
     reconcile = command(
         "reconcile", handler=run_reconcile, help="re-derive accounts under the current rules"
@@ -1250,7 +1277,62 @@ def run_storage(args) -> int:
     else:
         print(f"Originals: {shown_files(storage.referenced_originals)} referenced, "
               f"{shown_files(storage.unreferenced_originals)} not referenced")
-    print("Backups: none recorded (backup create arrives in M5.4)")
+    if not storage.backups:
+        print("Backups: none recorded")
+    else:
+        total = StoredFiles(sum(backup.byte_count for backup in storage.backups),
+                            sum(backup.file_count for backup in storage.backups))
+        print(f"Backups: {shown_files(total)} in {len(storage.backups)} recorded, as written; "
+              "their volumes are not read")
+        for backup in storage.backups:
+            print(f"  {backup.created_at} {shown(backup.backup_folder)}: "
+                  f"{shown_files(StoredFiles(backup.byte_count, backup.file_count))}")
+    return 0
+
+
+def print_checked_backup(checked: CheckedBackup) -> None:
+    if checked.is_real:
+        print(f"Ledger: real, with {len(checked.original_names)} originals")
+    else:
+        print("Ledger: synthetic, with no originals")
+    print(f"Files: {checked.byte_count} bytes in {checked.file_count} files, each matching the "
+          "manifest")
+    print("SQLite integrity and foreign key checks: ok")
+    latest = len(load_migrations())
+    if checked.schema_version < latest:
+        print(f"Schema version: {checked.schema_version}, older than this code's {latest}")
+    else:
+        print(f"Schema version: {checked.schema_version}")
+    print(f"Logical digest: {checked.logical_digest}, matching the manifest")
+
+
+def run_backup_create(args) -> int:
+    conn = open_ledger(args.db)
+    checked = create_backup(conn, args.db, args.backup_folder)
+    print(f"Backup written to {shown(args.backup_folder)}")
+    print_checked_backup(checked)
+    print(f"Recorded in the ledger. To check it later, run: pf backup verify --from "
+          f"{shown(args.backup_folder)}")
+    return 0
+
+
+def run_backup_verify(args) -> int:
+    try:
+        checked = check_backup(args.backup_folder)
+    except BackupNotIntact as failure:
+        print(f"The backup is not intact: {failure.reason}.")
+        return 1
+    print_checked_backup(checked)
+    print("The backup is intact.")
+    return 0
+
+
+def run_backup_restore(args) -> int:
+    checked = restore_backup(args.backup_folder, args.restored_db)
+    print(f"Restored {shown(args.restored_db)} from {shown(args.backup_folder)}")
+    print_checked_backup(checked)
+    if checked.schema_version < len(load_migrations()):
+        print(f"Before using it, run: pf migrate --db {shown(args.restored_db)}")
     return 0
 
 
@@ -3123,7 +3205,7 @@ def main(argv: list[str] | None = None) -> int:
         # The reader went away, as in `pf transactions | head`. Nothing went wrong here.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return BROKEN_PIPE_EXIT
-    except (CommandError, DecisionRefused, UnsafeLocation) as error:
+    except (CommandError, DecisionRefused, UnsafeLocation, BackupRefused) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 2
     except sqlite3.OperationalError as error:

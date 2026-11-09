@@ -1,5 +1,7 @@
 """Storage by kind: software, database with its journal, originals and backups, each apart, in
-bytes and files (PRD §20, D-058 point 6). Sizes are read without following links.
+bytes and files (PRD §20, D-058 point 6). Sizes are read without following links. Backups are those
+the ledger records, at the sizes recorded when each was made, since their volume is often not
+mounted.
 """
 
 import os
@@ -8,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import personal_finance
+from personal_finance.db.backups import RecordedBackup, recorded_backups
 from personal_finance.db.originals import entry_names_in, referenced_originals
 
 # SQLite's files beside a database: its rollback journal, or a write-ahead log and its index.
@@ -29,6 +32,7 @@ class StorageByKind:
     database: StoredFiles
     referenced_originals: StoredFiles | None
     unreferenced_originals: StoredFiles | None
+    backups: list[RecordedBackup]
 
 
 def stored_file(path: Path) -> StoredFiles:
@@ -68,4 +72,5 @@ def storage_by_kind(
                 referenced += entry
             else:
                 unreferenced += entry
-    return StorageByKind(software_files(), database_files(database_path), referenced, unreferenced)
+    return StorageByKind(software_files(), database_files(database_path), referenced, unreferenced,
+                         recorded_backups(conn))

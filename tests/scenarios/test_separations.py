@@ -644,7 +644,8 @@ class TestPrivacy:  # P14, D-037
 
     def assert_clean(self, *texts):
         for text in texts:
-            assert self.AMOUNT not in text
+            # A timestamp such as 16.502Z holds the amount's digits, so timestamps are left out.
+            assert self.AMOUNT not in re.sub(r"\d{4}-\d{2}-\d{2}T[\d:.]+Z", "", text)
             assert self.TEXT not in text
 
     def test_merges_separate_decisions_and_undo_show_no_financial_data(self, ledger):

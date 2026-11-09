@@ -340,4 +340,6 @@ class TestDisplays:  # K14, K15
         assert "declared after import, claimed at import: unknown" in documents
         assert "Documents whose coverage you declared after import: 1" in ledger.totals()
         for text in (out, ledger.coverage_show("a.csv"), ledger.run("review", "coverage", "history")[1]):
-            assert "6.50" not in text and "SYNTHETIC CAFE" not in text
+            # A timestamp such as 16.502Z holds the amount's digits, so timestamps are left out.
+            assert "6.50" not in re.sub(r"\d{4}-\d{2}-\d{2}T[\d:.]+Z", "", text)
+            assert "SYNTHETIC CAFE" not in text

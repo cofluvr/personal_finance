@@ -37,6 +37,7 @@ def test_new_database_has_the_expected_tables(conn):
     assert table_names(conn) == {
         "account",
         "account_reconciliation",
+        "backup_record",
         "balance_observation",
         "balance_observation_event",
         "coverage_declaration",

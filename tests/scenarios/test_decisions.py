@@ -69,6 +69,8 @@ ONE_SIDED_TABLES = ("one_sided_transfer_effect", "one_sided_transfer_event",
 BALANCE_TABLES = ("balance_observation_event", "balance_observation")
 # Empty on every synthetic ledger, so set-backs drop it and dumps leave it out (D-058).
 REAL_LEDGER_TABLES = ("real_ledger",)
+# Created by 0018, and empty until a backup is made, so set-backs drop it too (D-058).
+BACKUP_TABLES = ("backup_record",)
 
 
 def declared(start, end):
@@ -99,7 +101,8 @@ class Ledger:
     def run(self, *command):
         self.capsys.readouterr()
         words = list(command)
-        position = 2 if words[0] in ("account", "archive", "review", "balance", "report") else 1
+        position = 2 if words[0] in ("account", "archive", "backup", "review", "balance",
+                                    "report") else 1
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
                          ["review", "correction"], ["review", "resolution"],
                          ["review", "coverage"], ["review", "classification"],
@@ -1148,7 +1151,8 @@ class TestPrivacy:  # S17
 
     def assert_clean(self, *texts):
         for text in texts:
-            assert self.AMOUNT not in text
+            # A timestamp such as 16.502Z holds the amount's digits, so timestamps are left out.
+            assert self.AMOUNT not in re.sub(r"\d{4}-\d{2}-\d{2}T[\d:.]+Z", "", text)
             assert self.TEXT not in text
 
     def test_reject_undo_and_decisions_show_no_financial_data(self, ledger):
