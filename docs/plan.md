@@ -312,17 +312,18 @@ until D-059 point F passes on one real file of it, by the steps in
 
 ## M7 plan
 
-Approved on 2026-11-09 as D-060, with pypdf as the dependency and point 1 amended for its JBIG2
-decoder. Each slice needs its own approval. M7.1 was approved and built the same day. M7.2 waits for
-the owner's format sample (D-060 point 2).
+Approved on 2026-11-09 as D-060, with pypdf as the dependency and points 1 to 3 and 5 amended: for
+pypdf's JBIG2 decoder, and for U.S. Bank's document, an activity printout stating no period or
+balance. **M7 is complete,** recorded by the owner on 2026-11-09, with M7.4 not needed and M7.5 not
+built, since the owner holds no Capital One card PDF.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M7.1 | Reading a PDF's text: pypdf, `pf pdf text`, W1 extended | Built, awaiting review |
-| M7.2 | U.S. Bank's card activity printout, `us_bank_card_activity_pdf_v1`. It states no period or balance (D-060, as amended) | Built, awaiting review |
-| M7.3 | U.S. Bank's CSV and PDF counting once, on D-006 unchanged, against a test-only CSV layout until the card CSV's header arrives | Built, awaiting review |
+| M7.1 | Reading a PDF's text: pypdf, `pf pdf text`, W1 extended | Complete |
+| M7.2 | U.S. Bank's card activity printout, `us_bank_card_activity_pdf_v1`. It states no period or balance (D-060, as amended) | Complete. Unverified until point F |
+| M7.3 | CSV and PDF counting once, on D-006 unchanged, against a test-only CSV layout: the owner holds no U.S. Bank card CSV | Complete |
 | M7.4 | Several accounts in one statement | Not built: U.S. Bank's printout holds one, and each entry names its card |
-| M7.5 | Capital One's card statement, `capital_one_card_statement_v1` | Not built: waits for its structure |
+| M7.5 | Capital One's card statement, `capital_one_card_statement_v1` | Not built: the owner holds no such PDF |
 
 ### M7.1 acceptance criteria
 

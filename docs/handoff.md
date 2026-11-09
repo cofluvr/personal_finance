@@ -1,7 +1,7 @@
-# Session Handoff: M7 Built as Far as Its Inputs Allow, Awaiting Review
+# Session Handoff: M7 Complete
 
-For a fresh session. Written 2026-11-09. **M1 to M6 are complete,** and so is the part of M7 the
-owner's inputs allow. M7 is D-060 in [decisions.md](decisions.md), as amended: U.S. Bank's
+For a fresh session. Written 2026-11-09. **M1 to M7 are complete.** M7 is D-060 in
+[decisions-d001-d052.md](decisions-d001-d052.md), as amended, recorded complete by the owner: U.S. Bank's
 document turned out to be a credit card's Recent Activity List printed to PDF, which states no
 period or balance, so its coverage is declared, as for a CSV. D-061 confirmed the Capital One bank
 format and checks each row's account number. Every fixture is invented.
@@ -12,12 +12,12 @@ format and checks each row's account number. Every fixture is invented.
 | M7.1 | `9a9eafe` | pypdf, fenced from running `jbig2dec`, and `pf pdf text` | 13 on the final code, all caught, and 3 on the logging fence |
 | D-061 | `7e4f506` | Capital One bank: format confirmed, account number checked | 7 applied, 7 caught |
 | M7.2 | `2626591` | `us_bank_card_activity_pdf_v1` | 16 applied, 13 caught, 2 dead code deleted, 1 gap closed |
-| M7.3 | the commit after it | CSV and PDF counting once, on D-006 unchanged | 8 applied, 6 caught here, 2 equivalent here and caught by unit tests |
+| M7.3 | `2665756` | CSV and PDF counting once, on D-006 unchanged | 8 applied, 6 caught here, 2 equivalent here and caught by unit tests |
 
-**Not built:** M7.4, since the printout holds one card and each entry names it. M7.5, since no
-Capital One card PDF's structure was supplied. A production CSV layout for U.S. Bank's card
-export, whose header was not supplied: `us_bank_v1` is not its format. **Next:** the owner's review
-of M7, and the inputs under "Awaiting the owner".
+**Not built:** M7.4, since the printout holds one card and each entry names it. M7.5, since the
+owner holds no Capital One card PDF. No U.S. Bank card CSV layout, since the owner holds no such
+export: `us_bank_v1` is not that card's format. **Next:** M8, the local review UI, needs its own
+plan as D-062, and point F per layout, under "Awaiting the owner".
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -45,7 +45,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
 | Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance `c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e`, its docs `7a0d446`, M5.5 `4548b12`, its docs `df53e65`, and M5's acceptance the commit after it |
-| Latest gating run | Full suite, exit code 0, on M7.3: see its commit message. About 7 minutes |
+| Latest gating run | Full suite, exit code 0, on M7's closeout: see its commit message. About 7 minutes |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -59,7 +59,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 ## Read first
 
 1. This file.
-2. [decisions.md](decisions.md): the index, the rules in brief, and D-060 in full. Every earlier
+2. [decisions.md](decisions.md): the index, the rules in brief, and D-061 in full. Every earlier
    decision is accepted, and their full text is in [decisions-d001-d052.md](decisions-d001-d052.md).
 3. [plan.md](plan.md): milestones and the M5 plan.
 4. [status.md](status.md): what exists, and the known limitations.
@@ -220,10 +220,6 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Review of M7: M7.1, M7.2, M7.3, and D-060's amendments for the activity printout.
-- The header row of U.S. Bank's card CSV export, for its production layout. `us_bank_v1` is not
-  its format, so it must not be used for that card.
-- For M7.5, a Capital One card PDF's lines from `bin/pf pdf text`, values invented, if wanted.
 - Point F for `us_bank_card_activity_pdf_v1`, by the PDF section of
   [layout-verification.md](layout-verification.md).
 - Point F per layout, by [layout-verification.md](layout-verification.md), and its results.
@@ -233,9 +229,10 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for D-059, M6, D-060's plan, M7.1, D-061, M7.2 and M7.3 on 2026-11-09, used for them | **Must be renewed** for each later M7 slice |
+| Local commits on `feature/m2-review` | Approved for D-059, M6, D-060, M7, D-061 and M7's closeout on 2026-11-09, used for them | **Must be renewed** for any change after the review |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
+| M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Approved for the declared dependencies and build requirements, and on 2026-11-09 for pypdf 6.21.2 | Ask for anything new, an upgrade of pypdf included |
 | Network access | Approved for the clean-install dependencies, and on 2026-11-09 for pypdf's release list and install. Used, and now closed | Ask for any use |
@@ -263,11 +260,11 @@ branch is feature/m2-review, the working tree is clean, and run the test suite w
 code before changing anything. Do not contact GitHub.
 
 Next task, from the owner:
-[PASTE IT HERE: for example, build M7.1 as approved in D-060]
+[PASTE IT HERE: for example, draft D-062, the M8 plan]
 
 Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as the next
 free decision number, and approval before any of it is built. Each slice of it then needs its own
-approval. Do not reopen D-042 to D-059 unless you find a concrete contradiction.
+approval. Do not reopen D-042 to D-061 unless you find a concrete contradiction.
 
 Follow the working principles in docs/handoff.md, and its "Keeping these docs small" rules when
 you update the docs. Pushing needs my explicit approval each time. No network, no new

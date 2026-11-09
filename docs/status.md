@@ -40,10 +40,11 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M6.3: American Express card | Complete (D-059). Format confirmed |
 | M6.4: BFSFCU | Complete (D-059). Format confirmed |
 | **M6 overall** | **Complete.** Point F runs per layout before its first real import |
-| M7.1: reading PDF text | Built (D-060), awaiting the owner's review |
-| M7.2: U.S. Bank card activity printout, `us_bank_card_activity_pdf_v1` | Built (D-060, as amended), awaiting the owner's review |
-| M7.3: CSV and PDF counting once | Built on D-006 unchanged, against a test-only CSV layout (D-060) |
-| M7.4 and M7.5 | Not built: one card per printout, and no Capital One card PDF structure supplied |
+| M7.1: reading PDF text | Complete (D-060) |
+| M7.2: U.S. Bank card activity printout, `us_bank_card_activity_pdf_v1` | Complete (D-060, as amended). Unverified until point F |
+| M7.3: CSV and PDF counting once | Complete, on D-006 unchanged, against a test-only CSV layout (D-060) |
+| M7.4 and M7.5 | Not built: one card per printout, and the owner holds no Capital One card PDF |
+| **M7 overall** | **Complete,** recorded by the owner on 2026-11-09 |
 | M8 | Not started |
 
 ## What exists
@@ -138,8 +139,8 @@ BFSFCU formats are confirmed from real exports, and the U.S. Bank format is not.
 name (D-061). None is to
 import into the real ledger until D-059 point F passes on a real file of it. One PDF layout exists,
 `us_bank_card_activity_pdf_v1`, for U.S. Bank's printed card activity list, unverified until point F
-passes. No CSV layout exists for U.S. Bank's card export, whose header was not supplied, and
-`us_bank_v1` is not its format. Fees linked to a parent and transfer groups are not built (D-059 point C).
+passes. The owner holds no U.S. Bank card CSV, and `us_bank_v1`
+is not that card's format. Fees linked to a parent and transfer groups are not built (D-059 point C).
 The M5 gate is open: the owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09, and
 real data belongs only in a real ledger on the encrypted image, never in a synthetic one. Only candidate items, decision conflicts and automatically merged transactions
 can be acted on.
