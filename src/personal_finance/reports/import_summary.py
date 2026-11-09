@@ -3,27 +3,27 @@
 import sqlite3
 from dataclasses import dataclass
 
+from personal_finance.db.id_lists import ids_as_json_array
+
 
 def final_transactions(conn: sqlite3.Connection, document_ids: list[str]) -> int:
     """Distinct live transactions that these documents' valid records now belong to."""
-    marks = ",".join("?" * len(document_ids))
     return conn.execute(
-        f"""SELECT COUNT(DISTINCT transaction_id) FROM transaction_source
-            WHERE source_document_id IN ({marks})""",
-        document_ids,
+        """SELECT COUNT(DISTINCT transaction_id) FROM transaction_source
+           WHERE source_document_id IN (SELECT value FROM json_each(?))""",
+        (ids_as_json_array(document_ids),),
     ).fetchone()[0]
 
 
 def consolidated_records(conn: sqlite3.Connection, document_ids: list[str]) -> int:
     """Valid records whose live transaction also has a record from another document."""
-    marks = ",".join("?" * len(document_ids))
     return conn.execute(
-        f"""SELECT COUNT(*) FROM transaction_source link
-            WHERE link.source_document_id IN ({marks})
-              AND EXISTS (SELECT 1 FROM transaction_source other
-                          WHERE other.transaction_id = link.transaction_id
-                            AND other.source_document_id <> link.source_document_id)""",
-        document_ids,
+        """SELECT COUNT(*) FROM transaction_source link
+           WHERE link.source_document_id IN (SELECT value FROM json_each(?))
+             AND EXISTS (SELECT 1 FROM transaction_source other
+                         WHERE other.transaction_id = link.transaction_id
+                           AND other.source_document_id <> link.source_document_id)""",
+        (ids_as_json_array(document_ids),),
     ).fetchone()[0]
 
 

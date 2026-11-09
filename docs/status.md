@@ -24,17 +24,20 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M3.3: card payments, one-sided transfers and coverage warnings | Accepted (D-055) |
 | M3.4: income and spending | Accepted (D-056) |
 | **M3 overall** | **Complete and accepted** |
-| M4 to M8 | Not started |
+| M4.1: the 32,766-variable limit | Accepted (D-057) |
+| M4.2: balance observations and statement reconciliation | Built, awaiting acceptance (D-057) |
+| M4.3 to M8 | Not started |
 
 ## What exists
 
 - `personal_finance.money`: exact parsing and formatting of amounts.
 - `personal_finance.db.migrate`: database creation, connections, migrations.
+- `personal_finance.db.id_lists`: any number of IDs as one SQL parameter (D-057).
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
   `0011_coverage_declarations`, `0012_pending_posted_links`, `0013_type_classifications`,
-  `0014_transfer_matches` and `0015_one_sided_transfers`,
+  `0014_transfer_matches`, `0015_one_sided_transfers` and `0016_balance_observations`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
@@ -66,6 +69,9 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.reports.totals`: account inflows, outflows and net movement, types, transfers
   between accounts, and income and spending (D-056).
 - `personal_finance.reports.import_summary`: run-level import counts in explicit units (D-036).
+- `personal_finance.reconcile.balance_observations` and `reports.balances`: recording and undoing
+  balance observations under one write lock, their undo token, and statement reconciliation
+  (D-057).
 - `personal_finance.reports.review_evidence`: the evidence behind one review item or one
   transaction, and their revision tokens (D-040, D-047).
 - `personal_finance.reports.decision_evidence`: what a decision binds, and the undo token (D-045).
@@ -87,7 +93,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `review coverage declare`, `review coverage history`, `review coverage undo`, `review classify`,
   `review classifications`, `review classification show`, `review classification undo`,
   `review transfers`, `review transfer match`, `review transfer one-sided`, `review transfer show`,
-  `review transfer undo`, `totals`, run
+  `review transfer undo`, `totals`, `balance record`, `balance list`, `balance check`,
+  `balance undo`, run
   through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
@@ -129,10 +136,9 @@ distinct spellings per block, and in the units of a group a decision touches.
   There are no reporting periods: totals cover the ledger or one account (D-056).
 - A loan payment is never split into principal and interest, so a one-sided one to a loan leaves
   that loan's interest out of spending, with a warning (D-056).
-- Every write fails with a database error once more than 32,766 transactions hold records bound by
-  matches and one-sided transfers, because `write_transfer_effects` passes one SQL variable per
-  transaction. An import of more than 32,766 files in one run, and `totals` with more than 32,766
-  active separations, fail the same way. Not yet planned.
+- Inserting a transfer match side scans every match side of its account, because SQLite plans the
+  `transfer_match_side_two_accounts` trigger's lookup by `account_id`. Each match a person makes
+  pays one scan, and building many matches directly is quadratic. Changing it needs a migration.
 - Only a person matches a transfer, one pair at a time, and only a candidate: a transfer-kind type
   on one side, the exactly opposite amount in another account, and dates within 5 days. Fees apart
   from the amount transferred and a transfer split over several transactions are not matched, and
@@ -142,6 +148,11 @@ distinct spellings per block, and in the units of a group a decision touches.
   span every day within 5 days. One whose records split, that reaches another match or one-sided
   transfer, whose type stops fitting or is undone, or whose counterpart's other side or covering
   coverage arrives no longer applies until undone. It is never superseded (D-055).
+- Balance observations are manual and posted only: no layout carries a balance, and there is no
+  available balance or net worth (D-057, points A, B and E). An observation is never superseded:
+  undo it and record again. One active per account and day.
+- `balance check` counts only transactions. An unresolved record is disclosed for the account but
+  placed in no interval, so a difference it causes is not attributed to one.
 - Coverage warnings are about one-sided transfers only. Coverage by reporting period waits for
   reporting periods, which D-056 leaves in M4 with D-013.
 - A match binds the records of both transactions when made, so a re-export that does not merge is

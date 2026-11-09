@@ -76,6 +76,7 @@ and keep its index line.
 | D-054 | Transfers across accounts — Approved, implemented and accepted in M3.2 |
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
+| D-057 | M4 plan: balances and reports — Approved, M4.1 implemented and accepted, M4.2 implemented |
 
 ## Rules in brief
 
@@ -158,6 +159,9 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Confirmed transfers | A side of an applied match or one-sided transfer, whatever its own type | D-056 |
 | Unconfirmed transfer kinds | Neither income, spending nor transfers, disclosed as a bound on both | D-011, D-056 |
 | Reporting periods | In M4, with D-013. Totals cover the ledger or one account | D-056 |
+| ID lists | One JSON array parameter read with `json_each`, never one SQL parameter per ID | D-057 |
+| Balance observations | A posted balance at the end of one day, stated by a person. A card or loan states what it owes, stored negated. One active per account and day. Never transaction evidence | D-057 |
+| Statement reconciliation | Consecutive observations, activity after the earlier day through the later one, by effective posting date else transaction date. Agreement is evidence, not coverage, and a difference is never absorbed | D-057 |
 
 ## Not yet decided
 
@@ -165,3 +169,130 @@ From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend detai
 and loan projection assumptions (Phase 1B), pairing protocol and snapshot
 compatibility (Phase 1C), backup and recovery design (M5), resource benchmarks
 (M4).
+
+## D-057 M4 plan: balances and reports — Approved, M4.1 implemented and accepted, M4.2 implemented
+
+Proposed on 2026-11-08, and approved by the owner the same day with the lead engineer's
+recommendations, including points A to E, with M4.1 approved to build. Each later slice needs its
+own approval, as in M3.
+Delivers plan.md's M4 (balance observations, statement reconciliation, monthly reports with
+disclosures, the 100,000-transaction benchmark) against PRD §17, §20 and §21 ("reports disclose
+incomplete data and material review issues"), using D-013, D-034 and D-056. Changes none of D-042
+to D-056. Acceptance tests, L1 to Z6, are in [plan.md](plan.md).
+
+```sh
+pf balance record --db DB --account A --date YYYY-MM-DD (--balance AMOUNT | --owed AMOUNT)
+pf balance list   --db DB [--account A]
+pf balance check  --db DB --account A
+pf balance undo   --db DB --account A --observation ID --token TOKEN
+pf report monthly --db DB [--account A] [--from YYYY-MM] [--to YYYY-MM]
+```
+
+**Slices:**
+
+| Slice | Scope |
+|---|---|
+| M4.1 | The 32,766-variable limit, with no change in behaviour |
+| M4.2 | Balance observations and statement reconciliation |
+| M4.3 | Monthly reports with disclosures (D-013) |
+| M4.4 | The 100,000-transaction benchmark and provisional resource targets |
+
+**Recommendations:**
+
+1. **M4.1 comes first.** The four unbounded `IN` lists (`transaction_facts`, `_separated` and both
+   queries in `reports/import_summary.py`) pass their IDs as one JSON array parameter, read with
+   SQLite's built-in `json_each`. One helper serves all four, since the pattern already repeats.
+   The fixed-size lists over `MANAGED_RULES` and `TRANSFER_TYPES` stay. The 100,000-transaction
+   benchmark would otherwise fail on any shape with more than 32,766 matched sides.
+2. **An observation is a posted balance at the end of one day,** stated by a person. Stored in the
+   ledger's sign convention (D-003): a credit card or loan takes `--owed`, stored negated, and
+   refuses `--balance`; every other account type takes `--balance` and refuses `--owed`. Output
+   shows `owed` for those two types. Only one active observation per account and date: a second is
+   refused until the first is undone. Undo needs the account and its token, `b1`, as other undos.
+3. **Observations are not transaction evidence.** Migration 0016 adds `balance_observation` and an
+   append-only `balance_observation_event`. No account becomes stale, `derive()` never reads them,
+   and every existing token keeps its digest. Recording or undoing needs no current account.
+4. **Statement reconciliation** (`balance check`) compares each pair of consecutive observations:
+   the later balance against the earlier plus the effective amounts of the account's transactions
+   posted in between (after the earlier day, through the later one). Each interval says `agrees` or
+   `differs by` the exact amount, and separately whether it is **covered**: complete coverage on the
+   posting basis spans every day of it (`complete_coverage_by_basis`). Disclosed per interval, with
+   counts and amounts: open review items with a transaction there, pending transactions (left out),
+   `unknown` status (counted), and posted transactions with no posting date (counted by transaction
+   date). Types, transfers and classifications do not enter it.
+5. **Agreement is evidence, not coverage** (as D-024): it never declares coverage, settles a review
+   item or changes any total. A difference is shown, never absorbed into an adjustment.
+6. **Monthly reports** use D-013: a transaction's month is its effective transaction date, else its
+   effective posting date, and the report counts how many used each. One line per month, for the
+   ledger or one account: net account movement and D-056's five groups, adding to it as in T1.
+   Transactions with neither date go on a `no date` line, so the months and that line add to
+   `totals` exactly. `totals` itself is unchanged.
+7. **Month disclosures,** per month: accounts whose complete coverage on the transaction basis spans
+   the whole month, and those it does not; open review items with a transaction dated in the month;
+   and transactions with an unsettled correction, classification, match or one-sided transfer. A
+   matched transfer whose sides fall in different months counts in each side's month, so a month's
+   ledger movement can be non-zero from it, disclosed by count.
+8. **The benchmark** (M4.4) builds 100,000 transactions directly, as `--income` does, over 60 months
+   and at least four accounts, with at least 20,000 matches so more than 32,766 matched sides reach
+   M4.1's queries, plus one-sided transfers, classifications, coverage intervals and monthly balance
+   observations. It measures `totals`, `report monthly`, `balance check`, one classification (which
+   rewrites every match outcome) and one import, and prints the counts it reached, so a shape that
+   misses a cost shows it. Targets are provisional, as D-034: below two seconds for each report
+   (PRD §20) on the documented machine, never test assertions. A target missed is reported with the
+   cost behind it, and a redesign is its own decision.
+9. **Privacy:** observations hold amounts and dates only, with no free text, and are shown escaped.
+
+**Not in M4,** each left visible rather than guessed: net worth (point B), statement balances read
+from documents (point A), available balances including pending, a projected current balance,
+storage reporting by kind (backups arrive in M5), and F3's merge-heavy benchmark, which stays in
+the backlog.
+
+**For the owner's decision, with the lead engineer's recommendation first:**
+
+- **A. Manual observations only.** No invented layout carries a balance, and PRD §5's extraction is
+  planned when a real layout shows one (M6, M7). Alternatively M4.2 adds balance metadata lines to
+  an invented layout now, which builds before a real layout needs it.
+- **B. Net worth waits.** Accounts have no parent or subaccount relation, so PRD §17's rule against
+  counting an aggregate loan twice cannot be enforced yet. Alternatively an M4.5 sums the latest
+  observations with a mixed-date warning, and the double-counting rule is left to the person.
+- **C. `json_each` for M4.1.** One parameter, no new dependency, already in SQLite 3.45.3.
+  Alternatively chunk the lists at 32,766, which keeps plain `IN` lists but repeats each query.
+- **D. Month coverage on the transaction basis only,** because D-013 dates months by transaction
+  date and posting-basis coverage misses a transaction dated late in a month and posted the next.
+  Alternatively either basis counts, as D-055, with the edge disclosed.
+- **E. Posted balances only.** Alternatively observations also state an available balance with
+  pending included, which no current layout shows.
+
+**How M4.1 was implemented,** where recommendation 1 left a choice. Accepted by the owner as built
+on 2026-11-08:
+
+- `db/id_lists.py` holds `ids_as_json_array`. It refuses an ID that is not a string, because
+  `json_each` would read a number as an integer that matches no TEXT ID, silently.
+- The query plans are unchanged: `transaction_facts` still looks each ID up by primary key, and the
+  import summary queries still scan `transaction_source`, as before.
+- L3's write uses 32,767 one-sided transfers rather than matches. Inserting a match side runs
+  `transfer_match_side_two_accounts`, whose lookup SQLite plans by `account_id`, so building many
+  matches directly is quadratic in an account's sides (about 37 seconds for 16,384 matches). Each
+  person's match pays one such scan. That is recorded in [status.md](status.md), and M4.4's shape
+  pays it once, at build time.
+
+**How M4.2 was implemented,** where recommendations 2 to 5 left a choice. Built on 2026-11-08 and
+awaiting acceptance:
+
+- Every transaction, pending ones too, is placed on its effective posting date, else its effective
+  transaction date (D-049). That date decides the interval for activity and for every disclosure,
+  including open review items. An interval runs after the earlier observation's day through the
+  later one's, and coverage is checked over those days.
+- `unknown` status and no posting date are disclosed within the activity, so one transaction can
+  be in both lines.
+- `balance list` shows each active observation's token, since D-057 names no `balance show`. The
+  token `b1` covers the observation's day and balance and those of the active observations either
+  side of it, whose intervals undoing it joins. It names no generated ID and reads no transaction,
+  so undo needs no current account.
+- A trigger also enforces one active observation per account and day. An amount owed whose
+  negation leaves the INTEGER range is refused as an invalid amount.
+- For a card or loan, `differs by` is in owed terms: observed owed less expected owed.
+- Beyond recommendation 4's list, `balance check` also discloses the account's unresolved records,
+  which are no transaction, so no interval counts them.
+- The "every day inside a span" test moved to `spans_cover_every_day` in
+  `reconcile/coverage_in_effect.py`, shared with D-055's coverage window, its second use.

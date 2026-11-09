@@ -7,6 +7,7 @@ a person classified, and leave out transfers they confirmed.
 import sqlite3
 from dataclasses import dataclass
 
+from personal_finance.db.id_lists import ids_as_json_array
 from personal_finance.reconcile.apply import STATE_ACTIVE, decision_states, declared_coverage
 from personal_finance.reconcile.classification_effects import FINANCIAL_TYPES, UNCLASSIFIED
 from personal_finance.reconcile.transfer_effects import TRANSFER_TYPES, transfer_candidates
@@ -493,12 +494,12 @@ def _separated(conn, account_id) -> int:
     active = [decision for decision, _ in separations if states[decision] == STATE_ACTIVE]
     if not active:
         return 0
-    marks = ", ".join("?" for _ in active)
     return conn.execute(
-        f"""SELECT COUNT(DISTINCT link.transaction_id)
-            FROM decision_constraint pair
-            JOIN transaction_source link
-                ON link.source_record_id IN (pair.left_record_id, pair.right_record_id)
-            WHERE pair.relation = 'different_event' AND pair.decision_id IN ({marks})""",
-        active,
+        """SELECT COUNT(DISTINCT link.transaction_id)
+           FROM decision_constraint pair
+           JOIN transaction_source link
+               ON link.source_record_id IN (pair.left_record_id, pair.right_record_id)
+           WHERE pair.relation = 'different_event'
+             AND pair.decision_id IN (SELECT value FROM json_each(?))""",
+        (ids_as_json_array(active),),
     ).fetchone()[0]
