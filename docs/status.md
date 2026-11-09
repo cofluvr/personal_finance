@@ -126,6 +126,25 @@ data** (M5 gate). A real ledger's location and encrypted disk image are checked 
 and restored (M5.4), but the gate stays closed until M5.5's checklist is run. Only candidate items, decision conflicts and automatically merged transactions
 can be acted on.
 
+## Network and dependencies
+
+Stated here once (D-058 point 9, W2).
+
+- **No network, and no other program but two.** No module under `src/` imports a network module,
+  runs a program or imports dynamically, except `db/volume_probes.py`, which runs
+  `/usr/sbin/diskutil info -plist` and `/usr/bin/hdiutil info -plist`, for a real ledger only,
+  with a 30-second timeout. `tests/unit/test_no_network_imports.py` parses every module and fails
+  on any added use. Every command works with no network connection (PRD §21).
+- **Runtime dependencies: none.** Only Python 3.12's standard library and its SQLite. Nothing is
+  downloaded or sent at run time: no telemetry, no update check and no log (D-037).
+- **Development dependencies:** pytest 9.2.0 and Hypothesis 6.170.14, pinned in
+  `requirements-dev.txt` without hashes, and setuptools `>=68` to build. Installing them is the
+  only step that needs a network, once. A later build can use another setuptools, and an editable
+  install is untested.
+- **The test socket guard** blocks Python sockets in the test process, not subprocesses or native
+  code. The suite never runs the two probes.
+- **Not covered:** what the interpreter, macOS, or tools run outside `pf` do on the network.
+
 ## Acceptance criteria progress
 
 All 47 criteria pass, each mapped to named tests in [m1-acceptance.md](m1-acceptance.md).
@@ -210,8 +229,6 @@ rewriting 20,000 match outcomes (D-057).
   typed, so a file name holding a newline can imitate a line there (noted below for all names).
 - Setup and both entry points have only been verified on this Mac with Python 3.12.6.
   `bin/pf` needs `.venv` at the root of its checkout.
-- Dependencies are pinned without hashes, and setuptools is only bounded as `>=68`, so a
-  later package build can use a different version. An editable install is untested.
 - A file's counts in an import summary describe the moment it was imported. Later files in
   the same run can change them, so only the run summary and the account lines are final.
 - `internal_error` and the unexpected-error message carry no detail by design, so such a
@@ -309,8 +326,6 @@ rewriting 20,000 match outcomes (D-057).
   `~/Documents` would sync. The owner confirmed it off on 2026-11-08.
 - A ledger is real or synthetic from `init`. A synthetic ledger is never checked, never promoted,
   and nothing stops real data being put in one: that rests on the owner.
-- The test network guard covers Python sockets in the test process. It does not
-  cover subprocesses or native code.
 - Uppercase extensions such as `.CSV` are ignored only because git sets
   `core.ignorecase` on macOS. On a case-sensitive setup they would not be.
 - Amount parsing accepts a small generic syntax. Trailing minus signs and CR/DR
