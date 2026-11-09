@@ -215,13 +215,13 @@ The schema guarantees every transaction a date, so the `no date` line of G1 is n
 ## M5 plan
 
 Approved on 2026-11-08 as D-058, with the lead engineer's recommendations, including points A to F.
-M5.1 was approved, built and accepted as built the same day. Each later slice needs its own approval. M5.2 and M5.4
-also need the owner's inputs named in D-058.
+M5.1 was approved, built and accepted as built the same day. M5.2 was approved with the owner's amendments to point
+3, and built the same day. Each later slice needs its own approval. M5.4 also needs the backup destination.
 
 | Slice | Scope | Status |
 |---|---|---|
 | M5.1 | Real ledgers, their location and file permissions | Accepted |
-| M5.2 | Encryption: an encrypted volume, checked on every open (D-002) | Not started |
+| M5.2 | Encryption: an encrypted volume, checked on every open (D-002) | Built, awaiting review |
 | M5.3 | Archiving originals, and storage by kind (D-017) | Not started |
 | M5.4 | Backup, verification and restore | Not started |
 | M5.5 | Network and dependency behaviour, and the readiness checklist | Not started |
@@ -241,7 +241,7 @@ also need the owner's inputs named in D-058.
 
 | ID | Test |
 |---|---|
-| E1 | A real ledger opens, and `init --real` creates one, only on a volume the probe reports encrypted. Not encrypted, an unknown answer, a missing key and a failed probe each refuse with nothing changed |
+| E1 | A real ledger opens, and `init --real` creates one, only in a folder inside a mounted disk image the probe reports encrypted and honouring ownership. The startup volume, FileVault or not, is refused. Not encrypted, an unknown answer, a missing key and a failed probe each refuse with nothing changed |
 | E2 | The probe reads `diskutil info -plist` output for the folder's volume, tested on recorded synthetic outputs. The suite never mounts a volume |
 | E3 | A real ledger runs with `temp_store = MEMORY`, and a sort larger than the page cache writes nothing to the temp folder |
 | E4 | Its rollback journal sits beside the database and is created `0600` |
@@ -273,7 +273,7 @@ also need the owner's inputs named in D-058.
 |---|---|
 | W1 | No module under `src/` imports a network module or `subprocess`, outside the one `diskutil` call, and an added import fails the test |
 | W2 | [status.md](status.md) states the network and dependency behaviour, once |
-| W3 | `docs/real-data-readiness.md` lists each step with its command and expected output, walked through on synthetic data in `build/` |
+| W3 | `docs/real-data-readiness.md` lists each step with its command and expected output, moving the owner's statements into the image among them, walked through on synthetic data in `build/` |
 | W4 | Every earlier criterion still passes |
 
 ## Backlog benchmarks

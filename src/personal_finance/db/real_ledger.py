@@ -1,13 +1,21 @@
-"""Where a real ledger may live, and where its imports may come from (D-058, M5.1).
+"""Where a real ledger may live, and where its imports may come from (D-058, M5.1 and M5.2).
 
 A real ledger holds actual financial data. It is marked once, by `pf init --real`, and every open
 checks its location before anything else. A synthetic ledger is never checked and behaves as before.
 Each check refuses, naming the rule. None repairs: a wrong mode is reported with the command to fix it.
+
+The location must be a folder inside a mounted disk image whose APFS volume diskutil reports as
+encrypted and as honouring file ownership. FileVault on the startup volume does not count (D-058
+point 3, as amended). Any answer from diskutil other than a clear yes refuses.
 """
 
 import os
+import plistlib
 import sqlite3
 from pathlib import Path
+from xml.parsers.expat import ExpatError
+
+from personal_finance.db import diskutil
 
 # Folders a sync client copies off this machine. Relative to the home folder.
 SYNCED_FOLDERS_UNDER_HOME = ("Library/Mobile Documents", "Library/CloudStorage", "Dropbox")
@@ -68,6 +76,7 @@ def refuse_unsafe_real_ledger_location(database_path: Path) -> None:
     refuse_unless_private(folder, private_mode="700")
     if resolved_path.exists():
         refuse_unless_private(resolved_path, private_mode="600")
+    refuse_unless_on_encrypted_disk_image(folder)
 
 
 def refuse_unless_private(path: Path, *, private_mode: str) -> None:
@@ -80,10 +89,65 @@ def refuse_unless_private(path: Path, *, private_mode: str) -> None:
         )
 
 
-def refuse_unsafe_real_ledger(conn: sqlite3.Connection, database_path: Path) -> None:
-    """Check an open ledger's location when it is real. A synthetic ledger passes unchecked."""
+def mount_point_containing(folder: Path) -> Path:
+    """The nearest mount point at or above folder. `/` always is one."""
+    candidate = folder
+    while not os.path.ismount(candidate):
+        candidate = candidate.parent
+    return candidate
+
+
+def refuse_unless_on_encrypted_disk_image(folder: Path) -> None:
+    mount_point = mount_point_containing(folder)
+    if mount_point == folder:
+        raise UnsafeLocation(
+            f"a real ledger must be in a folder inside its volume, not at the volume's root: {folder}"
+        )
+    try:
+        diskutil_exit_code, diskutil_output = diskutil.info_plist(mount_point)
+    except diskutil.DiskutilDidNotAnswer as failure:
+        raise UnsafeLocation(
+            f"could not ask diskutil whether {mount_point} is encrypted ({failure}), so the real "
+            "ledger stays closed"
+        ) from None
+    try:
+        volume = plistlib.loads(diskutil_output)
+    except (ValueError, ExpatError):
+        volume = None
+    if diskutil_exit_code != 0 or not isinstance(volume, dict) or "Error" in volume:
+        raise UnsafeLocation(
+            f"diskutil could not describe {mount_point}, so the real ledger stays closed"
+        )
+    if volume.get("MountPoint") != str(mount_point):
+        raise UnsafeLocation(
+            f"diskutil described a volume other than {mount_point}, so the real ledger stays closed"
+        )
+    if volume.get("BusProtocol") != "Disk Image":
+        raise UnsafeLocation(
+            f"a real ledger must be on a mounted disk image, and {mount_point} is not one. FileVault "
+            "on the startup volume does not count"
+        )
+    if volume.get("FilesystemType") != "apfs":
+        raise UnsafeLocation(f"a real ledger's disk image must hold an APFS volume: {mount_point}")
+    if volume.get("Encryption") is not True:
+        raise UnsafeLocation(
+            f"diskutil does not report {mount_point} as encrypted. A real ledger needs an "
+            "\"APFS (Encrypted)\" volume: encrypting only the disk image file is not reported"
+        )
+    if volume.get("GlobalPermissionsEnabled") is not True:
+        raise UnsafeLocation(
+            f"{mount_point} ignores file ownership, so its permissions protect nothing. Run: "
+            f"sudo diskutil enableOwnership {mount_point}"
+        )
+
+
+def check_real_ledger_on_open(conn: sqlite3.Connection, database_path: Path) -> None:
+    """When the ledger is real, refuse an unsafe location, then keep SQLite's temporary files in
+    memory, so no sort or index spills to the system temp folder (D-058 point 4). A synthetic
+    ledger is neither checked nor changed."""
     if is_real_ledger(conn):
         refuse_unsafe_real_ledger_location(database_path)
+        conn.execute("PRAGMA temp_store = MEMORY")
 
 
 def refuse_import_from_git_work_tree(import_path: Path) -> None:

@@ -30,7 +30,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M4.4: the 100,000-transaction benchmark | Accepted (D-057) |
 | **M4 overall** | **Complete and accepted** |
 | M5.1: real ledgers, their location and file permissions | Accepted (D-058) |
-| M5.2 to M5.5 | Planned in D-058, not started |
+| M5.2: encryption, an encrypted volume checked on every open | Built, awaiting review (D-002, D-058) |
+| M5.3 to M5.5 | Planned in D-058, not started |
 | M6 to M8 | Not started |
 
 ## What exists
@@ -38,8 +39,10 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.money`: exact parsing and formatting of amounts.
 - `personal_finance.db.migrate`: database creation, connections, migrations.
 - `personal_finance.db.id_lists`: any number of IDs as one SQL parameter (D-057).
-- `personal_finance.db.real_ledger`: the real-ledger mark, and the location and import checks every
-  open of a real ledger runs (D-058).
+- `personal_finance.db.real_ledger`: the real-ledger mark, and the location, encrypted-volume and
+  import checks every open of a real ledger runs, with its temporary files kept in memory (D-058).
+- `personal_finance.db.diskutil`: the one subprocess call, `diskutil info -plist` on a mount point
+  (D-058).
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
@@ -110,8 +113,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 ## What does not exist yet
 
 No real institution layout is supported. **It must not be used with real financial
-data** (M5 gate). A real ledger's location is checked (M5.1), but nothing is encrypted, archived or
-backed up yet, and the gate stays closed until M5.5's checklist is run. Only candidate items, decision conflicts and automatically merged transactions
+data** (M5 gate). A real ledger's location and encrypted disk image are checked (M5.1, M5.2), but nothing is
+archived or backed up yet, and the gate stays closed until M5.5's checklist is run. Only candidate items, decision conflicts and automatically merged transactions
 can be acted on.
 
 ## Acceptance criteria progress
@@ -283,10 +286,12 @@ rewriting 20,000 match outcomes (D-057).
 - `create_database` leaves its file behind if a migration fails, and a later
   attempt then refuses to overwrite it.
 - Edited migration files are not detected. Only the version number is tracked.
-- The database is not encrypted. A synthetic ledger gets `0600` at creation only. A real ledger is
-  checked for privacy on every open, and refused rather than repaired.
-- A real ledger cannot detect iCloud's Desktop and Documents sync, which leaves `~/Desktop` and
-  `~/Documents` synced with nothing in the path to show it (D-058).
+- A synthetic ledger is not encrypted, and gets `0600` at creation only. A real ledger is checked
+  for privacy and for an encrypted disk image on every open, and refused rather than repaired.
+  The image's password, and the location of the image file itself, are not checked (D-058).
+- iCloud's Desktop and Documents sync cannot be detected from a path. A real ledger now lives
+  under `/Volumes`, which it does not reach, but an image file kept in `~/Desktop` or
+  `~/Documents` would sync. The owner confirmed it off on 2026-11-08.
 - A ledger is real or synthetic from `init`. A synthetic ledger is never checked, never promoted,
   and nothing stops real data being put in one: that rests on the owner.
 - The test network guard covers Python sockets in the test process. It does not

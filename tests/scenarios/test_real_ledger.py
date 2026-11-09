@@ -2,17 +2,20 @@
 
 pytest's temporary folder can sit inside this repository, which is a git work tree, when TMPDIR
 points into build/. The `vault` fixture therefore treats a work tree found above tmp_path as absent,
-while one made inside tmp_path is still found by the real search.
+while one made inside tmp_path is still found by the real search. It also places the folder on a
+synthetic encrypted disk image, answering for diskutil with a recording (M5.2), so the suite never
+runs diskutil or mounts a volume.
 """
 
 import os
 import sqlite3
+from pathlib import Path
 
 import pytest
 from test_decisions import ALL_TABLES, CARD_HEADER, CAFE, Ledger
 
 from personal_finance import cli
-from personal_finance.db import real_ledger
+from personal_finance.db import diskutil, real_ledger
 from personal_finance.db.migrate import connect, create_database
 from personal_finance.db.real_ledger import (
     SYNCED_FOLDERS_UNDER_HOME,
@@ -22,6 +25,28 @@ from personal_finance.db.real_ledger import (
 )
 
 LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", "real_ledger")
+
+DISKUTIL_RECORDINGS = Path(__file__).parents[1] / "fixtures" / "synthetic" / "diskutil"
+SYNTHETIC_MOUNT_POINT = Path("/Volumes/SyntheticLedger")
+
+
+def diskutil_recording(name):
+    return (DISKUTIL_RECORDINGS / f"{name}.plist").read_bytes()
+
+
+def place_on_volume(monkeypatch, diskutil_output, *, mount_point=SYNTHETIC_MOUNT_POINT,
+                    diskutil_exit_code=0):
+    """Make every folder's mount point `mount_point`, and diskutil's answer about it the one given.
+    Returns the list of mount points diskutil was asked about."""
+    asked_about = []
+
+    def answer(asked_mount_point):
+        asked_about.append(asked_mount_point)
+        return diskutil_exit_code, diskutil_output
+
+    monkeypatch.setattr(real_ledger, "mount_point_containing", lambda folder: mount_point)
+    monkeypatch.setattr(diskutil, "info_plist", answer)
+    return asked_about
 
 
 class RealLedger(Ledger):
@@ -44,7 +69,8 @@ class RealLedger(Ledger):
 
 @pytest.fixture
 def vault(tmp_path, monkeypatch):
-    """A private folder for a real ledger, under a home with no synced folders."""
+    """A private folder for a real ledger on an encrypted disk image, under a home with no synced
+    folders."""
     search_from_the_disk = git_work_tree_containing
 
     def work_tree_within_tmp_path(path):
@@ -54,6 +80,7 @@ def vault(tmp_path, monkeypatch):
         return found
 
     monkeypatch.setattr(real_ledger, "git_work_tree_containing", work_tree_within_tmp_path)
+    place_on_volume(monkeypatch, diskutil_recording("encrypted_disk_image"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
     folder = tmp_path / "vault"

@@ -21,7 +21,7 @@ and keep its index line.
 | Decision | Title and status |
 |---|---|
 | D-001 | Database: SQLite through the standard library — Approved |
-| D-002 | Encryption — Approved in D-058, to be implemented in M5.2 |
+| D-002 | Encryption — Approved in D-058, implemented in M5.2 |
 | D-003 | Money: signed integer cents — Approved |
 | D-004 | Provenance layers — Approved |
 | D-005 | Document coverage is explicit — Approved |
@@ -77,7 +77,7 @@ and keep its index line.
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
-| D-058 | M5 plan: the real-data gate — Approved, M5.1 implemented and accepted |
+| D-058 | M5 plan: the real-data gate — Approved, M5.1 implemented and accepted, M5.2 implemented |
 
 ## Rules in brief
 
@@ -167,6 +167,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Monthly reports | A transaction's month is its effective transaction date, else its effective posting date. Months add to `totals`, D-056's groups add to each month, and a month is covered only by complete transaction-basis coverage of every day | D-013, D-057 |
 | Real ledgers | Real or synthetic, fixed at `init`. Only a real ledger is checked, on every open, and a synthetic one is never promoted | D-058 |
 | Real ledger location | Refused inside a git work tree or a synced folder, through a symbolic link, not owned by the user, or open to group or others. Checked, never repaired. Its imports never come from a git work tree | D-019, D-058 |
+| Encrypted volume | A real ledger's folder is inside, never at the root of, a mounted disk image whose APFS volume diskutil reports encrypted and honouring ownership. FileVault on the startup volume does not count. Any other answer refuses. Temporary files stay in memory | D-002, D-058 |
 
 ## Not yet decided
 
@@ -174,7 +175,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-058 M5 plan: the real-data gate — Approved, M5.1 implemented and accepted
+## D-058 M5 plan: the real-data gate — Approved, M5.1 implemented and accepted, M5.2 implemented
 
 Proposed on 2026-11-08, and approved by the owner the same day with the lead engineer's
 recommendations, including points A to F, with M5.1 approved to build. Each later slice needs its
@@ -220,7 +221,8 @@ pf backup restore --from BACKUP --to NEW_DB
    rather than repairs: a wrong mode is refused with the `chmod` to run, never changed silently
    (fail fast). Files a real ledger imports are refused from inside a git work tree too.
 3. **Encryption by an encrypted APFS volume, not SQLCipher (D-002).** The owner creates an
-   encrypted disk image with Disk Utility or `hdiutil` and keeps its password in their Keychain.
+   encrypted disk image with Disk Utility or `hdiutil`, and keeps its password themselves, not in
+   the login Keychain (corrected by the owner on 2026-11-08).
    The application holds no key, password or secret, so PRD §19's "secrets kept out of source code
    and ordinary configuration" holds by having none, and no dependency is added (D-020). On every
    open, a real ledger's directory must be on a volume that `diskutil info -plist` reports as
@@ -228,6 +230,12 @@ pf backup restore --from BACKUP --to NEW_DB
    (fail closed). Tests replace the probe, so the suite never mounts a volume. One walkthrough on
    a real encrypted image is the owner's, or needs their approval, since mounting writes outside
    the repository.
+
+   **Amended by the owner on 2026-11-08, approving M5.2.** FileVault does not satisfy point A. The
+   probe requires a mounted disk image that is not the startup volume, as well as encryption, and
+   a ledger on the FileVault-encrypted startup volume is refused. The real ledger lives in a `0700`
+   folder inside the mounted volume, never at its root. M5.5's checklist moves the owner's
+   statements into the image.
 4. **Caches stay on that volume.** A real ledger runs with `PRAGMA temp_store = MEMORY`, so SQLite
    writes no sort or index spill to the system temp folder. Its rollback journal sits beside the
    database, and a test shows it gets `0600`. The application writes no other cache, and no log
@@ -316,3 +324,39 @@ owner on 2026-11-08, built the same day, and accepted as built:
   the owner to rule it out.
 - pytest's temporary folder can sit inside this repository, a git work tree, so the tests treat a
   work tree found above their own folder as absent and still find one made inside it.
+
+**How M5.2 was implemented,** under point 3 as amended. Approved to build by the owner on
+2026-11-08 and built the same day, on synthetic data:
+
+- **The keys** come from real `diskutil info -plist` output on macOS Golden Gate 27.2: the startup
+  Data volume, run on this repository's volume, and the owner's empty image, with their approval.
+  A real ledger needs `MountPoint` equal to its folder's mount point, `BusProtocol` `Disk Image`
+  (the startup volume reports `Apple Fabric`), `FilesystemType` `apfs`, and `Encryption` and
+  `GlobalPermissionsEnabled` each the boolean `true`. A non-zero exit, an `Error` key, output that
+  is not a plist dictionary, or a missing key or other type refuses. Messages name the mount point,
+  never a value diskutil returned.
+- diskutil refuses a folder ("Could not find disk"), so the probe walks up to the nearest mount
+  point and asks about that. A ledger whose folder is the mount point is refused before asking.
+  Under the startup Data volume the walk reaches `/` through its firmlinks, which is refused as
+  not a disk image either way.
+- **Encryption of the image file alone is not reported.** An image made with
+  `hdiutil create -encryption AES-256` held an APFS volume reporting `Encryption` false, so the
+  owner's image needs an "APFS (Encrypted)" volume. diskutil cannot see image-layer encryption,
+  and a second probe was not added.
+- **Ownership on a mounted image must be checked on the real image.** A new image ignored
+  ownership (`GlobalPermissionsEnabled` false), which makes M5.1's owner and mode checks
+  meaningless, so the probe refuses it and names `sudo diskutil enableOwnership`. The rule was
+  added with the owner after the real image showed it. On 2026-11-08 the owner enabled ownership,
+  and the ledger folder was shown `drwx------`, owned by the owner.
+- `db/diskutil.py` holds the application's only subprocess call: `/usr/sbin/diskutil` by its full
+  path, with a 30-second timeout, and failing to run it refuses. Tests replace it with recordings
+  in `tests/fixtures/synthetic/diskutil`, so the suite never runs diskutil or mounts a volume.
+- `temp_store = MEMORY` is set by the same check that every open of a real ledger runs, before
+  `migrate` migrates. `init --real` migrates its empty ledger before the mark, so it holds nothing
+  to spill. SQLite unlinks temporary files as it opens them, so the test reads the temp folder's
+  modification time in a child process, since SQLite reads `SQLITE_TMPDIR` once per process. The
+  same sort on a synthetic ledger is the control that shows it spills.
+- **Point 4's journal needs no code.** SQLite gives a journal its database's mode whatever the
+  umask, and a test shows `0600` beside the database with the umask cleared.
+- **Not detected:** whether the image's password is strong or where it is kept, and where the
+  image file itself lives. It is not under `/Volumes`, so the synced-folder rule does not see it.

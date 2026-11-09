@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>APFSContainerReference</key>
+	<string>disk90</string>
+	<key>APFSPhysicalStores</key>
+	<array>
+		<dict>
+			<key>APFSPhysicalStore</key>
+			<string>disk89s1</string>
+		</dict>
+	</array>
+	<key>BusProtocol</key>
+	<string>Disk Image</string>
+	<key>DeviceIdentifier</key>
+	<string>disk90s1</string>
+	<key>DeviceNode</key>
+	<string>/dev/disk90s1</string>
+	<key>Encryption</key>
+	<true/>
+	<key>EncryptionThisVolumeProper</key>
+	<true/>
+	<key>FileVault</key>
+	<true/>
+	<key>FilesystemName</key>
+	<string>APFS</string>
+	<key>FilesystemType</key>
+	<string>apfs</string>
+	<key>GlobalPermissionsEnabled</key>
+	<false/>
+	<key>Internal</key>
+	<false/>
+	<key>Locked</key>
+	<false/>
+	<key>MountPoint</key>
+	<string>/Volumes/SyntheticLedger</string>
+	<key>RemovableMedia</key>
+	<true/>
+	<key>Size</key>
+	<integer>1000000000</integer>
+	<key>VolumeName</key>
+	<string>SyntheticLedger</string>
+	<key>VolumeUUID</key>
+	<string>00000000-0000-4000-8000-000000000001</string>
+	<key>WholeDisk</key>
+	<false/>
+	<key>Writable</key>
+	<true/>
+</dict>
+</plist>

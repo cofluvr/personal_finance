@@ -24,10 +24,10 @@ from personal_finance.db.migrate import (
 )
 from personal_finance.db.real_ledger import (
     UnsafeLocation,
+    check_real_ledger_on_open,
     is_real_ledger,
     mark_real_ledger,
     refuse_import_from_git_work_tree,
-    refuse_unsafe_real_ledger,
     refuse_unsafe_real_ledger_location,
 )
 from personal_finance.ingest.coverage import DATE_BASES, declare_complete
@@ -877,7 +877,7 @@ def open_ledger(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
     if not path.is_file():
         raise CommandError(f"database not found: {path}")
     conn = connect(path, read_only=read_only)
-    refuse_unsafe_real_ledger(conn, path)
+    check_real_ledger_on_open(conn, path)
     current, latest = schema_version(conn), len(load_migrations())
     if current < latest:
         raise CommandError(
@@ -923,7 +923,7 @@ def run_migrate(args) -> int:
     if not args.db.is_file():
         raise CommandError(f"database not found: {args.db}")
     conn = connect(args.db)
-    refuse_unsafe_real_ledger(conn, args.db)
+    check_real_ledger_on_open(conn, args.db)
     before = schema_version(conn)
     try:
         after = migrate(conn)
