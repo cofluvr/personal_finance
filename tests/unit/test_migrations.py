@@ -53,6 +53,7 @@ def test_new_database_has_the_expected_tables(conn):
         "one_sided_transfer_effect",
         "one_sided_transfer_event",
         "one_sided_transfer_record",
+        "real_ledger",
         "record_parse",
         "record_resolution",
         "record_resolution_event",

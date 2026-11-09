@@ -22,6 +22,14 @@ from personal_finance.db.migrate import (
     migrate,
     schema_version,
 )
+from personal_finance.db.real_ledger import (
+    UnsafeLocation,
+    check_real_ledger_on_open,
+    is_real_ledger,
+    mark_real_ledger,
+    refuse_import_from_git_work_tree,
+    refuse_unsafe_real_ledger_location,
+)
 from personal_finance.ingest.coverage import DATE_BASES, declare_complete
 from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import LAYOUTS
@@ -417,7 +425,12 @@ def build_parser() -> argparse.ArgumentParser:
         sub.set_defaults(handler=handler)
         return sub
 
-    command("init", handler=run_init, help="create a new ledger database")
+    init = command("init", handler=run_init, help="create a new ledger database")
+    init.add_argument(
+        "--real",
+        action="store_true",
+        help="for actual financial data: the ledger's location is checked on every open",
+    )
     command("migrate", handler=run_migrate, help="upgrade a ledger to the current schema")
 
     account = commands.add_parser("account", help="manage accounts")
@@ -864,6 +877,7 @@ def open_ledger(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
     if not path.is_file():
         raise CommandError(f"database not found: {path}")
     conn = connect(path, read_only=read_only)
+    check_real_ledger_on_open(conn, path)
     current, latest = schema_version(conn), len(load_migrations())
     if current < latest:
         raise CommandError(
@@ -888,11 +902,19 @@ def find_account(conn, reference: str) -> str:
 
 
 def run_init(args) -> int:
+    if args.real:
+        refuse_unsafe_real_ledger_location(args.db)
     try:
         create_database(args.db)
     except FileExistsError:
         raise CommandError(f"refusing to overwrite existing file: {args.db}") from None
-    print(f"Created {args.db}")
+    if args.real:
+        conn = connect(args.db)
+        mark_real_ledger(conn)
+        conn.close()
+        print(f"Created real ledger {args.db}")
+    else:
+        print(f"Created {args.db}")
     return 0
 
 
@@ -901,6 +923,7 @@ def run_migrate(args) -> int:
     if not args.db.is_file():
         raise CommandError(f"database not found: {args.db}")
     conn = connect(args.db)
+    check_real_ledger_on_open(conn, args.db)
     before = schema_version(conn)
     try:
         after = migrate(conn)
@@ -964,6 +987,9 @@ def describe_coverage(coverage) -> str:
 def run_import(args) -> int:
     declared = declared_coverage(args)
     conn = open_ledger(args.db)
+    if is_real_ledger(conn):
+        for import_path in args.files:
+            refuse_import_from_git_work_tree(import_path)
     account_id = find_account(conn, args.account)
     results = import_files(
         conn,
@@ -3038,7 +3064,7 @@ def main(argv: list[str] | None = None) -> int:
         # The reader went away, as in `pf transactions | head`. Nothing went wrong here.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return BROKEN_PIPE_EXIT
-    except (CommandError, DecisionRefused) as error:
+    except (CommandError, DecisionRefused, UnsafeLocation) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 2
     except sqlite3.OperationalError as error:

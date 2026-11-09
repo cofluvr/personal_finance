@@ -152,15 +152,14 @@ Approved with D-056 on 2026-11-08.
 ## M4 plan
 
 Approved on 2026-11-08 as D-057, with the lead engineer's recommendations, including points A to
-E. M4.1, M4.2 and M4.3 were approved, built and accepted as built. M4.4 was approved and built,
-and awaits acceptance, which completes M4.
+E. Every slice was approved, built and accepted as built. **M4 is complete.**
 
 | Slice | Scope | Status |
 |---|---|---|
 | M4.1 | The 32,766-variable limit, with no change in behaviour | Accepted |
 | M4.2 | Balance observations and statement reconciliation | Accepted |
 | M4.3 | Monthly reports with disclosures (D-013) | Accepted |
-| M4.4 | The 100,000-transaction benchmark and provisional resource targets | Built, awaiting acceptance |
+| M4.4 | The 100,000-transaction benchmark and provisional resource targets | Accepted |
 
 ### M4.1 acceptance criteria
 
@@ -212,6 +211,71 @@ The schema guarantees every transaction a date, so the `no date` line of G1 is n
 | Z4 | Figures and the machine go in [benchmarks.md](benchmarks.md). Targets are provisional and not test assertions (D-034, D-057) |
 | Z5 | A missed target is reported with the cost behind it, not redesigned within M4.4 |
 | Z6 | S, C, P, N, V, U, K, Q, F, X, O, T, L, B and G still pass |
+
+## M5 plan
+
+Approved on 2026-11-08 as D-058, with the lead engineer's recommendations, including points A to F.
+M5.1 was approved, built and accepted as built the same day. M5.2 was approved with the owner's amendments to point
+3, built the same day, and accepted on 2026-11-09, with a second amendment accepting images encrypted as files.
+M5.3 is approved. Each later slice needs its own approval. M5.4 also needs the backup destination.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M5.1 | Real ledgers, their location and file permissions | Accepted |
+| M5.2 | Encryption: an encrypted volume, checked on every open (D-002) | Accepted |
+| M5.3 | Archiving originals, and storage by kind (D-017) | Approved, not started |
+| M5.4 | Backup, verification and restore | Not started |
+| M5.5 | Network and dependency behaviour, and the readiness checklist | Not started |
+
+### M5.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| H1 | `init --real` marks a ledger real. Plain `init` and every ledger before 0017 are synthetic. Only a ledger holding no account and no import run can be marked, each refusal with a control that succeeds, and the mark is never changed or removed |
+| H2 | `init --real` refuses, creating nothing: a missing folder, a folder in a git work tree (a `.git` folder or file), in each synced folder, reached through a symbolic link, open to group or others, or owned by someone else. A private folder gives a `0600` ledger |
+| H3 | Every kind of command on a real ledger, read-only ones and `migrate` included, refuses with nothing changed once its folder or database is open to others, a `.git` appears above it, or it is reached through a symbolic link, and opens once safe |
+| H4 | A real ledger refuses an import with any file inside a git work tree, followed through links, importing nothing. A synthetic ledger imports from anywhere |
+| H5 | A synthetic ledger in a git work tree with shared modes opens as before, and every earlier criterion passes with no token or output change |
+| H6 | Migration 0017 works on a populated ledger, leaves it synthetic, makes no account stale, and is atomic on failure |
+
+### M5.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| E1 | A real ledger opens, and `init --real` creates one, only in a folder inside a mounted disk image honouring ownership, whose volume diskutil reports encrypted or whose image hdiutil reports encrypted. The startup volume, FileVault or not, is refused. Not encrypted, an unknown answer, a missing key and a failed probe each refuse with nothing changed |
+| E2 | The probe reads `diskutil info -plist` output for the folder's volume, and `hdiutil info -plist` for its image, tested on recorded synthetic outputs. The suite never mounts a volume |
+| E3 | A real ledger runs with `temp_store = MEMORY`, and a sort larger than the page cache writes nothing to the temp folder |
+| E4 | Its rollback journal sits beside the database and is created `0600` |
+| E5 | No probe runs for a synthetic ledger, and every earlier criterion passes |
+
+### M5.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| Y1 | Importing into a real ledger copies each new document to `originals/` under its SHA-256, byte-identical and `0400`, before the import commits. A repeat import copies nothing |
+| Y2 | A failed copy fails the file as `archive_failed`, keeping nothing. A copy left by a rolled-back import is reported as not referenced |
+| Y3 | Archiving changes no transaction, token or provenance, and no identity reads a location. A synthetic ledger archives nothing |
+| Y4 | `archive verify` reports missing, altered and unreferenced originals exactly, and passes an intact archive |
+| Y5 | `pf storage` reports software, database with its journal, originals and backups apart, in bytes and files |
+
+### M5.4 acceptance criteria
+
+| ID | Test |
+|---|---|
+| R1 | `backup create` writes a new folder on a gated volume other than the ledger's, and refuses an existing folder, the ledger's own volume and an unsafe destination, writing nothing |
+| R2 | The manifest holds each file's hash and size, the schema and code versions, and the logical digest |
+| R3 | `backup restore` writes only to a new path passing every gate, and refuses any altered or missing file, a failed integrity or foreign-key check, a newer schema and a digest difference, leaving nothing |
+| R4 | Every report, list and token of a restored ledger matches the original's byte for byte, over generated ledgers holding decisions, corrections, classifications, matches, one-sided transfers and observations, and every original matches by hash |
+| R5 | `backup verify` runs R3's checks without restoring, and a backup taken while another connection writes is consistent |
+
+### M5.5 acceptance criteria
+
+| ID | Test |
+|---|---|
+| W1 | No module under `src/` imports a network module or `subprocess`, outside the `diskutil` and `hdiutil` calls in `db/volume_probes.py`, and an added import fails the test |
+| W2 | [status.md](status.md) states the network and dependency behaviour, once |
+| W3 | `docs/real-data-readiness.md` lists each step with its command and expected output, moving the owner's statements into the image among them, walked through on synthetic data in `build/` |
+| W4 | Every earlier criterion still passes |
 
 ## Backlog benchmarks
 

@@ -28,7 +28,7 @@ LEDGER_TABLES = (
     "transfer_match", "transfer_match_side", "transfer_match_record", "transfer_match_event",
     "transfer_match_effect", "one_sided_transfer", "one_sided_transfer_record",
     "one_sided_transfer_event", "one_sided_transfer_effect", "balance_observation",
-    "balance_observation_event",
+    "balance_observation_event", "real_ledger",
 )
 
 

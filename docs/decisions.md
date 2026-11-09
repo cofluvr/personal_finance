@@ -11,7 +11,7 @@ Status values:
 
 Status of the code behind each decision is in [status.md](status.md).
 
-The full text of D-001 to D-056 is in [decisions-d001-d052.md](decisions-d001-d052.md). This file
+The full text of D-001 to D-057 is in [decisions-d001-d052.md](decisions-d001-d052.md). This file
 holds the index, the rules in brief, and the newest decisions in full, once there are any. When a
 decision here is accepted and the next one is written, move its full text to the end of that file
 and keep its index line.
@@ -21,7 +21,7 @@ and keep its index line.
 | Decision | Title and status |
 |---|---|
 | D-001 | Database: SQLite through the standard library — Approved |
-| D-002 | Encryption — Pending, by M5 |
+| D-002 | Encryption — Approved in D-058, implemented and accepted in M5.2 |
 | D-003 | Money: signed integer cents — Approved |
 | D-004 | Provenance layers — Approved |
 | D-005 | Document coverage is explicit — Approved |
@@ -76,7 +76,8 @@ and keep its index line.
 | D-054 | Transfers across accounts — Approved, implemented and accepted in M3.2 |
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
-| D-057 | M4 plan: balances and reports — Approved, M4.1 to M4.3 implemented and accepted, M4.4 implemented |
+| D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
+| D-058 | M5 plan: the real-data gate — Approved, M5.1 and M5.2 implemented and accepted |
 
 ## Rules in brief
 
@@ -164,179 +165,210 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Statement reconciliation | Consecutive observations, activity after the earlier day through the later one, by effective posting date else transaction date. Agreement is evidence, not coverage, and a difference is never absorbed | D-057 |
 | Scale benchmark | 100,000 transactions, 60 months, four accounts, 20,000 matches. Below two seconds per report, provisional, never a test assertion | D-034, D-057 |
 | Monthly reports | A transaction's month is its effective transaction date, else its effective posting date. Months add to `totals`, D-056's groups add to each month, and a month is covered only by complete transaction-basis coverage of every day | D-013, D-057 |
+| Real ledgers | Real or synthetic, fixed at `init`. Only a real ledger is checked, on every open, and a synthetic one is never promoted | D-058 |
+| Real ledger location | Refused inside a git work tree or a synced folder, through a symbolic link, not owned by the user, or open to group or others. Checked, never repaired. Its imports never come from a git work tree | D-019, D-058 |
+| Encrypted volume | A real ledger's folder is inside, never at the root of, a mounted disk image whose APFS volume honours ownership, and which diskutil reports encrypted or hdiutil reports encrypted as an image. FileVault on the startup volume does not count. Any other answer refuses. Temporary files stay in memory | D-002, D-058 |
 
 ## Not yet decided
 
-From `shared-contract.md` §6: transfer-matching rules (M3), safe-to-spend details
-and loan projection assumptions (Phase 1B), pairing protocol and snapshot
-compatibility (Phase 1C), backup and recovery design (M5), resource benchmarks
-(M4).
+From `shared-contract.md` §6: safe-to-spend details and loan projection assumptions
+(Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
+was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-057 M4 plan: balances and reports — Approved, M4.1 to M4.3 implemented and accepted, M4.4 implemented
+## D-058 M5 plan: the real-data gate — Approved, M5.1 and M5.2 implemented and accepted
 
 Proposed on 2026-11-08, and approved by the owner the same day with the lead engineer's
-recommendations, including points A to E, with M4.1 approved to build. Each later slice needs its
-own approval, as in M3.
-Delivers plan.md's M4 (balance observations, statement reconciliation, monthly reports with
-disclosures, the 100,000-transaction benchmark) against PRD §17, §20 and §21 ("reports disclose
-incomplete data and material review issues"), using D-013, D-034 and D-056. Changes none of D-042
-to D-056. Acceptance tests, L1 to Z6, are in [plan.md](plan.md).
+recommendations, including points A to F, with M5.1 approved to build. Each later slice needs its
+own approval, as in M3 and M4. Delivers plan.md's M5 (data location outside the repo, encryption,
+file permissions, archiving, backup and restore) against PRD §19, §20's storage reporting and §21's
+"backups restore records, rules, corrections, and goals" and "core operation succeeds without
+internet access". Settles D-002, builds D-017, and keeps D-019 and D-025. Changes none of D-042 to
+D-057. Acceptance tests, H1 to W4, are in [plan.md](plan.md).
 
 ```sh
-pf balance record --db DB --account A --date YYYY-MM-DD (--balance AMOUNT | --owed AMOUNT)
-pf balance list   --db DB [--account A]
-pf balance check  --db DB --account A
-pf balance undo   --db DB --account A --observation ID --token TOKEN
-pf report monthly --db DB [--account A] [--from YYYY-MM] [--to YYYY-MM]
+pf init           --db DB [--real]
+pf storage        --db DB
+pf archive verify --db DB
+pf backup create  --db DB --to DIR
+pf backup verify  --from BACKUP
+pf backup restore --from BACKUP --to NEW_DB
 ```
 
 **Slices:**
 
 | Slice | Scope |
 |---|---|
-| M4.1 | The 32,766-variable limit, with no change in behaviour |
-| M4.2 | Balance observations and statement reconciliation |
-| M4.3 | Monthly reports with disclosures (D-013) |
-| M4.4 | The 100,000-transaction benchmark and provisional resource targets |
+| M5.1 | Real ledgers, their location and file permissions |
+| M5.2 | Encryption: an encrypted volume, checked on every open (D-002) |
+| M5.3 | Archiving originals, and storage by kind (D-017) |
+| M5.4 | Backup, verification and restore |
+| M5.5 | Network and dependency behaviour, and the readiness checklist |
 
 **Recommendations:**
 
-1. **M4.1 comes first.** The four unbounded `IN` lists (`transaction_facts`, `_separated` and both
-   queries in `reports/import_summary.py`) pass their IDs as one JSON array parameter, read with
-   SQLite's built-in `json_each`. One helper serves all four, since the pattern already repeats.
-   The fixed-size lists over `MANAGED_RULES` and `TRANSFER_TYPES` stay. The 100,000-transaction
-   benchmark would otherwise fail on any shape with more than 32,766 matched sides.
-2. **An observation is a posted balance at the end of one day,** stated by a person. Stored in the
-   ledger's sign convention (D-003): a credit card or loan takes `--owed`, stored negated, and
-   refuses `--balance`; every other account type takes `--balance` and refuses `--owed`. Output
-   shows `owed` for those two types. Only one active observation per account and date: a second is
-   refused until the first is undone. Undo needs the account and its token, `b1`, as other undos.
-3. **Observations are not transaction evidence.** Migration 0016 adds `balance_observation` and an
-   append-only `balance_observation_event`. No account becomes stale, `derive()` never reads them,
-   and every existing token keeps its digest. Recording or undoing needs no current account.
-4. **Statement reconciliation** (`balance check`) compares each pair of consecutive observations:
-   the later balance against the earlier plus the effective amounts of the account's transactions
-   posted in between (after the earlier day, through the later one). Each interval says `agrees` or
-   `differs by` the exact amount, and separately whether it is **covered**: complete coverage on the
-   posting basis spans every day of it (`complete_coverage_by_basis`). Disclosed per interval, with
-   counts and amounts: open review items with a transaction there, pending transactions (left out),
-   `unknown` status (counted), and posted transactions with no posting date (counted by transaction
-   date). Types, transfers and classifications do not enter it.
-5. **Agreement is evidence, not coverage** (as D-024): it never declares coverage, settles a review
-   item or changes any total. A difference is shown, never absorbed into an adjustment.
-6. **Monthly reports** use D-013: a transaction's month is its effective transaction date, else its
-   effective posting date, and the report counts how many used each. One line per month, for the
-   ledger or one account: net account movement and D-056's five groups, adding to it as in T1.
-   Transactions with neither date go on a `no date` line, so the months and that line add to
-   `totals` exactly. `totals` itself is unchanged.
-7. **Month disclosures,** per month: accounts whose complete coverage on the transaction basis spans
-   the whole month, and those it does not; open review items with a transaction dated in the month;
-   and transactions with an unsettled correction, classification, match or one-sided transfer. A
-   matched transfer whose sides fall in different months counts in each side's month, so a month's
-   ledger movement can be non-zero from it, disclosed by count.
-8. **The benchmark** (M4.4) builds 100,000 transactions directly, as `--income` does, over 60 months
-   and at least four accounts, with at least 20,000 matches so more than 32,766 matched sides reach
-   M4.1's queries, plus one-sided transfers, classifications, coverage intervals and monthly balance
-   observations. It measures `totals`, `report monthly`, `balance check`, one classification (which
-   rewrites every match outcome) and one import, and prints the counts it reached, so a shape that
-   misses a cost shows it. Targets are provisional, as D-034: below two seconds for each report
-   (PRD §20) on the documented machine, never test assertions. A target missed is reported with the
-   cost behind it, and a redesign is its own decision.
-9. **Privacy:** observations hold amounts and dates only, with no free text, and are shown escaped.
+1. **A ledger is synthetic or real, fixed at `init`.** Migration 0017 adds `real_ledger`, holding
+   one row on a real ledger and none on a synthetic one. Triggers refuse the row in a ledger holding
+   an account or an import run, and any change or removal of it. Existing ledgers and every `init`
+   without `--real` are synthetic and behave exactly as now, so every existing test, token and
+   output is unchanged. Only a real ledger runs the gates below, on every open, read-only commands
+   included. A synthetic ledger is never promoted: real data starts in a new
+   real ledger.
+2. **A real ledger's location** is refused, naming the rule, when the database or its directory:
+   does not exist yet (the folder); is inside any git work tree, this repository included (a
+   `.git` in it or any parent); is inside a known synced folder (`~/Library/Mobile Documents`,
+   `~/Library/CloudStorage`, `~/Dropbox`); is reached through a symbolic link at any step; is not
+   owned by the user; or grants any group or other permission, so `0700` and `0600` pass. It checks
+   rather than repairs: a wrong mode is refused with the `chmod` to run, never changed silently
+   (fail fast). Files a real ledger imports are refused from inside a git work tree too.
+3. **Encryption by an encrypted APFS volume, not SQLCipher (D-002).** The owner creates an
+   encrypted disk image with Disk Utility or `hdiutil`, and keeps its password themselves, not in
+   the login Keychain (corrected by the owner on 2026-11-08).
+   The application holds no key, password or secret, so PRD §19's "secrets kept out of source code
+   and ordinary configuration" holds by having none, and no dependency is added (D-020). On every
+   open, a real ledger's directory must be on a volume that `diskutil info -plist` reports as
+   encrypted, read with `plistlib`. An unknown answer, a missing key or a failed probe refuses
+   (fail closed). Tests replace the probe, so the suite never mounts a volume. One walkthrough on
+   a real encrypted image is the owner's, or needs their approval, since mounting writes outside
+   the repository.
 
-**Not in M4,** each left visible rather than guessed: net worth (point B), statement balances read
-from documents (point A), available balances including pending, a projected current balance,
-storage reporting by kind (backups arrive in M5), and F3's merge-heavy benchmark, which stays in
-the backlog.
+   **Amended by the owner on 2026-11-08, approving M5.2.** FileVault does not satisfy point A. The
+   probe requires a mounted disk image that is not the startup volume, as well as encryption, and
+   a ledger on the FileVault-encrypted startup volume is refused. The real ledger lives in a `0700`
+   folder inside the mounted volume, never at its root. M5.5's checklist moves the owner's
+   statements into the image.
+
+   **Amended again by the owner on 2026-11-09, after M5.2's review.** An image encrypted as a file
+   (`hdiutil create -encryption`) is accepted too, though diskutil reports its APFS volume
+   unencrypted: `hdiutil info -plist` must show exactly one attached image backing the volume's
+   device at its mount point, and that image must report itself encrypted. hdiutil joins diskutil
+   as the second outside call, and point 9 allows both.
+4. **Caches stay on that volume.** A real ledger runs with `PRAGMA temp_store = MEMORY`, so SQLite
+   writes no sort or index spill to the system temp folder. Its rollback journal sits beside the
+   database, and a test shows it gets `0600`. The application writes no other cache, and no log
+   (D-037).
+5. **Originals are archived by copying on import (D-017),** for a real ledger only, into
+   `originals/` beside the database, named by the document's SHA-256, written to a temporary name,
+   synced, renamed into place and set `0400`. Identity still comes from content and ledger
+   records, never the location. The copy is made before the import commits, and a failed copy
+   fails the file (`archive_failed`) with nothing kept. A copy left by a rolled-back import is
+   harmless, since its name is its content, and `pf storage` counts it as not referenced.
+   `pf archive verify` rehashes every original and lists missing, altered and unreferenced ones.
+   Nothing is ever deleted (PRD §19, "until explicit deletion"), and no deletion command is built.
+6. **`pf storage`** reports software, database (with its journal), originals and backups apart
+   (PRD §20), in bytes and file counts. Backups are counted only for destinations recorded in the
+   ledger by `backup create`.
+7. **A backup is a new directory,** never an overwrite: the ledger copied with SQLite's online
+   backup API (`Connection.backup`), every referenced original, and a `manifest.json` holding each
+   file's SHA-256 and size, the schema version, the code version and a logical digest: every
+   table's rows in primary-key order, hashed. The destination passes recommendation 2's and 3's
+   checks and must not be on the ledger's own volume, so one lost disk is not both copies. A
+   backup holds the whole ledger, so records, rules fingerprints, decisions, corrections,
+   classifications, matches and observations are all in it, and goals will be once they exist.
+8. **Restore never overwrites.** `pf backup restore` writes to a new path that passes every gate,
+   then checks the manifest's hashes, `PRAGMA integrity_check` and `foreign_key_check`, the schema
+   version against the code (as `open_ledger`), and the logical digest, and refuses on any
+   difference with nothing left behind. `pf backup verify` runs the same checks without
+   restoring. **The restore test** compares every report, list and token of the restored ledger
+   with the original's, byte for byte, on generated ledgers, and every original by hash.
+9. **No network, and it is shown.** A test reads every module under `src/` and refuses an import
+   of `socket`, `ssl`, `http`, `urllib`, `ftplib`, `smtplib` or `subprocess` outside the
+   `diskutil` and `hdiutil` calls in `db/volume_probes.py` (point 3, as amended). The existing socket guard stays. The no-network and dependency behaviour is
+   written down once, in status.md.
+10. **Readiness is a checklist, not code.** M5.5 writes `docs/real-data-readiness.md`: the steps
+    the owner takes before the first real document (create the encrypted image, `init --real` on
+    it, a backup to a second encrypted volume and a restore of it, `archive verify`), each with the
+    command and its expected output. M6 starts only once the owner has run it.
+
+**Not in M5,** each left visible rather than guessed: real layouts (M6), deleting originals,
+scheduled or rotated backups, backups to a network or cloud service, a key or password the
+application manages, encrypting a synthetic ledger, other operating systems, F2's timestamp marker
+(needed only before a UI or export shows legacy timestamps), and the security proposal (point E).
 
 **For the owner's decision, with the lead engineer's recommendation first:**
 
-- **A. Manual observations only.** No invented layout carries a balance, and PRD §5's extraction is
-  planned when a real layout shows one (M6, M7). Alternatively M4.2 adds balance metadata lines to
-  an invented layout now, which builds before a real layout needs it.
-- **B. Net worth waits.** Accounts have no parent or subaccount relation, so PRD §17's rule against
-  counting an aggregate loan twice cannot be enforced yet. Alternatively an M4.5 sums the latest
-  observations with a mixed-date warning, and the double-counting rule is left to the person.
-- **C. `json_each` for M4.1.** One parameter, no new dependency, already in SQLite 3.45.3.
-  Alternatively chunk the lists at 32,766, which keeps plain `IN` lists but repeats each query.
-- **D. Month coverage on the transaction basis only,** because D-013 dates months by transaction
-  date and posting-basis coverage misses a transaction dated late in a month and posted the next.
-  Alternatively either basis counts, as D-055, with the edge disclosed.
-- **E. Posted balances only.** Alternatively observations also state an available balance with
-  pending included, which no current layout shows.
+- **A. An encrypted APFS volume.** No dependency, no key in the application, and the gate is
+  checkable. Its limit: while mounted, anything running as the user can read it, as with any file.
+  Alternatively SQLCipher, which encrypts the file itself but adds a native dependency, a key the
+  application must obtain, and still leaves originals and backups to encrypt separately.
+- **B. A real or synthetic ledger fixed at `init`,** so tests and walkthroughs stay as they are.
+  Alternatively every ledger passes the gates, with tests replacing the checks, which leaves
+  `build/` walkthroughs refused.
+- **C. Archiving inside import,** so no real document is kept without its original.
+  Alternatively a separate `pf archive add`, which can be forgotten.
+- **D. A directory backup with a manifest.** Plain files, checked by hash. Alternatively one
+  `zipfile` archive, which is one file to move but must be unpacked to check.
+- **E. The security proposal stays a separate owner action.** M5 does not apply it (D-025, and
+  this session's "no security changes"). The readiness checklist asks the owner to decide on it
+  and, if applied, to run its own verification table. The primary control is unchanged: real data
+  stays outside this workspace (D-019).
+- **F. A tripwire, recommended against.** A real ledger could refuse to open when `CLAUDECODE` is
+  set in the environment, which Claude Code sets in its shells. It stops an accident only, is
+  trivially bypassed, and may be read as a control it is not. Recommended against, unless the
+  owner wants it as a reminder.
 
-**How M4.1 was implemented,** where recommendation 1 left a choice. Accepted by the owner as built
-on 2026-11-08:
+**Inputs needed from the owner before M5.2 and M5.4 are built** (PRD §22): the macOS version, the
+data destination and the backup destination, both on encrypted volumes the owner creates.
 
-- `db/id_lists.py` holds `ids_as_json_array`. It refuses an ID that is not a string, because
-  `json_each` would read a number as an integer that matches no TEXT ID, silently.
-- The query plans are unchanged: `transaction_facts` still looks each ID up by primary key, and the
-  import summary queries still scan `transaction_source`, as before.
-- L3's write uses 32,767 one-sided transfers rather than matches. Inserting a match side runs
-  `transfer_match_side_two_accounts`, whose lookup SQLite plans by `account_id`, so building many
-  matches directly is quadratic in an account's sides (about 37 seconds for 16,384 matches). Each
-  person's match pays one such scan. That is recorded in [status.md](status.md), and M4.4's shape
-  pays it once, at build time.
+**How M5.1 was implemented,** where recommendations 1 and 2 left a choice. Approved to build by the
+owner on 2026-11-08, built the same day, and accepted as built:
 
-**How M4.2 was implemented,** where recommendations 2 to 5 left a choice. Accepted by the owner as built
-on 2026-11-08:
+- The mark is the presence of `real_ledger`'s one row, with no kind column to keep consistent.
+  `init --real` checks the location, creates the ledger as before, then writes the row. A failure
+  between the two leaves an empty synthetic ledger, which a repeat `init --real` refuses to
+  overwrite, as `init` always has.
+- The link rule compares the absolute path with the resolved one, so a link anywhere on the way,
+  the database itself included, refuses. macOS's `/tmp` and `/var` are links, so no real ledger
+  lives under them.
+- `open_ledger` and `migrate`, the only two ways a command opens a ledger, check it before the
+  schema version, so an unsafe ledger is refused before anything else is said about it.
+- Privacy is no group or other permission bit, not an exact mode, and the refusal names the
+  `chmod` that fixes it. Ownership compares with the effective user.
+- An import checks every file before importing any, so a refusal imports nothing. The search for
+  `.git` follows links.
+- **Not detected:** iCloud's Desktop and Documents sync makes `~/Desktop` and `~/Documents` synced
+  with no folder from the list in the path, and the path alone cannot tell. M5.5's checklist asks
+  the owner to rule it out.
+- pytest's temporary folder can sit inside this repository, a git work tree, so the tests treat a
+  work tree found above their own folder as absent and still find one made inside it.
 
-- Every transaction, pending ones too, is placed on its effective posting date, else its effective
-  transaction date (D-049). That date decides the interval for activity and for every disclosure,
-  including open review items. An interval runs after the earlier observation's day through the
-  later one's, and coverage is checked over those days.
-- `unknown` status and no posting date are disclosed within the activity, so one transaction can
-  be in both lines.
-- `balance list` shows each active observation's token, since D-057 names no `balance show`. The
-  token `b1` covers the observation's day and balance and those of the active observations either
-  side of it, whose intervals undoing it joins. It names no generated ID and reads no transaction,
-  so undo needs no current account.
-- A trigger also enforces one active observation per account and day. An amount owed whose
-  negation leaves the INTEGER range is refused as an invalid amount.
-- For a card or loan, `differs by` is in owed terms: observed owed less expected owed.
-- Beyond recommendation 4's list, `balance check` also discloses the account's unresolved records,
-  which are no transaction, so no interval counts them.
-- The "every day inside a span" test moved to `spans_cover_every_day` in
-  `reconcile/coverage_in_effect.py`, shared with D-055's coverage window, its second use.
+**How M5.2 was implemented,** under point 3 as amended. Approved to build by the owner on
+2026-11-08, built the same day on synthetic data, and accepted as built on 2026-11-09. The second
+amendment followed:
 
-**How M4.3 was implemented,** where recommendations 6 and 7 left a choice. Approved to build by
-the owner on 2026-11-08, built the same day, and accepted as built:
-
-- `pf report monthly` is read-only, needs no migration and changes no token. `totals` is unchanged.
-  D-056's five groups are tallied by `IncomeAndSpendingTally` in `reports/totals.py`, which
-  `income_and_spending` and the monthly report share, its second use.
-- **No `no date` line.** Migration 0001 refuses a transaction with neither date, and no correction
-  clears one, so that line would always be empty. A transaction without either date stops the
-  report with an internal error instead, as T10 does. G1's "or `no date`" holds trivially.
-- Without a range, the months run from the first month holding a transaction to the last, empty
-  months between included, so a gap shows. With `--from` or `--to`, every month of the range is
-  shown, a missing end defaulting to the data's, and transactions in months outside it are
-  disclosed by count and amount, so the report still adds to `totals`.
-- Pending transactions count, as in `totals`, and each month says how many.
-- Coverage lists every registered account for the ledger, including one with no documents, as
-  covered or not covered for each month.
-- An unsettled match or one-sided transfer names no transaction, so it is disclosed in the month of
-  the current transactions holding the records it binds. Each disclosure counts transactions.
-- A matched side counts as crossing months when its other side, in any account, is dated in
-  another month. Only the sides in the report's scope are counted, in the months shown.
-- Unresolved records and accounts not reconciled under the current rules are disclosed once, for
-  the whole report.
-
-**How M4.4 was implemented,** where recommendation 8 left a choice. Approved to build by the owner
-on 2026-11-08, built the same day and awaiting acceptance. Figures are in
-[benchmarks.md](benchmarks.md):
-
-- `measure_reconciliation.py --scale` imports one file per account and month, each declaring
-  complete coverage of its month, then writes types, matches, one-sided transfers and observations
-  directly, as `--income` does. The four accounts are checking, savings, a card and a loan, with an
-  investment account, holding no documents, as the one-sided counterpart.
-- The 20,000 matches run on four routes, so no account holds more than 10,000 sides. Inserting a
-  side scans its account's sides (M4.1), and spreading them keeps the build to about 170s.
-- Coverage is on the transaction basis for checking and savings and the posting basis for the card
-  and loan, so both `report monthly` and `balance check` meet covered and not-covered cases.
-- Reports are timed through the CLI with output discarded. The classification and the import are
-  timed through their functions, and the rewrite of every match outcome inside each is timed apart.
-- Rows are named by external IDs, and the classified transaction by one, never by generated IDs.
-- Z3 ran on a copy of the source in `build/` with M4.1's source change reversed. No commit holds
-  that code.
-- Every target met, so nothing is redesigned. Writes have no target.
+- **The keys** come from real `diskutil info -plist` output on macOS Golden Gate 27.2: the startup
+  Data volume, run on this repository's volume, and the owner's empty image, with their approval.
+  A real ledger needs `MountPoint` equal to its folder's mount point, `BusProtocol` `Disk Image`
+  (the startup volume reports `Apple Fabric`), `FilesystemType` `apfs`, and `Encryption` and
+  `GlobalPermissionsEnabled` each the boolean `true`. A non-zero exit, an `Error` key, output that
+  is not a plist dictionary, or a missing key or other type refuses. Messages name the mount point,
+  never a value diskutil returned.
+- diskutil refuses a folder ("Could not find disk"), so the probe walks up to the nearest mount
+  point and asks about that. A ledger whose folder is the mount point is refused before asking.
+  Under the startup Data volume the walk reaches `/` through its firmlinks, which is refused as
+  not a disk image either way.
+- **Encryption of the image file alone is not reported by diskutil.** The owner's image, made with
+  `hdiutil create -encryption AES-256`, holds an APFS volume reporting `Encryption` false, while
+  `hdiutil isencrypted` says YES. Under the second amendment, a volume diskutil does not report
+  encrypted is looked up in `hdiutil info -plist` (keys from a real run, with the owner's
+  approval): `images`, each with `system-entities` holding `dev-entry` and `mount-point`, and
+  `image-encrypted`. The entity must be `/dev/` plus diskutil's `DeviceIdentifier`, at the same
+  mount point, in exactly one image, and `image-encrypted` the boolean `true`. hdiutil is asked
+  only when diskutil does not report encryption.
+- **Ownership on a mounted image must be checked on the real image.** A new image ignored
+  ownership (`GlobalPermissionsEnabled` false), which makes M5.1's owner and mode checks
+  meaningless, so the probe refuses it and names `sudo diskutil enableOwnership`. The rule was
+  added with the owner after the real image showed it. On 2026-11-08 the owner enabled ownership,
+  and the ledger folder was shown `drwx------`, owned by the owner.
+- `db/volume_probes.py` holds the application's only subprocess calls: `/usr/sbin/diskutil` and
+  `/usr/bin/hdiutil` by their full paths, through one runner with a 30-second timeout, and failing
+  to run either refuses. Tests replace both with recordings in
+  `tests/fixtures/synthetic/volume_probes`, so the suite never runs them or mounts a volume.
+- `temp_store = MEMORY` is set by the same check that every open of a real ledger runs, before
+  `migrate` migrates. `init --real` migrates its empty ledger before the mark, so it holds nothing
+  to spill. SQLite unlinks temporary files as it opens them, so the test reads the temp folder's
+  modification time in a child process, since SQLite reads `SQLITE_TMPDIR` once per process. The
+  same sort on a synthetic ledger is the control that shows it spills.
+- **Point 4's journal needs no code.** SQLite gives a journal its database's mode whatever the
+  umask, and a test shows `0600` beside the database with the umask cleared.
+- **Not detected:** whether the image's password is strong or where it is kept, and where the
+  image file itself lives. It is not under `/Volumes`, so the synced-folder rule does not see it.

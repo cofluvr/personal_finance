@@ -67,6 +67,8 @@ TRANSFER_TABLES = ("transfer_match_effect", "transfer_match_event", "transfer_ma
 ONE_SIDED_TABLES = ("one_sided_transfer_effect", "one_sided_transfer_event",
                     "one_sided_transfer_record", "one_sided_transfer")
 BALANCE_TABLES = ("balance_observation_event", "balance_observation")
+# Empty on every synthetic ledger, so set-backs drop it and dumps leave it out (D-058).
+REAL_LEDGER_TABLES = ("real_ledger",)
 
 
 def declared(start, end):
