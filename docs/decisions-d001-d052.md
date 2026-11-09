@@ -1,6 +1,6 @@
-# Decision Log: Full Text of D-001 to D-058
+# Decision Log: Full Text of D-001 to D-059
 
-Moved out of [decisions.md](decisions.md) on 2026-11-08, unchanged, D-053 once D-054 was written, and D-058 once D-059 was. The index, the rules in brief and
+Moved out of [decisions.md](decisions.md) on 2026-11-08, unchanged, D-053 once D-054 was written, D-058 once D-059 was, and D-059 once D-060 was. The index, the rules in brief and
 the newest decisions are in decisions.md. Status values are defined there. Read a decision here
 when a task touches it: search for its heading, such as `## D-049`.
 
@@ -2366,3 +2366,83 @@ was left open, and it was built the same day on synthetic data, and accepted as 
   enableOwnership`) were not run. Each is followed in the checklist by a `pf` step that checks it.
 - **Point F's tripwire** is not built, as recommended. The security proposal stays unapplied
   (point E): the checklist asks the owner.
+
+## D-059 M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6
+
+Directed by the owner on 2026-11-09, to be built unattended overnight with each slice gated on the
+full suite and committed locally: the sequence Capital One (card and bank), U.S. Bank, American
+Express, then BFSFCU; `--account` stays required (D-015); fees as their own transactions linked to
+a parent or batch reference, and split transfers as individual transfers sharing a transfer group;
+identity by hashing account, date, amount, raw description and position in the file, so identical
+rows in one file stay distinct; fixtures keeping each format's structure and inventing every value.
+Points A to F are where a direction meets an earlier rule. Each says what was built and why, for
+the owner's review. Acceptance tests, J1 to J8 for every layout, are in [plan.md](plan.md).
+
+**Slices:**
+
+| Slice | Scope |
+|---|---|
+| M6.1 | Capital One: `capital_one_card_v1` and `capital_one_bank_v1` |
+| M6.2 | U.S. Bank: `us_bank_v1`, its CSV activity list. Its PDF is M7 (point D) |
+| M6.3 | American Express: `amex_card_v1` |
+| M6.4 | BFSFCU: waits for a redacted header and two invented rows (point E) |
+
+**Points for the owner's review:**
+
+- **A. No sample reached the repository, so every layout is unverified.** No session may read the
+  owner's statements (D-019), and none was supplied redacted. Each layout is written from the lead
+  engineer's knowledge of the institution's export, and its fixtures in
+  `tests/fixtures/synthetic/statements/` are wholly invented, so they sit under the existing
+  `.gitignore` exemption rather than a new one in `tests/fixtures/statements/`, which would loosen a
+  privacy control. A layout's header must match exactly, so a different column set fails the file
+  as `header_mismatch` and imports nothing. What a header cannot show, the sign of money, which
+  date a column holds and whether pending rows appear, is checked within a row where the export
+  allows it and otherwise stated as an assumption in [layouts.md](layouts.md). **A layout stays
+  unverified until point F passes on one real file of it.**
+- **B. Position does not enter cross-document identity.** Hashing a row's position in its file
+  concretely contradicts D-026 and M1's required case that overlapping files do not double-count:
+  an export starting one day earlier shifts every position, so the same transaction gets another
+  hash, and an identifier that differs establishes distinctness, counting it twice. What the
+  direction asks within one file already holds: every row is its own source record, kept with its
+  document, row number, raw fingerprint and occurrence, and identical rows in one file are separate
+  transactions. Each layout declares no external ID guarantee. A guarantee needs two overlapping
+  real exports to show it, and a new layout version (D-026).
+- **C. Fees and split transfers are recorded, not built.** None of these exports carries a parent
+  or batch reference, so nothing would fill the link (working principle 1). Each fee row already
+  imports as its own transaction, classifiable as `fee` (D-053) and counted as spending (D-056). A
+  transfer group crosses D-054's one-to-one match and needs a migration, so it is planned as its
+  own slice, on the owner's model, when a real export shows one.
+- **D. U.S. Bank's PDF is M7.** M6.2 is the CSV activity list. PDF parsing and CSV-to-PDF
+  matching stay in M7, as planned.
+- **E. BFSFCU is not built.** Its export format is not known to the lead engineer, and inventing
+  one would test a guess against itself. M6.4 starts from the header row of a real export and two
+  invented rows in its format, supplied by the owner. PRD §5 names three institutions, and BFSFCU is
+  the owner's addition.
+- **F. Verifying a layout on a real file, the owner's step.** Not into the real ledger, since
+  imports are never deleted: `init --real` a second ledger in a new `0700` folder on
+  `/Volumes/CommonCents`, import one real statement period with `--declare-complete-coverage`,
+  record its statement's opening and closing balances with `balance record`, and run `balance
+  check`. Agreement to the cent verifies the sign, the dates and completeness. A difference, or
+  any unresolved row, means the layout is wrong: the folder is removed, and the layout corrected
+  under a new version before any real import.
+
+**The owner's review, on 2026-11-09.** Points A to F approved as written, and M6.1 to M6.3 found
+sound. Points A to D are resolved. Point E stays open: M6.4 is approved to build once the header
+and two rows of a BFSFCU export reach this repository, which they had not when this was recorded.
+Point F is the owner's to run, with the steps in [layout-verification.md](layout-verification.md).
+The owner supplied a BFSFCU export's header and four rows the same day, and M6.4 was built from their
+format, with every value invented: `bfsfcu_v1`, the one layout that states its status, so it is the
+exception to the common rule below.
+
+**Formats confirmed, and M6 complete, on 2026-11-09.** The owner supplied the header and three rows of
+a Capital One card export and of an American Express export. Both match `capital_one_card_v1` and
+`amex_card_v1` as built: columns, date formats and signs, including Amex's positive charge, so no
+parser changed. Both list newest first, and their fixtures were reordered to match, keeping every
+value invented. The owner recorded all four slices as complete. Still not confirmed from a real
+export: the formats of `capital_one_bank_v1` and `us_bank_v1`. Point F still runs for every layout
+before its first real import.
+
+**Layout rules common to M6:** coverage by user declaration only; settlement status `unknown`,
+since no export states it, which D-006 never reads as `posted` and `balance check` discloses; a
+column named only `Date` is the posting date, as in `synthetic_card_v1`; an institution's
+category, card number and running balance stay in the raw cells, unread (D-014, D-057).

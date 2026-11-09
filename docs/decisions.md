@@ -11,7 +11,7 @@ Status values:
 
 Status of the code behind each decision is in [status.md](status.md).
 
-The full text of D-001 to D-058 is in [decisions-d001-d052.md](decisions-d001-d052.md). This file
+The full text of D-001 to D-059 is in [decisions-d001-d052.md](decisions-d001-d052.md). This file
 holds the index, the rules in brief, and the newest decisions in full, once there are any. When a
 decision here is accepted and the next one is written, move its full text to the end of that file
 and keep its index line.
@@ -79,6 +79,7 @@ and keep its index line.
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
 | D-058 | M5 plan: the real-data gate — Approved, implemented and accepted in M5 |
 | D-059 | M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6 |
+| D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Proposed |
 
 ## Rules in brief
 
@@ -178,82 +179,179 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-059 M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6
+## D-060 M7 plan: text PDF statements, and CSV and PDF counting once — Proposed
 
-Directed by the owner on 2026-11-09, to be built unattended overnight with each slice gated on the
-full suite and committed locally: the sequence Capital One (card and bank), U.S. Bank, American
-Express, then BFSFCU; `--account` stays required (D-015); fees as their own transactions linked to
-a parent or batch reference, and split transfers as individual transfers sharing a transfer group;
-identity by hashing account, date, amount, raw description and position in the file, so identical
-rows in one file stay distinct; fixtures keeping each format's structure and inventing every value.
-Points A to F are where a direction meets an earlier rule. Each says what was built and why, for
-the owner's review. Acceptance tests, J1 to J8 for every layout, are in [plan.md](plan.md).
+Proposed on 2026-11-09, for the owner's review. Delivers plan.md's M7 row (text PDFs and CSV-to-PDF
+matching, "same activity in both formats counts once") against PRD-backend §5 (statements with
+selectable text, extracting "account metadata, transactions, and available balances", balances
+never fabricated) and §21 ("overlapping CSV/PDF records count once when confidently matched").
+Changes none of D-042 to D-059. One fallback in point 4 would amend D-006, and is proposed only if a
+format sample needs it. Point 1 adds the first runtime dependency, a D-020 decision for the owner.
+Plan only: nothing is built until it is approved, and then each slice separately. Acceptance tests,
+D1 to D14 and I1 to I11, are in [plan.md](plan.md).
 
 **Slices:**
 
 | Slice | Scope |
 |---|---|
-| M6.1 | Capital One: `capital_one_card_v1` and `capital_one_bank_v1` |
-| M6.2 | U.S. Bank: `us_bank_v1`, its CSV activity list. Its PDF is M7 (point D) |
-| M6.3 | American Express: `amex_card_v1` |
-| M6.4 | BFSFCU: waits for a redacted header and two invented rows (point E) |
+| M7.1 | Reading a PDF's text: the dependency, `ingest/pdf_reader.py`, `pf pdf text`, W1 extended (point 1). Needs the owner's D-020 approval and one network use, for the install |
+| M7.2 | U.S. Bank's statement, `us_bank_statement_v1`: the first PDF layout, its stated period and balances (point 3), its in-document check (point 5), migration 0019. Waits for the owner's format sample (point 2) |
+| M7.3 | U.S. Bank's CSV and PDF counting once (point 4) |
+| M7.4 | Several accounts in one statement. Built only if U.S. Bank's statement holds them (point 3) |
+| M7.5 | Capital One's card statement, `capital_one_card_statement_v1`, matched with `capital_one_card_v1` |
 
-**Points for the owner's review:**
+**Recommendations, each with its alternatives:**
 
-- **A. No sample reached the repository, so every layout is unverified.** No session may read the
-  owner's statements (D-019), and none was supplied redacted. Each layout is written from the lead
-  engineer's knowledge of the institution's export, and its fixtures in
-  `tests/fixtures/synthetic/statements/` are wholly invented, so they sit under the existing
-  `.gitignore` exemption rather than a new one in `tests/fixtures/statements/`, which would loosen a
-  privacy control. A layout's header must match exactly, so a different column set fails the file
-  as `header_mismatch` and imports nothing. What a header cannot show, the sign of money, which
-  date a column holds and whether pending rows appear, is checked within a row where the export
-  allows it and otherwise stated as an assumption in [layouts.md](layouts.md). **A layout stays
-  unverified until point F passes on one real file of it.**
-- **B. Position does not enter cross-document identity.** Hashing a row's position in its file
-  concretely contradicts D-026 and M1's required case that overlapping files do not double-count:
-  an export starting one day earlier shifts every position, so the same transaction gets another
-  hash, and an identifier that differs establishes distinctness, counting it twice. What the
-  direction asks within one file already holds: every row is its own source record, kept with its
-  document, row number, raw fingerprint and occurrence, and identical rows in one file are separate
-  transactions. Each layout declares no external ID guarantee. A guarantee needs two overlapping
-  real exports to show it, and a new layout version (D-026).
-- **C. Fees and split transfers are recorded, not built.** None of these exports carries a parent
-  or batch reference, so nothing would fill the link (working principle 1). Each fee row already
-  imports as its own transaction, classifiable as `fee` (D-053) and counted as spending (D-056). A
-  transfer group crosses D-054's one-to-one match and needs a migration, so it is planned as its
-  own slice, on the owner's model, when a real export shows one.
-- **D. U.S. Bank's PDF is M7.** M6.2 is the CSV activity list. PDF parsing and CSV-to-PDF
-  matching stay in M7, as planned.
-- **E. BFSFCU is not built.** Its export format is not known to the lead engineer, and inventing
-  one would test a guess against itself. M6.4 starts from the header row of a real export and two
-  invented rows in its format, supplied by the owner. PRD §5 names three institutions, and BFSFCU is
-  the owner's addition.
-- **F. Verifying a layout on a real file, the owner's step.** Not into the real ledger, since
-  imports are never deleted: `init --real` a second ledger in a new `0700` folder on
-  `/Volumes/CommonCents`, import one real statement period with `--declare-complete-coverage`,
-  record its statement's opening and closing balances with `balance record`, and run `balance
-  check`. Agreement to the cent verifies the sign, the dates and completeness. A difference, or
-  any unresolved row, means the layout is wrong: the folder is removed, and the layout corrected
-  under a new version before any real import.
+1. **Text extraction: pypdf, pinned, as the first runtime dependency.**
+   - pypdf is pure Python, BSD-licensed, with no required dependency on Python 3.12, each to be
+     confirmed from its metadata at install. A release at least two weeks old, pinned by version and
+     hash in a new `requirements.txt`, installed with `--require-hashes`, and declared in
+     `pyproject.toml`. One network use, for that install.
+   - Imported by one module, `ingest/pdf_reader.py`, which turns bytes into pages of text lines in
+     one fixed extraction mode: pypdf's layout mode where the pinned release offers it, since
+     statements separate money in and out by column. Nothing else sees pypdf, and its errors are
+     caught at that one boundary.
+   - W1 is extended to parse the installed pypdf modules with the same refusals. A release that
+     imports a network module, `subprocess` or `ctypes`, or runs a program, fails the suite and is
+     not adopted.
+   - The extractor's version joins the stored parser version (`1+pypdf-<version>`), so an upgrade is
+     a new interpretation of new documents, never a silent rereading of stored ones (D-026). The
+     same bytes are still skipped on reimport (D-022).
+   - Refused, each as a file failure: an encrypted PDF (`encrypted_pdf`, since AES needs a further
+     cryptography dependency), one with no text layer (`no_text_layer`, a scan), and one the library
+     cannot read (`unreadable_pdf`). If U.S. Bank's statement is encrypted (point 2c), this point
+     returns to the owner before M7.1.
 
-**The owner's review, on 2026-11-09.** Points A to F approved as written, and M6.1 to M6.3 found
-sound. Points A to D are resolved. Point E stays open: M6.4 is approved to build once the header
-and two rows of a BFSFCU export reach this repository, which they had not when this was recorded.
-Point F is the owner's to run, with the steps in [layout-verification.md](layout-verification.md).
-The owner supplied a BFSFCU export's header and four rows the same day, and M6.4 was built from their
-format, with every value invented: `bfsfcu_v1`, the one layout that states its status, so it is the
-exception to the common rule below.
+   Alternatives: **a standard-library reader** (zlib for streams, and its own parsing of objects,
+   content streams, font encodings and character maps) needs no dependency, but is on the order of a
+   thousand lines (principle 5) and would be designed blind: a statement's fonts are internal to the
+   real file, which no session may read (D-019), and a wrong character map garbles text without
+   failing. Recommended only if the owner refuses any dependency. **The owner converting outside
+   the app** (Preview's export as text) needs no PDF code, but adds a manual step per statement,
+   archives the text rather than the statement (D-017), and leaves line order to macOS.
+   **pdfminer.six** brings further dependencies. **pdftotext**, or any program, is refused by W1
+   (D-058 point 9), and macOS's PDFKit needs PyObjC.
 
-**Formats confirmed, and M6 complete, on 2026-11-09.** The owner supplied the header and three rows of
-a Capital One card export and of an American Express export. Both match `capital_one_card_v1` and
-`amex_card_v1` as built: columns, date formats and signs, including Amex's positive charge, so no
-parser changed. Both list newest first, and their fixtures were reordered to match, keeping every
-value invented. The owner recorded all four slices as complete. Still not confirmed from a real
-export: the formats of `capital_one_bank_v1` and `us_bank_v1`. Point F still runs for every layout
-before its first real import.
+2. **Layouts, in order: U.S. Bank's statement, then Capital One's card statement.** U.S. Bank first,
+   as promised (D-059 point D), paired with `us_bank_v1`. Capital One's card second, because its CSV
+   format is confirmed from a real export, so M7.5 tests matching against a known format. Amex,
+   Capital One bank and BFSFCU statements are each a later slice on the same pattern, on request.
+   What the owner supplies for each, format and structure only, every value invented, as D-059
+   point E did:
+   - a. **The lines `bin/pf pdf text STATEMENT.pdf` prints** (M7.1) for one statement, run by the
+     owner on the image. It writes nothing and opens no ledger. From the account summary to the end
+     of the last transaction section, plus one repeated page header and footer. Keep word for word
+     every heading, column heading and label (the opening and closing balance labels, section
+     names, subtotals), the date format, how money out is shown (a minus sign, its own column, a
+     trailing `-`, parentheses), and how a long description wraps. Replace every name, address,
+     account number beyond its last four digits, amount, date and description with invented ones of
+     the same shape.
+   - b. Whether the statement holds more than one account, and if so the lines where the next
+     begins.
+   - c. Whether it asks for a password, or Preview shows it as secured. **This one is needed before
+     M7.1.**
+   - d. Two or three transactions as they appear in both the CSV export and the PDF of the same
+     period, values invented, each description's wording pattern kept: prefixes, suffixes,
+     reference numbers, truncation. This decides point 4.
+   - e. For U.S. Bank, the CSV header and a row or two, confirming `us_bank_v1`, as already awaited.
 
-**Layout rules common to M6:** coverage by user declaration only; settlement status `unknown`,
-since no export states it, which D-006 never reads as `posted` and `balance check` discloses; a
-column named only `Date` is the posting date, as in `synthetic_card_v1`; an institution's
-category, card number and running balance stay in the raw cells, unread (D-014, D-057).
+   Each layout is built from that format alone. Its tests read the supplied line structure
+   directly, and a PDF generated in the test from those lines checks the reader. Neither shows that
+   pypdf reads the real file the same way. Point 5's check does, on every import.
+
+3. **What a statement adds, without reopening D-005, D-027 or D-057:**
+   - **The stated period is coverage evidence:** `complete`, `document_metadata`, on the posting
+     basis, as D-005's validated layout metadata, since the layout declares that its period lists
+     every transaction posted in it. Recorded only when point 5's check agrees with no unresolved
+     row, otherwise `partial` with the period, as D-005 asks of a period that does not prove
+     completeness. A statement states no generation date, so under D-027 its closing day is not
+     established: rows on that day stay possible duplicates against a CSV, disclosed. Reading the
+     closing balance as proof of that day would reopen D-027, and is not proposed. A declaration on
+     a PDF is refused as `coverage_conflict`, as for any document stating coverage.
+   - **The opening and closing balances are neither coverage nor observations.** They are document
+     evidence, stored per document and account by migration 0019, append-only, in the ledger's sign
+     convention (a card's owed amount negated, D-057). The import's check and `trace` read them.
+     `derive()`, `balance check` and every token never do. D-057 keeps observations to what a person
+     states, so the owner may still `balance record` them. Making them observations is a later
+     decision.
+   - **Several accounts in one document are neither:** they are structure. D-005 already keeps
+     coverage per account, and each source record carries its account. Until M7.4, a statement
+     listing more than one account fails as `multiple_accounts`, importing nothing. M7.4, only if
+     needed: one import names each section's account by its printed last four digits (`--account
+     NAME --statement-account LAST4`, repeated), every section must be named or the file fails as
+     `unmapped_statement_account`, and each section gets its own coverage and check. Importing the
+     file once per account is not an option, since D-022 rejects the same bytes under another
+     account.
+   - A layout states the account types it fits, since a card's balance runs the other way to a
+     bank's, and another type fails the file as `account_type_mismatch`.
+
+4. **Matching a PDF row to its CSV counterpart:**
+   - **Both sides ID-less, the expected case.** No CSV layout reads an ID (D-059 point B), and a
+     statement prints none. D-006's exact rule applies unchanged: the same dates, amount, folded
+     description and status class, both documents complete on the same basis over the day, inside
+     both effective intervals, not a boundary date, and no unresolved row that could affect the
+     count, paired one-for-one by count. The PDF layout states `posted`, as a statement lists posted
+     activity, and D-006 compares it as compatible with the CSV's `unknown`. `us_bank_v1` reads only
+     the posting date, as a checking statement prints, so the keys align.
+   - **Descriptions.** The layout joins a wrapped description with one space, so `fold` sees the
+     CSV's text wherever the bank prints the same words. If point 2d shows the PDF adds or drops
+     words, exact matching never fires and every overlapping row goes to review: correct, but not
+     counting once. Then, and only then, M7.3 asks the owner to amend D-006: under the same coverage
+     conditions, a CSV row and a PDF row are a confident pair when each is the only row of that
+     account, posting date and amount in its document. Uniqueness makes the pairing unambiguous.
+     Two rows of one amount on one day stay possible duplicates, and similarity still never merges
+     (D-032). Alternative: a description mapping per pair of layouts, which fails silently when a
+     bank changes its wording. Not recommended.
+   - **Dates.** Where two layouts read different dates, such as a card CSV with both against a
+     statement with one, D-006's material-field rule is applied to the exact key: the basis date
+     must be present on both and equal, the other date equal where both have it. Documents of one
+     layout have the same dates present, so existing outcomes are unchanged, which a test shows.
+     Built in M7.5 only if Capital One's statement needs it.
+   - **One side with an ID: D-026's temporary limitation is settled by keeping it.** A row with a
+     validated ID pairs only by ID, and against an ID-less row it can only be a possible duplicate,
+     as `test_an_id_bearing_row_against_an_id_less_row_can_only_be_a_candidate` pins. No real layout
+     reads an ID and none in M7 will, so real data never reaches the case. Letting such a row also
+     pair by count would mix ID pairing and count pairing in one transaction, for no layout that
+     needs it. It becomes D-026's rule, revisited when a real layout gains
+     a guarantee, which needs two overlapping real exports (D-059 point B). Alternative: pair it by
+     the exact rule, treating its ID as absent for that comparison.
+   - **M1's case still holds.** Nothing merges without D-006's evidence, so each row stays its own
+     transaction until confidently matched, and an unmatched overlap is a disclosed possible
+     duplicate, never a lost row. Reimporting a PDF changes nothing (D-022). The CSV and PDF of one
+     period counting once in either order is I1, by A16's comparison, and a CSV export overlapping
+     two statements is I3.
+
+5. **Point F on a PDF layout.** The statement carries its own check, so every PDF import runs it:
+   - **Every line of a transaction section is accounted for:** a transaction, a continuation of one,
+     or a line the layout names (a heading, a page header or footer, a subtotal). Any other line
+     there is an unresolved row, `unrecognized_line`, keeping its text. A line the parser silently
+     skips is a PDF's characteristic failure, so none is skipped.
+   - **The in-document check.** With no unresolved row, the opening balance plus the parsed rows
+     must equal the closing balance to the cent, and any subtotal the layout names must agree. A
+     difference fails the file as `statement_out_of_balance`, importing nothing (principle 3): with
+     every row parsed, a difference means the layout is wrong. With unresolved rows the check is not
+     run, the period is `partial`, and the import says why.
+   - **The owner's step,** added to [layout-verification.md](layout-verification.md) in M7.2: import
+     one real statement into the throwaway ledger. It passes when it imports with complete coverage
+     and no unresolved row, so the check agreed. Then import the CSV export of the same period into
+     the same account, declaring that period: `totals` must be unchanged, with no open review group
+     but closing-day rows. That verifies point 4 on real data. A PDF layout stays unverified until it
+     passes.
+
+6. **Where it is built.** A PDF layout parses a document's lines into rows, the stated period,
+   balances and accounts, beside the CSV layouts. `import_files` chooses the reader by the layout and
+   stores `format = 'pdf'`, which migration 0001 allows. A row's raw cells are its lines of text and
+   its page, so fingerprints and occurrences work as for CSV, and identical rows in one statement
+   stay separate (D-008). A date printed without a year takes the one year that places it in the
+   period. One that places nowhere leaves the row `invalid_date`. New file failures:
+   `encrypted_pdf`, `no_text_layer`, `unreadable_pdf`, `statement_structure_mismatch` (an expected
+   heading or label missing, the PDF's `header_mismatch`), `statement_out_of_balance`,
+   `multiple_accounts`, `account_type_mismatch` and, in M7.4, `unmapped_statement_account`. New
+   unresolved reason: `unrecognized_line`.
+
+**Not in M7:** scanned PDFs and OCR; encrypted PDFs; balances as observations (D-057); the closing
+day as covered (D-027); IDs from PDFs, and ID-bearing rows pairing by count; detecting a layout
+(`--layout` stays required); a PDF holding several periods; statement lines outside the transaction
+sections beyond the balances and the period (rewards, payment due, minimum payment, year-to-date
+totals), which stay unread; investment and loan statements; fee parents and split transfers (D-059
+point C); the local UI (M8).
