@@ -31,8 +31,10 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | **M4 overall** | **Complete and accepted** |
 | M5.1: real ledgers, their location and file permissions | Accepted (D-058) |
 | M5.2: encryption, an encrypted volume checked on every open | Accepted (D-002, D-058) |
-| M5.3: archiving originals, and storage by kind | Built, awaiting review (D-017, D-058) |
-| M5.4 and M5.5 | Planned in D-058, not started |
+| M5.3: archiving originals, and storage by kind | Accepted (D-017, D-058) |
+| M5.4: backup, verification and restore | Accepted (D-058) |
+| M5.5: network and dependency behaviour, and the readiness checklist | Accepted (D-058) |
+| **M5 overall** | **Complete and accepted.** Readiness checklist run by the owner on 2026-11-09 |
 | M6 to M8 | Not started |
 
 ## What exists
@@ -46,14 +48,16 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   them (D-017, D-058).
 - `personal_finance.reports.storage`: software, database, originals and backups storage apart
   (D-058).
+- `personal_finance.db.backups`: backing up a ledger with a manifest and logical digest, checking a
+  backup, and restoring one to a new path (D-058).
 - `personal_finance.db.volume_probes`: the only subprocess calls, `diskutil info -plist` on a mount
   point and `hdiutil info -plist` (D-058).
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
   `0011_coverage_declarations`, `0012_pending_posted_links`, `0013_type_classifications`,
-  `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations` and
-  `0017_real_ledger`,
+  `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations`,
+  `0017_real_ledger` and `0018_backup_records`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
@@ -112,15 +116,35 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `review classifications`, `review classification show`, `review classification undo`,
   `review transfers`, `review transfer match`, `review transfer one-sided`, `review transfer show`,
   `review transfer undo`, `totals`, `report monthly`, `balance record`, `balance list`,
-  `balance check`, `balance undo`, `archive verify`, `storage`, run
+  `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
+  `backup verify`, `backup restore`, run
   through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
 
-No real institution layout is supported. **It must not be used with real financial
-data** (M5 gate). A real ledger's location and encrypted disk image are checked (M5.1, M5.2), and its originals are archived (M5.3), but nothing is
-backed up yet, and the gate stays closed until M5.5's checklist is run. Only candidate items, decision conflicts and automatically merged transactions
+No real institution layout is supported, so no real statement can be imported until M6. The M5
+gate is open: the owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09, and
+real data belongs only in a real ledger on the encrypted image, never in a synthetic one. Only candidate items, decision conflicts and automatically merged transactions
 can be acted on.
+
+## Network and dependencies
+
+Stated here once (D-058 point 9, W2).
+
+- **No network, and no other program but two.** No module under `src/` imports a network module,
+  runs a program or imports dynamically, except `db/volume_probes.py`, which runs
+  `/usr/sbin/diskutil info -plist` and `/usr/bin/hdiutil info -plist`, for a real ledger only,
+  with a 30-second timeout. `tests/unit/test_no_network_imports.py` parses every module and fails
+  on any added use. Every command works with no network connection (PRD §21).
+- **Runtime dependencies: none.** Only Python 3.12's standard library and its SQLite. Nothing is
+  downloaded or sent at run time: no telemetry, no update check and no log (D-037).
+- **Development dependencies:** pytest 9.2.0 and Hypothesis 6.170.14, pinned in
+  `requirements-dev.txt` without hashes, and setuptools `>=68` to build. Installing them is the
+  only step that needs a network, once. A later build can use another setuptools, and an editable
+  install is untested.
+- **The test socket guard** blocks Python sockets in the test process, not subprocesses or native
+  code. The suite never runs the two probes.
+- **Not covered:** what the interpreter, macOS, or tools run outside `pf` do on the network.
 
 ## Acceptance criteria progress
 
@@ -206,8 +230,6 @@ rewriting 20,000 match outcomes (D-057).
   typed, so a file name holding a newline can imitate a line there (noted below for all names).
 - Setup and both entry points have only been verified on this Mac with Python 3.12.6.
   `bin/pf` needs `.venv` at the root of its checkout.
-- Dependencies are pinned without hashes, and setuptools is only bounded as `>=68`, so a
-  later package build can use a different version. An editable install is untested.
 - A file's counts in an import summary describe the moment it was imported. Later files in
   the same run can change them, so only the run summary and the account lines are final.
 - `internal_error` and the unexpected-error message carry no detail by design, so such a
@@ -276,6 +298,10 @@ rewriting 20,000 match outcomes (D-057).
   repeat import with a different declaration still fails with `coverage_conflict`, which names the
   command.
 - Only a real ledger keeps originals. A synthetic one stores row contents and the file's hash only.
+- A backup is taken only when the owner runs `backup create`: nothing is scheduled or rotated, and
+  nothing deletes an old backup. Its manifest is not signed, so it shows accidental change, not a
+  deliberate rewrite of both files and manifest. Two disk images whose files share one disk are not
+  told apart, so such a backup does not survive losing that disk (D-058 point 7, as amended).
 - Two real ledgers in one folder share `originals/`, and each lists the other's originals as not
   referenced. `archive verify` checks content, not modes, and nothing repairs or deletes an
   original. The syncs that make a copy durable are not tested.
@@ -301,8 +327,6 @@ rewriting 20,000 match outcomes (D-057).
   `~/Documents` would sync. The owner confirmed it off on 2026-11-08.
 - A ledger is real or synthetic from `init`. A synthetic ledger is never checked, never promoted,
   and nothing stops real data being put in one: that rests on the owner.
-- The test network guard covers Python sockets in the test process. It does not
-  cover subprocesses or native code.
 - Uppercase extensions such as `.CSV` are ignored only because git sets
   `core.ignorecase` on macOS. On a case-sensitive setup they would not be.
 - Amount parsing accepts a small generic syntax. Trailing minus signs and CR/DR

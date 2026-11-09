@@ -1,12 +1,12 @@
-# Session Handoff: M5.3 Built, Awaiting Review
+# Session Handoff: M5 Complete, M6 Plan Next
 
-For a fresh session. Written 2026-11-09. **M1 to M4 are complete and accepted.** The owner approved
-the M5 plan, D-058 in [decisions.md](decisions.md), with the lead engineer's recommendations,
-including points A to F. **M5.1, real ledgers and their location, and M5.2, encryption, are built
-and accepted,** M5.2 under point 3 as the owner amended it twice. **M5.3, archiving originals and
-storage by kind, is built and awaits the owner's review** ("How M5.3 was implemented" under D-058).
-M5.4 and M5.5 each need their own approval, and M5.4 needs the backup destination. Slices and acceptance criteria are in
-[plan.md](plan.md).
+For a fresh session. Written 2026-11-09. **M1 to M5 are complete and accepted.** M5, the real-data
+gate, is D-058 in [decisions.md](decisions.md), with points 3 and 7 as the owner amended them. The owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09 on `/Volumes/CommonCents`
+and `/Volumes/CommonCentsBackup`, and reported every step verified.
+
+**Next: draft D-059, the M6 plan** (first real statement layouts and their importers, one layout at
+a time, from redacted samples), for the owner's approval before anything of it is built. Milestones
+and criteria are in [plan.md](plan.md).
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -33,12 +33,12 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457` and its docs the commit after it |
-| Latest gating run | Full suite, 2073 passed, exit code 0, on M5.3's docs commit |
+| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance `c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e`, its docs `7a0d446`, M5.5 `4548b12`, its docs `df53e65`, and M5's acceptance the commit after it |
+| Latest gating run | Full suite, 2177 passed, exit code 0, on M5.5's docs `df53e65` |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
-| Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on a separate encrypted drive, chosen in M5.4 (D-058 point 7) |
-| Real ledger's image | `~/CommonCents.sparsebundle`, mounted by the owner only when needed at `/Volumes/CommonCents`, with the ledger folder `/Volumes/CommonCents/ledger` (`0700`, the owner's). It holds the owner's statements: never read, list or search it. Run diskutil, hdiutil or `stat` on it only with the owner's approval each time. Checked 2026-11-09: encrypted as an image file (`image-encrypted` true), its APFS volume not (`Encryption` false), ownership honoured, so the gate accepts it. No `pf` command has run on it |
+| Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
+| Real ledger's image | `~/CommonCents.sparsebundle`, mounted by the owner only when needed at `/Volumes/CommonCents`, with the ledger folder `/Volumes/CommonCents/ledger` (`0700`, the owner's). It holds the owner's statements: never read, list or search it. Run diskutil, hdiutil or `stat` on it only with the owner's approval each time. Checked 2026-11-09: encrypted as an image file (`image-encrypted` true), its APFS volume not (`Encryption` false), ownership honoured, so the gate accepts it. The owner ran the readiness checklist on it on 2026-11-09, so the real ledger lives at `/Volumes/CommonCents/ledger/ledger.db` |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
 | Entry point | `bin/pf`, using this checkout's `.venv`. An installed `pf` script also works |
@@ -65,10 +65,17 @@ Then only what the task needs:
 - For changes to M5.3: `db/originals.py`, `reports/storage.py`, the archive step in
   `ingest/pipeline.py`, `run_import`, `run_archive_verify` and `run_storage` in `cli.py`,
   `tests/scenarios/test_originals.py`, and "How M5.3 was implemented" under D-058.
-- For building M5.4 and M5.5: their recommendations and criteria in D-058 and [plan.md](plan.md),
-  D-002, D-017, D-019 and D-025 in [decisions-d001-d052.md](decisions-d001-d052.md), PRD-backend
-  §19 to §21, and [security-controls-proposal.md](security-controls-proposal.md), which stays
-  unapplied (point E).
+- For changes to M5.4: `db/backups.py`, migration 0018, the `backup` commands and `run_storage`
+  in `cli.py`, `tests/scenarios/test_backups.py`, and "How M5.4 was implemented" under D-058.
+- For changes to M5.5: `tests/unit/test_no_network_imports.py`, [real-data-readiness.md](real-data-readiness.md),
+  "Network and dependencies" in [status.md](status.md), and "How M5.5 was implemented" under D-058.
+- For drafting D-059, the M6 plan: plan.md's M6 row ("Only layouts supplied as redacted samples,
+  one at a time"), [layouts.md](layouts.md), D-005, D-018, D-021, D-022, D-024 and D-026 in
+  [decisions-d001-d052.md](decisions-d001-d052.md), PRD-backend §5 and §6, `ingest/` (`layouts.py`,
+  `csv_reader.py`, `coverage.py`, `pipeline.py`), and the synthetic fixtures in
+  `tests/fixtures/synthetic`. A real layout's sample reaches this repository only redacted and
+  with the owner's approval (D-019). When D-059 is written, move D-058's full text to
+  [decisions-d001-d052.md](decisions-d001-d052.md) and keep its index line.
 - For changes to M4: the M4 slice's code, its scenario tests, and its "How M4.n was implemented"
   under D-057 in [decisions-d001-d052.md](decisions-d001-d052.md). M4.4's benchmark is `--scale` in
   `tests/benchmarks/measure_reconciliation.py`, with figures in [benchmarks.md](benchmarks.md).
@@ -117,6 +124,8 @@ Pitfalls that recurred across M1 to M3.4:
   which the product rightly refused. Key by account and external ID, never by generated ID order.
 - **Benchmarks** must be able to reach the cost they claim to measure. Three documents, not two, are
   needed for a confirmation to link anything.
+- **Privacy checks against an amount** must leave timestamps out: in M5.4 a gate failed when
+  `16.502Z` held `6.50`. Three tests now strip ISO timestamps first.
 - **Learn an outside tool's output from a real run before designing on it.** In M5.2 diskutil
   refused a folder, had no `VirtualOrPhysical` key, and reported an image encrypted only as a file
   as not encrypted: all three would have been built wrong from memory.
@@ -197,18 +206,18 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Review of M5.3. M5.4 needs the backup drive, which the owner will have ready.
-- A first `pf init --real` on the real image is the owner's to run, or needs their approval. The
-  gate stays closed to real documents until M5.5's checklist is run.
+- Approval of D-059, the M6 plan, once drafted, and a redacted sample of the first layout.
+- An earlier draft of an M8 plan, left uncommitted by another session, was discarded by the owner
+  on 2026-11-09. D-059 is free for M6.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved through M5.3, used for it | **Must be renewed** for M5.4 or M5.3 changes |
-| M1 to M4 | Accepted as built | None |
-| M5 | Plan approved (D-058). M5.1 and M5.2 accepted as built. M5.3 built | Review of M5.3, approval of M5.4 and M5.5 |
+| Local commits on `feature/m2-review` | Approved for M5.4, M5.5 and M5's closeout on 2026-11-09, used for them | **Must be renewed** for D-059 and M6 |
+| M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
+| M6 | Not planned | D-059 to draft, then approval of it and of each slice |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -236,10 +245,10 @@ branch is feature/m2-review, the working tree is clean, and run the test suite w
 code before changing anything. Do not contact GitHub.
 
 Next task, from the owner:
-[PASTE IT HERE: for example, build M5.3, archiving originals and storage by kind]
+[PASTE IT HERE: for example, draft D-059, the M6 plan]
 
-Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as a new
-decision, D-059, and approval before any of it is built. Each slice of it then needs its own
+Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as the next
+free decision number, and approval before any of it is built. Each slice of it then needs its own
 approval. Do not reopen D-042 to D-058 unless you find a concrete contradiction.
 
 Follow the working principles in docs/handoff.md, and its "Keeping these docs small" rules when

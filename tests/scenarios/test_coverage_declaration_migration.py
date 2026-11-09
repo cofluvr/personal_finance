@@ -13,6 +13,7 @@ from test_confirmations import confirm_ok
 from test_coverage_declarations import MONTH, CoverageLedger, unknown_beside_complete
 from test_decisions import (
     ALL_TABLES,
+    BACKUP_TABLES,
     BALANCE_TABLES,
     REAL_LEDGER_TABLES,
     CLASSIFICATION_TABLES,
@@ -33,7 +34,7 @@ VERSION_10_TABLES = tuple(table for table in ALL_TABLES
 
 def set_back_to_version_10(path) -> None:
     conn = connect(path)
-    for table in (*REAL_LEDGER_TABLES, *BALANCE_TABLES, *ONE_SIDED_TABLES, *TRANSFER_TABLES, *CLASSIFICATION_TABLES, *DECLARATION_TABLES):
+    for table in (*BACKUP_TABLES, *REAL_LEDGER_TABLES, *BALANCE_TABLES, *ONE_SIDED_TABLES, *TRANSFER_TABLES, *CLASSIFICATION_TABLES, *DECLARATION_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
     conn.execute("PRAGMA user_version = 10")

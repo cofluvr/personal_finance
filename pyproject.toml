@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "personal-finance"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Local-first personal finance ledger"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,6 +12,9 @@ dependencies = []
 
 [project.scripts]
 pf = "personal_finance.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "personal_finance.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

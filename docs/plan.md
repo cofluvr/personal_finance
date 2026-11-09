@@ -217,16 +217,18 @@ The schema guarantees every transaction a date, so the `no date` line of G1 is n
 Approved on 2026-11-08 as D-058, with the lead engineer's recommendations, including points A to F.
 M5.1 was approved, built and accepted as built the same day. M5.2 was approved with the owner's amendments to point
 3, built the same day, and accepted on 2026-11-09, with a second amendment accepting images encrypted as files.
-M5.3 was approved and built on 2026-11-09, and awaits review. Each later slice needs its own approval. M5.4 also
-needs the backup destination.
+M5.3 was approved and built on 2026-11-09, and accepted as built the same day. M5.4 was approved on 2026-11-09, with the
+owner's amendment to point 7, and M5.5 the same day. Both were built that day and accepted as built.
+**M5 is complete.** The owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09 on `/Volumes/CommonCents`
+and `/Volumes/CommonCentsBackup`, and reported every step verified. M6 is next, and needs its own plan.
 
 | Slice | Scope | Status |
 |---|---|---|
 | M5.1 | Real ledgers, their location and file permissions | Accepted |
 | M5.2 | Encryption: an encrypted volume, checked on every open (D-002) | Accepted |
-| M5.3 | Archiving originals, and storage by kind (D-017) | Built, awaiting review |
-| M5.4 | Backup, verification and restore | Not started |
-| M5.5 | Network and dependency behaviour, and the readiness checklist | Not started |
+| M5.3 | Archiving originals, and storage by kind (D-017) | Accepted |
+| M5.4 | Backup, verification and restore | Accepted |
+| M5.5 | Network and dependency behaviour, and the readiness checklist | Accepted |
 
 ### M5.1 acceptance criteria
 
