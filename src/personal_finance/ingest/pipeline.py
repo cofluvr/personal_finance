@@ -20,6 +20,7 @@ from personal_finance.ingest.coverage import Coverage
 from personal_finance.ingest.csv_reader import RawRecord, read_document
 from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import Layout, ParsedRow
+from personal_finance.ingest.pdf_documents import read_pdf_document
 from personal_finance.reconcile.apply import declared_coverage, is_current, reconcile_account
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reconcile.same_document import find_candidate_groups
@@ -163,7 +164,9 @@ def _import_content(
             conn, run_id, name, digest, existing, account_id, layout, declared, rules
         )
 
-    metadata, records = read_document(content, layout)
+    _require_account_type(conn, account_id, layout)
+    read = read_pdf_document if layout.file_format == "pdf" else read_document
+    metadata, records = read(content, layout)
     progress.rows_attempted = len(records)
     _require_account_number(conn, account_id, layout, records)
     coverage = _resolve_coverage(metadata, layout, declared)
@@ -173,8 +176,9 @@ def _import_content(
     conn.execute(
         """INSERT INTO source_document (id, content_sha256, file_name, byte_size, format,
                                         layout_id, generated_on)
-           VALUES (?, ?, ?, ?, 'csv', ?, ?)""",
-        (document_id, digest, name, len(content), layout.layout_id, generated_on),
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (document_id, digest, name, len(content), layout.file_format, layout.layout_id,
+         generated_on),
     )
     conn.execute(
         """INSERT INTO document_coverage (source_document_id, account_id, coverage_kind,
@@ -313,15 +317,28 @@ def _open_groups_touching(conn, document_id) -> int:
 def _require_account_number(conn, account_id, layout: Layout, records) -> None:
     """Every row of a layout naming its account must name this account's last four digits, so a
     file exported from another account fails rather than importing into this one (D-061)."""
-    if layout.account_number_column is None:
+    if layout.row_account_number is None:
         return
     (last4,) = conn.execute("SELECT last4 FROM account WHERE id = ?", (account_id,)).fetchone()
     if last4 is None:
         raise ImportFailure("account_number_unknown")
-    position = layout.columns.index(layout.account_number_column)
     for record in records:
-        if len(record.cells) == len(layout.columns) and record.cells[position].strip() != last4:
+        if len(record.cells) != len(layout.columns):
+            continue
+        named = layout.row_account_number(record.cells)
+        if named is not None and named != last4:
             raise ImportFailure("account_number_mismatch")
+
+
+def _require_account_type(conn, account_id, layout: Layout) -> None:
+    """A layout for one kind of account refuses another, whose balance runs the other way."""
+    if layout.account_types is None:
+        return
+    (account_type,) = conn.execute(
+        "SELECT account_type FROM account WHERE id = ?", (account_id,)
+    ).fetchone()
+    if account_type not in layout.account_types:
+        raise ImportFailure("account_type_mismatch")
 
 
 def _resolve_coverage(metadata, layout, declared) -> Coverage:

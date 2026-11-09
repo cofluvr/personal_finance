@@ -319,10 +319,10 @@ the owner's format sample (D-060 point 2).
 | Slice | Scope | Status |
 |---|---|---|
 | M7.1 | Reading a PDF's text: pypdf, `pf pdf text`, W1 extended | Built, awaiting review |
-| M7.2 | U.S. Bank's statement, `us_bank_statement_v1`, with its period, balances and in-document check | Waits for the format sample |
+| M7.2 | U.S. Bank's card activity printout, `us_bank_card_activity_pdf_v1`. It states no period or balance (D-060, as amended) | Built, awaiting review |
 | M7.3 | U.S. Bank's CSV and PDF counting once | Not started |
-| M7.4 | Several accounts in one statement | Only if U.S. Bank's statement holds them |
-| M7.5 | Capital One's card statement, `capital_one_card_statement_v1` | Not started |
+| M7.4 | Several accounts in one statement | Not built: U.S. Bank's printout holds one, and each entry names its card |
+| M7.5 | Capital One's card statement, `capital_one_card_statement_v1` | Not built: waits for its structure |
 
 ### M7.1 acceptance criteria
 
@@ -337,6 +337,11 @@ in M7.2 (D-060, "How M7.1 was implemented").
 | D4 | pypdf is pinned by version and hash and declared in `pyproject.toml`, the stored parser version names its version, and [status.md](status.md) states the dependency once. Every earlier criterion still passes |
 
 ### M7.2 acceptance criteria, for each PDF layout
+
+For `us_bank_card_activity_pdf_v1`, which states no period or balance, D8 is replaced by coverage
+by declaration on the posting basis only, D9 and D10 do not apply, D11 does not apply since its
+dates carry the year, and D13's several accounts fail as `account_number_mismatch`. A description
+does not wrap in this printout, so D5's joining is not built. D14's migration is not needed.
 
 | ID | Test |
 |---|---|

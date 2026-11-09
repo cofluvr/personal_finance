@@ -79,7 +79,7 @@ and keep its index line.
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
 | D-058 | M5 plan: the real-data gate — Approved, implemented and accepted in M5 |
 | D-059 | M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6 |
-| D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, point 1 amended, M7.1 built |
+| D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, M7.1 and M7.2 built |
 | D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
 
 ## Rules in brief
@@ -182,7 +182,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-060 M7 plan: text PDF statements, and CSV and PDF counting once — Approved, point 1 amended, M7.1 built
+## D-060 M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, M7.1 and M7.2 built
 
 Proposed on 2026-11-09, for the owner's review. Delivers plan.md's M7 row (text PDFs and CSV-to-PDF
 matching, "same activity in both formats counts once") against PRD-backend §5 (statements with
@@ -405,6 +405,49 @@ on the owner's Mac.
 - **Moved to M7.2:** D2's import of a failing PDF and D4's stored parser version, since no PDF layout
   exists to import with.
 
+
+**Points 2, 3 and 5, as amended for U.S. Bank's printout, on 2026-11-09.** The owner supplied the
+structure of U.S. Bank's document, values redacted, and asked for M7.2, M7.3 and M7.5 to be built
+unattended. The document is a credit card's Recent Activity List printed from the website, not a
+statement: one account, unencrypted, each entry on one line with its account line below, a
+printout header on every page, and no period or balance. So, without reopening D-005, D-027 or
+D-057:
+
+- **Coverage is a user declaration,** on the posting basis, as for the CSV layouts. Point 3's
+  stated period and point 5's in-document check have nothing to read, so neither is built, nor
+  migration 0019 for balances (principle 1). D8 to D11 of the plan fall away for this layout, and
+  point F uses the card statement's balances, as in M6.
+- **Every line is still accounted for** (point 5): a line the layout does not know is an
+  `unrecognized_line` row, and an entry with no account line a `missing_account_line` row. The
+  page header and `Posted` are required, else `statement_structure_mismatch`.
+- **Several accounts are refused by the account line:** every entry names its card, which must be
+  the account's `--last4`, as D-061 and the owner directed. `multiple_accounts` is not needed, and
+  M7.4 is not built.
+- **The CSV counterpart is not `us_bank_v1`.** The owner's card CSV rows hold a date `MM/DD/YYYY`,
+  the description, a signed amount with a charge positive, and the account, where `us_bank_v1`
+  expects `Date, Transaction, Name, Memo, Amount` with ISO dates. Its header was not supplied, so no
+  production layout is written for it (D-059 point E). M7.3 shows the matching with a test-only
+  layout of those fields.
+- **M7.5 is not built:** no Capital One card PDF's structure has been supplied.
+
+**How M7.2 was implemented:**
+
+- **`us_bank_card_activity_pdf_v1`** in `ingest/layouts.py`, described in
+  [layouts.md](layouts.md). A layout now states its `file_format`, how `group_lines` turns a PDF's
+  pages into rows of cells, the `account_types` it fits, and `row_account_number`, which replaced
+  D-061's column name so a row can name its account inside a line. Capital One bank's check reads
+  the same way.
+- **`ingest/pdf_documents.py`** reads a PDF layout's document, and `csv_reader.raw_records`, now
+  shared, numbers rows and fingerprints their cells, so identical PDF entries stay separate
+  (D-008). `import_files` reads by the layout's format and stores it in `source_document.format`.
+- **Checks before rows are stored:** the account type (`account_type_mismatch`), then the
+  structure, then each row's account number. Each fails the file, importing nothing.
+- **Tests:** `tests/scenarios/test_us_bank_activity_pdf.py`, on printouts written in the test with
+  invented values, positioned as the owner's, with an account line after a page break. D2's
+  import half and D4's stored parser version are tested here.
+- **Breaks:** 16 applied, 13 caught. `$` stripping was dead code, since `parse_cents` reads `$`, and
+  was deleted. A branch for an account line without digits was unreachable and was removed. A last
+  entry with no account line was a test gap, now closed and caught.
 ## D-061 Capital One bank format confirmed, and its rows' account number checked — Approved, implemented
 
 Directed by the owner on 2026-11-09, outside M7's slices, with the header and two rows of each of

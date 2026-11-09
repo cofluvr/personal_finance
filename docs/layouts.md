@@ -146,6 +146,25 @@ point E). No value from it is kept, and the layout stays unverified until point 
 | Order | Newest first. Order carries no meaning |
 | Assumptions | Pending transactions are absent or marked otherwise than `Posted` |
 
+## us_bank_card_activity_pdf_v1
+
+U.S. Bank's Recent Activity List for a credit card, printed from its website to PDF and read with
+pypdf in layout mode (D-060 point 1). The structure comes from the owner's printout on 2026-11-09,
+its values never kept (D-060, as amended). It is an activity list, not a statement: it states no
+period and no balance.
+
+| Property | Meaning |
+|---|---|
+| Structure | Every page starts with the printout's header, `M/D/YY, H:MM AM` then `Recent Activity List \| U.S. Bank`, and page 1 goes on to `Posted`. Otherwise the file fails as `statement_structure_mismatch` |
+| Row | An entry line, `MM/DD/YYYY`, the description and the amount, separated by two or more spaces, then its account line, `Credit Card ...` and four digits, which can fall after a page break. Stored as the page, the entry line and the account line |
+| Other lines | Any other line is an unresolved row, `unrecognized_line`, keeping its text. An entry with no account line is `missing_account_line`. No line is skipped but a page header and `Posted` |
+| Amount | Signed, **positive for a charge**, so stored negated, as `amex_card_v1`. A payment or statement credit is negative, so money in. `$` and commas are read |
+| Date | The posting date, as the entries sit under `Posted`. Coverage by user declaration on the `posting` basis only |
+| Status | `posted` |
+| Account | A credit card account only, else `account_type_mismatch`. Every account line must name the account's registered `--last4`, as D-061 |
+| Parser version | `1+pypdf-6.21.2`, so another pypdf release is another interpretation (D-026) |
+| Assumptions | The date is the posting date, a description never wraps onto a second line, and only posted activity is listed. A `Pending` section would leave an unresolved row |
+
 ## Test-only layouts
 
 Tests may define extra synthetic layouts, such as one with unreliable external IDs
@@ -172,12 +191,13 @@ These definitions apply to every layout and are what import summaries count (D-0
 ## Unresolved row reasons
 
 `missing_amount`, `missing_date`, `invalid_amount`, `invalid_date`, `invalid_status`,
-`invalid_direction`, `conflicting_amount`, `wrong_column_count`. Each row keeps its original cells and
-creates no transaction.
+`invalid_direction`, `conflicting_amount`, `wrong_column_count`, `unrecognized_line`,
+`missing_account_line`. Each row keeps its original cells and creates no transaction.
 
 ## File failure codes
 
 `unreadable_file`, `invalid_encoding`, `malformed_csv`, `header_mismatch`,
 `invalid_coverage_metadata`, `coverage_basis_unavailable`, `coverage_conflict`,
-`account_mismatch`, `account_number_unknown`, `account_number_mismatch`, `layout_mismatch`, `layout_definition_changed`, `database_busy`,
+`account_mismatch`, `account_number_unknown`, `account_number_mismatch`, `account_type_mismatch`,
+`encrypted_pdf`, `no_text_layer`, `unreadable_pdf`, `statement_structure_mismatch`, `layout_mismatch`, `layout_definition_changed`, `database_busy`,
 `internal_error`.

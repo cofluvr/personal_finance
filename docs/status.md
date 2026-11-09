@@ -41,7 +41,8 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M6.4: BFSFCU | Complete (D-059). Format confirmed |
 | **M6 overall** | **Complete.** Point F runs per layout before its first real import |
 | M7.1: reading PDF text | Built (D-060), awaiting the owner's review |
-| M7.2 to M7.5 | Not started. M7.2 waits for the U.S. Bank statement's format |
+| M7.2: U.S. Bank card activity printout, `us_bank_card_activity_pdf_v1` | Built (D-060, as amended), awaiting the owner's review |
+| M7.3 to M7.5 | See plan.md's M7 table |
 | M8 | Not started |
 
 ## What exists
@@ -134,8 +135,10 @@ Five institution layouts exist, `capital_one_card_v1`, `capital_one_bank_v1`, `u
 BFSFCU formats are confirmed from real exports, and the U.S. Bank format is not.
 `capital_one_bank_v1` imports only into an account registered with the last four digits its rows
 name (D-061). None is to
-import into the real ledger until D-059 point F passes on a real file of it. A PDF's text can be
-read with `pf pdf text`, but no PDF layout exists, so no PDF imports until M7.2. Fees linked to a parent and transfer groups are not built (D-059 point C).
+import into the real ledger until D-059 point F passes on a real file of it. One PDF layout exists,
+`us_bank_card_activity_pdf_v1`, for U.S. Bank's printed card activity list, unverified until point F
+passes. No CSV layout exists for U.S. Bank's card export, whose header was not supplied, and
+`us_bank_v1` is not its format. Fees linked to a parent and transfer groups are not built (D-059 point C).
 The M5 gate is open: the owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09, and
 real data belongs only in a real ledger on the encrypted image, never in a synthetic one. Only candidate items, decision conflicts and automatically merged transactions
 can be acted on.
