@@ -11,7 +11,7 @@ Status values:
 
 Status of the code behind each decision is in [status.md](status.md).
 
-The full text of D-001 to D-058 is in [decisions-d001-d052.md](decisions-d001-d052.md). This file
+The full text of D-001 to D-060 is in [decisions-d001-d052.md](decisions-d001-d052.md). This file
 holds the index, the rules in brief, and the newest decisions in full, once there are any. When a
 decision here is accepted and the next one is written, move its full text to the end of that file
 and keep its index line.
@@ -79,6 +79,8 @@ and keep its index line.
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
 | D-058 | M5 plan: the real-data gate — Approved, implemented and accepted in M5 |
 | D-059 | M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6 |
+| D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, implemented in M7 |
+| D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
 
 ## Rules in brief
 
@@ -170,6 +172,10 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Real ledger location | Refused inside a git work tree or a synced folder, through a symbolic link, not owned by the user, or open to group or others. Checked, never repaired. Its imports never come from a git work tree | D-019, D-058 |
 | Originals | A real ledger keeps each new document's bytes in `originals/` under its SHA-256, `0400`, before the import commits. Never overwritten or deleted. Identity never reads it | D-017, D-058 |
 | Encrypted volume | A real ledger's folder is inside, never at the root of, a mounted disk image whose APFS volume honours ownership, and which diskutil reports encrypted or hdiutil reports encrypted as an image. FileVault on the startup volume does not count. Any other answer refuses. Temporary files stay in memory | D-002, D-058 |
+| Account number in rows | A layout whose rows name the account's last four digits refuses a file naming another, or an account with none registered, importing nothing | D-061 |
+| PDF layouts | A layout groups a PDF's lines into rows, keeping each. A line it does not know is an unresolved row, never skipped. A document stating no period takes a declaration, as a CSV | D-060 |
+| CSV and PDF | One event in both counts once only by D-006's exact rule, unchanged. An ID-bearing row against an ID-less one stays a possible duplicate | D-006, D-026, D-060 |
+| PDF text | pypdf alone reads it, pinned by hash, imported by `ingest/pdf_reader.py` only, with `jbig2dec` unset and its log silenced. W1 parses pypdf too, allowing only its JBIG2 decoder's `subprocess` | D-020, D-060 |
 | Backups | A new folder, on a mounted volume other than a real ledger's and gated as its folder is, holding the ledger, its referenced originals and a manifest of hashes, sizes, versions and a logical digest. Restore never overwrites, and checks every file, integrity, foreign keys, schema and digest first | D-058 |
 
 ## Not yet decided
@@ -178,82 +184,39 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-059 M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6
+## D-061 Capital One bank format confirmed, and its rows' account number checked — Approved, implemented
 
-Directed by the owner on 2026-11-09, to be built unattended overnight with each slice gated on the
-full suite and committed locally: the sequence Capital One (card and bank), U.S. Bank, American
-Express, then BFSFCU; `--account` stays required (D-015); fees as their own transactions linked to
-a parent or batch reference, and split transfers as individual transfers sharing a transfer group;
-identity by hashing account, date, amount, raw description and position in the file, so identical
-rows in one file stay distinct; fixtures keeping each format's structure and inventing every value.
-Points A to F are where a direction meets an earlier rule. Each says what was built and why, for
-the owner's review. Acceptance tests, J1 to J8 for every layout, are in [plan.md](plan.md).
+Directed by the owner on 2026-11-09, outside M7's slices, with the header and two rows of each of
+two real Capital One exports, a 360 Performance Savings account and a 360 Checking account. No
+value from them is kept in this repository: the fixtures invent every value, keeping the format.
 
-**Slices:**
+**The format matches `capital_one_bank_v1` as built,** so no parser changed: the exact header,
+`MM/DD/YY` dates, `Transaction Amount` never negative with `Transaction Type` `Debit` or `Credit`
+giving its direction, and `Balance` a running balance after each row, newest first. Amounts drop
+trailing zeros (`1400`, `14.1`), which the parser already read. The fixture now lists newest first
+in that style, with a Zelle receipt and a web payment in the wording the exports showed. Still
+assumed: the date is the transaction date, and the export holds posted transactions only, which
+D-059 point F checks.
 
-| Slice | Scope |
-|---|---|
-| M6.1 | Capital One: `capital_one_card_v1` and `capital_one_bank_v1` |
-| M6.2 | U.S. Bank: `us_bank_v1`, its CSV activity list. Its PDF is M7 (point D) |
-| M6.3 | American Express: `amex_card_v1` |
-| M6.4 | BFSFCU: waits for a redacted header and two invented rows (point E) |
+**The owner's choices on the account layer,** each recommended by the lead engineer:
 
-**Points for the owner's review:**
+1. **The Account Number is checked.** Each row names its account's last four digits. A layout may
+   name such a column, and `capital_one_bank_v1` names `Account Number`. Every row of a new
+   document must name the importing account's registered last four digits (`pf account add
+   --last4`), or the file fails as `account_number_mismatch`, importing nothing, so the savings
+   export cannot import into checking. A row too short to hold the column is unresolved as before,
+   and is not checked. An account registered without last four digits fails the file as
+   `account_number_unknown`: nothing would show which account the file belongs to. A repeat import
+   of identical bytes is unchanged (D-022). Files that pass are read exactly as before, so the
+   layout keeps its ID and parser version: the check refuses files, and changes no meaning.
+2. **A transfer between the two accounts uses M3.2 unchanged.** The savings export's "Withdrawal
+   to 360 Checking" row, classified `transfer`, is a candidate against the checking deposit of the
+   opposite amount, and `review transfer match` matches them (D-054). A scenario test shows it on
+   invented exports. The checking side's wording is a guess, which matching never reads.
 
-- **A. No sample reached the repository, so every layout is unverified.** No session may read the
-  owner's statements (D-019), and none was supplied redacted. Each layout is written from the lead
-  engineer's knowledge of the institution's export, and its fixtures in
-  `tests/fixtures/synthetic/statements/` are wholly invented, so they sit under the existing
-  `.gitignore` exemption rather than a new one in `tests/fixtures/statements/`, which would loosen a
-  privacy control. A layout's header must match exactly, so a different column set fails the file
-  as `header_mismatch` and imports nothing. What a header cannot show, the sign of money, which
-  date a column holds and whether pending rows appear, is checked within a row where the export
-  allows it and otherwise stated as an assumption in [layouts.md](layouts.md). **A layout stays
-  unverified until point F passes on one real file of it.**
-- **B. Position does not enter cross-document identity.** Hashing a row's position in its file
-  concretely contradicts D-026 and M1's required case that overlapping files do not double-count:
-  an export starting one day earlier shifts every position, so the same transaction gets another
-  hash, and an identifier that differs establishes distinctness, counting it twice. What the
-  direction asks within one file already holds: every row is its own source record, kept with its
-  document, row number, raw fingerprint and occurrence, and identical rows in one file are separate
-  transactions. Each layout declares no external ID guarantee. A guarantee needs two overlapping
-  real exports to show it, and a new layout version (D-026).
-- **C. Fees and split transfers are recorded, not built.** None of these exports carries a parent
-  or batch reference, so nothing would fill the link (working principle 1). Each fee row already
-  imports as its own transaction, classifiable as `fee` (D-053) and counted as spending (D-056). A
-  transfer group crosses D-054's one-to-one match and needs a migration, so it is planned as its
-  own slice, on the owner's model, when a real export shows one.
-- **D. U.S. Bank's PDF is M7.** M6.2 is the CSV activity list. PDF parsing and CSV-to-PDF
-  matching stay in M7, as planned.
-- **E. BFSFCU is not built.** Its export format is not known to the lead engineer, and inventing
-  one would test a guess against itself. M6.4 starts from the header row of a real export and two
-  invented rows in its format, supplied by the owner. PRD §5 names three institutions, and BFSFCU is
-  the owner's addition.
-- **F. Verifying a layout on a real file, the owner's step.** Not into the real ledger, since
-  imports are never deleted: `init --real` a second ledger in a new `0700` folder on
-  `/Volumes/CommonCents`, import one real statement period with `--declare-complete-coverage`,
-  record its statement's opening and closing balances with `balance record`, and run `balance
-  check`. Agreement to the cent verifies the sign, the dates and completeness. A difference, or
-  any unresolved row, means the layout is wrong: the folder is removed, and the layout corrected
-  under a new version before any real import.
+**Open:** `pf` has no command to change an account, so an account added without last four digits
+cannot gain them. If the real ledger holds such a Capital One bank account, setting them once, never
+changing them after, is a follow-up for the owner's approval.
 
-**The owner's review, on 2026-11-09.** Points A to F approved as written, and M6.1 to M6.3 found
-sound. Points A to D are resolved. Point E stays open: M6.4 is approved to build once the header
-and two rows of a BFSFCU export reach this repository, which they had not when this was recorded.
-Point F is the owner's to run, with the steps in [layout-verification.md](layout-verification.md).
-The owner supplied a BFSFCU export's header and four rows the same day, and M6.4 was built from their
-format, with every value invented: `bfsfcu_v1`, the one layout that states its status, so it is the
-exception to the common rule below.
-
-**Formats confirmed, and M6 complete, on 2026-11-09.** The owner supplied the header and three rows of
-a Capital One card export and of an American Express export. Both match `capital_one_card_v1` and
-`amex_card_v1` as built: columns, date formats and signs, including Amex's positive charge, so no
-parser changed. Both list newest first, and their fixtures were reordered to match, keeping every
-value invented. The owner recorded all four slices as complete. Still not confirmed from a real
-export: the formats of `capital_one_bank_v1` and `us_bank_v1`. Point F still runs for every layout
-before its first real import.
-
-**Layout rules common to M6:** coverage by user declaration only; settlement status `unknown`,
-since no export states it, which D-006 never reads as `posted` and `balance check` discloses; a
-column named only `Date` is the posting date, as in `synthetic_card_v1`; an institution's
-category, card number and running balance stay in the raw cells, unread (D-014, D-057).
+**Tests:** `tests/scenarios/test_capital_one_accounts.py`, and the layout's J1 to J7 case on the
+new fixture, with its account's last four digits. Seven deliberate breaks of the check, all caught.

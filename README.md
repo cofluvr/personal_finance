@@ -133,10 +133,11 @@ Early implementation of the Python backend. It imports two invented CSV layouts 
 
 ## Development Setup
 
-Requires Python 3.12 or later on macOS. Installing the development tools is the only step that needs network access. The application itself has no runtime dependencies.
+Requires Python 3.12 or later on macOS. Installing the dependencies is the only step that needs network access. The application has one runtime dependency, pypdf, pinned by hash in `requirements.txt`, which reads PDF text (D-060).
 
 ```sh
 python3 -m venv .venv
+.venv/bin/python -m pip install --require-hashes --no-deps -r requirements.txt
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m pytest
 ```

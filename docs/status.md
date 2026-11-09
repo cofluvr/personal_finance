@@ -35,12 +35,17 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M5.4: backup, verification and restore | Accepted (D-058) |
 | M5.5: network and dependency behaviour, and the readiness checklist | Accepted (D-058) |
 | **M5 overall** | **Complete and accepted.** Readiness checklist run by the owner on 2026-11-09 |
-| M6.1: Capital One card and bank layouts | Complete (D-059). Card format confirmed, bank format not |
+| M6.1: Capital One card and bank layouts | Complete (D-059). Both formats confirmed, the bank's with its account number checked (D-061) |
 | M6.2: U.S. Bank CSV activity list | Complete (D-059). Format not confirmed |
 | M6.3: American Express card | Complete (D-059). Format confirmed |
 | M6.4: BFSFCU | Complete (D-059). Format confirmed |
 | **M6 overall** | **Complete.** Point F runs per layout before its first real import |
-| M7 and M8 | Not started |
+| M7.1: reading PDF text | Complete (D-060) |
+| M7.2: U.S. Bank card activity printout, `us_bank_card_activity_pdf_v1` | Complete (D-060, as amended). Unverified until point F |
+| M7.3: CSV and PDF counting once | Complete, on D-006 unchanged, against a test-only CSV layout (D-060) |
+| M7.4 and M7.5 | Not built: one card per printout, and the owner holds no Capital One card PDF |
+| **M7 overall** | **Complete,** recorded by the owner on 2026-11-09 |
+| M8 | Not started |
 
 ## What exists
 
@@ -122,15 +127,20 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `review transfers`, `review transfer match`, `review transfer one-sided`, `review transfer show`,
   `review transfer undo`, `totals`, `report monthly`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
-  `backup verify`, `backup restore`, run
+  `backup verify`, `backup restore`, `pdf text`, run
   through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
 
 Five institution layouts exist, `capital_one_card_v1`, `capital_one_bank_v1`, `us_bank_v1`,
-`amex_card_v1` and `bfsfcu_v1`, on invented fixtures. The Capital One card, Amex and BFSFCU formats
-are confirmed from real exports, and the Capital One bank and U.S. Bank formats are not. None is to
-import into the real ledger until D-059 point F passes on a real file of it. PDFs wait for M7. Fees linked to a parent and transfer groups are not built (D-059 point C).
+`amex_card_v1` and `bfsfcu_v1`, on invented fixtures. The Capital One card, Capital One bank, Amex and
+BFSFCU formats are confirmed from real exports, and the U.S. Bank format is not.
+`capital_one_bank_v1` imports only into an account registered with the last four digits its rows
+name (D-061). None is to
+import into the real ledger until D-059 point F passes on a real file of it. One PDF layout exists,
+`us_bank_card_activity_pdf_v1`, for U.S. Bank's printed card activity list, unverified until point F
+passes. The owner holds no U.S. Bank card CSV, and `us_bank_v1`
+is not that card's format. Fees linked to a parent and transfer groups are not built (D-059 point C).
 The M5 gate is open: the owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09, and
 real data belongs only in a real ledger on the encrypted image, never in a synthetic one. Only candidate items, decision conflicts and automatically merged transactions
 can be acted on.
@@ -144,11 +154,17 @@ Stated here once (D-058 point 9, W2).
   `/usr/sbin/diskutil info -plist` and `/usr/bin/hdiutil info -plist`, for a real ledger only,
   with a 30-second timeout. `tests/unit/test_no_network_imports.py` parses every module and fails
   on any added use. Every command works with no network connection (PRD §21).
-- **Runtime dependencies: none.** Only Python 3.12's standard library and its SQLite. Nothing is
-  downloaded or sent at run time: no telemetry, no update check and no log (D-037).
+- **One runtime dependency: pypdf 6.21.2** (D-060 point 1, as amended), pure Python and BSD-3-Clause,
+  with no dependency of its own on Python 3.12. Pinned by version and hash in `requirements.txt`,
+  installed with `--require-hashes`, and imported by `ingest/pdf_reader.py` alone. W1 parses its
+  modules too. Its one allowance is `subprocess` in its `filters.py`, where its JBIG2 image decoder
+  runs `jbig2dec` if that program is on the path. The reader runs pypdf with that program unset, so
+  it never runs, and silences pypdf's log, which can quote a file's bytes. Otherwise only Python
+  3.12's standard library and its SQLite. Nothing is downloaded or sent at run time: no telemetry,
+  no update check and no log (D-037).
 - **Development dependencies:** pytest 9.2.0 and Hypothesis 6.170.14, pinned in
-  `requirements-dev.txt` without hashes, and setuptools `>=68` to build. Installing them is the
-  only step that needs a network, once. A later build can use another setuptools, and an editable
+  `requirements-dev.txt` without hashes, and setuptools `>=68` to build. Installing them and pypdf
+  is the only step that needs a network, once. A later build can use another setuptools, and an editable
   install is untested.
 - **The test socket guard** blocks Python sockets in the test process, not subprocesses or native
   code. The suite never runs the two probes.

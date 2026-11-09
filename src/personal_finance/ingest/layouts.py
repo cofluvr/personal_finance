@@ -7,10 +7,13 @@ never changes once used: a change in meaning needs a new layout_id, so that stor
 keep the meaning they were imported under.
 """
 
-from collections.abc import Callable, Mapping
+import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
+from personal_finance.ingest.errors import ImportFailure
+from personal_finance.ingest.pdf_reader import EXTRACTOR_VERSION
 from personal_finance.money import MoneyParseError, parse_cents
 
 
@@ -41,6 +44,15 @@ class Layout:
     external_id_guarantee: str = "none"
     external_id_namespace: str | None = None
     has_metadata_preamble: bool = False
+    # The last four digits a row's cells name for its account, or None where a row names none.
+    # Every row naming one must name the importing account's, so a file cannot import into
+    # another account (D-061).
+    row_account_number: Callable[[Sequence[str]], str | None] | None = None
+    # csv, or pdf, whose lines group_lines turns into rows of cells (D-060 point 6).
+    file_format: str = "csv"
+    group_lines: Callable[[list[list[str]]], list[tuple[str, ...]]] | None = None
+    # The account types the layout's documents can belong to, where it says (D-060 point 3).
+    account_types: tuple[str, ...] | None = None
 
     @property
     def external_ids_reliable(self) -> bool:
@@ -246,8 +258,9 @@ CAPITAL_ONE_CARD_V1 = Layout(
     pending_in_complete_coverage={"transaction": False, "posting": False},
 )
 
-# Capital One's checking and savings export. Account Number and Balance stay in the raw
-# cells, unread: a balance is a person's observation, never transaction evidence (D-057).
+# Capital One's checking and savings export, its format confirmed from the owner's exports (D-061).
+# Account Number must be the account's last four digits. Balance stays in the raw cells, unread: a
+# balance is a person's observation, never transaction evidence (D-057).
 CAPITAL_ONE_BANK_V1 = Layout(
     layout_id="capital_one_bank_v1",
     parser_version="1",
@@ -261,6 +274,7 @@ CAPITAL_ONE_BANK_V1 = Layout(
     ),
     parse_row=_parse_capital_one_bank_row,
     pending_in_complete_coverage={"transaction": False},
+    row_account_number=lambda cells: cells[0].strip(),
 )
 
 # U.S. Bank's CSV activity list. Memo stays in the raw cells, unread.
@@ -309,6 +323,89 @@ BFSFCU_V1 = Layout(
     pending_in_complete_coverage={"posting": False},
 )
 
+_US_BANK_PAGE_HEADER = re.compile(
+    r"\d{1,2}/\d{1,2}/\d{2}, \d{1,2}:\d{2} [AP]M {2,}Recent Activity List \| U\.S\. Bank"
+)
+_US_BANK_ENTRY = re.compile(r"(\d{2}/\d{2}/\d{4}) {2,}(\S.*?) {2,}(-?\$[\d,]+\.\d{2})")
+_US_BANK_ACCOUNT = re.compile(r"Credit Card \.\.\.(\S+)")
+
+
+def _group_us_bank_activity(pages: list[list[str]]) -> list[tuple[str, ...]]:
+    """Each entry as (page, its line, its account line), and any other line as (page, line, "").
+
+    Every page starts with the printout's header, and the first goes on to `Posted`, else the
+    file is not this layout. An account line can follow its entry across a page break. No line is
+    skipped but a header and `Posted`, so one this layout does not know becomes an unresolved row.
+    """
+    rows: list[tuple[str, ...]] = []
+    entry: tuple[str, str] | None = None
+    for number, lines in enumerate(pages, start=1):
+        if not lines or not _US_BANK_PAGE_HEADER.fullmatch(lines[0].strip()):
+            raise ImportFailure("statement_structure_mismatch")
+        body = lines[1:]
+        if number == 1:
+            if not body or body[0].strip() != "Posted":
+                raise ImportFailure("statement_structure_mismatch")
+            body = body[1:]
+        for line in body:
+            if entry is not None and _US_BANK_ACCOUNT.fullmatch(line.strip()):
+                rows.append((*entry, line))
+                entry = None
+                continue
+            if entry is not None:
+                rows.append((*entry, ""))
+                entry = None
+            if _US_BANK_ENTRY.fullmatch(line.strip()):
+                entry = (str(number), line)
+            else:
+                rows.append((str(number), line, ""))
+    if entry is not None:
+        rows.append((*entry, ""))
+    return rows
+
+
+def _parse_us_bank_activity_row(cells: Mapping[str, str]) -> ParsedRow:
+    """A charge is positive in this printout, so the sign is reversed, as in amex_card_v1."""
+    entry = _US_BANK_ENTRY.fullmatch(cells["Entry line"].strip())
+    if entry is None:
+        return ParsedRow("unrecognized_line")
+    if not cells["Account line"].strip():
+        return ParsedRow("missing_account_line")
+    date_text, description, amount_text = entry.groups()
+    problems: list[str] = []
+    amount = _amount(amount_text, problems)
+    row = ParsedRow(
+        posting_date=_date(date_text, "%m/%d/%Y", problems),
+        amount_cents=None if amount is None else -amount,
+        description=description,
+        settlement_status="posted",
+    )
+    return _finish(row, problems)
+
+
+def _us_bank_activity_account_number(cells: Sequence[str]) -> str | None:
+    """What follows `Credit Card ...`, or None for a row with no account line, which is
+    unresolved anyway. Only a line of that form becomes a row's account line."""
+    if not cells[2].strip():
+        return None
+    return _US_BANK_ACCOUNT.fullmatch(cells[2].strip())[1]
+
+
+# U.S. Bank's Recent Activity List for a credit card, printed from its website to PDF. Its
+# structure comes from the owner's printout, its values never kept (D-060, as amended). It states
+# no period and no balance, so coverage is a user declaration, and no in-document check runs.
+US_BANK_CARD_ACTIVITY_PDF_V1 = Layout(
+    layout_id="us_bank_card_activity_pdf_v1",
+    parser_version=f"1+{EXTRACTOR_VERSION}",
+    columns=("Page", "Entry line", "Account line"),
+    parse_row=_parse_us_bank_activity_row,
+    pending_in_complete_coverage={"posting": False},
+    row_account_number=_us_bank_activity_account_number,
+    file_format="pdf",
+    group_lines=_group_us_bank_activity,
+    account_types=("credit_card",),
+)
+
 LAYOUTS = {
     layout.layout_id: layout
     for layout in (
@@ -319,5 +416,6 @@ LAYOUTS = {
         US_BANK_V1,
         AMEX_CARD_V1,
         BFSFCU_V1,
+        US_BANK_CARD_ACTIVITY_PDF_V1,
     )
 }

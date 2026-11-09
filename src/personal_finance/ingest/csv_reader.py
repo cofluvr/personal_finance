@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 from collections import Counter
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from personal_finance.ingest.errors import ImportFailure
@@ -39,18 +40,22 @@ def read_document(content: bytes, layout: Layout) -> tuple[dict[str, str], list[
     if not rows or tuple(rows[0]) != layout.columns:
         raise ImportFailure("header_mismatch")
 
+    return metadata, raw_records(cells for cells in rows[1:] if cells)
+
+
+def raw_records(rows: Iterable[Sequence[str]]) -> list[RawRecord]:
+    """Each row as stored: numbered from 1, with its cells' JSON, their fingerprint, and its
+    occurrence among identical rows. Shared by CSV and PDF documents."""
     records = []
     seen: Counter[str] = Counter()
-    for cells in rows[1:]:
-        if not cells:
-            continue
-        raw_json = json.dumps(cells, ensure_ascii=False, separators=(",", ":"))
+    for cells in rows:
+        raw_json = json.dumps(list(cells), ensure_ascii=False, separators=(",", ":"))
         fingerprint = hashlib.sha256(raw_json.encode("utf-8")).hexdigest()
         seen[fingerprint] += 1
         records.append(
             RawRecord(len(records) + 1, tuple(cells), raw_json, fingerprint, seen[fingerprint])
         )
-    return metadata, records
+    return records
 
 
 def _split_preamble(text: str) -> tuple[dict[str, str], str]:

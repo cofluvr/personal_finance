@@ -23,7 +23,9 @@ Added account Capital One card: <ID>
 
 Below, `C` is `/Volumes/CommonCents/layout-check/check.db`. Use one account per layout, of its
 type: `credit_card` for `capital_one_card_v1` and `amex_card_v1`, `checking` or `savings` for
-`capital_one_bank_v1` and `us_bank_v1`.
+`capital_one_bank_v1` and `us_bank_v1`. For `capital_one_bank_v1`, add the account with
+`--last4` and the four digits its export shows in `Account Number`, or the import fails as
+`account_number_unknown` (D-061).
 
 ## 2. One statement period
 
@@ -70,6 +72,24 @@ transaction basis: that is expected, and `agrees` still passes it.
 **It fails** on `differs by`. A difference of twice the period's movement means the sign is
 reversed. A difference equal to a few transactions at the period's edges means the export's date
 is not the one the layout assumes. Either way, report the line, not the statement.
+
+## PDF layouts
+
+`us_bank_card_activity_pdf_v1` states no period and no balance, so it is checked as the CSV layouts
+are, with the card statement's balances. Print the Recent Activity List for exactly one statement
+period, add a `credit_card` account with `--last4`, and import it with that period declared on the
+`posting` basis:
+
+```sh
+pf account add --db C --name "U.S. Bank card" --type credit_card --last4 <its last four digits>
+pf import --db C --account "U.S. Bank card" --layout us_bank_card_activity_pdf_v1 \
+  --declare-complete-coverage --coverage-start 2026-10-01 --coverage-end 2026-10-31 \
+  --coverage-basis posting "/Volumes/CommonCents/<statements folder>/<printout>.pdf"
+```
+
+**Stop if** the file fails, or any row is unresolved: `statement_structure_mismatch` means the
+header or `Posted` differs, and an `unrecognized_line` row a line the layout does not know, such as
+a pending section. Then record the statement's balances and run `balance check` as in step 3.
 
 ## 4. Removing the throwaway ledger
 

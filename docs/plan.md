@@ -284,14 +284,15 @@ and `/Volumes/CommonCentsBackup`, and reported every step verified. M6 is planne
 
 Directed by the owner on 2026-11-09 as D-059, built unattended, each slice gated on the full suite
 and committed locally. The owner approved points A to F the same day, and recorded all four slices
-complete. **M6 is complete.** The Capital One card, Amex and BFSFCU formats are confirmed from real
-exports, and the Capital One bank and U.S. Bank formats are not. Every layout is unverified
+complete. **M6 is complete.** The Capital One card, Capital One bank, Amex and BFSFCU formats are
+confirmed from real exports, and the U.S. Bank format is not. D-061 added the Capital One bank
+account number check. Every layout is unverified
 until D-059 point F passes on one real file of it, by the steps in
 [layout-verification.md](layout-verification.md).
 
 | Slice | Scope | Status |
 |---|---|---|
-| M6.1 | Capital One: `capital_one_card_v1` and `capital_one_bank_v1` | Complete. Card format confirmed, bank format not |
+| M6.1 | Capital One: `capital_one_card_v1` and `capital_one_bank_v1` | Complete. Both formats confirmed, the bank's in D-061 |
 | M6.2 | U.S. Bank: `us_bank_v1`, its CSV activity list | Complete. Format not confirmed |
 | M6.3 | American Express: `amex_card_v1` | Complete. Format confirmed |
 | M6.4 | BFSFCU: `bfsfcu_v1`, from the format of a real export | Complete. Format confirmed |
@@ -308,6 +309,81 @@ until D-059 point F passes on one real file of it, by the steps in
 | J6 | Coverage comes only from a declaration on a basis the layout offers. Another basis fails as `coverage_basis_unavailable` |
 | J7 | The stored interpretation names the layout, with no ID namespace and guarantee `none`, and `pf import --layout` offers it |
 | J8 | Every earlier criterion still passes |
+
+## M7 plan
+
+Approved on 2026-11-09 as D-060, with pypdf as the dependency and points 1 to 3 and 5 amended: for
+pypdf's JBIG2 decoder, and for U.S. Bank's document, an activity printout stating no period or
+balance. **M7 is complete,** recorded by the owner on 2026-11-09, with M7.4 not needed and M7.5 not
+built, since the owner holds no Capital One card PDF.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M7.1 | Reading a PDF's text: pypdf, `pf pdf text`, W1 extended | Complete |
+| M7.2 | U.S. Bank's card activity printout, `us_bank_card_activity_pdf_v1`. It states no period or balance (D-060, as amended) | Complete. Unverified until point F |
+| M7.3 | CSV and PDF counting once, on D-006 unchanged, against a test-only CSV layout: the owner holds no U.S. Bank card CSV | Complete |
+| M7.4 | Several accounts in one statement | Not built: U.S. Bank's printout holds one, and each entry names its card |
+| M7.5 | Capital One's card statement, `capital_one_card_statement_v1` | Not built: the owner holds no such PDF |
+
+### M7.1 acceptance criteria
+
+D2's import of a failing PDF and D4's stored parser version need a PDF layout, so they are tested
+in M7.2 (D-060, "How M7.1 was implemented").
+
+| ID | Test |
+|---|---|
+| D1 | The reader returns each page's lines in order from a PDF generated in the test from known lines, and `pf pdf text` prints them with page numbers, escaped as D-037, writing nothing and opening no ledger |
+| D2 | An encrypted PDF, one with no text, bytes that are not a PDF and a truncated PDF fail as `encrypted_pdf`, `no_text_layer` or `unreadable_pdf`. An import of one imports nothing and goes on to the next file |
+| D3 | W1 parses the installed pypdf modules with the same refusals, allowing only `subprocess` in its JBIG2 decoder, which the reader never lets run, and only `ingest/pdf_reader.py` imports pypdf |
+| D4 | pypdf is pinned by version and hash and declared in `pyproject.toml`, the stored parser version names its version, and [status.md](status.md) states the dependency once. Every earlier criterion still passes |
+
+### M7.2 acceptance criteria, for each PDF layout
+
+For `us_bank_card_activity_pdf_v1`, which states no period or balance, D8 is replaced by coverage
+by declaration on the posting basis only, D9 and D10 do not apply, D11 does not apply since its
+dates carry the year, and D13's several accounts fail as `account_number_mismatch`. A description
+does not wrap in this printout, so D5's joining is not built. D14's migration is not needed.
+
+| ID | Test |
+|---|---|
+| D5 | Every row of the fixture parses to the expected signed amount, dates and description, with status `posted` and no external ID. A wrapped description joins with one space |
+| D6 | A line in a transaction section that is no transaction, continuation or named line is an unresolved `unrecognized_line` row keeping its text, and the period is then `partial` |
+| D7 | A missing heading or label fails the file as `statement_structure_mismatch`, importing nothing |
+| D8 | The period is complete `document_metadata` coverage on the posting basis only when the check agrees with no unresolved row, its effective end is the day before the closing date (D-027), and a declaration is refused as `coverage_conflict` |
+| D9 | A one-cent change to a row, a dropped row, a reversed sign or a disagreeing subtotal fails the file as `statement_out_of_balance`, importing nothing |
+| D10 | The opening and closing balances are stored per document and account in the ledger's sign convention, append-only, and change no `derive()` output, token, observation or `balance check` output |
+| D11 | A date without a year takes the one that places it in the period, across December and January, and one placing nowhere is `invalid_date` |
+| D12 | Identical rows in one statement stay separate, each tracing to its document, page and row, and reimporting the statement changes nothing |
+| D13 | A statement listing more than one account fails as `multiple_accounts`, and an account of a type the layout does not fit as `account_type_mismatch` |
+| D14 | Migration 0019 works on a populated ledger, makes no account stale and is atomic on failure. [layout-verification.md](layout-verification.md) has the PDF steps, walked through on the fixture in `build/`. Every earlier criterion still passes |
+
+### M7.3 acceptance criteria
+
+I7 is not needed: the formats' descriptions agree, so D-006 is not amended.
+
+| ID | Test |
+|---|---|
+| I1 | The CSV and the PDF of one period, both complete on the posting basis, count each shared row once in either import order, by A16's comparison, with only closing-day rows left as possible duplicates |
+| I2 | Each D-006 condition missing in turn (coverage unknown or partial, another basis, a date outside an interval, an unresolved row in either document) leaves the rows possible duplicates, counted and disclosed, never lost |
+| I3 | A CSV export overlapping two consecutive statements counts each row once |
+| I4 | Identical rows pair one-for-one by count: two in the CSV against two in the PDF give two transactions, and two against one give two |
+| I5 | An ID-bearing row against an ID-less PDF row is a possible duplicate, never merged, and both count (D-026, as kept) |
+| I6 | Account movement, `totals` and `report monthly` after the matching PDF equal those of the CSV alone, save closing-day rows, disclosed |
+| I7 | Only if the owner approves D-060 point 4's amendment: a row unique by account, posting date and amount in each document pairs confidently under the coverage conditions, two of one amount on one day in either document stay possible duplicates, and similarity alone never merges. Every earlier criterion still passes |
+
+### M7.4 acceptance criteria, only if built
+
+| ID | Test |
+|---|---|
+| I8 | Each named section imports into its account with its own coverage and check. An unnamed section fails the file as `unmapped_statement_account`, and a section or account named twice is refused |
+| I9 | Reimporting the statement changes nothing, and importing it under another set of accounts is rejected (D-022) |
+
+### M7.5 acceptance criteria
+
+| ID | Test |
+|---|---|
+| I10 | D5 to D13 pass for `capital_one_card_statement_v1`, and I1 to I4 against `capital_one_card_v1` |
+| I11 | Only if the two layouts read different dates (D-060 point 4): the basis date must agree and the other where both have it, and every outcome of the existing exhaustive import-order tests is unchanged |
 
 ## Backlog benchmarks
 
