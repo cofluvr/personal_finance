@@ -1,8 +1,11 @@
 # Document Layouts
 
 A layout says exactly how one document format is read. Support is defined only by
-tested layouts. **No real institution's format is supported.** Both layouts below
-are invented for development.
+tested layouts. The two synthetic layouts are invented for development. **The institution
+layouts are unverified** (D-059): each is written from the lead engineer's knowledge of the
+export, not from a sample, and its fixture is invented. Each stays unverified until one real
+file of it reconciles with its statement, D-059 point F. What a header cannot show is listed
+under each as an assumption.
 
 A layout's meaning never changes once used. A change needs a new `layout_id`, so
 stored documents keep the meaning they were imported under. The one exception is a
@@ -69,6 +72,78 @@ Complete coverage and pending transactions:
 |---|---|---|
 | `posting` | Every posted transaction with a date in the interval | **Excluded.** This export never contains pending transactions |
 
+## Institution layouts: rules common to all
+
+| Property | Meaning |
+|---|---|
+| Header | Must match exactly, or the file fails as `header_mismatch` and imports nothing |
+| Status | `unknown` where the export does not state it, which D-006 never reads as `posted`. `bfsfcu_v1` states it |
+| Transaction ID | None read, guarantee `none` (D-059 point B). Identical rows in one file are separate events, kept apart by row number |
+| Metadata | None. A `#` line fails the header |
+| Coverage | User declaration only, on the bases listed under each. Pending rows are not in the export, so a complete claim says nothing about them |
+| Unread columns | Category, card or account number and running balance stay in the raw cells (D-014, D-057) |
+
+## capital_one_card_v1
+
+Columns: `Transaction Date, Posted Date, Card No., Description, Category, Debit, Credit`.
+
+| Property | Meaning |
+|---|---|
+| Debit, Credit | As `synthetic_card_v1`: exactly one filled, never negative. A debit is stored negative |
+| Dates | `YYYY-MM-DD`, as the column names say. Coverage on either basis |
+| Confirmed | Header, date format, Debit for a charge and Credit for a payment, and newest-first order, from the owner's export on 2026-11-09 |
+| Assumptions | The export holds posted transactions only |
+
+## capital_one_bank_v1
+
+Columns: `Account Number, Transaction Description, Transaction Date, Transaction Type,
+Transaction Amount, Balance`.
+
+| Property | Meaning |
+|---|---|
+| Amount | `Transaction Amount` never negative. `Transaction Type` `Debit` stores it negative, `Credit` positive, any other value leaves the row `invalid_direction` |
+| Date | `MM/DD/YY`, the transaction date. Coverage on the `transaction` basis only |
+| Assumptions | The export holds posted transactions only, the date is the transaction date, and Balance is a running balance |
+
+## us_bank_v1
+
+Columns: `Date, Transaction, Name, Memo, Amount`, each quoted. U.S. Bank's CSV activity list;
+its PDF statements are M7 (D-059 point D).
+
+| Property | Meaning |
+|---|---|
+| Amount | Signed, negative for money out. `Transaction` `DEBIT` or `CREDIT` must agree, else `conflicting_amount`. Any other value leaves the row `invalid_direction` |
+| Description | `Name`. `Memo` stays in the raw cells, unread |
+| Date | `YYYY-MM-DD`, the posting date. Coverage on the `posting` basis only |
+| Assumptions | The export holds posted transactions only, and its date is the posting date |
+
+## amex_card_v1
+
+Columns: `Date, Description, Amount`.
+
+| Property | Meaning |
+|---|---|
+| Amount | Signed, **positive for a charge**, so stored negated: a charge is money out, a payment or credit money in |
+| Date | `MM/DD/YYYY`, the posting date. Coverage on the `posting` basis only |
+| Confirmed | Header, date format, a charge positive and a payment negative, and newest-first order, from the owner's export on 2026-11-09 |
+| Assumptions | The export holds posted transactions only, and its date is the posting date |
+
+## bfsfcu_v1
+
+Columns, each quoted: `Transaction ID, Posting Date, Effective Date, Transaction Type, Posting
+Status, Amount, Check Number, Reference Number, Description, Transaction Category, Type, Balance,
+Memo, Extended Description`. The header and row format come from the owner's real export (D-059
+point E). No value from it is kept, and the layout stays unverified until point F passes.
+
+| Property | Meaning |
+|---|---|
+| Amount | Signed, negative for money out, with five decimals. A digit beyond the cent leaves the row `invalid_amount`. `Transaction Type` `Debit` or `Credit` must agree, else `conflicting_amount`, and any other value is `invalid_direction` |
+| Status | `Posting Status` `Posted`. Any other value, `Pending` included, leaves the row `invalid_status`, since only `Posted` has been seen |
+| Date | `Posting Date`, `M/D/YYYY`, the posting date. Coverage on the `posting` basis only. `Effective Date` can fall after it, so it is not read as the transaction date |
+| Unread | `Transaction ID`, `Reference Number`, `Check Number`, `Effective Date`, the categories, `Balance`, `Memo` and `Extended Description` |
+| Order | Newest first. Order carries no meaning |
+| Assumptions | Pending transactions are absent or marked otherwise than `Posted` |
+
 ## Test-only layouts
 
 Tests may define extra synthetic layouts, such as one with unreliable external IDs
@@ -76,8 +151,8 @@ for A21. These live in the tests, and are not supported or production layouts.
 
 ## Rows that may be one event
 
-Identical rows of the same status are separate events in both layouts. This is a
-property of these invented layouts, and each real layout must prove it. Evidence
+Identical rows of the same status are separate events in every layout here. Each
+institution layout must show this on a real file (D-059 point F). Evidence
 that rows may be one event is flagged under D-021.
 
 ## What counts as a row
@@ -95,7 +170,7 @@ These definitions apply to every layout and are what import summaries count (D-0
 ## Unresolved row reasons
 
 `missing_amount`, `missing_date`, `invalid_amount`, `invalid_date`, `invalid_status`,
-`conflicting_amount`, `wrong_column_count`. Each row keeps its original cells and
+`invalid_direction`, `conflicting_amount`, `wrong_column_count`. Each row keeps its original cells and
 creates no transaction.
 
 ## File failure codes

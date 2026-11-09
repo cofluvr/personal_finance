@@ -1,12 +1,21 @@
-# Session Handoff: M5 Complete, M6 Plan Next
+# Session Handoff: M6 Complete, Point F Next
 
-For a fresh session. Written 2026-11-09. **M1 to M5 are complete and accepted.** M5, the real-data
-gate, is D-058 in [decisions.md](decisions.md), with points 3 and 7 as the owner amended them. The owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09 on `/Volumes/CommonCents`
-and `/Volumes/CommonCentsBackup`, and reported every step verified.
+For a fresh session. Written 2026-11-09. **M1 to M6 are complete.** M6, the first real CSV layouts,
+is D-059 in [decisions.md](decisions.md), with points A to F as the owner approved them. Its
+fixtures are invented. The Capital One card, Amex and BFSFCU formats are confirmed from the owner's
+real exports, keeping none of their values, and the Capital One bank and U.S. Bank formats are not.
 
-**Next: draft D-059, the M6 plan** (first real statement layouts and their importers, one layout at
-a time, from redacted samples), for the owner's approval before anything of it is built. Milestones
-and criteria are in [plan.md](plan.md).
+| Slice | Commit | Layouts | Breaks |
+|---|---|---|---|
+| D-059 | `64a4791` | The plan, J1 to J8 | |
+| M6.1 | `729e44b` | `capital_one_card_v1`, `capital_one_bank_v1` | 18 applied, 18 caught |
+| M6.2 | `15f5958` | `us_bank_v1`, and a fix to `capital_one_bank_v1` | 13 applied, 13 caught |
+| M6.3 | `8e70069` | `amex_card_v1` | 8 applied, 8 caught |
+| M6.4 | `3c19a70` | `bfsfcu_v1`, and one shared Debit/Credit agreement rule | 14 applied, 14 caught |
+
+**Next:** the owner's point F run per layout, by [layout-verification.md](layout-verification.md),
+before its first real import. A layout that fails is corrected under a new version. M7, PDF
+parsing, needs its own plan as D-060.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -34,7 +43,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
 | Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance `c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e`, its docs `7a0d446`, M5.5 `4548b12`, its docs `df53e65`, and M5's acceptance the commit after it |
-| Latest gating run | Full suite, 2177 passed, exit code 0, on M5.5's docs `df53e65` |
+| Latest gating run | Full suite, exit code 0, on M6's closeout: see its commit message |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -42,7 +51,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
 | Entry point | `bin/pf`, using this checkout's `.venv`. An installed `pf` script also works |
-| Data | Synthetic only. Keep databases outside the repository |
+| Data | Synthetic only. Keep databases outside the repository. Institution fixtures in `tests/fixtures/synthetic/statements` are invented |
 | Remote | The owner pushes branches themselves. Nothing has been pushed from here since `673c025`, and GitHub's live state is unverified. Details in the archive |
 
 ## Read first
@@ -69,13 +78,10 @@ Then only what the task needs:
   in `cli.py`, `tests/scenarios/test_backups.py`, and "How M5.4 was implemented" under D-058.
 - For changes to M5.5: `tests/unit/test_no_network_imports.py`, [real-data-readiness.md](real-data-readiness.md),
   "Network and dependencies" in [status.md](status.md), and "How M5.5 was implemented" under D-058.
-- For drafting D-059, the M6 plan: plan.md's M6 row ("Only layouts supplied as redacted samples,
-  one at a time"), [layouts.md](layouts.md), D-005, D-018, D-021, D-022, D-024 and D-026 in
-  [decisions-d001-d052.md](decisions-d001-d052.md), PRD-backend §5 and §6, `ingest/` (`layouts.py`,
-  `csv_reader.py`, `coverage.py`, `pipeline.py`), and the synthetic fixtures in
-  `tests/fixtures/synthetic`. A real layout's sample reaches this repository only redacted and
-  with the owner's approval (D-019). When D-059 is written, move D-058's full text to
-  [decisions-d001-d052.md](decisions-d001-d052.md) and keep its index line.
+- For changes to M6: D-059, [layouts.md](layouts.md), `ingest/layouts.py`,
+  `tests/scenarios/test_institution_layouts.py` (one `LayoutCase` per layout runs J1 to J7), and
+  `tests/fixtures/synthetic/statements`. A new layout is a new `LayoutCase`. A real layout's sample
+  reaches this repository only redacted and with the owner's approval (D-019).
 - For changes to M4: the M4 slice's code, its scenario tests, and its "How M4.n was implemented"
   under D-057 in [decisions-d001-d052.md](decisions-d001-d052.md). M4.4's benchmark is `--scale` in
   `tests/benchmarks/measure_reconciliation.py`, with figures in [benchmarks.md](benchmarks.md).
@@ -206,18 +212,18 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Approval of D-059, the M6 plan, once drafted, and a redacted sample of the first layout.
-- An earlier draft of an M8 plan, left uncommitted by another session, was discarded by the owner
-  on 2026-11-09. D-059 is free for M6.
+- Point F per layout, by [layout-verification.md](layout-verification.md), and its results.
+- A header and rows of a Capital One bank and a U.S. Bank export, values invented, to confirm
+  those two formats.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for M5.4, M5.5 and M5's closeout on 2026-11-09, used for them | **Must be renewed** for D-059 and M6 |
+| Local commits on `feature/m2-review` | Approved for D-059 and M6 on 2026-11-09, used for them | **Must be renewed** for changes after the review |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
-| M6 | Not planned | D-059 to draft, then approval of it and of each slice |
+| M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |

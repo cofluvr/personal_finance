@@ -1,0 +1,8 @@
+"Transaction ID","Posting Date","Effective Date","Transaction Type","Posting Status","Amount","Check Number","Reference Number","Description","Transaction Category","Type","Balance","Memo","Extended Description"
+"20261031 000000 3 1,207","10/31/2026","10/31/2026","Credit","Posted","0.03000","","10000007","Credit Dividend","","Credit/Deposit Transactions","512.40000","","Credit Dividend"
+"20261022 000000 1,825 1,206","10/22/2026","10/22/2026","Debit","Posted","-18.25000","","10000006","POS Purchase: SYNTHETIC GROCERY 000    Anytown        XX","","Debit Card","512.37000","","POS Purchase"
+"20261022 000000 1,825 1,205","10/22/2026","10/22/2026","Debit","Posted","-18.25000","","10000005","POS Purchase: SYNTHETIC GROCERY 000    Anytown        XX","","Debit Card","530.62000","","POS Purchase"
+"20261015 000000 40,000 1,204","10/15/2026","10/15/2026","Credit","Posted","400.00000","","10000004","Deposit: SYNTHETIC EMPLOYER PAYROLL","","Credit/Deposit Transactions","548.87000","","Deposit"
+"20261009 000000 210 1,203","10/9/2026","10/9/2026","Debit","Posted","-2.10000","","10000003","ATM Withdrawal: Foreign Transaction Fee 000000","","Debit Card","148.87000","","ATM Withdrawal"
+"20261008 000000 7,000 1,202","10/8/2026","10/9/2026","Debit","Posted","-70.00000","","10000002","ATM Withdrawal: 00000000 SYNTHETIC BANK          Anytown        XX","","Debit Card","150.97000","","ATM Withdrawal"
+"20260930 000000 2 1,201","9/30/2026","9/30/2026","Credit","Posted","0.02000","","10000001","Credit Dividend","","Credit/Deposit Transactions","220.97000","","Credit Dividend"

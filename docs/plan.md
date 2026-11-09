@@ -220,7 +220,7 @@ M5.1 was approved, built and accepted as built the same day. M5.2 was approved w
 M5.3 was approved and built on 2026-11-09, and accepted as built the same day. M5.4 was approved on 2026-11-09, with the
 owner's amendment to point 7, and M5.5 the same day. Both were built that day and accepted as built.
 **M5 is complete.** The owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09 on `/Volumes/CommonCents`
-and `/Volumes/CommonCentsBackup`, and reported every step verified. M6 is next, and needs its own plan.
+and `/Volumes/CommonCentsBackup`, and reported every step verified. M6 is planned in D-059.
 
 | Slice | Scope | Status |
 |---|---|---|
@@ -279,6 +279,35 @@ and `/Volumes/CommonCentsBackup`, and reported every step verified. M6 is next, 
 | W2 | [status.md](status.md) states the network and dependency behaviour, once |
 | W3 | `docs/real-data-readiness.md` lists each step with its command and expected output, moving the owner's statements into the image among them, walked through on synthetic data in `build/` |
 | W4 | Every earlier criterion still passes |
+
+## M6 plan
+
+Directed by the owner on 2026-11-09 as D-059, built unattended, each slice gated on the full suite
+and committed locally. The owner approved points A to F the same day, and recorded all four slices
+complete. **M6 is complete.** The Capital One card, Amex and BFSFCU formats are confirmed from real
+exports, and the Capital One bank and U.S. Bank formats are not. Every layout is unverified
+until D-059 point F passes on one real file of it, by the steps in
+[layout-verification.md](layout-verification.md).
+
+| Slice | Scope | Status |
+|---|---|---|
+| M6.1 | Capital One: `capital_one_card_v1` and `capital_one_bank_v1` | Complete. Card format confirmed, bank format not |
+| M6.2 | U.S. Bank: `us_bank_v1`, its CSV activity list | Complete. Format not confirmed |
+| M6.3 | American Express: `amex_card_v1` | Complete. Format confirmed |
+| M6.4 | BFSFCU: `bfsfcu_v1`, from the format of a real export | Complete. Format confirmed |
+
+### M6 acceptance criteria, for each layout
+
+| ID | Test |
+|---|---|
+| J1 | The layout's exact header is accepted, and a column missing, renamed, reordered or added fails the file as `header_mismatch`, importing nothing |
+| J2 | Every row of its fixture parses to the expected signed amount, dates on the stated basis and description, with status `unknown` and no external ID. Money out is negative and money in positive |
+| J3 | A blank or invalid amount or date, and each check the layout makes within a row, leaves the row unresolved with its reason and original cells |
+| J4 | Identical rows in one file are separate transactions, each tracing to its document and row |
+| J5 | Reimporting the fixture changes nothing, and an overlapping export with complete declared coverage on both counts the shared rows once |
+| J6 | Coverage comes only from a declaration on a basis the layout offers. Another basis fails as `coverage_basis_unavailable` |
+| J7 | The stored interpretation names the layout, with no ID namespace and guarantee `none`, and `pf import --layout` offers it |
+| J8 | Every earlier criterion still passes |
 
 ## Backlog benchmarks
 

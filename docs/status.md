@@ -35,7 +35,12 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M5.4: backup, verification and restore | Accepted (D-058) |
 | M5.5: network and dependency behaviour, and the readiness checklist | Accepted (D-058) |
 | **M5 overall** | **Complete and accepted.** Readiness checklist run by the owner on 2026-11-09 |
-| M6 to M8 | Not started |
+| M6.1: Capital One card and bank layouts | Complete (D-059). Card format confirmed, bank format not |
+| M6.2: U.S. Bank CSV activity list | Complete (D-059). Format not confirmed |
+| M6.3: American Express card | Complete (D-059). Format confirmed |
+| M6.4: BFSFCU | Complete (D-059). Format confirmed |
+| **M6 overall** | **Complete.** Point F runs per layout before its first real import |
+| M7 and M8 | Not started |
 
 ## What exists
 
@@ -59,7 +64,7 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations`,
   `0017_real_ledger` and `0018_backup_records`,
   applied by `init` and `migrate` only (D-035).
-- `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
+- `personal_finance.ingest`: two invented layouts and five unverified institution layouts (D-059), explicit coverage, atomic
   per-file import.
 - `personal_finance.reconcile.same_document`: flags possible duplicates within one
   document. Merges nothing.
@@ -122,8 +127,11 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 
 ## What does not exist yet
 
-No real institution layout is supported, so no real statement can be imported until M6. The M5
-gate is open: the owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09, and
+Five institution layouts exist, `capital_one_card_v1`, `capital_one_bank_v1`, `us_bank_v1`,
+`amex_card_v1` and `bfsfcu_v1`, on invented fixtures. The Capital One card, Amex and BFSFCU formats
+are confirmed from real exports, and the Capital One bank and U.S. Bank formats are not. None is to
+import into the real ledger until D-059 point F passes on a real file of it. PDFs wait for M7. Fees linked to a parent and transfer groups are not built (D-059 point C).
+The M5 gate is open: the owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09, and
 real data belongs only in a real ledger on the encrypted image, never in a synthetic one. Only candidate items, decision conflicts and automatically merged transactions
 can be acted on.
 
