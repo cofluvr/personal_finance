@@ -24,12 +24,14 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M3.3: card payments, one-sided transfers and coverage warnings | Accepted (D-055) |
 | M3.4: income and spending | Accepted (D-056) |
 | **M3 overall** | **Complete and accepted** |
-| M4 to M8 | Not started |
+| M4.1: the 32,766-variable limit | Accepted (D-057) |
+| M4.2 to M8 | Not started |
 
 ## What exists
 
 - `personal_finance.money`: exact parsing and formatting of amounts.
 - `personal_finance.db.migrate`: database creation, connections, migrations.
+- `personal_finance.db.id_lists`: any number of IDs as one SQL parameter (D-057).
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
@@ -129,10 +131,9 @@ distinct spellings per block, and in the units of a group a decision touches.
   There are no reporting periods: totals cover the ledger or one account (D-056).
 - A loan payment is never split into principal and interest, so a one-sided one to a loan leaves
   that loan's interest out of spending, with a warning (D-056).
-- Every write fails with a database error once more than 32,766 transactions hold records bound by
-  matches and one-sided transfers, because `write_transfer_effects` passes one SQL variable per
-  transaction. An import of more than 32,766 files in one run, and `totals` with more than 32,766
-  active separations, fail the same way. Not yet planned.
+- Inserting a transfer match side scans every match side of its account, because SQLite plans the
+  `transfer_match_side_two_accounts` trigger's lookup by `account_id`. Each match a person makes
+  pays one scan, and building many matches directly is quadratic. Changing it needs a migration.
 - Only a person matches a transfer, one pair at a time, and only a candidate: a transfer-kind type
   on one side, the exactly opposite amount in another account, and dates within 5 days. Fees apart
   from the amount transferred and a transfer split over several transactions are not matched, and

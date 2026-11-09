@@ -1,9 +1,10 @@
-# Session Handoff: M3 Complete
+# Session Handoff: M4.1 Accepted
 
 For a fresh session. Written 2026-11-08. **M1, M2 and M3 are complete and accepted.** The owner
-accepted M3.4, income and spending (D-056), on 2026-11-08 as built, with no changes, and M3 closes
-with it (D-056, point C). **Nothing further is planned.** The owner asked for M3 to be closed out
-without planning M4, so the next milestone needs its own request and plan.
+approved the M4 plan, D-057 in [decisions.md](decisions.md), with the lead engineer's
+recommendations, including points A to E. **M4.1, the 32,766-variable limit, is built and was
+accepted as built on 2026-11-08.** M4.2 to M4.4 each need their own approval. Slices and acceptance
+criteria are in [plan.md](plan.md).
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -30,8 +31,8 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`: it records M3.4's acceptance and M3's close. Earlier markers are in the archive |
-| Latest gating run | Full suite, 1742 passed, exit code 0, gating the commit recording M3's close |
+| Latest commit | Run `git log -1`: it records M4.1, built and accepted. Earlier markers are in the archive |
+| Latest gating run | Full suite, 1749 passed, exit code 0, gating the commit recording M4.1 |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -42,18 +43,17 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 ## Read first
 
 1. This file.
-2. [decisions.md](decisions.md): the index and the rules in brief. Every decision is accepted, and
-   their full text is in [decisions-d001-d052.md](decisions-d001-d052.md).
-3. [plan.md](plan.md): milestones and the M3 plan.
+2. [decisions.md](decisions.md): the index, the rules in brief, and D-057 in full. Every earlier
+   decision is accepted, and their full text is in [decisions-d001-d052.md](decisions-d001-d052.md).
+3. [plan.md](plan.md): milestones and the M4 plan.
 4. [status.md](status.md): what exists, and the known limitations.
 
 Then only what the task needs:
 
-- For M4, balances and reports: PRD-backend §5, §17 and §20, D-013 and D-034 in
-  [decisions-d001-d052.md](decisions-d001-d052.md), and the variable limit in [status.md](status.md).
-- For the variable limit: `transaction_facts` in `reconcile/transfer_effects.py`, `_separated` in
-  `reports/totals.py`, `reports/import_summary.py`, and the `--income` shape in
-  `tests/benchmarks/measure_reconciliation.py`.
+- For building M4.2 to M4.4: D-057 in [decisions.md](decisions.md), PRD-backend §5, §17 and §20,
+  and D-013 and D-034 in [decisions-d001-d052.md](decisions-d001-d052.md).
+- For changes to M4.1: `db/id_lists.py`, its four callers (`transaction_facts`, `_separated`, and
+  both queries in `reports/import_summary.py`), and `tests/scenarios/test_id_lists.py`.
 - For changes to M3.4 (D-056): `reports/totals.py`, `run_totals`, `print_income_and_spending`
   and `describe_income_and_spending` in `cli.py`, `tests/scenarios/test_income_and_spending.py`,
   and "M3.4 as built" in the archive.
@@ -162,17 +162,16 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- What comes next. M4 is not planned. The 32,766-variable limit is open, and a plan for M4 should
-  take it up before the 100,000-transaction benchmark.
+- Approval of M4.2, balance observations and statement reconciliation.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved through closing M3 | **Must be renewed** for anything further |
+| Local commits on `feature/m2-review` | Approved through M4.1 | **Must be renewed** for anything further |
 | M1, M2 and M3 | Accepted as built | None |
-| M4 | Not planned | Needs the owner's request, then its own plan and approval |
+| M4 | Plan approved (D-057). M4.1 accepted as built | Approval of each later slice |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |

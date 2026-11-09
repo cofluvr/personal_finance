@@ -149,6 +149,66 @@ Approved with D-056 on 2026-11-08.
 | T11 | The groups are the same at every valid point of the existing exhaustive import-order tests for two accounts |
 | T12 | S, C, P, N, V, U, K, Q, F, X and O still pass, and `totals` is measured on a ledger with many transactions in every group, including many matches and one-sided transfers, with the new section's cost shown apart from the candidate search |
 
+## M4 plan
+
+Approved on 2026-11-08 as D-057, with the lead engineer's recommendations, including points A to
+E. M4.1 was approved, built and accepted as built. Each later slice needs its own approval.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M4.1 | The 32,766-variable limit, with no change in behaviour | Accepted |
+| M4.2 | Balance observations and statement reconciliation | Proposed |
+| M4.3 | Monthly reports with disclosures (D-013) | Proposed |
+| M4.4 | The 100,000-transaction benchmark and provisional resource targets | Proposed |
+
+### M4.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| L1 | `transaction_facts`, `_separated` and both import summary queries succeed at 32,767 IDs, each test failing on the current code |
+| L2 | Their results are identical to the current code's below the limit, on generated ledgers |
+| L3 | An import run of 32,767 files, a write with 32,767 transactions bound by one-sided transfers and `totals` with 32,767 active separations succeed, built directly |
+| L4 | Every existing criterion still passes, with no token, migration or output change |
+
+### M4.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| B1 | Opening balance plus activity equals closing balance: an interval agrees exactly, and a one-cent change on either side gives `differs by` that cent |
+| B2 | Activity counts posted transactions after the earlier day through the later one, exactly at both edges, using effective amounts and posting dates |
+| B3 | Refused, with nothing changed: unknown account, a second active observation for one date, `--owed` on a non-liability, `--balance` on a card or loan, an invalid amount or date, and undo with a wrong account or stale token |
+| B4 | `--owed` stores the negation, shown as owed, and a credit balance on a card round-trips |
+| B5 | Covered only when complete posting-basis coverage spans every day of the interval. Transaction-basis coverage, partial coverage and a one-day gap at either edge are not covered |
+| B6 | Pending transactions are left out and counted, `unknown` status and posted without a posting date are counted and disclosed, and open review items in the interval are disclosed |
+| B7 | Agreement declares no coverage, settles no review item, and changes no total. Source evidence, `ledger_transaction`, `derive()` output and every token are byte-identical with and without observations |
+| B8 | Migration 0016 works on a populated ledger, makes no account stale, and is atomic on failure. Observation tables are append-only |
+| B9 | An observation survives repeat imports, `reconcile` and a rules change. A later import inside an interval changes its outcome |
+| B10 | Tokens: `b1` pinned. Undo restores the earlier intervals exactly |
+
+### M4.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| G1 | Every transaction is in exactly one month or `no date`, and their lines add to `totals` exactly, per group, for the ledger and for one account, over generated ledgers |
+| G2 | A month uses the effective transaction date, else the effective posting date, and the counts of each are right. A date correction moves a transaction between months, and its undo moves it back |
+| G3 | Within each month, D-056's five groups add to net account movement |
+| G4 | A month is covered for an account only when complete transaction-basis coverage spans every day of it, exact at the first and last day. Posting-basis coverage does not count |
+| G5 | Open review items and unsettled corrections, classifications, matches and one-sided transfers are disclosed in the month of their transactions |
+| G6 | A match whose sides fall in different months counts each side in its month, and the cross-month count is disclosed |
+| G7 | `--from` and `--to` are inclusive, and an invalid or reversed range is refused. `report monthly` writes nothing, and `totals` output is unchanged |
+| G8 | The months are the same at every valid point of the existing exhaustive import-order tests for two accounts |
+
+### M4.4 acceptance criteria
+
+| ID | Test |
+|---|---|
+| Z1 | The shape reaches 100,000 transactions, 60 months, four accounts, at least 20,000 matches and more than 32,766 matched sides, and prints those counts |
+| Z2 | It measures `totals`, `report monthly`, `balance check`, one classification and one import into that ledger, each apart |
+| Z3 | A run on the code before M4.1 fails at the variable limit, showing the shape reaches it |
+| Z4 | Figures and the machine go in [benchmarks.md](benchmarks.md). Targets are provisional and not test assertions (D-034, D-057) |
+| Z5 | A missed target is reported with the cost behind it, not redesigned within M4.4 |
+| Z6 | S, C, P, N, V, U, K, Q, F, X, O, T, L, B and G still pass |
+
 ## Backlog benchmarks
 
 Not scheduled, and not part of A39 acceptance.

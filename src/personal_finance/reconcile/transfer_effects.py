@@ -15,6 +15,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from personal_finance.db.id_lists import ids_as_json_array
 from personal_finance.reconcile.classification_effects import PAID_ACCOUNT_TYPES_BY_TYPE
 from personal_finance.reconcile.coverage_in_effect import complete_coverage_by_basis
 
@@ -170,9 +171,9 @@ def transaction_facts(conn: sqlite3.Connection, transaction_ids) -> dict[str, Tr
     wanted = sorted(set(transaction_ids))
     if not wanted:
         return {}
-    marks = ", ".join("?" for _ in wanted)
     return {facts.transaction_id: facts for facts in map(
-        _facts_of, conn.execute(_FACTS + f" WHERE entry.id IN ({marks})", wanted))}
+        _facts_of, conn.execute(_FACTS + " WHERE entry.id IN (SELECT value FROM json_each(?))",
+                                (ids_as_json_array(wanted),)))}
 
 
 _ACTIVE_ONE_SIDED_BOUND = """
