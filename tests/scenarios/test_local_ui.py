@@ -327,7 +327,11 @@ class TestHeadersAndAssets:  # UB6
             assert response.header("Server") == "pf", name
 
     def test_pages_hold_no_script_inline_style_or_outside_address(self, ledger, client):
-        for target in ("/", "/monthly", "/?account=A", "/no-such-page"):
+        items = [address for address in parsed_page(client.get("/review").body).addresses
+                 if address.startswith("/review/item")]
+        assert items
+        for target in ("/", "/monthly", "/?account=A", "/no-such-page", "/documents",
+                       "/transactions", "/review", *items):
             page = parsed_page(client.get(target).body)
             assert "script" not in page.tags
             assert "style" not in page.tags

@@ -23,8 +23,12 @@ from personal_finance.cli import (
 )
 from personal_finance.reports.report_text import (
     account_choices,
+    document_list_lines,
     monthly_report_lines,
+    review_item_report,
+    review_queue_lines,
     totals_report_lines,
+    transaction_list_lines,
 )
 
 LOOPBACK_ADDRESS = "127.0.0.1"
@@ -64,6 +68,9 @@ form { margin: 0 0 16px; }
 NAVIGATION = (
     ("/", "Totals"),
     ("/monthly", "Monthly"),
+    ("/documents", "Import results"),
+    ("/transactions", "Transactions"),
+    ("/review", "Review queue"),
 )
 
 # What each page accepts in its address. A value is an ID or a month and nothing else, refused
@@ -71,6 +78,10 @@ NAVIGATION = (
 PAGE_PARAMETERS = {
     "/": {"account"},
     "/monthly": {"account", "from", "to"},
+    "/documents": set(),
+    "/transactions": set(),
+    "/review": set(),
+    "/review/item": {"id"},
     "/style.css": set(),
 }
 QUERY_VALUE = re.compile(r"[A-Za-z0-9_-]{0,100}")
@@ -85,6 +96,7 @@ READ_ONLY = "This interface is read-only. Decisions are made with pf review in t
 NOT_FOUND = "There is no such page."
 BAD_ADDRESS = "This address holds a value the interface does not accept."
 UNREADABLE = "This request could not be read."
+ITEM_NOT_FOUND = "Review item not found. A later import can replace one: see the review queue."
 
 
 class LoopbackServer(HTTPServer):
@@ -212,6 +224,18 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         if path == "/":
             form = account_form(conn, "/", account_id)
             return self.send_page(200, "Totals", totals_report_lines(conn, account_id), form=form)
+        if path == "/documents":
+            return self.send_page(200, "Import results", document_list_lines(conn))
+        if path == "/transactions":
+            return self.send_page(200, "Transactions", transaction_list_lines(conn))
+        if path == "/review":
+            return self.send_page(200, "Review queue", review_queue_lines(conn))
+        if path == "/review/item":
+            report = review_item_report(conn, parameters.get("id", ""))
+            if report is None:
+                return self.send_page(404, "Not found", notice=ITEM_NOT_FOUND)
+            hint = decision_hint(self.server.ledger_path, report)
+            return self.send_page(200, "Review item", report.lines, after=hint)
         first_month = validated_month("from", parameters.get("from") or None)
         last_month = validated_month("to", parameters.get("to") or None)
         if first_month and last_month and first_month > last_month:
@@ -300,3 +324,19 @@ def account_form(conn, action, account_id, first_month=None, last_month=None) ->
         )
     return (f'<form method="get" action="{action}"><label>Account <select name="account">'
             f'{"".join(options)}</select></label>{months} <button>Show</button></form>')
+
+
+def decision_hint(ledger_path, report) -> str:
+    """The terminal commands that decide this item, with its account ID, item ID and revision
+    token. The interface decides nothing (D-062 point 3), so D-043's checks stay in pf review."""
+    common = (f"{report.item_id} --db {ledger_path} --account {report.account_id} "
+              f"--revision {report.revision}")
+    if report.kind == "unresolved_record":
+        commands = [f"pf review complete {common} with the values to supply",
+                    f"pf review dismiss {common}"]
+    else:
+        commands = [f"pf review confirm {common} --group T ...",
+                    f"pf review reject {common} --pair T1 T2"]
+    lines = "".join(f'<div class="hint-line">  {escaped(command)}</div>' for command in commands)
+    return ('<h2>Deciding this item</h2><p class="notice">This interface is read-only. To decide, '
+            f'run one of these in the terminal:</p><div class="report">{lines}</div>')

@@ -95,7 +95,9 @@ class _PageParser(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.report_lines, self.addresses, self.tags, self.attributes = [], [], [], []
+        self.hint_text = ""
         self._line_depth = 0
+        self._in_hint = False
 
     def handle_starttag(self, tag, attrs):
         self.tags.append(tag)
@@ -106,6 +108,7 @@ class _PageParser(HTMLParser):
         elif tag == "div" and ("class", "line") in attrs:
             self._line_depth = 1
             self.report_lines.append("")
+        self._in_hint = tag == "div" and ("class", "hint-line") in attrs
 
     def handle_endtag(self, tag):
         if self._line_depth:
@@ -114,6 +117,8 @@ class _PageParser(HTMLParser):
     def handle_data(self, data):
         if self._line_depth:
             self.report_lines[-1] += data
+        if self._in_hint:
+            self.hint_text += data
 
 
 def parsed_page(body: bytes) -> _PageParser:

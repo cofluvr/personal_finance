@@ -389,12 +389,13 @@ I7 is not needed: the formats' descriptions agree, so D-006 is not amended.
 
 Approved by the owner on 2026-11-09 as D-062, with A to E: read-only, so M8.4 is not built. Point
 1 changes a security control (W1), approved as one. M8.1 to M8.3 approved to build in order.
+**M8 is built,** awaiting the owner's review.
 
 | Slice | Scope | Status |
 |---|---|---|
 | M8.1 | One builder per report, the CLI printing its lines byte for byte as now. No server | Complete |
 | M8.2 | `pf ui`: the loopback server, its protections, and the totals and monthly pages | Complete |
-| M8.3 | Import results, transactions, the review queue and one review item, read-only | Proposed |
+| M8.3 | Import results, transactions, the review queue and one review item, read-only | Complete |
 | M8.4 | Review decisions from the browser | Not built: the owner chose a read-only M8 |
 
 ### M8.1 acceptance criteria

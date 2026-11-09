@@ -81,7 +81,7 @@ and keep its index line.
 | D-059 | M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6 |
 | D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, implemented in M7 |
 | D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
-| D-062 | M8 plan: the local review UI — Approved with A to E, read-only |
+| D-062 | M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8 |
 
 ## Rules in brief
 
@@ -176,6 +176,9 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Account number in rows | A layout whose rows name the account's last four digits refuses a file naming another, or an account with none registered, importing nothing | D-061 |
 | PDF layouts | A layout groups a PDF's lines into rows, keeping each. A line it does not know is an unresolved row, never skipped. A document stating no period takes a declaration, as a CSV | D-060 |
 | CSV and PDF | One event in both counts once only by D-006's exact rule, unchanged. An ID-bearing row against an ID-less one stays a possible duplicate | D-006, D-026, D-060 |
+| Report text | `totals`, `report monthly`, `documents`, `transactions`, `review list` and `review show` are built as lines in `reports/report_text.py`, which the CLI prints and the UI renders. A page computes nothing of its own | D-062 |
+| Local UI | `pf ui` serves read-only pages on `127.0.0.1` at a port the system picks, with no option to change it. Exact Host, a one-use launch key for an `HttpOnly`, `SameSite=Strict` cookie, `GET` only, no script, no logging, the ledger opened read-only through the gate on every request. Decisions stay in the terminal | D-062 |
+| W1 and `http` | Only `ui/server.py` imports from `http`, and only `http.server`'s `BaseHTTPRequestHandler` and `HTTPServer` | D-058, D-062 |
 | PDF text | pypdf alone reads it, pinned by hash, imported by `ingest/pdf_reader.py` only, with `jbig2dec` unset and its log silenced. W1 parses pypdf too, allowing only its JBIG2 decoder's `subprocess` | D-020, D-060 |
 | Backups | A new folder, on a mounted volume other than a real ledger's and gated as its folder is, holding the ledger, its referenced originals and a manifest of hashes, sizes, versions and a logical digest. Restore never overwrites, and checks every file, integrity, foreign keys, schema and digest first | D-058 |
 
@@ -186,7 +189,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
 
-## D-062 M8 plan: the local review UI — Approved with A to E, read-only
+## D-062 M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8
 
 Proposed on 2026-11-09. Delivers plan.md's M8 row (loopback-only import results, review queue and
 transactions; tested by Host and CSRF checks, and UI totals matching the CLI) against PRD-backend §18
@@ -417,3 +420,20 @@ approved to build in order, each gated on the full suite and committed locally.
   once, and on M4.3's generated ledgers, whose builder is now `generated_ledger()` for both tests.
 - **Three test gaps closed** by deliberate breaks: `handle_error`'s traceback, HTML in account names
   on these pages, and a refused address told apart from an unknown account.
+
+**How M8.3 was implemented:**
+
+- Four pages, each a builder's lines: import results (`documents`), transactions, the review queue
+  (`review list`), whose item IDs link to `/review/item?id=`, and one item (`review show`). The
+  item page adds the terminal commands that decide it, naming the ledger, account ID, item ID and
+  revision token: `confirm` and `reject`, or `complete` and `dismiss` for an unresolved row. It
+  holds no form.
+- **One difference from the CLI, by design:** D-037 prints file names as typed, so a control or
+  format character in one reaches the terminal. A page writes it escaped, as `shown()` does, so
+  its text then differs from the CLI's in that character alone. A test pins it.
+- **No creation timestamps** (point 7): a test retires an ID with its identity history removed, as
+  before migration 0004, revives it, and finds no timestamp on any page, while `trace` shows one.
+- **A test gap closed:** the ledger path in the item page's commands, shown as typed, is escaped,
+  shown with a ledger in a folder named with HTML.
+- Not done: a look at `pf ui` in a browser. No session opens a browser or connects to the server,
+  so that is the owner's, under "Awaiting the owner" in the handoff.

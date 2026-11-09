@@ -47,7 +47,9 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | **M7 overall** | **Complete,** recorded by the owner on 2026-11-09 |
 | M8.1: one builder per report | Complete (D-062) |
 | M8.2: `pf ui`, the loopback server, totals and monthly pages | Complete (D-062) |
-| M8.3 | Approved, not built |
+| M8.3: import results, transactions, review queue and item pages | Complete (D-062) |
+| M8.4: decisions from the browser | Not built: the owner chose a read-only M8 |
+| **M8 overall** | **Built,** awaiting the owner's review |
 
 ## What exists
 
@@ -205,6 +207,15 @@ rewriting 20,000 match outcomes (D-057).
 
 ## Known limitations
 
+- The local UI is read-only, and shows six commands' output only. It searches nothing, imports
+  nothing, exports nothing and shows no `trace` or decision history, which carry creation
+  timestamps (F2). Decisions are made with `pf review` in the terminal (D-062).
+- `pf ui` cannot stop what the browser keeps: history (addresses with IDs and months, a fixed
+  title) and session-restore snapshots. It asks for a private window. Cookies are not kept apart by
+  port, so a page served by another local user on another loopback port, opened while `pf ui`
+  runs, receives its cookie. Anything running as the owner can read the ledger anyway.
+- A control or format character in a file name shows escaped on a page and as typed in the CLI.
+- `pf ui` answers one request at a time, and reruns a real ledger's two volume probes for each.
 - Only a person classifies, one transaction at a time. A type must fit the transaction's
   direction. A card, loan or investment payment may be money in on the account it pays, and interest
   is money out only, so interest earned is `income` (D-053, D-054).

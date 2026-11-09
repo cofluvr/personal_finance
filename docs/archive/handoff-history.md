@@ -975,3 +975,19 @@ M6 is D-059, complete on 2026-11-09.
 | M6.2 | `15f5958` | `us_bank_v1`, and a fix to `capital_one_bank_v1` | 13 applied, 13 caught |
 | M6.3 | `8e70069` | `amex_card_v1` | 8 applied, 8 caught |
 | M6.4 | `3c19a70` | `bfsfcu_v1`, and one shared Debit/Credit agreement rule | 14 applied, 14 caught |
+
+## M7 slices
+
+M7 is D-060, complete on 2026-11-09.
+
+| Slice | Commit | What | Breaks |
+|---|---|---|---|
+| D-060 | `b78ab14` | The M7 plan, D1 to D14 and I1 to I11 | |
+| M7.1 | `9a9eafe` | pypdf, fenced from running `jbig2dec`, and `pf pdf text` | 13 on the final code, all caught, and 3 on the logging fence |
+| D-061 | `7e4f506` | Capital One bank: format confirmed, account number checked | 7 applied, 7 caught |
+| M7.2 | `2626591` | `us_bank_card_activity_pdf_v1` | 16 applied, 13 caught, 2 dead code deleted, 1 gap closed |
+| M7.3 | `2665756` | CSV and PDF counting once, on D-006 unchanged | 8 applied, 6 caught here, 2 equivalent here and caught by unit tests |
+
+**Not built:** M7.4, since the printout holds one card and each entry names it. M7.5, since the
+owner holds no Capital One card PDF. No U.S. Bank card CSV layout, since the owner holds no such
+export: `us_bank_v1` is not that card's format.
