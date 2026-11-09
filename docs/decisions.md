@@ -77,7 +77,7 @@ and keep its index line.
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
-| D-058 | M5 plan: the real-data gate — Approved, M5.1 and M5.2 implemented and accepted |
+| D-058 | M5 plan: the real-data gate — Approved, M5.1 and M5.2 implemented and accepted, M5.3 implemented |
 
 ## Rules in brief
 
@@ -167,6 +167,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Monthly reports | A transaction's month is its effective transaction date, else its effective posting date. Months add to `totals`, D-056's groups add to each month, and a month is covered only by complete transaction-basis coverage of every day | D-013, D-057 |
 | Real ledgers | Real or synthetic, fixed at `init`. Only a real ledger is checked, on every open, and a synthetic one is never promoted | D-058 |
 | Real ledger location | Refused inside a git work tree or a synced folder, through a symbolic link, not owned by the user, or open to group or others. Checked, never repaired. Its imports never come from a git work tree | D-019, D-058 |
+| Originals | A real ledger keeps each new document's bytes in `originals/` under its SHA-256, `0400`, before the import commits. Never overwritten or deleted. Identity never reads it | D-017, D-058 |
 | Encrypted volume | A real ledger's folder is inside, never at the root of, a mounted disk image whose APFS volume honours ownership, and which diskutil reports encrypted or hdiutil reports encrypted as an image. FileVault on the startup volume does not count. Any other answer refuses. Temporary files stay in memory | D-002, D-058 |
 
 ## Not yet decided
@@ -175,7 +176,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-058 M5 plan: the real-data gate — Approved, M5.1 and M5.2 implemented and accepted
+## D-058 M5 plan: the real-data gate — Approved, M5.1 and M5.2 implemented and accepted, M5.3 implemented
 
 Proposed on 2026-11-08, and approved by the owner the same day with the lead engineer's
 recommendations, including points A to F, with M5.1 approved to build. Each later slice needs its
@@ -372,3 +373,28 @@ amendment followed:
   umask, and a test shows `0600` beside the database with the umask cleared.
 - **Not detected:** whether the image's password is strong or where it is kept, and where the
   image file itself lives. It is not under `/Volumes`, so the synced-folder rule does not see it.
+
+**How M5.3 was implemented,** where recommendations 5 and 6 left a choice. The owner approved the
+lead engineer's recommendations on 2026-11-09, and it was built the same day on synthetic data. It
+awaits review. No migration: `import_attempt.failure_code` takes any code.
+
+- **The bytes archived** are the ones read once, hashed and parsed, never a second read of the
+  file. The copy is the last step before `COMMIT`, so a file that fails to parse leaves none.
+- **A file already holding the name** is rehashed. Matching bytes are kept as the original,
+  untouched. Anything else, a link or a folder included, fails the import as `archive_failed` and
+  is never overwritten, so `archive verify` shows it altered.
+- **The folder** is `originals/` beside the database, flat, with no extension on a name. `import`
+  creates it `0700` before importing, and `import`, `archive verify` and `storage` refuse it when it
+  is a link, not a folder, not owned by the user or open to group or others. Ordinary opens do not
+  check it. A copy is written to `.<hash>.<random>.partial` with `O_EXCL`, synced, set `0400`,
+  renamed, and the folder synced. A failed copy removes its partial file.
+- **A repeat import copies nothing,** even when its original is missing: `archive verify` reports
+  that.
+- **`archive verify`** lists missing and altered originals with their document, and every other
+  entry as not referenced. It exits 1 unless the archive is intact, and refuses a synthetic ledger.
+- **`storage`** counts every file under the installed `personal_finance` package as software, not
+  the interpreter or `.venv`. The database counts with any `-journal`, `-wal` and `-shm` beside it.
+  Originals are split into referenced and not referenced. Sizes are exact bytes, read without
+  following links. Backups read "none recorded" until M5.4 adds the table recording them.
+- **Not handled:** two real ledgers in one folder share `originals/`, and each lists the other's
+  originals as not referenced.
