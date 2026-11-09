@@ -32,8 +32,9 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M5.1: real ledgers, their location and file permissions | Accepted (D-058) |
 | M5.2: encryption, an encrypted volume checked on every open | Accepted (D-002, D-058) |
 | M5.3: archiving originals, and storage by kind | Accepted (D-017, D-058) |
-| M5.4: backup, verification and restore | Built, awaiting review (D-058) |
-| M5.5: network and dependency behaviour, and the readiness checklist | Built, awaiting review (D-058) |
+| M5.4: backup, verification and restore | Accepted (D-058) |
+| M5.5: network and dependency behaviour, and the readiness checklist | Accepted (D-058) |
+| **M5 overall** | **Complete and accepted.** Readiness checklist run by the owner on 2026-11-09 |
 | M6 to M8 | Not started |
 
 ## What exists
@@ -121,10 +122,9 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 
 ## What does not exist yet
 
-No real institution layout is supported. **It must not be used with real financial
-data** (M5 gate). A real ledger's location and encrypted disk image are checked (M5.1, M5.2), its originals are archived (M5.3), and it can be backed up
-and restored (M5.4), but the gate stays closed until the owner runs
-[real-data-readiness.md](real-data-readiness.md) (M5.5). Only candidate items, decision conflicts and automatically merged transactions
+No real institution layout is supported, so no real statement can be imported until M6. The M5
+gate is open: the owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09, and
+real data belongs only in a real ledger on the encrypted image, never in a synthetic one. Only candidate items, decision conflicts and automatically merged transactions
 can be acted on.
 
 ## Network and dependencies

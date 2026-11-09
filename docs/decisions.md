@@ -77,7 +77,7 @@ and keep its index line.
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
-| D-058 | M5 plan: the real-data gate — Approved, M5.1 to M5.3 implemented and accepted, M5.4 and M5.5 implemented |
+| D-058 | M5 plan: the real-data gate — Approved, implemented and accepted in M5 |
 
 ## Rules in brief
 
@@ -177,7 +177,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-058 M5 plan: the real-data gate — Approved, M5.1 to M5.3 implemented and accepted, M5.4 and M5.5 implemented
+## D-058 M5 plan: the real-data gate — Approved, implemented and accepted in M5
 
 Proposed on 2026-11-08, and approved by the owner the same day with the lead engineer's
 recommendations, including points A to F, with M5.1 approved to build. Each later slice needs its
@@ -409,7 +409,7 @@ as built. No migration: `import_attempt.failure_code` takes any code.
 
 **How M5.4 was implemented,** under points 7 and 8, point 7 as amended. The owner approved M5.4,
 with the lead engineer's recommendations for the choices points 7 and 8 left open, on 2026-11-09,
-and it was built the same day on synthetic data. It awaits review. Migration 0018 adds
+and it was built the same day on synthetic data, and accepted as built. Migration 0018 adds
 `backup_record`.
 
 - **`--to` names the new backup folder,** which must not exist. It is created `0700`, holding
@@ -446,7 +446,7 @@ and it was built the same day on synthetic data. It awaits review. Migration 001
 
 **How M5.5 was implemented,** under points 9 and 10. The owner approved M5.5 on 2026-11-09 to be
 built unattended, choosing the lead engineer's most fail-closed recommendation wherever a choice
-was left open, and it was built the same day on synthetic data. It awaits review.
+was left open, and it was built the same day on synthetic data, and accepted as built. The owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09 on `/Volumes/CommonCents` and `/Volumes/CommonCentsBackup`, and reported every step verified.
 
 - **W1 parses every module, never imports it,** and refuses more than point 9's list: `_socket`,
   `_ssl`, `asyncio`, `socketserver`, `xmlrpc`, `poplib`, `imaplib`, `nntplib`, `telnetlib`,
