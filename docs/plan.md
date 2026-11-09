@@ -60,7 +60,7 @@ them passing. The rules are D-040 to D-052.
 
 Proposed on 2026-11-08. M3.1 was approved the same day with no changes. Each later slice needs its
 own approval. M3.2 was built on the lead engineer's recommendations and accepted with no changes,
-and M3.3 was accepted as built with no changes. M3 closes after M3.4 (D-056, point C), with fees
+and M3.3 and M3.4 were accepted as built with no changes. **M3 is complete** (D-056, point C), with fees
 separate from transferred principal and transfers split over several transactions left as open
 PRD §9 requirements, to plan when a real layout shows one (M6).
 
@@ -69,7 +69,7 @@ PRD §9 requirements, to plan when a real layout shows one (M6).
 | M3.1 | Financial types, stated by a person (D-053) | Accepted |
 | M3.2 | Transfer candidates across accounts, and reconciling two accounts together (D-054) | Accepted |
 | M3.3 | Card payments, one-sided transfers and coverage warnings (D-012, D-055) | Accepted |
-| M3.4 | Income and spending, with disclosures of unconfirmed transfers (D-056) | Built, awaiting review |
+| M3.4 | Income and spending, with disclosures of unconfirmed transfers (D-056) | Accepted |
 
 ### M3.1 acceptance criteria
 

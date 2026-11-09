@@ -585,6 +585,24 @@ The benchmark is `tests/benchmarks/measure_reconciliation.py --resolved`.
   own file.
 - One record at a time.
 
+## M3.4 as built
+
+Built and accepted by the owner on 2026-11-08 as built, with no changes, including the
+implementation choices and points for review in D-056. M3 closes with it. Scope and acceptance tests are in [plan.md](plan.md)
+(T1 to T12), the rules, implementation choices and points for review in D-056. Tests are in
+`tests/scenarios/test_income_and_spending.py`, with T11 in both import-order tests. The benchmark
+is `measure_reconciliation.py --income`, in [benchmarks.md](benchmarks.md). 23 deliberate breaks:
+19 caught by the test aimed at each rule, and 4 survivors closed by new tests and then caught.
+Breaks and benchmark output are in `build/m3.4-breaks/` and `build/m3.4-bench/`.
+
+**Known limits of M3.4, as accepted:**
+
+- Income and spending count only what a person classified and confirmed. Unconfirmed transfer
+  kinds and unclassified transactions are disclosed as a bound, never counted.
+- No reporting periods, which stay in M4 with D-013.
+- A loan payment is never split into principal and interest.
+- Every write fails above 32,766 transactions bound by transfers, in M3.2 and M3.3 code, for review.
+
 ## M3.3 as built
 
 Built and accepted by the owner on 2026-11-08 as built, with no changes, including the
@@ -901,7 +919,7 @@ belongs in M2, and F2's stored marker if any new command shows legacy creation t
 
 ## Where each slice starts in git
 
-Run `git log -1`: the commit recording this handoff. M3.3's acceptance and D-056 are recorded after `c85c099`, which records M3.3 as built. M3.3 starts after `6bd89a5`, which records D-055's approval, itself after `37882b5`, which records M3.2's acceptance and proposes D-055. M3.2's acceptance is recorded after `f19bd1d`. M3.2 starts after `0a08cd5`, which proposes D-054, itself after `dd961a4`, which records M3.1's acceptance. M3.1 starts after `c25913f`, which records D-053's approval, itself after `08e4225`, which proposed it. M2.6's acceptance is recorded after `4aac5c3`. M2.6 starts after `8384fb6`, which records its plan's approval, itself after `0032c9c`, which records M2.5's acceptance. M2.5 starts after `d1feb30`, which records its plan's approval, itself after `7551e18`, which records M2.4's acceptance. M2.4 starts after `97f7296`, which records M2.3's acceptance. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a`
+Run `git log -1`: the commit recording this handoff. M3.4's acceptance and M3's close are recorded after `7248d20`, which records M3.4 as built. M3.4 starts after `288fb32`, which records D-056's approval. M3.3's acceptance and D-056 are recorded after `c85c099`, which records M3.3 as built. M3.3 starts after `6bd89a5`, which records D-055's approval, itself after `37882b5`, which records M3.2's acceptance and proposes D-055. M3.2's acceptance is recorded after `f19bd1d`. M3.2 starts after `0a08cd5`, which proposes D-054, itself after `dd961a4`, which records M3.1's acceptance. M3.1 starts after `c25913f`, which records D-053's approval, itself after `08e4225`, which proposed it. M2.6's acceptance is recorded after `4aac5c3`. M2.6 starts after `8384fb6`, which records its plan's approval, itself after `0032c9c`, which records M2.5's acceptance. M2.5 starts after `d1feb30`, which records its plan's approval, itself after `7551e18`, which records M2.4's acceptance. M2.4 starts after `97f7296`, which records M2.3's acceptance. M2.3 starts after `66ecb06`, which records M2.2's acceptance. M2.2 starts after `1caeb52`, and M2.1 after `643e1b1`. In M1, slice 3 starts after `66fda56` and slice 4 after `cda368a`
 
 ## Remote state, in full
 

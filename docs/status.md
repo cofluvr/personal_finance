@@ -22,8 +22,9 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M3.1: financial types | Accepted (D-053) |
 | M3.2: transfers across accounts | Accepted (D-054) |
 | M3.3: card payments, one-sided transfers and coverage warnings | Accepted (D-055) |
-| M3.4: income and spending | Built, awaiting review (D-056) |
-| M3 to M8 | Not started |
+| M3.4: income and spending | Accepted (D-056) |
+| **M3 overall** | **Complete and accepted** |
+| M4 to M8 | Not started |
 
 ## What exists
 
@@ -130,7 +131,8 @@ distinct spellings per block, and in the units of a group a decision touches.
   that loan's interest out of spending, with a warning (D-056).
 - Every write fails with a database error once more than 32,766 transactions hold records bound by
   matches and one-sided transfers, because `write_transfer_effects` passes one SQL variable per
-  transaction (D-056, for review).
+  transaction. An import of more than 32,766 files in one run, and `totals` with more than 32,766
+  active separations, fail the same way. Not yet planned.
 - Only a person matches a transfer, one pair at a time, and only a candidate: a transfer-kind type
   on one side, the exactly opposite amount in another account, and dates within 5 days. Fees apart
   from the amount transferred and a transfer split over several transactions are not matched, and

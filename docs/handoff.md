@@ -1,10 +1,9 @@
-# Session Handoff: M3.4 Built, Awaiting Review
+# Session Handoff: M3 Complete
 
-For a fresh session. Written 2026-11-08. **M1, M2 and M3.1 to M3.3 are complete and accepted.** The
-owner approved M3.4, income and spending (D-056), on 2026-11-08 with the lead engineer's
-recommendations, including points A to C. **M3.4 is built and awaits review**: the implementation
-choices and points for review are at the end of D-056, and the limits in "M3.4 as built" below.
-Once M3.4 is accepted, M3 closes (D-056, point C).
+For a fresh session. Written 2026-11-08. **M1, M2 and M3 are complete and accepted.** The owner
+accepted M3.4, income and spending (D-056), on 2026-11-08 as built, with no changes, and M3 closes
+with it (D-056, point C). **Nothing further is planned.** The owner asked for M3 to be closed out
+without planning M4, so the next milestone needs its own request and plan.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -31,8 +30,8 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`: it records M3.4 as built. M3.4 starts after `288fb32`, which records D-056's approval. Earlier markers are in the archive |
-| Latest gating run | Full suite, 1742 passed, exit code 0, gating the commit recording M3.4 as built |
+| Latest commit | Run `git log -1`: it records M3.4's acceptance and M3's close. Earlier markers are in the archive |
+| Latest gating run | Full suite, 1742 passed, exit code 0, gating the commit recording M3's close |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -43,16 +42,21 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 ## Read first
 
 1. This file.
-2. [decisions.md](decisions.md): the index, the rules in brief, and D-056 in full.
+2. [decisions.md](decisions.md): the index and the rules in brief. Every decision is accepted, and
+   their full text is in [decisions-d001-d052.md](decisions-d001-d052.md).
 3. [plan.md](plan.md): milestones and the M3 plan.
 4. [status.md](status.md): what exists, and the known limitations.
 
 Then only what the task needs:
 
+- For M4, balances and reports: PRD-backend §5, §17 and §20, D-013 and D-034 in
+  [decisions-d001-d052.md](decisions-d001-d052.md), and the variable limit in [status.md](status.md).
+- For the variable limit: `transaction_facts` in `reconcile/transfer_effects.py`, `_separated` in
+  `reports/totals.py`, `reports/import_summary.py`, and the `--income` shape in
+  `tests/benchmarks/measure_reconciliation.py`.
 - For changes to M3.4 (D-056): `reports/totals.py`, `run_totals`, `print_income_and_spending`
-  and `describe_income_and_spending` in `cli.py`, and `tests/scenarios/test_income_and_spending.py`.
-- For the transfer-effects variable limit: `transaction_facts` in `reconcile/transfer_effects.py`,
-  and the `--income` shape in `tests/benchmarks/measure_reconciliation.py`.
+  and `describe_income_and_spending` in `cli.py`, `tests/scenarios/test_income_and_spending.py`,
+  and "M3.4 as built" in the archive.
 - For changes to M3.2 or M3.3: `reconcile/transfer_effects.py`, `reconcile/transfers.py`,
   `reconcile/coverage_in_effect.py`, `reports/transfer_evidence.py`, their scenario tests, and
   "M3.2 as built" or "M3.3 as built" in the archive.
@@ -60,23 +64,6 @@ Then only what the task needs:
 - [layouts.md](layouts.md) when a task touches parsing or layouts. [benchmarks.md](benchmarks.md)
   when it touches performance. [archive/plan-m1-m2.md](archive/plan-m1-m2.md) for the M1 and M2
   acceptance criteria.
-
-## M3.4 as built
-
-Built 2026-11-08, awaiting the owner's review. Scope and acceptance tests are in [plan.md](plan.md)
-(T1 to T12), the rules, implementation choices and points for review in D-056. Tests are in
-`tests/scenarios/test_income_and_spending.py`, with T11 in both import-order tests. The benchmark
-is `measure_reconciliation.py --income`, in [benchmarks.md](benchmarks.md). 23 deliberate breaks:
-19 caught by the test aimed at each rule, and 4 survivors closed by new tests and then caught.
-Breaks and benchmark output are in `build/m3.4-breaks/` and `build/m3.4-bench/`.
-
-**Known limits of M3.4:**
-
-- Income and spending count only what a person classified and confirmed. Unconfirmed transfer
-  kinds and unclassified transactions are disclosed as a bound, never counted.
-- No reporting periods, which stay in M4 with D-013.
-- A loan payment is never split into principal and interest.
-- Every write fails above 32,766 transactions bound by transfers, in M3.2 and M3.3 code, for review.
 
 ## Lessons for new work
 
@@ -175,17 +162,17 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Review of M3.4 as built, including the implementation choices and the points for review at the
-  end of D-056, notably the 32,766-variable limit in M3.2 and M3.3's transfer effects.
+- What comes next. M4 is not planned. The 32,766-variable limit is open, and a plan for M4 should
+  take it up before the 100,000-transaction benchmark.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved through M3.4 | **Must be renewed** for anything further |
-| M1, M2 and M3.1 to M3.3 | Accepted as built | None |
-| M3.4 | Plan D-056 approved 2026-11-08. Built, awaiting review | Owner accepts or asks for changes |
+| Local commits on `feature/m2-review` | Approved through closing M3 | **Must be renewed** for anything further |
+| M1, M2 and M3 | Accepted as built | None |
+| M4 | Not planned | Needs the owner's request, then its own plan and approval |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -212,14 +199,12 @@ this task. Open the archive and other decisions only when the task needs them. C
 branch is feature/m2-review, the working tree is clean, and run the test suite with a real exit
 code before changing anything. Do not contact GitHub.
 
-M3.4 review outcome (D-056, income and spending, including its implementation choices and its
-points for review, among them the 32,766-variable limit in transfer effects):
-[PASTE IT HERE: accepted, or the changes you want]
+Next task, from the owner:
+[PASTE IT HERE: for example, propose a plan for M4, balances and reports]
 
-Task: record the outcome in D-056 and the handoff. If changes are wanted, make them as small gated
-commits and stop for review again. If accepted, M3 closes: record that, and propose a plan for the
-next milestone as its own decision, and stop for approval before building any of it. Do not reopen
-D-042 to D-056 unless you find a concrete contradiction.
+Task: do only what the owner asks. A new milestone needs its own plan as a new decision, D-057,
+and approval before any of it is built. Do not reopen D-042 to D-056 unless you find a concrete
+contradiction.
 
 Follow the working principles in docs/handoff.md, and its "Keeping these docs small" rules when
 you update the docs. Pushing needs my explicit approval each time. No network, no new
