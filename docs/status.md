@@ -45,7 +45,8 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M7.3: CSV and PDF counting once | Complete, on D-006 unchanged, against a test-only CSV layout (D-060) |
 | M7.4 and M7.5 | Not built: one card per printout, and the owner holds no Capital One card PDF |
 | **M7 overall** | **Complete,** recorded by the owner on 2026-11-09 |
-| M8 | Planned in D-062, pending the owner's review. Nothing built |
+| M8.1: one builder per report | Complete (D-062) |
+| M8.2 and M8.3 | Approved, not built |
 
 ## What exists
 
@@ -56,6 +57,8 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   import checks every open of a real ledger runs, with its temporary files kept in memory (D-058).
 - `personal_finance.db.originals`: archiving a real ledger's originals on import, and verifying
   them (D-017, D-058).
+- `personal_finance.reports.report_text`: the text of `totals`, `report monthly`, `documents`,
+  `transactions`, `review list` and `review show`, built as lines that the CLI prints (D-062).
 - `personal_finance.reports.storage`: software, database, originals and backups storage apart
   (D-058).
 - `personal_finance.db.backups`: backing up a ledger with a manifest and logical digest, checking a

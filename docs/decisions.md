@@ -81,7 +81,7 @@ and keep its index line.
 | D-059 | M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6 |
 | D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, implemented in M7 |
 | D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
-| D-062 | M8 plan: the local review UI — Pending, for the owner's review |
+| D-062 | M8 plan: the local review UI — Approved with A to E, read-only |
 
 ## Rules in brief
 
@@ -186,7 +186,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
 
-## D-062 M8 plan: the local review UI — Pending, for the owner's review
+## D-062 M8 plan: the local review UI — Approved with A to E, read-only
 
 Proposed on 2026-11-09. Delivers plan.md's M8 row (loopback-only import results, review queue and
 transactions; tested by Host and CSRF checks, and UI totals matching the CLI) against PRD-backend §18
@@ -366,3 +366,29 @@ device (Phase 1C's sync), JavaScript, a dependency, F2, F3, and the security pro
   whose password the browser offers to store.
 - **D. Point 6's line builders,** a refactor of the CLI's output gated on byte-identical output.
 - **E. The scope of point 2,** and the slices M8.1 to M8.3 in that order.
+
+**The owner's review, on 2026-11-09.** A to E approved as recommended: W1's allowance for
+`http.server` in `ui/server.py`, a read-only M8 with decisions left to `pf review` in the terminal
+(M8.4 not built), the launch key and cookie, the line builders, and the scope. M8.1 to M8.3
+approved to build in order, each gated on the full suite and committed locally.
+
+**How M8.1 was implemented:**
+
+- `reports/report_text.py` holds the six builders, `account_choices` for the UI, and everything
+  their text needs, moved from `cli.py` unchanged but for `print` becoming `out.add`: the notices
+  and explanations, the `describe_*` helpers, and the `print_*` helpers, renamed `add_*` since they
+  print nothing. `trace`, `review merge show`, `review transaction show` and the import summary use
+  the moved helpers and still print. `review_item_report` also returns the item's ID, kind, account
+  ID and revision token, for the item page's terminal commands.
+- **Compared byte for byte:** the suite was run on the code before M8.1 with `--basetemp` in
+  `build/`, keeping every ledger it built, 2,284 of them. The six commands, with each account,
+  three month ranges and every review item, made 30,302 runs on those files before the move and
+  again after. 30,300 are identical. The other two are `totals` on a ledger built to overflow
+  SQLite's integer range, where an unexpected error used to follow one printed line and now follows
+  none: a builder computes everything before anything is printed. That is the one change, as
+  intended by the comment `run_totals` already carried.
+- Tests that patched `cli.account_movement`, `cli.load_review_evidence` or `cli.DIRECT_PAIRS_SHOWN`
+  to reach `totals` or `review show` now patch `report_text`, and tests importing the moved notices
+  import them from there.
+- **A test gap closed:** nothing checked that a report for one account leaves another account's
+  staleness out. `test_report_text.py` now does, for `totals` and `report monthly`.

@@ -35,7 +35,6 @@ from pathlib import Path
 from synthetic_ledger import dense_rows, full_reexports, ordinary_rows, variant_rows, with_overlap
 
 from personal_finance.db.migrate import connect, create_database
-from personal_finance.cli import DIRECT_PAIRS_SHOWN
 from personal_finance.cli import main as cli_main
 from personal_finance.ingest.coverage import declare_complete
 from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1, SYNTHETIC_CHECKING_V1
@@ -71,6 +70,7 @@ from personal_finance.reconcile.decisions import (
     undo_decision,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
+from personal_finance.reports.report_text import DIRECT_PAIRS_SHOWN
 from personal_finance.reports.classification_evidence import (
     classification_undo_outlook,
     load_classification,

@@ -387,16 +387,15 @@ I7 is not needed: the formats' descriptions agree, so D-006 is not amended.
 
 ## M8 plan
 
-Proposed on 2026-11-09 as D-062, **pending the owner's review.** Nothing is built until it is
-approved, and then each slice separately. Point 1 changes a security control (W1), and so needs the
-owner's approval as one.
+Approved by the owner on 2026-11-09 as D-062, with A to E: read-only, so M8.4 is not built. Point
+1 changes a security control (W1), approved as one. M8.1 to M8.3 approved to build in order.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M8.1 | One builder per report, the CLI printing its lines byte for byte as now. No server | Proposed |
+| M8.1 | One builder per report, the CLI printing its lines byte for byte as now. No server | Complete |
 | M8.2 | `pf ui`: the loopback server, its protections, and the totals and monthly pages | Proposed |
 | M8.3 | Import results, transactions, the review queue and one review item, read-only | Proposed |
-| M8.4 | Review decisions from the browser | Only if the owner chooses D-062 point 3's alternative |
+| M8.4 | Review decisions from the browser | Not built: the owner chose a read-only M8 |
 
 ### M8.1 acceptance criteria
 
@@ -427,7 +426,7 @@ owner's approval as one.
 | UC3 | The item page shows its account ID, item ID, revision token and the `pf review` command to decide it, and no form. An unknown item gives a page repeating nothing it was given. A stale account's warning shows as in the CLI |
 | UC4 | On a ledger holding an ID retired before migration 0004, no page shows a creation timestamp, so F2 is not needed. Every earlier criterion still passes |
 
-### M8.4 acceptance criteria, only if chosen
+### M8.4 acceptance criteria, not built
 
 | ID | Test |
 |---|---|

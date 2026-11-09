@@ -8,8 +8,7 @@ from pathlib import Path
 import pytest
 from ledger_view import semantic_view
 
-from personal_finance import cli
-from personal_finance.cli import CONFLICT_NOTICE, UNDO_NOTICE, main
+from personal_finance.cli import UNDO_NOTICE, main
 from personal_finance.db.migrate import connect
 from personal_finance.reconcile import decisions as decisions_module
 from personal_finance.reconcile.apply import load_constraints, reconcile_account
@@ -35,8 +34,9 @@ from personal_finance.reconcile.decisions import (
     WOULD_CHANGE_LEDGER,
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
-from personal_finance.reports import decision_evidence
+from personal_finance.reports import decision_evidence, report_text
 from personal_finance.reports.decision_evidence import load_decision, undo_outlook
+from personal_finance.reports.report_text import CONFLICT_NOTICE, REASON_EXPLANATIONS
 
 CARD_HEADER = "Date,Description,Debit,Credit\n"
 CHECKING_HEADER = "Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
@@ -394,7 +394,7 @@ class TestDirectPairsOnly:
         assert code == 2 and PAIR_NOT_DIRECT in err
 
     def test_a_long_list_of_pairs_says_it_stops(self, ledger, monkeypatch):
-        monkeypatch.setattr(cli, "DIRECT_PAIRS_SHOWN", 1)
+        monkeypatch.setattr(report_text, "DIRECT_PAIRS_SHOWN", 1)
         item, *_ = three_of_them(ledger)
         out = ledger.show(item)
         assert "Only the first 1 are listed." in out
@@ -645,7 +645,7 @@ class TestConflicts:
         (conflict,) = ledger.items("decision_conflict")
         out = ledger.show(conflict)
         assert "Kind: decision_conflict" in out
-        assert f"{REASON_WITHHELD}: {cli.REASON_EXPLANATIONS[REASON_WITHHELD]}" in out
+        assert f"{REASON_WITHHELD}: {REASON_EXPLANATIONS[REASON_WITHHELD]}" in out
         assert "decision_basis_changed" not in out
         assert CONFLICT_NOTICE in out
         assert "Already decided, as different events:" in out
@@ -676,8 +676,8 @@ class TestConflicts:
         ledger.card("e.csv", CAFE, extra=WHOLE_MONTH)
         (conflict,) = ledger.items("decision_conflict")
         out = ledger.show(conflict)
-        assert f"automatic_match_withheld: {cli.REASON_EXPLANATIONS['automatic_match_withheld']}" in out
-        assert f"decision_basis_changed: {cli.REASON_EXPLANATIONS['decision_basis_changed']}" in out
+        assert f"automatic_match_withheld: {REASON_EXPLANATIONS['automatic_match_withheld']}" in out
+        assert f"decision_basis_changed: {REASON_EXPLANATIONS['decision_basis_changed']}" in out
         totals = ledger.totals()
         assert "where an automatic match was withheld: 4" in totals
         assert "where a decision's basis changed: 4" in totals
