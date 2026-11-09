@@ -105,6 +105,12 @@ class TransferLedger(ClassificationLedger):
         return out.split("Income and spending, as you classified and matched them:\n")[1].split(
             "Disclosures:")[0]
 
+    def monthly_report(self, account=None):
+        words = ["report", "monthly"] + (["--account", account] if account else [])
+        code, out, err = self.run(*words)
+        assert code == 0, err
+        return out
+
     def before_transfers(self):
         """Totals up to the transfer section: account movement and financial types."""
         return self.totals().split("Transfers between your accounts")[0]

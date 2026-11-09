@@ -1,5 +1,5 @@
 """Equivalent transfer matches made at different points in the import sequence of two accounts
-(X11, D-054), with income and spending (T11, D-056).
+(X11, D-054), with income and spending (T11, D-056) and the monthly report (G8, D-057).
 
 Exhaustive rather than a property test: every order of four files across two accounts, and every
 point after both sides' files arrive.
@@ -27,7 +27,7 @@ def outcome(ledger):
     view = ledger.view()
     del view["revisions"]
     return (view, ledger.matches(), ledger.outcomes(), ledger.transfers_section(),
-            ledger.income_section())
+            ledger.income_section(), ledger.monthly_report())
 
 
 def bound_files(ledger, match, side):
@@ -83,11 +83,16 @@ def test_every_valid_point_of_every_order_gives_the_same_outcome(tmp_path, capsy
     # Both a and c are imported by position 2, 3 or 4 in 4, 8 and 12 orders, leaving 3, 2 or 1
     # valid points.
     assert compared == 4 * 3 + 8 * 2 + 12 * 1 == 40
-    view, matches, outcomes, transfers, income = reference
+    view, matches, outcomes, transfers, income, monthly = reference
     assert matches == [("applied", ("a.csv", "b.csv"), ("c.csv",))]
     assert outcomes == [(("a.csv", "b.csv"), "applied", "transfer")]
     assert transfers.startswith("  Matched: 1 pairs, moving 5.00\n"
                                 "  In a candidate pair, not matched: 0 transactions\n")
     assert "  Confirmed transfers: 2 transactions, 5.00 out and 5.00 in\n" in income
     assert "  Unclassified: 1 transactions, 0.00 out and 5.00 in\n" in income
+    assert monthly.startswith(
+        "2026-01: net account movement 0.00 over 2 transactions, of which pending: 0\n"
+        "  Dated by transaction date: 1, by posting date: 1\n")
+    assert "\n2026-02: net account movement 5.00 over 1 transactions, of which pending: 0\n" \
+        in monthly
     assert view["movement"].transactions == 3

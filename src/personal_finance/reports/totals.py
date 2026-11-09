@@ -386,56 +386,75 @@ class IncomeAndSpending:
         return combined(group for _, group in self.confirmed_transfers_by_type)
 
 
-def income_and_spending(conn: sqlite3.Connection,
-                        account_id: str | None = None) -> IncomeAndSpending:
-    """Groups each transaction by whether a transfer is confirmed there, then by its applied type.
+# Whether a transfer is confirmed on the transaction `entry`. An effect row names its transactions
+# only while it applies, so naming one confirms it.
+CONFIRMED_TRANSFER_SQL = """
+    EXISTS (SELECT 1 FROM transfer_match_effect matched
+            WHERE matched.outflow_transaction_id = entry.id)
+    OR EXISTS (SELECT 1 FROM transfer_match_effect matched
+               WHERE matched.inflow_transaction_id = entry.id)
+    OR EXISTS (SELECT 1 FROM one_sided_transfer_effect one_sided
+               WHERE one_sided.transaction_id = entry.id)"""
 
-    An effect row names its transactions only while it applies, so naming one confirms it.
-    """
-    income = unconfirmed_transfer_kinds = unclassified = GroupTotal()
-    spending_by_type: dict[str, GroupTotal] = {}
-    confirmed_by_type: dict[str, GroupTotal] = {}
-    for amount_cents, financial_type, confirmed_transfer in conn.execute(
-        """SELECT COALESCE(fix.corrected_amount_cents, entry.amount_cents), kind.financial_type,
-                  EXISTS (SELECT 1 FROM transfer_match_effect matched
-                          WHERE matched.outflow_transaction_id = entry.id)
-                  OR EXISTS (SELECT 1 FROM transfer_match_effect matched
-                             WHERE matched.inflow_transaction_id = entry.id)
-                  OR EXISTS (SELECT 1 FROM one_sided_transfer_effect one_sided
-                             WHERE one_sided.transaction_id = entry.id)
-           FROM ledger_transaction entry
-           LEFT JOIN transaction_correction fix
-               ON fix.transaction_id = entry.id AND fix.field = 'amount' AND fix.state = 'applied'
-           LEFT JOIN transaction_classification kind ON kind.transaction_id = entry.id
-           WHERE :account IS NULL OR entry.account_id = :account""",
-        {"account": account_id},
-    ):
+
+class IncomeAndSpendingTally:
+    """Adds transactions one at a time to D-056's five groups: first by whether a transfer is
+    confirmed there, then by applied type."""
+
+    def __init__(self):
+        self.income = self.unconfirmed_transfer_kinds = self.unclassified = GroupTotal()
+        self.spending_by_type: dict[str, GroupTotal] = {}
+        self.confirmed_by_type: dict[str, GroupTotal] = {}
+
+    def add(self, amount_cents: int, financial_type: str | None,
+            confirmed_transfer: bool) -> None:
         if confirmed_transfer:
             # D-054's fit rule lets only a transfer kind, or no type, apply on a confirmed side.
             if financial_type not in (None, *TRANSFER_TYPES):
                 raise AssertionError("a confirmed transfer holds a type other than a transfer kind")
             key = financial_type or UNCLASSIFIED
-            confirmed_by_type[key] = confirmed_by_type.get(key, GroupTotal()).adding(amount_cents)
+            self.confirmed_by_type[key] = self.confirmed_by_type.get(
+                key, GroupTotal()).adding(amount_cents)
         elif financial_type == "income":
-            income = income.adding(amount_cents)
+            self.income = self.income.adding(amount_cents)
         elif financial_type in SPENDING_TYPES:
-            spending_by_type[financial_type] = spending_by_type.get(
+            self.spending_by_type[financial_type] = self.spending_by_type.get(
                 financial_type, GroupTotal()).adding(amount_cents)
         elif financial_type in TRANSFER_TYPES:
-            unconfirmed_transfer_kinds = unconfirmed_transfer_kinds.adding(amount_cents)
+            self.unconfirmed_transfer_kinds = self.unconfirmed_transfer_kinds.adding(amount_cents)
         elif financial_type is None:
-            unclassified = unclassified.adding(amount_cents)
+            self.unclassified = self.unclassified.adding(amount_cents)
         else:
             raise AssertionError("an applied type that no group counts")
-    return IncomeAndSpending(
-        income,
-        tuple((financial_type, spending_by_type[financial_type])
-              for financial_type in FINANCIAL_TYPES if financial_type in spending_by_type),
-        tuple((financial_type, confirmed_by_type[financial_type])
-              for financial_type in (*FINANCIAL_TYPES, UNCLASSIFIED)
-              if financial_type in confirmed_by_type),
-        unconfirmed_transfer_kinds, unclassified,
-    )
+
+    def result(self) -> IncomeAndSpending:
+        return IncomeAndSpending(
+            self.income,
+            tuple((financial_type, self.spending_by_type[financial_type])
+                  for financial_type in FINANCIAL_TYPES if financial_type in self.spending_by_type),
+            tuple((financial_type, self.confirmed_by_type[financial_type])
+                  for financial_type in (*FINANCIAL_TYPES, UNCLASSIFIED)
+                  if financial_type in self.confirmed_by_type),
+            self.unconfirmed_transfer_kinds, self.unclassified,
+        )
+
+
+def income_and_spending(conn: sqlite3.Connection,
+                        account_id: str | None = None) -> IncomeAndSpending:
+    """Groups each transaction by whether a transfer is confirmed there, then by its applied type."""
+    tally = IncomeAndSpendingTally()
+    for amount_cents, financial_type, confirmed_transfer in conn.execute(
+        f"""SELECT COALESCE(fix.corrected_amount_cents, entry.amount_cents), kind.financial_type,
+                   {CONFIRMED_TRANSFER_SQL}
+            FROM ledger_transaction entry
+            LEFT JOIN transaction_correction fix
+                ON fix.transaction_id = entry.id AND fix.field = 'amount' AND fix.state = 'applied'
+            LEFT JOIN transaction_classification kind ON kind.transaction_id = entry.id
+            WHERE :account IS NULL OR entry.account_id = :account""",
+        {"account": account_id},
+    ):
+        tally.add(amount_cents, financial_type, confirmed_transfer)
+    return tally.result()
 
 
 # A pending transaction this much older than its account's latest date is disclosed (D-016).
