@@ -380,3 +380,38 @@ reaches the quadratic cost it guards against.
 transfers, building the shape failed in `write_transfer_effects` with SQLite's "too many SQL
 variables", because it passes one per bound transaction. This is M3.2 and M3.3 code, left for the
 owner's review with M3.4.
+
+**The 100,000-transaction shape (M4.4, Z1 to Z5),** measured 2026-11-08 on the same machine with
+`measure_reconciliation.py --scale`. Full output is in `build/m4.4-bench/`, which is ignored and may
+not survive.
+
+100,000 transactions over 60 months (2022-01 to 2026-12) in four accounts, checking, savings, a
+card and a loan, imported as one `synthetic_checking_v1` file per account and month, each declaring
+complete coverage of its month: transaction basis for checking and savings, posting basis for the
+card and loan. Written directly: 20,000 applied matches on four routes, so 40,000 matched sides
+(above 32,766), about 10% of them crossing months; 2,000 one-sided transfers to an investment
+account with no documents; 53,000 applied classifications; and 240 month-end balance observations,
+each interval agreeing. The shape asserts every count, no open review items, 60 months in the
+report, agreement in every interval, and that the classification and the import each rewrite all
+20,000 match outcomes. Building it takes about 170s, most of it the imports and the quadratic
+match-side trigger in [status.md](status.md).
+
+| Operation | Time | Provisional target |
+|---|---|---|
+| `pf totals` | 1.389s | Below 2s: met |
+| `pf report monthly` | 0.629s | Below 2s: met |
+| `pf balance check`, checking, 59 intervals | 0.047s | Below 2s: met |
+| One classification, a savings inflow | 1.275s, of which 0.885s rewrites every match outcome | None |
+| One import of one row into savings | 2.013s, of which 0.976s rewrites every match outcome | None |
+
+Reports are timed through the CLI, output discarded, so they include opening the ledger and the
+stale-account check. An earlier run on the same shape gave 1.544s for `totals` and 1.006s for
+`report monthly`, so the margin under two seconds varies between runs.
+
+**The shape reaches the variable limit (Z3).** Run on a copy of the source with M4.1 reversed
+(`build/z3-pre-m41/`), it fails while building, in `transaction_facts` called by
+`write_transfer_effects`, with "too many SQL variables".
+
+**Every write pays for every match.** About 0.9s of each write above is rewriting the 20,000 match
+outcomes, linear in matches, as recorded for M3.2. Writes have no PRD target yet. If one is set,
+this rewrite is the cost behind it, and changing it is its own decision (D-057, Z5).

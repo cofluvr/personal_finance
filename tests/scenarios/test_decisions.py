@@ -97,7 +97,7 @@ class Ledger:
     def run(self, *command):
         self.capsys.readouterr()
         words = list(command)
-        position = 2 if words[0] in ("account", "review", "balance") else 1
+        position = 2 if words[0] in ("account", "review", "balance", "report") else 1
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
                          ["review", "correction"], ["review", "resolution"],
                          ["review", "coverage"], ["review", "classification"],

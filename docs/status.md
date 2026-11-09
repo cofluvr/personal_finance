@@ -25,8 +25,11 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M3.4: income and spending | Accepted (D-056) |
 | **M3 overall** | **Complete and accepted** |
 | M4.1: the 32,766-variable limit | Accepted (D-057) |
-| M4.2: balance observations and statement reconciliation | Built, awaiting acceptance (D-057) |
-| M4.3 to M8 | Not started |
+| M4.2: balance observations and statement reconciliation | Accepted (D-057) |
+| M4.3: monthly reports with disclosures | Accepted (D-013, D-057) |
+| M4.4: the 100,000-transaction benchmark | Built, awaiting acceptance (D-057) |
+| **M4 overall** | **Built. Complete once M4.4 is accepted** |
+| M5 to M8 | Not started |
 
 ## What exists
 
@@ -68,6 +71,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   configuration and the description heuristic.
 - `personal_finance.reports.totals`: account inflows, outflows and net movement, types, transfers
   between accounts, and income and spending (D-056).
+- `personal_finance.reports.monthly`: the monthly report, with each month's coverage and
+  disclosures (D-013, D-057).
 - `personal_finance.reports.import_summary`: run-level import counts in explicit units (D-036).
 - `personal_finance.reconcile.balance_observations` and `reports.balances`: recording and undoing
   balance observations under one write lock, their undo token, and statement reconciliation
@@ -93,8 +98,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `review coverage declare`, `review coverage history`, `review coverage undo`, `review classify`,
   `review classifications`, `review classification show`, `review classification undo`,
   `review transfers`, `review transfer match`, `review transfer one-sided`, `review transfer show`,
-  `review transfer undo`, `totals`, `balance record`, `balance list`, `balance check`,
-  `balance undo`, run
+  `review transfer undo`, `totals`, `report monthly`, `balance record`, `balance list`,
+  `balance check`, `balance undo`, run
   through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
@@ -121,7 +126,9 @@ The security controls proposal is **not applied** and provides no protection
 ## Reconciliation measurements
 
 In [benchmarks.md](benchmarks.md). Reconciliation is quadratic in fully overlapping files, in
-distinct spellings per block, and in the units of a group a decision touches.
+distinct spellings per block, and in the units of a group a decision touches. On the
+100,000-transaction shape every report runs below two seconds, and each write spends about 0.9s
+rewriting 20,000 match outcomes (D-057).
 
 ## Known limitations
 
@@ -133,7 +140,7 @@ distinct spellings per block, and in the units of a group a decision touches.
   until one is undone. There is no command to settle them other than undo.
 - Income and spending count only what a person classified. Unconfirmed transfer kinds and
   unclassified transactions are in neither, and `totals` gives how far that may understate each.
-  There are no reporting periods: totals cover the ledger or one account (D-056).
+  The only reporting period is the calendar month, in `report monthly` (D-056, D-057).
 - A loan payment is never split into principal and interest, so a one-sided one to a loan leaves
   that loan's interest out of spending, with a warning (D-056).
 - Inserting a transfer match side scans every match side of its account, because SQLite plans the
@@ -153,8 +160,11 @@ distinct spellings per block, and in the units of a group a decision touches.
   undo it and record again. One active per account and day.
 - `balance check` counts only transactions. An unresolved record is disclosed for the account but
   placed in no interval, so a difference it causes is not attributed to one.
-- Coverage warnings are about one-sided transfers only. Coverage by reporting period waits for
-  reporting periods, which D-056 leaves in M4 with D-013.
+- `report monthly` judges a month's coverage on the transaction basis only (D-057, point D), so a
+  month covered on the posting basis alone reads as not covered. It lists every registered
+  account for the ledger, including those with no documents.
+- A matched transfer whose sides fall in different months moves each month by its side, disclosed
+  by count. Nothing nets them.
 - A match binds the records of both transactions when made, so a re-export that does not merge is
   unmatched. A match is never superseded: undo it and match again.
 - A match whose side splits, that reaches a transaction another match or a one-sided transfer

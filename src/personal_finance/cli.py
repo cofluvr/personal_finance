@@ -7,6 +7,7 @@ commands that exist to show selected data print descriptions or raw rows (D-037)
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 import uuid
@@ -109,6 +110,7 @@ from personal_finance.reports.coverage_evidence import (
     load_document_coverage,
 )
 from personal_finance.reports.import_summary import summarize_run
+from personal_finance.reports.monthly import monthly_report
 from personal_finance.reports.resolution_evidence import (
     binding_entries,
     list_resolutions,
@@ -809,6 +811,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     totals = command("totals", handler=run_totals, help="show account movement")
     totals.add_argument("--account", help="account name or ID")
+
+    report = commands.add_parser("report", help="show reports by period")
+    report_commands = report.add_subparsers(dest="report_command", required=True)
+    monthly = command(
+        "monthly", report_commands, handler=run_report_monthly,
+        help="show account movement and income and spending by month, with disclosures",
+    )
+    monthly.add_argument("--account", help="account name or ID")
+    monthly.add_argument("--from", dest="first_month", help="the first month, YYYY-MM, inclusive")
+    monthly.add_argument("--to", dest="last_month", help="the last month, YYYY-MM, inclusive")
 
     balance = commands.add_parser(
         "balance", help="record posted balances and check them against transactions"
@@ -2828,6 +2840,10 @@ def out_and_in(group) -> str:
 def print_income_and_spending(groups) -> None:
     """Five groups, each transaction in one, adding to net account movement (D-056)."""
     print("Income and spending, as you classified and matched them:")
+    print_income_and_spending_groups(groups)
+
+
+def print_income_and_spending_groups(groups) -> None:
     income, spending = groups.income, groups.spending
     print(f"  Income: {income.transactions} transactions, "
           f"{format_cents(income.in_cents - income.out_cents)}")
@@ -2841,6 +2857,95 @@ def print_income_and_spending(groups) -> None:
         print(f"    {financial_type}: {out_and_in(group)}")
     print(f"  Of a transfer kind, not confirmed: {out_and_in(groups.unconfirmed_transfer_kinds)}")
     print(f"  Unclassified: {out_and_in(groups.unclassified)}")
+
+
+MONTH_PATTERN = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
+
+
+def validated_month(option, text) -> str | None:
+    if text is None:
+        return None
+    if not MONTH_PATTERN.fullmatch(text) or text < "0001-01":
+        raise CommandError(f"{option} must be a month as YYYY-MM. Nothing was changed.")
+    return text
+
+
+def run_report_monthly(args) -> int:
+    first_month = validated_month("--from", args.first_month)
+    last_month = validated_month("--to", args.last_month)
+    if first_month and last_month and first_month > last_month:
+        raise CommandError("--from is after --to. Nothing was changed.")
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    # Before any output, so a broken invariant stops the report rather than truncating it.
+    report = monthly_report(conn, account_id, first_month, last_month)
+
+    if not report.months:
+        print("No transactions, so there are no months to show.")
+    for month in report.months:
+        print_month(month)
+        if month.accounts_covered:
+            print("  Covered for the whole month: "
+                  + ", ".join(shown(name) for name in month.accounts_covered))
+        if month.accounts_not_covered:
+            print("  Not covered for the whole month: "
+                  + ", ".join(shown(name) for name in month.accounts_not_covered))
+
+    print("Disclosures:")
+    print(
+        "- Each transaction is in the month of its effective transaction date, else its "
+        "effective posting date. Amounts are account movements, with pending transactions "
+        "counted as in totals."
+    )
+    print(
+        "- A month is covered for an account only when complete transaction-basis coverage spans "
+        "every day of it. A month not covered may be missing transactions."
+    )
+    if report.transactions_outside_range:
+        print(
+            f"- {report.transactions_outside_range} transactions, "
+            f"{format_cents(report.net_cents_outside_range)}, are in months outside this range."
+        )
+    if report.unresolved_records:
+        print(
+            f"- {report.unresolved_records} unresolved records are no transaction, so no month "
+            "counts them, and their amounts may be unknown."
+        )
+    stale = stale_accounts(conn, DEFAULT_RULES, account_id)
+    if stale:
+        print(
+            f"- {len(stale)} accounts have not been reconciled under the current matching "
+            "rules, so overlapping files there may be counted twice. Run reconcile."
+        )
+    return 0
+
+
+def print_month(month) -> None:
+    print(
+        f"{month.month}: net account movement {format_cents(month.net_cents)} over "
+        f"{month.transactions} transactions, of which pending: {month.pending_transactions}"
+    )
+    print(f"  Dated by transaction date: {month.dated_by_transaction_date}, "
+          f"by posting date: {month.dated_by_posting_date}")
+    print_income_and_spending_groups(month.income_and_spending)
+    if month.open_review_items:
+        print(f"  Open review items: {len(month.open_review_items)}, holding "
+              f"{month.transactions_in_open_review_items} transactions here")
+    for count, label in (
+        (month.transactions_with_unsettled_correction, "an unsettled correction"),
+        (month.transactions_with_unsettled_classification, "an unsettled classification"),
+        (month.transactions_with_unsettled_match, "a transfer match that no longer applies"),
+        (month.transactions_with_unsettled_one_sided_transfer,
+         "a one-sided transfer that no longer applies"),
+    ):
+        if count:
+            print(f"  With {label}: {count} transactions")
+    if month.matched_sides_with_other_side_in_another_month:
+        print(
+            f"  Matched transfers whose other side is in another month: "
+            f"{month.matched_sides_with_other_side_in_another_month}, so this month's movement "
+            "includes them"
+        )
 
 
 def describe_income_and_spending(groups) -> list[str]:

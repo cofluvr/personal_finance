@@ -10,7 +10,8 @@ Not part of the test suite. Run from the repository root:
     and dismissing unresolved rows, --declared for coverage declared after import, --pending for
     pending rows posted at another amount, --classified for financial types, --transfers for
     transfer matches across two accounts, --one-sided for one-sided transfers, --income for income
-    and spending in totals, or rows per month such as 200 1000 4000)
+    and spending in totals, --scale for the 100,000-transaction shape of M4.4, or rows per month
+    such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
 one import_files call: reading and parsing the file, writing records, reconciling the
@@ -22,6 +23,9 @@ Provisional targets (D-034) apply only to the 24-file ordinary and dense fixture
 not test assertions, because wall-clock checks would make the suite flaky.
 """
 
+import calendar
+import contextlib
+import io
 import sys
 import tempfile
 import time
@@ -32,11 +36,15 @@ from synthetic_ledger import dense_rows, full_reexports, ordinary_rows, variant_
 
 from personal_finance.db.migrate import connect, create_database
 from personal_finance.cli import DIRECT_PAIRS_SHOWN
+from personal_finance.cli import main as cli_main
 from personal_finance.ingest.coverage import declare_complete
 from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1, SYNTHETIC_CHECKING_V1
 from personal_finance.ingest.pipeline import import_files
+from personal_finance.money import format_cents
 from personal_finance.reconcile import apply as apply_module
+from personal_finance.reconcile import classifications as classifications_module
 from personal_finance.reconcile.apply import decision_states, load_evidence
+from personal_finance.reconcile.balance_observations import record_observation
 from personal_finance.reconcile.classification_effects import (
     classification_chain_states,
     load_active_classifications,
@@ -83,6 +91,8 @@ from personal_finance.reconcile.transfers import (
     undo_one_sided,
     undo_transfer,
 )
+from personal_finance.reports.balances import check_balances
+from personal_finance.reports.monthly import monthly_report
 from personal_finance.reports.totals import (
     account_movement,
     income_and_spending,
@@ -1601,7 +1611,276 @@ def income() -> None:
         measure_income_and_spending(count)
 
 
+# The 100,000-transaction shape (D-057 recommendation 8, Z1 to Z6). Every account uses the checking
+# layout, whose reliable IDs keep rows of different files apart.
+SCALE_MONTHS = [f"{2022 + number // 12}-{1 + number % 12:02}" for number in range(60)]
+SCALE_ACCOUNTS = (("checking", "Checking", "checking", "transaction"),
+                  ("savings", "Savings", "savings", "transaction"),
+                  ("card", "Card", "credit_card", "posting"),
+                  ("loan", "Loan", "loan", "posting"))
+# Each route: outflow account, inflow account, the outflow's type, and matches.
+SCALE_ROUTES = (("checking", "savings", "transfer", 5000),
+                ("checking", "card", "card_payment", 5000),
+                ("savings", "loan", "loan_payment", 5000),
+                ("savings", "card", "card_payment", 5000))
+SCALE_ONE_SIDED = 2000
+# Transactions in no transfer, per account: (count, money in, type or None).
+SCALE_OTHERS = {
+    "checking": ((3000, True, "income"), (6000, False, "purchase"), (4000, False, None)),
+    "savings": ((2000, True, "income"), (8000, True, None)),
+    "card": ((10000, False, "purchase"), (5000, False, None)),
+    "loan": ((10000, False, "interest"), (10000, False, None)),
+}
+
+
+def scale_day(number: int, offset: int = 0) -> str:
+    """A day spread over the 60 months, offset days later, so a late day can cross months."""
+    month, day = SCALE_MONTHS[number % 60], 1 + (number // 60) % 28 + offset
+    if day > 28:
+        month = SCALE_MONTHS[min(number % 60 + 1, 59)]
+        day -= 28
+    return f"{month}-{day:02}"
+
+
+def scale_ledger(root: Path):
+    """100,000 transactions over 60 months in four accounts, imported as one file a month per
+    account, each declaring complete coverage of its month: on the transaction basis for checking
+    and savings, on the posting basis for the card and the loan. Then, written directly, 20,000
+    applied matches, 2,000 one-sided transfers to an investment account with no documents, types
+    on every matched outflow and on most other transactions, and an observed balance at the end of
+    every month of every account, agreeing with the activity. Returns the connection and the
+    ledger's path."""
+    path = root / "ledger.db"
+    create_database(path)
+    conn = connect(path)
+    for account, name, account_type, _ in SCALE_ACCOUNTS:
+        conn.execute("INSERT INTO account (id, display_name, account_type) VALUES (?, ?, ?)",
+                     (account, name, account_type))
+    conn.execute("INSERT INTO account (id, display_name, account_type) "
+                 "VALUES ('invest', 'Invest', 'investment')")
+
+    rows = {account: [] for account, *_ in SCALE_ACCOUNTS}  # (external ID, day, cents, type)
+    matches = []
+    number = 0
+    for outflow_account, inflow_account, financial_type, count in SCALE_ROUTES:
+        for _ in range(count):
+            cents = 100_000 + number
+            # Inflows land three days later, so matches dated late in a month cross into the next.
+            rows[outflow_account].append((f"M{number}O", scale_day(number), -cents,
+                                          financial_type))
+            rows[inflow_account].append((f"M{number}I", scale_day(number, 3), cents, None))
+            matches.append((f"M{number}O", outflow_account, f"M{number}I", inflow_account))
+            number += 1
+    for statement in range(SCALE_ONE_SIDED):
+        rows["checking"].append((f"O{statement}", scale_day(statement), -(300_000 + statement),
+                                 "investment_contribution"))
+    for account, groups in SCALE_OTHERS.items():
+        for group, (count, money_in, financial_type) in enumerate(groups):
+            for index in range(count):
+                cents = 1 + (index * 7919 + group * 104_729) % 99_999
+                rows[account].append((f"X{group}-{index}", scale_day(index + group * 17),
+                                      cents if money_in else -cents, financial_type))
+    assert sum(len(found) for found in rows.values()) == 100_000
+
+    for account, _, _, basis in SCALE_ACCOUNTS:
+        by_month = {month: [] for month in SCALE_MONTHS}
+        for external_id, day, cents, _ in rows[account]:
+            by_month[day[:7]].append(f"{external_id},{day},{day},SYNTHETIC {external_id},"
+                                     f"{cents / 100:.2f},POSTED\n")
+        for month, lines in by_month.items():
+            source = root / f"{account}-{month}.csv"
+            source.write_text(
+                "Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+                + "".join(lines))
+            last_day = f"{month}-{calendar.monthrange(int(month[:4]), int(month[5:]))[1]:02}"
+            (result,) = import_files(conn, [source], account_id=account,
+                                     layout=SYNTHETIC_CHECKING_V1,
+                                     declared_coverage=declare_complete(f"{month}-01", last_day,
+                                                                        basis))
+            assert result.outcome == "imported", result
+
+    # External IDs repeat across accounts, so each is looked up with its account.
+    links = {
+        (account, external_id): (transaction_id, record_id)
+        for account, external_id, transaction_id, record_id in conn.execute(
+            """SELECT entry.account_id, entry.external_id, link.transaction_id,
+                      link.source_record_id
+               FROM transaction_source link
+               JOIN ledger_transaction entry ON entry.id = link.transaction_id""")
+    }
+    conn.execute("BEGIN")
+    for account in rows:
+        classify_directly(conn, account, [(*links[account, external_id], financial_type)
+                                          for external_id, _, _, financial_type in rows[account]
+                                          if financial_type])
+    for number, (outflow_id, outflow_account, inflow_id, inflow_account) in enumerate(matches):
+        match_id = f"m{number:06}"
+        conn.execute("INSERT INTO transfer_match (id) VALUES (?)", (match_id,))
+        for side, account, external_id in (("outflow", outflow_account, outflow_id),
+                                           ("inflow", inflow_account, inflow_id)):
+            transaction_id, record_id = links[account, external_id]
+            conn.execute("INSERT INTO transfer_match_side VALUES (?, ?, ?, ?, 't7-0')",
+                         (match_id, side, account, transaction_id))
+            conn.execute("INSERT INTO transfer_match_record VALUES (?, ?, ?)",
+                         (match_id, side, record_id))
+        conn.execute("INSERT INTO transfer_match_event (match_id, event) VALUES (?, 'made')",
+                     (match_id,))
+    for statement in range(SCALE_ONE_SIDED):
+        statement_id = f"o{statement:06}"
+        transaction_id, record_id = links["checking", f"O{statement}"]
+        conn.execute(
+            """INSERT INTO one_sided_transfer (id, account_id, counterpart_account_id,
+                                               target_transaction_id, target_revision)
+               VALUES (?, 'checking', 'invest', ?, 't7-0')""",
+            (statement_id, transaction_id),
+        )
+        conn.execute("INSERT INTO one_sided_transfer_record VALUES (?, ?)",
+                     (statement_id, record_id))
+        conn.execute("INSERT INTO one_sided_transfer_event (one_sided_transfer_id, event) "
+                     "VALUES (?, 'made')", (statement_id,))
+    write_transfer_effects(conn)
+    conn.execute("COMMIT")
+
+    for account, _, account_type, _ in SCALE_ACCOUNTS:
+        balance = 0
+        by_month = {month: 0 for month in SCALE_MONTHS}
+        for _, day, cents, _ in rows[account]:
+            by_month[day[:7]] += cents
+        for month, cents in by_month.items():
+            balance += cents
+            last_day = f"{month}-{calendar.monthrange(int(month[:4]), int(month[5:]))[1]:02}"
+            owed = account_type in ("credit_card", "loan")
+            record_observation(conn, account, last_day,
+                               format_cents(-balance if owed else balance), owed=owed)
+    return conn, path
+
+
+def timed_command(*words: str) -> float:
+    """One CLI command's wall time, its output discarded, failing on a non-zero exit."""
+    started = time.perf_counter()
+    with contextlib.redirect_stdout(io.StringIO()):
+        code = cli_main(list(words))
+    seconds = time.perf_counter() - started
+    assert code == 0, words
+    return seconds
+
+
+def counting_rewrites(module, rewritten: list, rewrite_seconds: list):
+    """Replaces a module's write_transfer_effects with one recording how many match outcomes each
+    call rewrites, so that a timing is known to include all of them, and how long it took."""
+    def counted(connection):
+        rewritten.append(connection.execute(
+            "SELECT COUNT(*) FROM transfer_match_effect").fetchone()[0])
+        started = time.perf_counter()
+        write_transfer_effects(connection)
+        rewrite_seconds.append(time.perf_counter() - started)
+    module.write_transfer_effects = counted
+
+
+def measure_scale() -> None:
+    """Measures totals, report monthly, balance check, one classification and one import on the
+    100,000-transaction shape, each apart, and prints the counts the shape reached (Z1, Z2).
+    Targets are provisional, below two seconds for each report (PRD §20, D-034, D-057)."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path = scale_ledger(root)
+        build_seconds = time.perf_counter() - started
+        (transactions, months, accounts, applied_matches, matched_sides, one_sided_applied,
+         classifications, coverage, observations, open_items) = conn.execute(
+            """SELECT (SELECT COUNT(*) FROM ledger_transaction),
+                      (SELECT COUNT(DISTINCT substr(COALESCE(transaction_date, posting_date), 1, 7))
+                       FROM ledger_transaction),
+                      (SELECT COUNT(DISTINCT account_id) FROM ledger_transaction),
+                      (SELECT COUNT(*) FROM transfer_match_effect WHERE state = 'applied'),
+                      (SELECT COUNT(*) FROM transfer_match_side),
+                      (SELECT COUNT(*) FROM one_sided_transfer_effect WHERE state = 'applied'),
+                      (SELECT COUNT(*) FROM transaction_classification WHERE state = 'applied'),
+                      (SELECT COUNT(*) FROM document_coverage WHERE coverage_kind = 'complete'),
+                      (SELECT COUNT(*) FROM balance_observation),
+                      (SELECT COUNT(*) FROM review_issue WHERE status = 'open')"""
+        ).fetchone()
+        print(
+            f"shape transactions={transactions} months={months} accounts={accounts} "
+            f"applied_matches={applied_matches} matched_sides={matched_sides} "
+            f"one_sided={one_sided_applied} classified={classifications} "
+            f"complete_coverage={coverage} observations={observations} "
+            f"open_review_items={open_items} build={build_seconds:.1f}s",
+            flush=True,
+        )
+        # Z1: the shape reaches the counts it claims, and more matched sides than SQLite's
+        # 32,766 variables, so that M4.1's queries are reached past their old limit.
+        assert (transactions, months, accounts) == (100_000, 60, 4)
+        assert applied_matches == 20_000 and matched_sides == 40_000 > 32_766
+        assert one_sided_applied == SCALE_ONE_SIDED and open_items == 0
+        conn.close()
+
+        database = str(path)
+        totals_seconds = timed_command("totals", "--db", database)
+        monthly_seconds = timed_command("report", "monthly", "--db", database)
+        check_seconds = timed_command("balance", "check", "--db", database, "--account",
+                                      "Checking")
+        conn = connect(path)
+        report = monthly_report(conn)
+        assert len(report.months) == 60
+        assert sum(month.matched_sides_with_other_side_in_another_month
+                   for month in report.months) > 0
+        check = check_balances(conn, "checking")
+        assert len(check.intervals) == 59
+        # Checking declares transaction-basis coverage and the card posting-basis coverage, so
+        # only the card's intervals are covered, and every interval agrees.
+        assert all(interval.difference_cents == 0 and not interval.covered
+                   for interval in check.intervals)
+        assert all(interval.difference_cents == 0 and interval.covered
+                   for interval in check_balances(conn, "card").intervals)
+
+        # Named by its external ID, since generated IDs are random and a matched side, also
+        # unclassified, would refuse a type that stops its match applying. X1-0 is an
+        # unclassified savings inflow in no transfer.
+        (unclassified,) = conn.execute(
+            """SELECT entry.id FROM ledger_transaction entry
+               WHERE entry.account_id = 'savings' AND entry.external_id = 'X1-0' AND NOT EXISTS (
+                   SELECT 1 FROM transaction_classification kind
+                   WHERE kind.transaction_id = entry.id)""").fetchone()
+        rewritten, classify_rewrite_seconds = [], []
+        counting_rewrites(classifications_module, rewritten, classify_rewrite_seconds)
+        started = time.perf_counter()
+        classify_transaction(conn, "savings", unclassified,
+                             transaction_revision(load_merge_evidence(conn, unclassified)),
+                             "income")
+        classify_seconds = time.perf_counter() - started
+        classifications_module.write_transfer_effects = write_transfer_effects
+        assert rewritten == [20_000], rewritten
+
+        later = root / "later.csv"
+        later.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+                         "LATER,2026-12-30,2026-12-30,SYNTHETIC LATER,-9.00,POSTED\n")
+        rewritten, import_rewrite_seconds = [], []
+        counting_rewrites(apply_module, rewritten, import_rewrite_seconds)
+        started = time.perf_counter()
+        (result,) = import_files(conn, [later], account_id="savings",
+                                 layout=SYNTHETIC_CHECKING_V1)
+        import_seconds = time.perf_counter() - started
+        apply_module.write_transfer_effects = write_transfer_effects
+        assert result.outcome == "imported" and rewritten == [20_000], (result, rewritten)
+        print(
+            f"totals={totals_seconds:7.3f}s report_monthly={monthly_seconds:7.3f}s "
+            f"balance_check={check_seconds:7.3f}s one_classification={classify_seconds:7.3f}s "
+            f"one_import={import_seconds:7.3f}s",
+            flush=True,
+        )
+        print(
+            f"of which rewriting 20,000 match outcomes: classification="
+            f"{classify_rewrite_seconds[0]:7.3f}s import={import_rewrite_seconds[0]:7.3f}s",
+            flush=True,
+        )
+        conn.close()
+
+
 def main() -> None:
+    if sys.argv[1:] == ["--scale"]:
+        measure_scale()
+        return
     if sys.argv[1:] == ["--worst"]:
         worst_cases()
         return

@@ -1,6 +1,6 @@
 """Equivalent one-sided transfers stated at different points in the import sequence of two
 accounts, including the counterpart's arrival (O12, D-055), with income and spending (T11,
-D-056).
+D-056) and the monthly report (G8, D-057).
 
 Exhaustive rather than a property test: every order of four files across two accounts, and every
 point at which stating is valid: after a's file arrives, and before a candidate with the
@@ -34,7 +34,8 @@ def outcome(ledger):
     """Everything but revisions, which cover the bound records and so differ by design."""
     view = ledger.view()
     del view["revisions"]
-    return view, ledger.one_sided_states(), ledger.transfers_section(), ledger.income_section()
+    return (view, ledger.one_sided_states(), ledger.transfers_section(),
+            ledger.income_section(), ledger.monthly_report())
 
 
 def bound_files(ledger, statement):
@@ -92,7 +93,7 @@ def test_every_valid_point_of_every_order_gives_the_same_outcome(tmp_path, capsy
             assert bound_files(ledger, statement) == expected, (order, point)
             compared += 1
 
-    view, states, transfers, income = reference
+    view, states, transfers, income, monthly = reference
     if found:
         # a before c in 12 orders: c two, three or four places after a, then one fewer point.
         assert compared == 6 * 1 + 4 * 2 + 2 * 3 == 20
@@ -100,6 +101,9 @@ def test_every_valid_point_of_every_order_gives_the_same_outcome(tmp_path, capsy
         assert "  In a candidate pair, not matched: 2 transactions\n" in transfers
         assert "  Of a transfer kind, not confirmed: 1 transactions, 5.00 out and 0.00 in\n" in \
             income
+        assert monthly.startswith(
+            "2026-01: net account movement 0.00 over 2 transactions, of which pending: 0\n")
+        assert "\n2026-02: net account movement 0.00 over 0 transactions" in monthly
     else:
         # a at position 1 to 4 in 6 orders each, leaving 4, 3, 2 or 1 points.
         assert compared == 6 * (4 + 3 + 2 + 1) == 60
@@ -107,4 +111,8 @@ def test_every_valid_point_of_every_order_gives_the_same_outcome(tmp_path, capsy
         assert "  One-sided, the other side not in the ledger: 1 transactions, 5.00 out" in \
             transfers
         assert "  Confirmed transfers: 1 transactions, 5.00 out and 0.00 in\n" in income
+        assert monthly.startswith(
+            "2026-01: net account movement -5.00 over 1 transactions, of which pending: 0\n")
+        assert "\n2026-02: net account movement 5.00 over 1 transactions" in monthly
     assert view["movement"].transactions == 3
+    assert "\n2026-03: net account movement -9.00 over 1 transactions" in monthly
