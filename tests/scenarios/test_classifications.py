@@ -82,7 +82,7 @@ class ClassificationLedger(CoverageLedger):
     def types(self):
         """The 'By financial type' lines of totals, as type, count and amount."""
         section = self.totals().split("By financial type, as you classified them:\n")[1]
-        section = section.split("Disclosures:")[0]
+        section = section.split("Transfers between your accounts")[0]
         return re.findall(r"^  (\S+): (\d+) transactions, (\S+)$", section, re.MULTILINE)
 
     def outcomes(self):

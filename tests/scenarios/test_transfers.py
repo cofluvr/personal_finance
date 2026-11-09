@@ -97,6 +97,12 @@ class TransferLedger(ClassificationLedger):
         words = ["totals"] + (["--account", account] if account else [])
         out = self.run(*words)[1]
         return out.split("Transfers between your accounts, as you matched them:\n")[1].split(
+            "Income and spending, as you classified and matched them:")[0]
+
+    def income_section(self, account=None):
+        words = ["totals"] + (["--account", account] if account else [])
+        out = self.run(*words)[1]
+        return out.split("Income and spending, as you classified and matched them:\n")[1].split(
             "Disclosures:")[0]
 
     def before_transfers(self):

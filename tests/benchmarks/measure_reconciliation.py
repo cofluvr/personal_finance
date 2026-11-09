@@ -9,8 +9,8 @@ Not part of the test suite. Run from the repository root:
     confirmation with a partition, --corrected for value corrections, --resolved for completing
     and dismissing unresolved rows, --declared for coverage declared after import, --pending for
     pending rows posted at another amount, --classified for financial types, --transfers for
-    transfer matches across two accounts, --one-sided for one-sided transfers, or rows per month
-    such as 200 1000 4000)
+    transfer matches across two accounts, --one-sided for one-sided transfers, --income for income
+    and spending in totals, or rows per month such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
 one import_files call: reading and parsing the file, writing records, reconciling the
@@ -83,7 +83,12 @@ from personal_finance.reconcile.transfers import (
     undo_one_sided,
     undo_transfer,
 )
-from personal_finance.reports.totals import account_movement, one_sided_summary, transfer_summary
+from personal_finance.reports.totals import (
+    account_movement,
+    income_and_spending,
+    one_sided_summary,
+    transfer_summary,
+)
 from personal_finance.reports.transfer_evidence import (
     load_match,
     load_one_sided,
@@ -1245,24 +1250,32 @@ def transfer_ledger(root: Path, outflows: list[int], inflows: list[int], one_day
         ))
         import_files(conn, [source], account_id=account, layout=SYNTHETIC_CARD_V1)
     conn.execute("BEGIN")
-    for number, (transaction_id, record_id) in enumerate(conn.execute(
-        "SELECT transaction_id, source_record_id FROM transaction_source WHERE account_id = 'out' "
-        "ORDER BY source_record_id"
-    ).fetchall()):
+    classify_directly(conn, "out", [
+        (transaction_id, record_id, "transfer") for transaction_id, record_id in conn.execute(
+            "SELECT transaction_id, source_record_id FROM transaction_source "
+            "WHERE account_id = 'out' ORDER BY source_record_id").fetchall()
+    ])
+    conn.execute("COMMIT")
+    return conn
+
+
+def classify_directly(conn, account: str, classified: list[tuple[str, str, str]]) -> None:
+    """Classifies each (transaction, record, type) of one account, inside the caller's
+    transaction, and writes the account's classification outcomes."""
+    start = conn.execute("SELECT COUNT(*) FROM type_classification").fetchone()[0]
+    for number, (transaction_id, record_id, financial_type) in enumerate(classified, start):
         classification_id = f"f{number:06}"
         conn.execute(
             """INSERT INTO type_classification (id, account_id, financial_type,
                                                 target_transaction_id, target_revision)
-               VALUES (?, 'out', 'transfer', ?, 't7-0')""",
-            (classification_id, transaction_id),
+               VALUES (?, ?, ?, ?, 't7-0')""",
+            (classification_id, account, financial_type, transaction_id),
         )
         conn.execute("INSERT INTO type_classification_record VALUES (?, ?)",
                      (classification_id, record_id))
         conn.execute("INSERT INTO type_classification_event (classification_id, event) "
                      "VALUES (?, 'made')", (classification_id,))
-    write_classification_effects(conn, "out")
-    conn.execute("COMMIT")
-    return conn
+    write_classification_effects(conn, account)
 
 
 def side_by_amount(conn, account):
@@ -1409,19 +1422,8 @@ def one_sided_ledger(root: Path, statements: int, opposite: int, spans: int):
     links = conn.execute(
         "SELECT transaction_id, source_record_id FROM transaction_source WHERE account_id = 'out' "
         "ORDER BY source_record_id").fetchall()
-    for number, (transaction_id, record_id) in enumerate(links):
-        classification_id = f"f{number:06}"
-        conn.execute(
-            """INSERT INTO type_classification (id, account_id, financial_type,
-                                                target_transaction_id, target_revision)
-               VALUES (?, 'out', 'transfer', ?, 't7-0')""",
-            (classification_id, transaction_id),
-        )
-        conn.execute("INSERT INTO type_classification_record VALUES (?, ?)",
-                     (classification_id, record_id))
-        conn.execute("INSERT INTO type_classification_event (classification_id, event) "
-                     "VALUES (?, 'made')", (classification_id,))
-    write_classification_effects(conn, "out")
+    classify_directly(conn, "out", [(transaction_id, record_id, "transfer")
+                                    for transaction_id, record_id in links])
     for number, (transaction_id, record_id) in enumerate(links[1:]):
         statement_id = f"o{number:06}"
         conn.execute(
@@ -1500,6 +1502,105 @@ def one_sided() -> None:
         measure_one_sided(statements, opposite, spans)
 
 
+def income_ledger(root: Path, count: int):
+    """count of each: matched pairs, one-sided transfers, unconfirmed transfer kinds, purchases,
+    income and unclassified inflows, written directly. Amounts differ by group, so nothing is a
+    candidate and no one-sided transfer finds its other side."""
+    matched = [100 * (1 + number) for number in range(count)]
+    one_sided = [100 * (count + 1 + number) for number in range(count)]
+    unconfirmed = [100 * (2 * count + 1 + number) for number in range(count)]
+    unclassified = [100 * number + 1 for number in range(count)]
+    conn = transfer_ledger(root, [-cents for cents in matched + one_sided + unconfirmed],
+                           matched + unclassified)
+    spending = root / "spending.csv"
+    spending.write_text("Date,Description,Debit,Credit\n" + "".join(
+        f"02/{1 + number % 28:02}/2026,SYNTHETIC SHOP {number},{number + 1}.07,\n"
+        f"02/{1 + number % 28:02}/2026,SYNTHETIC PAY {number},,{number + 1}.03\n"
+        for number in range(count)))
+    import_files(conn, [spending], account_id="out", layout=SYNTHETIC_CARD_V1)
+    outflows, inflows = side_by_amount(conn, "out"), side_by_amount(conn, "in")
+    conn.execute("BEGIN")
+    classify_directly(conn, "out", [
+        (transaction_id, record_id, "purchase" if amount < 0 else "income")
+        for transaction_id, record_id, amount in conn.execute(
+            """SELECT link.transaction_id, link.source_record_id, entry.amount_cents
+               FROM transaction_source link
+               JOIN ledger_transaction entry ON entry.id = link.transaction_id
+               JOIN source_document document ON document.id = link.source_document_id
+               WHERE document.file_name = 'spending.csv'""").fetchall()
+    ])
+    for number, cents in enumerate(matched):
+        match_id = f"m{number:06}"
+        conn.execute("INSERT INTO transfer_match (id) VALUES (?)", (match_id,))
+        for side, account, (transaction_id, record_id) in (
+                ("outflow", "out", outflows[-cents]), ("inflow", "in", inflows[cents])):
+            conn.execute("INSERT INTO transfer_match_side VALUES (?, ?, ?, ?, 't7-0')",
+                         (match_id, side, account, transaction_id))
+            conn.execute("INSERT INTO transfer_match_record VALUES (?, ?, ?)",
+                         (match_id, side, record_id))
+        conn.execute("INSERT INTO transfer_match_event (match_id, event) VALUES (?, 'made')",
+                     (match_id,))
+    for number, cents in enumerate(one_sided):
+        statement_id = f"o{number:06}"
+        transaction_id, record_id = outflows[-cents]
+        conn.execute(
+            """INSERT INTO one_sided_transfer (id, account_id, counterpart_account_id,
+                                               target_transaction_id, target_revision)
+               VALUES (?, 'out', 'in', ?, 't7-0')""",
+            (statement_id, transaction_id),
+        )
+        conn.execute("INSERT INTO one_sided_transfer_record VALUES (?, ?)",
+                     (statement_id, record_id))
+        conn.execute("INSERT INTO one_sided_transfer_event (one_sided_transfer_id, event) "
+                     "VALUES (?, 'made')", (statement_id,))
+    write_transfer_effects(conn)
+    conn.execute("COMMIT")
+    return conn
+
+
+def measure_income_and_spending(count: int) -> None:
+    """The groups read, for each transaction, whether an applied match or one-sided transfer names
+    it, so a lookup missing the effect indexes would cost transactions x effects: here 6 x count
+    transactions against 2 x count effects. Shown apart from the candidate search, which totals
+    also runs."""
+    with tempfile.TemporaryDirectory() as folder:
+        conn = income_ledger(Path(folder), count)
+        applied = conn.execute(
+            """SELECT (SELECT COUNT(*) FROM transfer_match_effect WHERE state = 'applied'),
+                      (SELECT COUNT(*) FROM one_sided_transfer_effect WHERE state = 'applied')"""
+        ).fetchone()
+        assert applied == (count, count), applied
+        started = time.perf_counter()
+        groups = income_and_spending(conn)
+        groups_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        movement = account_movement(conn)
+        movement_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        transfers = transfer_summary(conn)
+        transfers_seconds = time.perf_counter() - started
+        found = (groups.confirmed_transfers.transactions, groups.income.transactions,
+                 groups.spending.transactions, groups.unconfirmed_transfer_kinds.transactions,
+                 groups.unclassified.transactions)
+        assert found == (3 * count, count, count, count, count), found
+        assert movement.transactions == 7 * count and transfers.transactions_in_candidates == 0
+        print(
+            f"income and spending transactions={movement.transactions:6} "
+            f"effects={2 * count:5} groups={groups_seconds:7.3f}s "
+            f"movement={movement_seconds:7.3f}s transfers_with_candidates="
+            f"{transfers_seconds:7.3f}s",
+            flush=True,
+        )
+        conn.close()
+
+
+def income() -> None:
+    # 8,000 binds 24,000 transactions, under SQLite's 32,766 variables, which
+    # write_transfer_effects passes one per transaction and so exceeds beyond it.
+    for count in (1000, 4000, 8000):
+        measure_income_and_spending(count)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--worst"]:
         worst_cases()
@@ -1536,6 +1637,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--one-sided"]:
         one_sided()
+        return
+    if sys.argv[1:] == ["--income"]:
+        income()
         return
     sizes = [(24, 200), (24, 1000), (24, 4000)]
     if len(sys.argv) > 1:

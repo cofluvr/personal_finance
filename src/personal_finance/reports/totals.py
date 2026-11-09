@@ -1,15 +1,18 @@
-"""Account movement totals. See decisions.md D-010.
+"""Account movement totals (D-010), and income and spending beside them (D-056).
 
-These are movements on accounts, not income or spending: they still include
-transfers and card payments.
+Account movement still includes transfers and card payments. Income and spending count only what
+a person classified, and leave out transfers they confirmed.
 """
 
 import sqlite3
 from dataclasses import dataclass
 
 from personal_finance.reconcile.apply import STATE_ACTIVE, decision_states, declared_coverage
-from personal_finance.reconcile.classification_effects import FINANCIAL_TYPES
+from personal_finance.reconcile.classification_effects import FINANCIAL_TYPES, UNCLASSIFIED
 from personal_finance.reconcile.transfer_effects import TRANSFER_TYPES, transfer_candidates
+
+# Applied types counted as spending, a refund reducing it (PRD §9, D-056).
+SPENDING_TYPES = ("purchase", "fee", "interest", "refund")
 
 
 @dataclass(frozen=True)
@@ -290,6 +293,10 @@ class OneSidedSummary:
     # ledger, so spending on it is understated (D-012).
     card_payments_without_history: int
     card_payments_without_history_cents: int
+    # Applied loan payments to a loan, whose interest for those dates is not in the ledger, so
+    # spending on interest is understated (D-056).
+    loan_payments_without_history: int
+    loan_payments_without_history_cents: int
     # Active ones that do not apply, by state.
     basis_changed: int
     conflicts: int
@@ -319,6 +326,8 @@ def one_sided_summary(conn: sqlite3.Connection, account_id: str | None = None) -
     applied = [row for row in rows if row[0] == "applied"]
     card_payments = [amount for _, amount, kind, counterpart_type, _ in applied
                      if kind == "card_payment" and counterpart_type == "credit_card"]
+    loan_payments = [amount for _, amount, kind, counterpart_type, _ in applied
+                     if kind == "loan_payment" and counterpart_type == "loan"]
     states = [row[0] for row in rows]
     return OneSidedSummary(
         len(applied),
@@ -327,8 +336,104 @@ def one_sided_summary(conn: sqlite3.Connection, account_id: str | None = None) -
         sum(not has_documents for *_, has_documents in applied),
         sum(bool(has_documents) for *_, has_documents in applied),
         len(card_payments), sum(abs(amount) for amount in card_payments),
+        len(loan_payments), sum(abs(amount) for amount in loan_payments),
         states.count("basis_changed"), states.count("conflict"), states.count("type_differs"),
         states.count("counterpart_found"), states.count("counterpart_covered"),
+    )
+
+
+@dataclass(frozen=True)
+class GroupTotal:
+    """A count of transactions and the amounts they move out and in, each a positive sum."""
+
+    transactions: int = 0
+    out_cents: int = 0
+    in_cents: int = 0
+
+    def adding(self, amount_cents: int) -> "GroupTotal":
+        return GroupTotal(self.transactions + 1, self.out_cents + max(-amount_cents, 0),
+                          self.in_cents + max(amount_cents, 0))
+
+
+def combined(groups) -> GroupTotal:
+    groups = tuple(groups)
+    return GroupTotal(sum(group.transactions for group in groups),
+                      sum(group.out_cents for group in groups),
+                      sum(group.in_cents for group in groups))
+
+
+@dataclass(frozen=True)
+class IncomeAndSpending:
+    """Every transaction, or those of one account, in exactly one of five groups, whose amounts in
+    less out add to net account movement (D-056)."""
+
+    income: GroupTotal
+    # Each spending type some transaction has, in the order of FINANCIAL_TYPES.
+    spending_by_type: tuple[tuple[str, GroupTotal], ...]
+    # Sides of an applied match or one-sided transfer, by applied type in the order of
+    # FINANCIAL_TYPES, and matched sides left unclassified last.
+    confirmed_transfers_by_type: tuple[tuple[str, GroupTotal], ...]
+    unconfirmed_transfer_kinds: GroupTotal
+    unclassified: GroupTotal
+
+    @property
+    def spending(self) -> GroupTotal:
+        return combined(group for _, group in self.spending_by_type)
+
+    @property
+    def confirmed_transfers(self) -> GroupTotal:
+        return combined(group for _, group in self.confirmed_transfers_by_type)
+
+
+def income_and_spending(conn: sqlite3.Connection,
+                        account_id: str | None = None) -> IncomeAndSpending:
+    """Groups each transaction by whether a transfer is confirmed there, then by its applied type.
+
+    An effect row names its transactions only while it applies, so naming one confirms it.
+    """
+    income = unconfirmed_transfer_kinds = unclassified = GroupTotal()
+    spending_by_type: dict[str, GroupTotal] = {}
+    confirmed_by_type: dict[str, GroupTotal] = {}
+    for amount_cents, financial_type, confirmed_transfer in conn.execute(
+        """SELECT COALESCE(fix.corrected_amount_cents, entry.amount_cents), kind.financial_type,
+                  EXISTS (SELECT 1 FROM transfer_match_effect matched
+                          WHERE matched.outflow_transaction_id = entry.id)
+                  OR EXISTS (SELECT 1 FROM transfer_match_effect matched
+                             WHERE matched.inflow_transaction_id = entry.id)
+                  OR EXISTS (SELECT 1 FROM one_sided_transfer_effect one_sided
+                             WHERE one_sided.transaction_id = entry.id)
+           FROM ledger_transaction entry
+           LEFT JOIN transaction_correction fix
+               ON fix.transaction_id = entry.id AND fix.field = 'amount' AND fix.state = 'applied'
+           LEFT JOIN transaction_classification kind ON kind.transaction_id = entry.id
+           WHERE :account IS NULL OR entry.account_id = :account""",
+        {"account": account_id},
+    ):
+        if confirmed_transfer:
+            # D-054's fit rule lets only a transfer kind, or no type, apply on a confirmed side.
+            if financial_type not in (None, *TRANSFER_TYPES):
+                raise AssertionError("a confirmed transfer holds a type other than a transfer kind")
+            key = financial_type or UNCLASSIFIED
+            confirmed_by_type[key] = confirmed_by_type.get(key, GroupTotal()).adding(amount_cents)
+        elif financial_type == "income":
+            income = income.adding(amount_cents)
+        elif financial_type in SPENDING_TYPES:
+            spending_by_type[financial_type] = spending_by_type.get(
+                financial_type, GroupTotal()).adding(amount_cents)
+        elif financial_type in TRANSFER_TYPES:
+            unconfirmed_transfer_kinds = unconfirmed_transfer_kinds.adding(amount_cents)
+        elif financial_type is None:
+            unclassified = unclassified.adding(amount_cents)
+        else:
+            raise AssertionError("an applied type that no group counts")
+    return IncomeAndSpending(
+        income,
+        tuple((financial_type, spending_by_type[financial_type])
+              for financial_type in FINANCIAL_TYPES if financial_type in spending_by_type),
+        tuple((financial_type, confirmed_by_type[financial_type])
+              for financial_type in (*FINANCIAL_TYPES, UNCLASSIFIED)
+              if financial_type in confirmed_by_type),
+        unconfirmed_transfer_kinds, unclassified,
     )
 
 
