@@ -91,7 +91,8 @@ Columns: `Transaction Date, Posted Date, Card No., Description, Category, Debit,
 |---|---|
 | Debit, Credit | As `synthetic_card_v1`: exactly one filled, never negative. A debit is stored negative |
 | Dates | `YYYY-MM-DD`, as the column names say. Coverage on either basis |
-| Assumptions | The export holds posted transactions only, and Debit is money out |
+| Confirmed | Header, date format, Debit for a charge and Credit for a payment, and newest-first order, from the owner's export on 2026-11-09 |
+| Assumptions | The export holds posted transactions only |
 
 ## capital_one_bank_v1
 
@@ -122,9 +123,10 @@ Columns: `Date, Description, Amount`.
 
 | Property | Meaning |
 |---|---|
-| Amount | Signed, **positive for a charge**, so stored negated: a charge is money out, a payment or credit money in. Nothing in a row can confirm the sign |
+| Amount | Signed, **positive for a charge**, so stored negated: a charge is money out, a payment or credit money in |
 | Date | `MM/DD/YYYY`, the posting date. Coverage on the `posting` basis only |
-| Assumptions | The sign, the export holds posted transactions only, and its date is the posting date. The sign is checked only by D-059 point F |
+| Confirmed | Header, date format, a charge positive and a payment negative, and newest-first order, from the owner's export on 2026-11-09 |
+| Assumptions | The export holds posted transactions only, and its date is the posting date |
 
 ## bfsfcu_v1
 

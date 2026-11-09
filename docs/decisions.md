@@ -78,7 +78,7 @@ and keep its index line.
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
 | D-058 | M5 plan: the real-data gate — Approved, implemented and accepted in M5 |
-| D-059 | M6 plan: first real CSV layouts — Approved with points A to F, M6.1 to M6.4 built |
+| D-059 | M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6 |
 
 ## Rules in brief
 
@@ -178,7 +178,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-059 M6 plan: first real CSV layouts — Approved with points A to F, M6.1 to M6.4 built
+## D-059 M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6
 
 Directed by the owner on 2026-11-09, to be built unattended overnight with each slice gated on the
 full suite and committed locally: the sequence Capital One (card and bank), U.S. Bank, American
@@ -244,6 +244,14 @@ Point F is the owner's to run, with the steps in [layout-verification.md](layout
 The owner supplied a BFSFCU export's header and four rows the same day, and M6.4 was built from their
 format, with every value invented: `bfsfcu_v1`, the one layout that states its status, so it is the
 exception to the common rule below.
+
+**Formats confirmed, and M6 complete, on 2026-11-09.** The owner supplied the header and three rows of
+a Capital One card export and of an American Express export. Both match `capital_one_card_v1` and
+`amex_card_v1` as built: columns, date formats and signs, including Amex's positive charge, so no
+parser changed. Both list newest first, and their fixtures were reordered to match, keeping every
+value invented. The owner recorded all four slices as complete. Still not confirmed from a real
+export: the formats of `capital_one_bank_v1` and `us_bank_v1`. Point F still runs for every layout
+before its first real import.
 
 **Layout rules common to M6:** coverage by user declaration only; settlement status `unknown`,
 since no export states it, which D-006 never reads as `posted` and `balance check` discloses; a
