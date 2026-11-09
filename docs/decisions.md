@@ -77,7 +77,7 @@ and keep its index line.
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
-| D-058 | M5 plan: the real-data gate — Approved, M5.1 to M5.3 implemented and accepted, M5.4 implemented |
+| D-058 | M5 plan: the real-data gate — Approved, M5.1 to M5.3 implemented and accepted, M5.4 and M5.5 implemented |
 
 ## Rules in brief
 
@@ -177,7 +177,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-058 M5 plan: the real-data gate — Approved, M5.1 to M5.3 implemented and accepted, M5.4 implemented
+## D-058 M5 plan: the real-data gate — Approved, M5.1 to M5.3 implemented and accepted, M5.4 and M5.5 implemented
 
 Proposed on 2026-11-08, and approved by the owner the same day with the lead engineer's
 recommendations, including points A to F, with M5.1 approved to build. Each later slice needs its
@@ -443,3 +443,24 @@ and it was built the same day on synthetic data. It awaits review. Migration 001
   `pyproject.toml`. It is recorded, not checked.
 - **Not detected:** two disk images whose files share a disk (point 7 as amended), and a manifest
   rewritten together with the files it describes. The manifest is not signed.
+
+**How M5.5 was implemented,** under points 9 and 10. The owner approved M5.5 on 2026-11-09 to be
+built unattended, choosing the lead engineer's most fail-closed recommendation wherever a choice
+was left open, and it was built the same day on synthetic data. It awaits review.
+
+- **W1 parses every module, never imports it,** and refuses more than point 9's list: `_socket`,
+  `_ssl`, `asyncio`, `socketserver`, `xmlrpc`, `poplib`, `imaplib`, `nntplib`, `telnetlib`,
+  `webbrowser`, `multiprocessing`, `concurrent`, `pty` and `ctypes`, every `os` call that runs a
+  program, and every dynamic import (`__import__`, `importlib.import_module`), whatever it names.
+  Module aliases are resolved. The allowance is `subprocess` in `db/volume_probes.py` alone, and
+  the test also requires that module to make one `subprocess.run` call and name only `diskutil` and
+  `hdiutil`.
+- **The checklist ends where M6 begins.** No real layout exists, so the owner's ledger is created,
+  backed up and restored empty, and the statements are moved into the image for M6 to import.
+  Deleting the copies outside the image is recommended, and left to the owner.
+- **The walkthrough ran in-process,** with the probes answered by the suite's recordings and the
+  work tree above `build/` ignored, as the tests do. Mounting an image writes outside the
+  repository, so none was mounted, and the macOS steps (`hdiutil create` and `attach`, `diskutil
+  enableOwnership`) were not run. Each is followed in the checklist by a `pf` step that checks it.
+- **Point F's tripwire** is not built, as recommended. The security proposal stays unapplied
+  (point E): the checklist asks the owner.

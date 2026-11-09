@@ -218,7 +218,7 @@ Approved on 2026-11-08 as D-058, with the lead engineer's recommendations, inclu
 M5.1 was approved, built and accepted as built the same day. M5.2 was approved with the owner's amendments to point
 3, built the same day, and accepted on 2026-11-09, with a second amendment accepting images encrypted as files.
 M5.3 was approved and built on 2026-11-09, and accepted as built the same day. M5.4 was approved on 2026-11-09, with the
-owner's amendment to point 7, built the same day, and awaits review. M5.5 needs its own approval.
+owner's amendment to point 7, and M5.5 the same day. Both were built that day, and await review.
 
 | Slice | Scope | Status |
 |---|---|---|
@@ -226,7 +226,7 @@ owner's amendment to point 7, built the same day, and awaits review. M5.5 needs 
 | M5.2 | Encryption: an encrypted volume, checked on every open (D-002) | Accepted |
 | M5.3 | Archiving originals, and storage by kind (D-017) | Accepted |
 | M5.4 | Backup, verification and restore | Built, awaiting review |
-| M5.5 | Network and dependency behaviour, and the readiness checklist | Not started |
+| M5.5 | Network and dependency behaviour, and the readiness checklist | Built, awaiting review |
 
 ### M5.1 acceptance criteria
 

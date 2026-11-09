@@ -1,12 +1,13 @@
-# Session Handoff: M5.4 Built
+# Session Handoff: M5.4 and M5.5 Built, Awaiting Review
 
 For a fresh session. Written 2026-11-09. **M1 to M4 are complete and accepted.** The owner approved
 the M5 plan, D-058 in [decisions.md](decisions.md), with the lead engineer's recommendations,
 including points A to F. **M5.1, real ledgers and their location, M5.2, encryption, and M5.3, archiving
 originals and storage by kind, are built and accepted,** M5.2 under point 3 as the owner amended it
-twice. **M5.4, backup, verification and restore, is built and awaits the
-owner's review** ("How M5.4 was implemented" under D-058), with point 7 as the owner amended it. M5.5
-needs its own approval. Slices and acceptance criteria are in
+twice. **M5.4, backup, verification and restore, and M5.5, no network and
+the readiness checklist, are built and await the owner's review** ("How M5.4 was implemented" and
+"How M5.5 was implemented" under D-058), with point 7 as the owner amended it. The gate opens
+once the owner runs [real-data-readiness.md](real-data-readiness.md). Slices and acceptance criteria are in
 [plan.md](plan.md).
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
@@ -34,8 +35,8 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance `c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e` and its docs the commit after it |
-| Latest gating run | Full suite, 2157 passed, exit code 0, on M5.4 `5e6e05e` |
+| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance `c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e`, its docs `7a0d446`, M5.5 `4548b12` and its docs the commit after it |
+| Latest gating run | Full suite, 2177 passed, exit code 0, on M5.5 `4548b12` |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted as its own volume (D-058 point 7, as amended). That folder is the owner's too: never read, list or search it |
@@ -68,7 +69,9 @@ Then only what the task needs:
   `tests/scenarios/test_originals.py`, and "How M5.3 was implemented" under D-058.
 - For changes to M5.4: `db/backups.py`, migration 0018, the `backup` commands and `run_storage`
   in `cli.py`, `tests/scenarios/test_backups.py`, and "How M5.4 was implemented" under D-058.
-- For building M5.5: its recommendations and criteria in D-058 and [plan.md](plan.md),
+- For changes to M5.5: `tests/unit/test_no_network_imports.py`, [real-data-readiness.md](real-data-readiness.md),
+  "Network and dependencies" in [status.md](status.md), and "How M5.5 was implemented" under D-058.
+- For later M5 work: the recommendations and criteria in D-058 and [plan.md](plan.md),
   D-002, D-017, D-019 and D-025 in [decisions-d001-d052.md](decisions-d001-d052.md), PRD-backend
   §19 to §21, and [security-controls-proposal.md](security-controls-proposal.md), which stays
   unapplied (point E).
@@ -120,6 +123,8 @@ Pitfalls that recurred across M1 to M3.4:
   which the product rightly refused. Key by account and external ID, never by generated ID order.
 - **Benchmarks** must be able to reach the cost they claim to measure. Three documents, not two, are
   needed for a confirmation to link anything.
+- **Privacy checks against an amount** must leave timestamps out: in M5.4 a gate failed when
+  `16.502Z` held `6.50`. Three tests now strip ISO timestamps first.
 - **Learn an outside tool's output from a real run before designing on it.** In M5.2 diskutil
   refused a folder, had no `VirtualOrPhysical` key, and reported an image encrypted only as a file
   as not encrypted: all three would have been built wrong from memory.
@@ -200,18 +205,22 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Review of M5.4.
-- A first `pf init --real` on the real image is the owner's to run, or needs their approval. The
-  gate stays closed to real documents until M5.5's checklist is run.
+- Review of M5.4 and M5.5.
+- Running [real-data-readiness.md](real-data-readiness.md), which needs the backup image created in
+  `~/CommonCents_LocalBackups`. M6 starts once it is run.
+- While M5.4 and M5.5 were built, another session left uncommitted edits proposing D-059 (an M8
+  plan) in decisions, plan, status and this file. They were left as found and never committed
+  from here. D-059's recommendation 8 widens M5.5's import test for one module.
+- A first `pf init --real` on the real image is the owner's to run, as the checklist's step 2.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for M5.4 on 2026-11-09 | **Must be renewed** for M5.5 or changes to earlier slices |
+| Local commits on `feature/m2-review` | Approved for M5.4 and M5.5 on 2026-11-09, used for them | **Must be renewed** for any further change |
 | M1 to M4 | Accepted as built | None |
-| M5 | Plan approved (D-058). M5.1 to M5.3 accepted as built. M5.4 approved | Review of M5.4, approval of M5.5 |
+| M5 | Plan approved (D-058). M5.1 to M5.3 accepted as built. M5.4 and M5.5 built | Review of M5.4 and M5.5 |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -239,10 +248,10 @@ branch is feature/m2-review, the working tree is clean, and run the test suite w
 code before changing anything. Do not contact GitHub.
 
 Next task, from the owner:
-[PASTE IT HERE: for example, build M5.3, archiving originals and storage by kind]
+[PASTE IT HERE: for example, review M5.4 and M5.5]
 
-Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as a new
-decision, D-059, and approval before any of it is built. Each slice of it then needs its own
+Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as the next
+free decision number, and approval before any of it is built. Each slice of it then needs its own
 approval. Do not reopen D-042 to D-058 unless you find a concrete contradiction.
 
 Follow the working principles in docs/handoff.md, and its "Keeping these docs small" rules when
