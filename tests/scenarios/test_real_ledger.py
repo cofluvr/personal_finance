@@ -3,8 +3,8 @@
 pytest's temporary folder can sit inside this repository, which is a git work tree, when TMPDIR
 points into build/. The `vault` fixture therefore treats a work tree found above tmp_path as absent,
 while one made inside tmp_path is still found by the real search. It also places the folder on a
-synthetic encrypted disk image, answering for diskutil with a recording (M5.2), so the suite never
-runs diskutil or mounts a volume.
+synthetic encrypted disk image, answering for diskutil and hdiutil with recordings (M5.2), so the
+suite never runs either or mounts a volume.
 """
 
 import os
@@ -15,7 +15,7 @@ import pytest
 from test_decisions import ALL_TABLES, CARD_HEADER, CAFE, Ledger
 
 from personal_finance import cli
-from personal_finance.db import diskutil, real_ledger
+from personal_finance.db import real_ledger, volume_probes
 from personal_finance.db.migrate import connect, create_database
 from personal_finance.db.real_ledger import (
     SYNCED_FOLDERS_UNDER_HOME,
@@ -26,27 +26,40 @@ from personal_finance.db.real_ledger import (
 
 LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", "real_ledger")
 
-DISKUTIL_RECORDINGS = Path(__file__).parents[1] / "fixtures" / "synthetic" / "diskutil"
+PROBE_RECORDINGS = Path(__file__).parents[1] / "fixtures" / "synthetic" / "volume_probes"
 SYNTHETIC_MOUNT_POINT = Path("/Volumes/SyntheticLedger")
 
 
-def diskutil_recording(name):
-    return (DISKUTIL_RECORDINGS / f"{name}.plist").read_bytes()
+def probe_recording(name):
+    return (PROBE_RECORDINGS / f"{name}.plist").read_bytes()
+
+
+class ProbesAsked:
+    def __init__(self):
+        self.diskutil_about = []
+        self.hdiutil = 0
 
 
 def place_on_volume(monkeypatch, diskutil_output, *, mount_point=SYNTHETIC_MOUNT_POINT,
-                    diskutil_exit_code=0):
-    """Make every folder's mount point `mount_point`, and diskutil's answer about it the one given.
-    Returns the list of mount points diskutil was asked about."""
-    asked_about = []
+                    diskutil_exit_code=0, hdiutil_output=None, hdiutil_exit_code=0):
+    """Make every folder's mount point `mount_point`, and the probes' answers the ones given. By
+    default hdiutil shows the volume's disk image as not encrypted. Returns what was asked."""
+    if hdiutil_output is None:
+        hdiutil_output = probe_recording("hdiutil_image_not_encrypted")
+    asked = ProbesAsked()
 
-    def answer(asked_mount_point):
-        asked_about.append(asked_mount_point)
+    def diskutil_answer(asked_mount_point):
+        asked.diskutil_about.append(asked_mount_point)
         return diskutil_exit_code, diskutil_output
 
+    def hdiutil_answer():
+        asked.hdiutil += 1
+        return hdiutil_exit_code, hdiutil_output
+
     monkeypatch.setattr(real_ledger, "mount_point_containing", lambda folder: mount_point)
-    monkeypatch.setattr(diskutil, "info_plist", answer)
-    return asked_about
+    monkeypatch.setattr(volume_probes, "diskutil_info_plist", diskutil_answer)
+    monkeypatch.setattr(volume_probes, "hdiutil_info_plist", hdiutil_answer)
+    return asked
 
 
 class RealLedger(Ledger):
@@ -80,7 +93,7 @@ def vault(tmp_path, monkeypatch):
         return found
 
     monkeypatch.setattr(real_ledger, "git_work_tree_containing", work_tree_within_tmp_path)
-    place_on_volume(monkeypatch, diskutil_recording("encrypted_disk_image"))
+    place_on_volume(monkeypatch, probe_recording("encrypted_disk_image"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
     folder = tmp_path / "vault"

@@ -1,10 +1,10 @@
-# Session Handoff: M5.2 Built, Awaiting Review
+# Session Handoff: M5.2 Accepted, M5.3 Next
 
 For a fresh session. Written 2026-11-08. **M1 to M4 are complete and accepted.** The owner approved
 the M5 plan, D-058 in [decisions.md](decisions.md), with the lead engineer's recommendations,
-including points A to F. **M5.1, real ledgers and their location, is accepted. M5.2, encryption, is
-built and awaits the owner's review,** under point 3 as the owner amended it. M5.3 to M5.5 each need
-their own approval, and M5.4 needs the backup destination. Slices and acceptance criteria are in
+including points A to F. **M5.1, real ledgers and their location, and M5.2, encryption, are built
+and accepted,** M5.2 under point 3 as the owner amended it twice. **M5.3 is approved to build.**
+M5.4 and M5.5 each need their own approval, and M5.4 needs the backup destination. Slices and acceptance criteria are in
 [plan.md](plan.md).
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
@@ -32,12 +32,12 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, and M5.2 the commit after it |
-| Latest gating run | Full suite, 2012 passed, exit code 0, on M5.2 as built |
+| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, and its second amendment the commit after it |
+| Latest gating run | Full suite, 2041 passed, exit code 0, on M5.2's second amendment |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
-| Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder. Backups go on a separate encrypted drive, chosen in M5.4 (D-058 point 7) |
-| Real ledger's image | `~/CommonCents.sparsebundle`, mounted by the owner only when needed at `/Volumes/CommonCents`, with the ledger folder `/Volumes/CommonCents/ledger` (`0700`, the owner's). Run diskutil or `stat` on it only with the owner's approval each time. At the last check it reported `Encryption` false, so the gate refuses it |
+| Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on a separate encrypted drive, chosen in M5.4 (D-058 point 7) |
+| Real ledger's image | `~/CommonCents.sparsebundle`, mounted by the owner only when needed at `/Volumes/CommonCents`, with the ledger folder `/Volumes/CommonCents/ledger` (`0700`, the owner's). It holds the owner's statements: never read, list or search it. Run diskutil, hdiutil or `stat` on it only with the owner's approval each time. Checked 2026-11-09: encrypted as an image file (`image-encrypted` true), its APFS volume not (`Encryption` false), ownership honoured, so the gate accepts it. No `pf` command has run on it |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
 | Entry point | `bin/pf`, using this checkout's `.venv`. An installed `pf` script also works |
@@ -57,9 +57,10 @@ Then only what the task needs:
 - For changes to M5.1: `db/real_ledger.py`, `run_init`, `open_ledger`, `run_migrate` and
   `run_import` in `cli.py`, migration 0017, `tests/scenarios/test_real_ledger.py`,
   `tests/scenarios/test_real_ledger_migration.py`, and "How M5.1 was implemented" under D-058.
-- For changes to M5.2: `db/diskutil.py`, `refuse_unless_on_encrypted_disk_image` and
-  `check_real_ledger_on_open` in `db/real_ledger.py`, `tests/scenarios/test_encrypted_volume.py`,
-  the recordings in `tests/fixtures/synthetic/diskutil`, and "How M5.2 was implemented" under D-058.
+- For changes to M5.2: `db/volume_probes.py`, `refuse_unless_on_encrypted_disk_image`,
+  `disk_image_is_encrypted` and `check_real_ledger_on_open` in `db/real_ledger.py`,
+  `tests/scenarios/test_encrypted_volume.py`, the recordings in
+  `tests/fixtures/synthetic/volume_probes`, and "How M5.2 was implemented" under D-058.
 - For building M5.3 to M5.5: their recommendations and criteria in D-058 and [plan.md](plan.md),
   D-002, D-017, D-019 and D-025 in [decisions-d001-d052.md](decisions-d001-d052.md), PRD-backend
   §19 to §21, and [security-controls-proposal.md](security-controls-proposal.md), which stays
@@ -192,20 +193,18 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Review of M5.2.
-- **The real image.** At the last check `/Volumes/CommonCents` reported `Encryption` false, which
-  the gate refuses. It needs an "APFS (Encrypted)" volume, and one diskutil check, with the owner's
-  approval, showing `Encryption` true before any real data goes in.
-- Approval of M5.3. M5.4 needs the backup drive.
+- Review of M5.3 once built. M5.4 needs the backup drive, which the owner will have ready.
+- A first `pf init --real` on the real image is the owner's to run, or needs their approval. The
+  gate stays closed to real documents until M5.5's checklist is run.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved through M5.2 | **Must be renewed** for M5.3 |
+| Local commits on `feature/m2-review` | Approved through M5.2's second amendment and M5.3 | **Must be renewed** for M5.4 |
 | M1 to M4 | Accepted as built | None |
-| M5 | Plan approved (D-058). M5.1 accepted as built. M5.2 built, awaiting review | Approval of each later slice |
+| M5 | Plan approved (D-058). M5.1 and M5.2 accepted as built. M5.3 approved | Approval of M5.4 and M5.5 |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -233,7 +232,7 @@ branch is feature/m2-review, the working tree is clean, and run the test suite w
 code before changing anything. Do not contact GitHub.
 
 Next task, from the owner:
-[PASTE IT HERE: for example, record M5.2's review, then build M5.3]
+[PASTE IT HERE: for example, build M5.3, archiving originals and storage by kind]
 
 Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as a new
 decision, D-059, and approval before any of it is built. Each slice of it then needs its own

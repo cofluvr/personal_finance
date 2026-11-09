@@ -4,9 +4,9 @@ A real ledger holds actual financial data. It is marked once, by `pf init --real
 checks its location before anything else. A synthetic ledger is never checked and behaves as before.
 Each check refuses, naming the rule. None repairs: a wrong mode is reported with the command to fix it.
 
-The location must be a folder inside a mounted disk image whose APFS volume diskutil reports as
-encrypted and as honouring file ownership. FileVault on the startup volume does not count (D-058
-point 3, as amended). Any answer from diskutil other than a clear yes refuses.
+The location must be a folder inside a mounted disk image whose APFS volume honours file ownership,
+and which diskutil reports encrypted or hdiutil reports encrypted as an image. FileVault on the
+startup volume does not count (D-058 point 3, as amended). Any answer other than a clear yes refuses.
 """
 
 import os
@@ -15,7 +15,7 @@ import sqlite3
 from pathlib import Path
 from xml.parsers.expat import ExpatError
 
-from personal_finance.db import diskutil
+from personal_finance.db import volume_probes
 
 # Folders a sync client copies off this machine. Relative to the home folder.
 SYNCED_FOLDERS_UNDER_HOME = ("Library/Mobile Documents", "Library/CloudStorage", "Dropbox")
@@ -103,21 +103,11 @@ def refuse_unless_on_encrypted_disk_image(folder: Path) -> None:
         raise UnsafeLocation(
             f"a real ledger must be in a folder inside its volume, not at the volume's root: {folder}"
         )
-    try:
-        diskutil_exit_code, diskutil_output = diskutil.info_plist(mount_point)
-    except diskutil.DiskutilDidNotAnswer as failure:
-        raise UnsafeLocation(
-            f"could not ask diskutil whether {mount_point} is encrypted ({failure}), so the real "
-            "ledger stays closed"
-        ) from None
-    try:
-        volume = plistlib.loads(diskutil_output)
-    except (ValueError, ExpatError):
-        volume = None
-    if diskutil_exit_code != 0 or not isinstance(volume, dict) or "Error" in volume:
-        raise UnsafeLocation(
-            f"diskutil could not describe {mount_point}, so the real ledger stays closed"
-        )
+    volume = probe_answer(
+        lambda: volume_probes.diskutil_info_plist(mount_point),
+        could_not_ask=f"could not ask diskutil whether {mount_point} is encrypted",
+        could_not_describe=f"diskutil could not describe {mount_point}",
+    )
     if volume.get("MountPoint") != str(mount_point):
         raise UnsafeLocation(
             f"diskutil described a volume other than {mount_point}, so the real ledger stays closed"
@@ -129,16 +119,64 @@ def refuse_unless_on_encrypted_disk_image(folder: Path) -> None:
         )
     if volume.get("FilesystemType") != "apfs":
         raise UnsafeLocation(f"a real ledger's disk image must hold an APFS volume: {mount_point}")
-    if volume.get("Encryption") is not True:
-        raise UnsafeLocation(
-            f"diskutil does not report {mount_point} as encrypted. A real ledger needs an "
-            "\"APFS (Encrypted)\" volume: encrypting only the disk image file is not reported"
-        )
     if volume.get("GlobalPermissionsEnabled") is not True:
         raise UnsafeLocation(
             f"{mount_point} ignores file ownership, so its permissions protect nothing. Run: "
             f"sudo diskutil enableOwnership {mount_point}"
         )
+    if volume.get("Encryption") is not True and not disk_image_is_encrypted(volume, mount_point):
+        raise UnsafeLocation(
+            f"neither the APFS volume at {mount_point} nor the disk image holding it is reported "
+            "encrypted"
+        )
+
+
+def disk_image_is_encrypted(volume: dict, mount_point: Path) -> bool:
+    """Whether the one attached disk image backing this volume's device at this mount point says it
+    is encrypted. diskutil cannot see encryption of the image file itself (D-058 point 3)."""
+    attached = probe_answer(
+        volume_probes.hdiutil_info_plist,
+        could_not_ask=f"could not ask hdiutil whether the disk image holding {mount_point} is "
+                      "encrypted",
+        could_not_describe="hdiutil could not describe the attached disk images",
+    )
+    images = attached.get("images")
+    if not isinstance(images, list):
+        raise UnsafeLocation(
+            "hdiutil could not describe the attached disk images, so the real ledger stays closed"
+        )
+    volume_device = f"/dev/{volume.get('DeviceIdentifier')}"
+    images_holding_the_volume = [
+        image for image in images
+        if isinstance(image, dict) and isinstance(image.get("system-entities"), list)
+        and any(
+            isinstance(entity, dict) and entity.get("dev-entry") == volume_device
+            and entity.get("mount-point") == str(mount_point)
+            for entity in image["system-entities"]
+        )
+    ]
+    if len(images_holding_the_volume) != 1:
+        raise UnsafeLocation(
+            f"hdiutil does not show exactly one disk image holding {mount_point}, so the real "
+            "ledger stays closed"
+        )
+    return images_holding_the_volume[0].get("image-encrypted") is True
+
+
+def probe_answer(ask, *, could_not_ask: str, could_not_describe: str) -> dict:
+    """A probe's plist dictionary. Failing to run, a failed exit, an `Error` key or anything but a
+    dictionary refuses."""
+    try:
+        exit_code, output = ask()
+    except volume_probes.ProbeDidNotAnswer as failure:
+        raise UnsafeLocation(f"{could_not_ask} ({failure}), so the real ledger stays closed") from None
+    try:
+        answer = plistlib.loads(output)
+    except (ValueError, ExpatError):
+        answer = None
+    if exit_code != 0 or not isinstance(answer, dict) or "Error" in answer:
+        raise UnsafeLocation(f"{could_not_describe}, so the real ledger stays closed")
+    return answer
 
 
 def check_real_ledger_on_open(conn: sqlite3.Connection, database_path: Path) -> None:

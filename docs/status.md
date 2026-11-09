@@ -30,7 +30,7 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M4.4: the 100,000-transaction benchmark | Accepted (D-057) |
 | **M4 overall** | **Complete and accepted** |
 | M5.1: real ledgers, their location and file permissions | Accepted (D-058) |
-| M5.2: encryption, an encrypted volume checked on every open | Built, awaiting review (D-002, D-058) |
+| M5.2: encryption, an encrypted volume checked on every open | Accepted (D-002, D-058) |
 | M5.3 to M5.5 | Planned in D-058, not started |
 | M6 to M8 | Not started |
 
@@ -41,8 +41,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.db.id_lists`: any number of IDs as one SQL parameter (D-057).
 - `personal_finance.db.real_ledger`: the real-ledger mark, and the location, encrypted-volume and
   import checks every open of a real ledger runs, with its temporary files kept in memory (D-058).
-- `personal_finance.db.diskutil`: the one subprocess call, `diskutil info -plist` on a mount point
-  (D-058).
+- `personal_finance.db.volume_probes`: the only subprocess calls, `diskutil info -plist` on a mount
+  point and `hdiutil info -plist` (D-058).
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,

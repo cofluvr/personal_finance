@@ -21,7 +21,7 @@ and keep its index line.
 | Decision | Title and status |
 |---|---|
 | D-001 | Database: SQLite through the standard library — Approved |
-| D-002 | Encryption — Approved in D-058, implemented in M5.2 |
+| D-002 | Encryption — Approved in D-058, implemented and accepted in M5.2 |
 | D-003 | Money: signed integer cents — Approved |
 | D-004 | Provenance layers — Approved |
 | D-005 | Document coverage is explicit — Approved |
@@ -77,7 +77,7 @@ and keep its index line.
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
-| D-058 | M5 plan: the real-data gate — Approved, M5.1 implemented and accepted, M5.2 implemented |
+| D-058 | M5 plan: the real-data gate — Approved, M5.1 and M5.2 implemented and accepted |
 
 ## Rules in brief
 
@@ -167,7 +167,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Monthly reports | A transaction's month is its effective transaction date, else its effective posting date. Months add to `totals`, D-056's groups add to each month, and a month is covered only by complete transaction-basis coverage of every day | D-013, D-057 |
 | Real ledgers | Real or synthetic, fixed at `init`. Only a real ledger is checked, on every open, and a synthetic one is never promoted | D-058 |
 | Real ledger location | Refused inside a git work tree or a synced folder, through a symbolic link, not owned by the user, or open to group or others. Checked, never repaired. Its imports never come from a git work tree | D-019, D-058 |
-| Encrypted volume | A real ledger's folder is inside, never at the root of, a mounted disk image whose APFS volume diskutil reports encrypted and honouring ownership. FileVault on the startup volume does not count. Any other answer refuses. Temporary files stay in memory | D-002, D-058 |
+| Encrypted volume | A real ledger's folder is inside, never at the root of, a mounted disk image whose APFS volume honours ownership, and which diskutil reports encrypted or hdiutil reports encrypted as an image. FileVault on the startup volume does not count. Any other answer refuses. Temporary files stay in memory | D-002, D-058 |
 
 ## Not yet decided
 
@@ -175,7 +175,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-058 M5 plan: the real-data gate — Approved, M5.1 implemented and accepted, M5.2 implemented
+## D-058 M5 plan: the real-data gate — Approved, M5.1 and M5.2 implemented and accepted
 
 Proposed on 2026-11-08, and approved by the owner the same day with the lead engineer's
 recommendations, including points A to F, with M5.1 approved to build. Each later slice needs its
@@ -236,6 +236,12 @@ pf backup restore --from BACKUP --to NEW_DB
    a ledger on the FileVault-encrypted startup volume is refused. The real ledger lives in a `0700`
    folder inside the mounted volume, never at its root. M5.5's checklist moves the owner's
    statements into the image.
+
+   **Amended again by the owner on 2026-11-09, after M5.2's review.** An image encrypted as a file
+   (`hdiutil create -encryption`) is accepted too, though diskutil reports its APFS volume
+   unencrypted: `hdiutil info -plist` must show exactly one attached image backing the volume's
+   device at its mount point, and that image must report itself encrypted. hdiutil joins diskutil
+   as the second outside call, and point 9 allows both.
 4. **Caches stay on that volume.** A real ledger runs with `PRAGMA temp_store = MEMORY`, so SQLite
    writes no sort or index spill to the system temp folder. Its rollback journal sits beside the
    database, and a test shows it gets `0600`. The application writes no other cache, and no log
@@ -265,8 +271,8 @@ pf backup restore --from BACKUP --to NEW_DB
    restoring. **The restore test** compares every report, list and token of the restored ledger
    with the original's, byte for byte, on generated ledgers, and every original by hash.
 9. **No network, and it is shown.** A test reads every module under `src/` and refuses an import
-   of `socket`, `ssl`, `http`, `urllib`, `ftplib`, `smtplib` or `subprocess` outside the one
-   `diskutil` call. The existing socket guard stays. The no-network and dependency behaviour is
+   of `socket`, `ssl`, `http`, `urllib`, `ftplib`, `smtplib` or `subprocess` outside the
+   `diskutil` and `hdiutil` calls in `db/volume_probes.py` (point 3, as amended). The existing socket guard stays. The no-network and dependency behaviour is
    written down once, in status.md.
 10. **Readiness is a checklist, not code.** M5.5 writes `docs/real-data-readiness.md`: the steps
     the owner takes before the first real document (create the encrypted image, `init --real` on
@@ -326,7 +332,8 @@ owner on 2026-11-08, built the same day, and accepted as built:
   work tree found above their own folder as absent and still find one made inside it.
 
 **How M5.2 was implemented,** under point 3 as amended. Approved to build by the owner on
-2026-11-08 and built the same day, on synthetic data:
+2026-11-08, built the same day on synthetic data, and accepted as built on 2026-11-09. The second
+amendment followed:
 
 - **The keys** come from real `diskutil info -plist` output on macOS Golden Gate 27.2: the startup
   Data volume, run on this repository's volume, and the owner's empty image, with their approval.
@@ -339,18 +346,23 @@ owner on 2026-11-08, built the same day, and accepted as built:
   point and asks about that. A ledger whose folder is the mount point is refused before asking.
   Under the startup Data volume the walk reaches `/` through its firmlinks, which is refused as
   not a disk image either way.
-- **Encryption of the image file alone is not reported.** An image made with
-  `hdiutil create -encryption AES-256` held an APFS volume reporting `Encryption` false, so the
-  owner's image needs an "APFS (Encrypted)" volume. diskutil cannot see image-layer encryption,
-  and a second probe was not added.
+- **Encryption of the image file alone is not reported by diskutil.** The owner's image, made with
+  `hdiutil create -encryption AES-256`, holds an APFS volume reporting `Encryption` false, while
+  `hdiutil isencrypted` says YES. Under the second amendment, a volume diskutil does not report
+  encrypted is looked up in `hdiutil info -plist` (keys from a real run, with the owner's
+  approval): `images`, each with `system-entities` holding `dev-entry` and `mount-point`, and
+  `image-encrypted`. The entity must be `/dev/` plus diskutil's `DeviceIdentifier`, at the same
+  mount point, in exactly one image, and `image-encrypted` the boolean `true`. hdiutil is asked
+  only when diskutil does not report encryption.
 - **Ownership on a mounted image must be checked on the real image.** A new image ignored
   ownership (`GlobalPermissionsEnabled` false), which makes M5.1's owner and mode checks
   meaningless, so the probe refuses it and names `sudo diskutil enableOwnership`. The rule was
   added with the owner after the real image showed it. On 2026-11-08 the owner enabled ownership,
   and the ledger folder was shown `drwx------`, owned by the owner.
-- `db/diskutil.py` holds the application's only subprocess call: `/usr/sbin/diskutil` by its full
-  path, with a 30-second timeout, and failing to run it refuses. Tests replace it with recordings
-  in `tests/fixtures/synthetic/diskutil`, so the suite never runs diskutil or mounts a volume.
+- `db/volume_probes.py` holds the application's only subprocess calls: `/usr/sbin/diskutil` and
+  `/usr/bin/hdiutil` by their full paths, through one runner with a 30-second timeout, and failing
+  to run either refuses. Tests replace both with recordings in
+  `tests/fixtures/synthetic/volume_probes`, so the suite never runs them or mounts a volume.
 - `temp_store = MEMORY` is set by the same check that every open of a real ledger runs, before
   `migrate` migrates. `init --real` migrates its empty ledger before the mark, so it holds nothing
   to spill. SQLite unlinks temporary files as it opens them, so the test reads the temp folder's
