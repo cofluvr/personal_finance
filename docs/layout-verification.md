@@ -23,7 +23,9 @@ Added account Capital One card: <ID>
 
 Below, `C` is `/Volumes/CommonCents/layout-check/check.db`. Use one account per layout, of its
 type: `credit_card` for `capital_one_card_v1` and `amex_card_v1`, `checking` or `savings` for
-`capital_one_bank_v1` and `us_bank_v1`.
+`capital_one_bank_v1` and `us_bank_v1`. For `capital_one_bank_v1`, add the account with
+`--last4` and the four digits its export shows in `Account Number`, or the import fails as
+`account_number_unknown` (D-061).
 
 ## 2. One statement period
 

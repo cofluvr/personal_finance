@@ -165,6 +165,7 @@ def _import_content(
 
     metadata, records = read_document(content, layout)
     progress.rows_attempted = len(records)
+    _require_account_number(conn, account_id, layout, records)
     coverage = _resolve_coverage(metadata, layout, declared)
     generated_on = _generated_on(metadata)
 
@@ -307,6 +308,20 @@ def _open_groups_touching(conn, document_id) -> int:
              AND link.source_document_id = ?""",
         (document_id,),
     ).fetchone()[0]
+
+
+def _require_account_number(conn, account_id, layout: Layout, records) -> None:
+    """Every row of a layout naming its account must name this account's last four digits, so a
+    file exported from another account fails rather than importing into this one (D-061)."""
+    if layout.account_number_column is None:
+        return
+    (last4,) = conn.execute("SELECT last4 FROM account WHERE id = ?", (account_id,)).fetchone()
+    if last4 is None:
+        raise ImportFailure("account_number_unknown")
+    position = layout.columns.index(layout.account_number_column)
+    for record in records:
+        if len(record.cells) == len(layout.columns) and record.cells[position].strip() != last4:
+            raise ImportFailure("account_number_mismatch")
 
 
 def _resolve_coverage(metadata, layout, declared) -> Coverage:

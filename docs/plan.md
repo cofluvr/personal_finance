@@ -284,14 +284,15 @@ and `/Volumes/CommonCentsBackup`, and reported every step verified. M6 is planne
 
 Directed by the owner on 2026-11-09 as D-059, built unattended, each slice gated on the full suite
 and committed locally. The owner approved points A to F the same day, and recorded all four slices
-complete. **M6 is complete.** The Capital One card, Amex and BFSFCU formats are confirmed from real
-exports, and the Capital One bank and U.S. Bank formats are not. Every layout is unverified
+complete. **M6 is complete.** The Capital One card, Capital One bank, Amex and BFSFCU formats are
+confirmed from real exports, and the U.S. Bank format is not. D-061 added the Capital One bank
+account number check. Every layout is unverified
 until D-059 point F passes on one real file of it, by the steps in
 [layout-verification.md](layout-verification.md).
 
 | Slice | Scope | Status |
 |---|---|---|
-| M6.1 | Capital One: `capital_one_card_v1` and `capital_one_bank_v1` | Complete. Card format confirmed, bank format not |
+| M6.1 | Capital One: `capital_one_card_v1` and `capital_one_bank_v1` | Complete. Both formats confirmed, the bank's in D-061 |
 | M6.2 | U.S. Bank: `us_bank_v1`, its CSV activity list | Complete. Format not confirmed |
 | M6.3 | American Express: `amex_card_v1` | Complete. Format confirmed |
 | M6.4 | BFSFCU: `bfsfcu_v1`, from the format of a real export | Complete. Format confirmed |

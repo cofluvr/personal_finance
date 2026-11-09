@@ -2,8 +2,9 @@
 
 For a fresh session. Written 2026-11-09. **M1 to M6 are complete.** M6, the first real CSV layouts,
 is D-059 in [decisions-d001-d052.md](decisions-d001-d052.md), with points A to F as the owner approved them. Its
-fixtures are invented. The Capital One card, Amex and BFSFCU formats are confirmed from the owner's
-real exports, keeping none of their values, and the Capital One bank and U.S. Bank formats are not.
+fixtures are invented. The Capital One card, Capital One bank, Amex and BFSFCU formats are
+confirmed from the owner's real exports, keeping none of their values, and the U.S. Bank format is
+not. D-061 confirmed the Capital One bank format and checks its rows' account number.
 
 | Slice | Commit | Layouts | Breaks |
 |---|---|---|---|
@@ -85,7 +86,7 @@ Then only what the task needs:
   `tests/unit/test_pdf_reader.py`, `tests/synthetic_pdf.py`, `reconcile/cross_document.py`
   (`_match_exact` and `_coverage_gap`), and `tests/unit/test_no_network_imports.py`. D-005, D-006,
   D-020, D-024, D-026 and D-027 in the full text when a point names them.
-- For changes to M6: D-059, [layouts.md](layouts.md), `ingest/layouts.py`,
+- For changes to M6: D-059, D-061 for `capital_one_bank_v1`'s account number check, [layouts.md](layouts.md), `ingest/layouts.py`,
   `tests/scenarios/test_institution_layouts.py` (one `LayoutCase` per layout runs J1 to J7), and
   `tests/fixtures/synthetic/statements`. A new layout is a new `LayoutCase`. A real layout's sample
   reaches this repository only redacted and with the owner's approval (D-019).
@@ -224,15 +225,16 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
   `bin/pf pdf text` prints for one statement, values invented, whether it holds several accounts,
   and matching CSV and PDF transactions. Point 2c is answered: not secured.
 - Point F per layout, by [layout-verification.md](layout-verification.md), and its results.
-- A header and rows of a Capital One bank and a U.S. Bank export, values invented, to confirm
-  those two formats.
+- A header and rows of a U.S. Bank export, values invented, to confirm its format.
+- Whether the real ledger already holds a Capital One bank account added without `--last4`. If so,
+  it cannot import `capital_one_bank_v1` (D-061), and a command to set the digits once needs approval.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for D-059, M6, D-060's plan and M7.1 on 2026-11-09, used for them | **Must be renewed** for each later M7 slice |
+| Local commits on `feature/m2-review` | Approved for D-059, M6, D-060's plan, M7.1 and D-061 on 2026-11-09, used for them | **Must be renewed** for each later M7 slice |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |

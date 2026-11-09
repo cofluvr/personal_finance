@@ -80,6 +80,7 @@ and keep its index line.
 | D-058 | M5 plan: the real-data gate — Approved, implemented and accepted in M5 |
 | D-059 | M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6 |
 | D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, point 1 amended, M7.1 built |
+| D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
 
 ## Rules in brief
 
@@ -171,6 +172,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Real ledger location | Refused inside a git work tree or a synced folder, through a symbolic link, not owned by the user, or open to group or others. Checked, never repaired. Its imports never come from a git work tree | D-019, D-058 |
 | Originals | A real ledger keeps each new document's bytes in `originals/` under its SHA-256, `0400`, before the import commits. Never overwritten or deleted. Identity never reads it | D-017, D-058 |
 | Encrypted volume | A real ledger's folder is inside, never at the root of, a mounted disk image whose APFS volume honours ownership, and which diskutil reports encrypted or hdiutil reports encrypted as an image. FileVault on the startup volume does not count. Any other answer refuses. Temporary files stay in memory | D-002, D-058 |
+| Account number in rows | A layout whose rows name the account's last four digits refuses a file naming another, or an account with none registered, importing nothing | D-061 |
 | PDF text | pypdf alone reads it, pinned by hash, imported by `ingest/pdf_reader.py` only, with `jbig2dec` unset and its log silenced. W1 parses pypdf too, allowing only its JBIG2 decoder's `subprocess` | D-020, D-060 |
 | Backups | A new folder, on a mounted volume other than a real ledger's and gated as its folder is, holding the ledger, its referenced originals and a manifest of hashes, sizes, versions and a logical digest. Restore never overwrites, and checks every file, integrity, foreign keys, schema and digest first | D-058 |
 
@@ -402,3 +404,40 @@ on the owner's Mac.
   subprocess, whose stderr must be the error line alone.
 - **Moved to M7.2:** D2's import of a failing PDF and D4's stored parser version, since no PDF layout
   exists to import with.
+
+## D-061 Capital One bank format confirmed, and its rows' account number checked — Approved, implemented
+
+Directed by the owner on 2026-11-09, outside M7's slices, with the header and two rows of each of
+two real Capital One exports, a 360 Performance Savings account and a 360 Checking account. No
+value from them is kept in this repository: the fixtures invent every value, keeping the format.
+
+**The format matches `capital_one_bank_v1` as built,** so no parser changed: the exact header,
+`MM/DD/YY` dates, `Transaction Amount` never negative with `Transaction Type` `Debit` or `Credit`
+giving its direction, and `Balance` a running balance after each row, newest first. Amounts drop
+trailing zeros (`1400`, `14.1`), which the parser already read. The fixture now lists newest first
+in that style, with a Zelle receipt and a web payment in the wording the exports showed. Still
+assumed: the date is the transaction date, and the export holds posted transactions only, which
+D-059 point F checks.
+
+**The owner's choices on the account layer,** each recommended by the lead engineer:
+
+1. **The Account Number is checked.** Each row names its account's last four digits. A layout may
+   name such a column, and `capital_one_bank_v1` names `Account Number`. Every row of a new
+   document must name the importing account's registered last four digits (`pf account add
+   --last4`), or the file fails as `account_number_mismatch`, importing nothing, so the savings
+   export cannot import into checking. A row too short to hold the column is unresolved as before,
+   and is not checked. An account registered without last four digits fails the file as
+   `account_number_unknown`: nothing would show which account the file belongs to. A repeat import
+   of identical bytes is unchanged (D-022). Files that pass are read exactly as before, so the
+   layout keeps its ID and parser version: the check refuses files, and changes no meaning.
+2. **A transfer between the two accounts uses M3.2 unchanged.** The savings export's "Withdrawal
+   to 360 Checking" row, classified `transfer`, is a candidate against the checking deposit of the
+   opposite amount, and `review transfer match` matches them (D-054). A scenario test shows it on
+   invented exports. The checking side's wording is a guess, which matching never reads.
+
+**Open:** `pf` has no command to change an account, so an account added without last four digits
+cannot gain them. If the real ledger holds such a Capital One bank account, setting them once, never
+changing them after, is a follow-up for the owner's approval.
+
+**Tests:** `tests/scenarios/test_capital_one_accounts.py`, and the layout's J1 to J7 case on the
+new fixture, with its account's last four digits. Seven deliberate breaks of the check, all caught.

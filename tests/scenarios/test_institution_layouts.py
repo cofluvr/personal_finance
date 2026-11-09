@@ -45,6 +45,8 @@ class LayoutCase:
     overlap_basis: str
     unoffered_bases: tuple[str, ...] = field(default=())
     expected_status: str = "unknown"
+    # The account's last four digits, for a layout whose rows name them (D-061).
+    last4: str | None = None
 
     @property
     def id(self) -> str:
@@ -93,27 +95,31 @@ CASES = (
         layout=CAPITAL_ONE_BANK_V1,
         fixture="capital_one_bank.csv",
         expected_rows=(
-            ("2026-01-02", None, 185000, "Deposit from SYNTHETIC EMPLOYER PAYROLL"),
-            ("2026-01-06", None, -2350, "Debit Card Purchase - SYNTHETIC MARKET"),
-            ("2026-01-06", None, -2350, "Debit Card Purchase - SYNTHETIC MARKET"),
-            ("2026-01-20", None, -25000, "Withdrawal to SYNTHETIC CARD PAYMENT"),
             ("2026-01-31", None, 42, "Monthly Interest Paid"),
+            ("2026-01-20", None, -12526, "Withdrawal from SYNTHETIC BANK WEB PYMT"),
+            ("2026-01-09", None, 7000, "Zelle money received from SYNTHETIC PAYER"),
+            ("2026-01-06", None, -2350, "Debit Card Purchase - SYNTHETIC MARKET"),
+            ("2026-01-06", None, -2350, "Debit Card Purchase - SYNTHETIC MARKET"),
+            ("2026-01-02", None, 185000, "Deposit from SYNTHETIC EMPLOYER PAYROLL"),
         ),
         unresolved_rows=(
             ({"Transaction Amount": ""}, "missing_amount"),
-            ({"Transaction Amount": "1850.0.0"}, "invalid_amount"),
-            ({"Transaction Amount": "-1850.00"}, "invalid_amount"),
+            ({"Transaction Amount": "0.4.2"}, "invalid_amount"),
+            ({"Transaction Amount": "-0.42"}, "invalid_amount"),
+            ({"Transaction Amount": "0.425"}, "invalid_amount"),
             ({"Transaction Type": ""}, "invalid_direction"),
             ({"Transaction Type": "Transfer"}, "invalid_direction"),
             ({"Transaction Date": ""}, "missing_date"),
-            ({"Transaction Date": "2026-01-02"}, "invalid_date"),
+            ({"Transaction Date": "2026-01-31"}, "invalid_date"),
+            ({"Transaction Date": "01/31/2026"}, "invalid_date"),
         ),
-        first_ends=4,
+        first_ends=3,
         second_starts=1,
-        first_interval=("2026-01-01", "2026-01-20"),
-        second_interval=("2026-01-05", "2026-01-31"),
+        first_interval=("2026-01-08", "2026-01-31"),
+        second_interval=("2026-01-01", "2026-01-20"),
         overlap_basis="transaction",
         unoffered_bases=("posting",),
+        last4="4821",
     ),
     LayoutCase(
         layout=US_BANK_V1,
@@ -207,9 +213,11 @@ pytestmark = pytest.mark.parametrize("case", CASES, ids=lambda case: case.id)
 
 
 @pytest.fixture
-def account(conn):
+def account(conn, case):
     conn.execute(
-        "INSERT INTO account (id, display_name, account_type) VALUES ('acct', 'acct', 'checking')"
+        """INSERT INTO account (id, display_name, account_type, last4)
+           VALUES ('acct', 'acct', 'checking', ?)""",
+        (case.last4,),
     )
     return "acct"
 
@@ -368,7 +376,9 @@ class TestJ7Interpretation:
         db = str(tmp_path / "ledger.db")
         assert LAYOUTS[case.id] is case.layout
         assert main(["init", "--db", db]) == 0
-        assert main(["account", "add", "--db", db, "--name", "Acct", "--type", "checking"]) == 0
+        last4 = ["--last4", case.last4] if case.last4 else []
+        assert main(["account", "add", "--db", db, "--name", "Acct", "--type", "checking",
+                     *last4]) == 0
         statement = str(STATEMENTS / case.fixture)
         assert main(["import", "--db", db, "--account", "Acct", "--layout", case.id,
                      statement]) == 0

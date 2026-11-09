@@ -41,6 +41,9 @@ class Layout:
     external_id_guarantee: str = "none"
     external_id_namespace: str | None = None
     has_metadata_preamble: bool = False
+    # A column naming the account by its last four digits. Every row must name the importing
+    # account's, so a file cannot import into another account (D-061).
+    account_number_column: str | None = None
 
     @property
     def external_ids_reliable(self) -> bool:
@@ -246,8 +249,9 @@ CAPITAL_ONE_CARD_V1 = Layout(
     pending_in_complete_coverage={"transaction": False, "posting": False},
 )
 
-# Capital One's checking and savings export. Account Number and Balance stay in the raw
-# cells, unread: a balance is a person's observation, never transaction evidence (D-057).
+# Capital One's checking and savings export, its format confirmed from the owner's exports (D-061).
+# Account Number must be the account's last four digits. Balance stays in the raw cells, unread: a
+# balance is a person's observation, never transaction evidence (D-057).
 CAPITAL_ONE_BANK_V1 = Layout(
     layout_id="capital_one_bank_v1",
     parser_version="1",
@@ -261,6 +265,7 @@ CAPITAL_ONE_BANK_V1 = Layout(
     ),
     parse_row=_parse_capital_one_bank_row,
     pending_in_complete_coverage={"transaction": False},
+    account_number_column="Account Number",
 )
 
 # U.S. Bank's CSV activity list. Memo stays in the raw cells, unread.
