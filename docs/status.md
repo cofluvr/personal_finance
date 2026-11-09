@@ -31,8 +31,9 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | **M4 overall** | **Complete and accepted** |
 | M5.1: real ledgers, their location and file permissions | Accepted (D-058) |
 | M5.2: encryption, an encrypted volume checked on every open | Accepted (D-002, D-058) |
-| M5.3: archiving originals, and storage by kind | Built, awaiting review (D-017, D-058) |
-| M5.4 and M5.5 | Planned in D-058, not started |
+| M5.3: archiving originals, and storage by kind | Accepted (D-017, D-058) |
+| M5.4: backup, verification and restore | Approved, not started (D-058) |
+| M5.5 | Planned in D-058, not started |
 | M6 to M8 | Not started |
 
 ## What exists

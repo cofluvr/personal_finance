@@ -1,11 +1,11 @@
-# Session Handoff: M5.3 Built, Awaiting Review
+# Session Handoff: M5.3 Accepted, M5.4 Approved
 
 For a fresh session. Written 2026-11-09. **M1 to M4 are complete and accepted.** The owner approved
 the M5 plan, D-058 in [decisions.md](decisions.md), with the lead engineer's recommendations,
-including points A to F. **M5.1, real ledgers and their location, and M5.2, encryption, are built
-and accepted,** M5.2 under point 3 as the owner amended it twice. **M5.3, archiving originals and
-storage by kind, is built and awaits the owner's review** ("How M5.3 was implemented" under D-058).
-M5.4 and M5.5 each need their own approval, and M5.4 needs the backup destination. Slices and acceptance criteria are in
+including points A to F. **M5.1, real ledgers and their location, M5.2, encryption, and M5.3, archiving
+originals and storage by kind, are built and accepted,** M5.2 under point 3 as the owner amended it
+twice. **M5.4, backup, verification and restore, is approved** and waits on the owner's answer about
+the backup destination. M5.5 needs its own approval. Slices and acceptance criteria are in
 [plan.md](plan.md).
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
@@ -33,8 +33,8 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457` and its docs the commit after it |
-| Latest gating run | Full suite, 2073 passed, exit code 0, on M5.3's docs commit |
+| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its docs `4582256`, and its acceptance the commit after it |
+| Latest gating run | Full suite, 2073 passed, exit code 0, on M5.3's docs commit `4582256` |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on a separate encrypted drive, chosen in M5.4 (D-058 point 7) |
@@ -197,7 +197,7 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Review of M5.3. M5.4 needs the backup drive, which the owner will have ready.
+- The backup destination for M5.4, and its other open choices.
 - A first `pf init --real` on the real image is the owner's to run, or needs their approval. The
   gate stays closed to real documents until M5.5's checklist is run.
 - Pushing. Not authorized from here.
@@ -206,9 +206,9 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved through M5.3, used for it | **Must be renewed** for M5.4 or M5.3 changes |
+| Local commits on `feature/m2-review` | Approved for M5.4 on 2026-11-09 | **Must be renewed** for M5.5 or changes to earlier slices |
 | M1 to M4 | Accepted as built | None |
-| M5 | Plan approved (D-058). M5.1 and M5.2 accepted as built. M5.3 built | Review of M5.3, approval of M5.4 and M5.5 |
+| M5 | Plan approved (D-058). M5.1 to M5.3 accepted as built. M5.4 approved | Review of M5.4, approval of M5.5 |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |

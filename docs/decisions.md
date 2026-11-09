@@ -77,7 +77,7 @@ and keep its index line.
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
-| D-058 | M5 plan: the real-data gate — Approved, M5.1 and M5.2 implemented and accepted, M5.3 implemented |
+| D-058 | M5 plan: the real-data gate — Approved, M5.1 to M5.3 implemented and accepted |
 
 ## Rules in brief
 
@@ -176,7 +176,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-058 M5 plan: the real-data gate — Approved, M5.1 and M5.2 implemented and accepted, M5.3 implemented
+## D-058 M5 plan: the real-data gate — Approved, M5.1 to M5.3 implemented and accepted
 
 Proposed on 2026-11-08, and approved by the owner the same day with the lead engineer's
 recommendations, including points A to F, with M5.1 approved to build. Each later slice needs its
@@ -375,8 +375,8 @@ amendment followed:
   image file itself lives. It is not under `/Volumes`, so the synced-folder rule does not see it.
 
 **How M5.3 was implemented,** where recommendations 5 and 6 left a choice. The owner approved the
-lead engineer's recommendations on 2026-11-09, and it was built the same day on synthetic data. It
-awaits review. No migration: `import_attempt.failure_code` takes any code.
+lead engineer's recommendations on 2026-11-09, built the same day on synthetic data, and accepted
+as built. No migration: `import_attempt.failure_code` takes any code.
 
 - **The bytes archived** are the ones read once, hashed and parsed, never a second read of the
   file. The copy is the last step before `COMMIT`, so a file that fails to parse leaves none.
