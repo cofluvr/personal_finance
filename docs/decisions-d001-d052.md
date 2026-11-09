@@ -1,6 +1,6 @@
-# Decision Log: Full Text of D-001 to D-057
+# Decision Log: Full Text of D-001 to D-058
 
-Moved out of [decisions.md](decisions.md) on 2026-11-08, unchanged, D-053 once D-054 was written. The index, the rules in brief and
+Moved out of [decisions.md](decisions.md) on 2026-11-08, unchanged, D-053 once D-054 was written, and D-058 once D-059 was. The index, the rules in brief and
 the newest decisions are in decisions.md. Status values are defined there. Read a decision here
 when a task touches it: search for its heading, such as `## D-049`.
 
@@ -2078,3 +2078,291 @@ on 2026-11-08, built the same day, and accepted as built. Figures are in
 
 **Accepted** by the owner on 2026-11-08: M4.4 as built, including the choices above. M4 is
 complete.
+
+## D-058 M5 plan: the real-data gate — Approved, implemented and accepted in M5
+
+Proposed on 2026-11-08, and approved by the owner the same day with the lead engineer's
+recommendations, including points A to F, with M5.1 approved to build. Each later slice needs its
+own approval, as in M3 and M4. Delivers plan.md's M5 (data location outside the repo, encryption,
+file permissions, archiving, backup and restore) against PRD §19, §20's storage reporting and §21's
+"backups restore records, rules, corrections, and goals" and "core operation succeeds without
+internet access". Settles D-002, builds D-017, and keeps D-019 and D-025. Changes none of D-042 to
+D-057. Acceptance tests, H1 to W4, are in [plan.md](plan.md).
+
+```sh
+pf init           --db DB [--real]
+pf storage        --db DB
+pf archive verify --db DB
+pf backup create  --db DB --to DIR
+pf backup verify  --from BACKUP
+pf backup restore --from BACKUP --to NEW_DB
+```
+
+**Slices:**
+
+| Slice | Scope |
+|---|---|
+| M5.1 | Real ledgers, their location and file permissions |
+| M5.2 | Encryption: an encrypted volume, checked on every open (D-002) |
+| M5.3 | Archiving originals, and storage by kind (D-017) |
+| M5.4 | Backup, verification and restore |
+| M5.5 | Network and dependency behaviour, and the readiness checklist |
+
+**Recommendations:**
+
+1. **A ledger is synthetic or real, fixed at `init`.** Migration 0017 adds `real_ledger`, holding
+   one row on a real ledger and none on a synthetic one. Triggers refuse the row in a ledger holding
+   an account or an import run, and any change or removal of it. Existing ledgers and every `init`
+   without `--real` are synthetic and behave exactly as now, so every existing test, token and
+   output is unchanged. Only a real ledger runs the gates below, on every open, read-only commands
+   included. A synthetic ledger is never promoted: real data starts in a new
+   real ledger.
+2. **A real ledger's location** is refused, naming the rule, when the database or its directory:
+   does not exist yet (the folder); is inside any git work tree, this repository included (a
+   `.git` in it or any parent); is inside a known synced folder (`~/Library/Mobile Documents`,
+   `~/Library/CloudStorage`, `~/Dropbox`); is reached through a symbolic link at any step; is not
+   owned by the user; or grants any group or other permission, so `0700` and `0600` pass. It checks
+   rather than repairs: a wrong mode is refused with the `chmod` to run, never changed silently
+   (fail fast). Files a real ledger imports are refused from inside a git work tree too.
+3. **Encryption by an encrypted APFS volume, not SQLCipher (D-002).** The owner creates an
+   encrypted disk image with Disk Utility or `hdiutil`, and keeps its password themselves, not in
+   the login Keychain (corrected by the owner on 2026-11-08).
+   The application holds no key, password or secret, so PRD §19's "secrets kept out of source code
+   and ordinary configuration" holds by having none, and no dependency is added (D-020). On every
+   open, a real ledger's directory must be on a volume that `diskutil info -plist` reports as
+   encrypted, read with `plistlib`. An unknown answer, a missing key or a failed probe refuses
+   (fail closed). Tests replace the probe, so the suite never mounts a volume. One walkthrough on
+   a real encrypted image is the owner's, or needs their approval, since mounting writes outside
+   the repository.
+
+   **Amended by the owner on 2026-11-08, approving M5.2.** FileVault does not satisfy point A. The
+   probe requires a mounted disk image that is not the startup volume, as well as encryption, and
+   a ledger on the FileVault-encrypted startup volume is refused. The real ledger lives in a `0700`
+   folder inside the mounted volume, never at its root. M5.5's checklist moves the owner's
+   statements into the image.
+
+   **Amended again by the owner on 2026-11-09, after M5.2's review.** An image encrypted as a file
+   (`hdiutil create -encryption`) is accepted too, though diskutil reports its APFS volume
+   unencrypted: `hdiutil info -plist` must show exactly one attached image backing the volume's
+   device at its mount point, and that image must report itself encrypted. hdiutil joins diskutil
+   as the second outside call, and point 9 allows both.
+4. **Caches stay on that volume.** A real ledger runs with `PRAGMA temp_store = MEMORY`, so SQLite
+   writes no sort or index spill to the system temp folder. Its rollback journal sits beside the
+   database, and a test shows it gets `0600`. The application writes no other cache, and no log
+   (D-037).
+5. **Originals are archived by copying on import (D-017),** for a real ledger only, into
+   `originals/` beside the database, named by the document's SHA-256, written to a temporary name,
+   synced, renamed into place and set `0400`. Identity still comes from content and ledger
+   records, never the location. The copy is made before the import commits, and a failed copy
+   fails the file (`archive_failed`) with nothing kept. A copy left by a rolled-back import is
+   harmless, since its name is its content, and `pf storage` counts it as not referenced.
+   `pf archive verify` rehashes every original and lists missing, altered and unreferenced ones.
+   Nothing is ever deleted (PRD §19, "until explicit deletion"), and no deletion command is built.
+6. **`pf storage`** reports software, database (with its journal), originals and backups apart
+   (PRD §20), in bytes and file counts. Backups are counted only for destinations recorded in the
+   ledger by `backup create`.
+7. **A backup is a new directory,** never an overwrite: the ledger copied with SQLite's online
+   backup API (`Connection.backup`), every referenced original, and a `manifest.json` holding each
+   file's SHA-256 and size, the schema version, the code version and a logical digest: every
+   table's rows in primary-key order, hashed. The destination passes recommendation 2's and 3's
+   checks and must not be on the ledger's own volume, so one lost disk is not both copies. A
+   backup holds the whole ledger, so records, rules fingerprints, decisions, corrections,
+   classifications, matches and observations are all in it, and goals will be once they exist.
+
+   **Amended by the owner on 2026-11-09, approving M5.4.** The owner keeps the backup's encrypted
+   disk image file in `~/CommonCents_LocalBackups`, on the same internal disk as the ledger's image.
+   "Not on the ledger's own volume" means a different mounted volume: the backup's folder sits
+   inside a mounted disk image other than the ledger's, passing points 2 and 3. Two images whose
+   files share a disk are not detected. Such a backup survives a damaged ledger or image, a bad
+   import or migration, and deletion, but not the loss of the disk or the Mac.
+8. **Restore never overwrites.** `pf backup restore` writes to a new path that passes every gate,
+   then checks the manifest's hashes, `PRAGMA integrity_check` and `foreign_key_check`, the schema
+   version against the code (as `open_ledger`), and the logical digest, and refuses on any
+   difference with nothing left behind. `pf backup verify` runs the same checks without
+   restoring. **The restore test** compares every report, list and token of the restored ledger
+   with the original's, byte for byte, on generated ledgers, and every original by hash.
+9. **No network, and it is shown.** A test reads every module under `src/` and refuses an import
+   of `socket`, `ssl`, `http`, `urllib`, `ftplib`, `smtplib` or `subprocess` outside the
+   `diskutil` and `hdiutil` calls in `db/volume_probes.py` (point 3, as amended). The existing socket guard stays. The no-network and dependency behaviour is
+   written down once, in status.md.
+10. **Readiness is a checklist, not code.** M5.5 writes `docs/real-data-readiness.md`: the steps
+    the owner takes before the first real document (create the encrypted image, `init --real` on
+    it, a backup to a second encrypted volume and a restore of it, `archive verify`), each with the
+    command and its expected output. M6 starts only once the owner has run it.
+
+**Not in M5,** each left visible rather than guessed: real layouts (M6), deleting originals,
+scheduled or rotated backups, backups to a network or cloud service, a key or password the
+application manages, encrypting a synthetic ledger, other operating systems, F2's timestamp marker
+(needed only before a UI or export shows legacy timestamps), and the security proposal (point E).
+
+**For the owner's decision, with the lead engineer's recommendation first:**
+
+- **A. An encrypted APFS volume.** No dependency, no key in the application, and the gate is
+  checkable. Its limit: while mounted, anything running as the user can read it, as with any file.
+  Alternatively SQLCipher, which encrypts the file itself but adds a native dependency, a key the
+  application must obtain, and still leaves originals and backups to encrypt separately.
+- **B. A real or synthetic ledger fixed at `init`,** so tests and walkthroughs stay as they are.
+  Alternatively every ledger passes the gates, with tests replacing the checks, which leaves
+  `build/` walkthroughs refused.
+- **C. Archiving inside import,** so no real document is kept without its original.
+  Alternatively a separate `pf archive add`, which can be forgotten.
+- **D. A directory backup with a manifest.** Plain files, checked by hash. Alternatively one
+  `zipfile` archive, which is one file to move but must be unpacked to check.
+- **E. The security proposal stays a separate owner action.** M5 does not apply it (D-025, and
+  this session's "no security changes"). The readiness checklist asks the owner to decide on it
+  and, if applied, to run its own verification table. The primary control is unchanged: real data
+  stays outside this workspace (D-019).
+- **F. A tripwire, recommended against.** A real ledger could refuse to open when `CLAUDECODE` is
+  set in the environment, which Claude Code sets in its shells. It stops an accident only, is
+  trivially bypassed, and may be read as a control it is not. Recommended against, unless the
+  owner wants it as a reminder.
+
+**Inputs needed from the owner before M5.2 and M5.4 are built** (PRD §22): the macOS version, the
+data destination and the backup destination, both on encrypted volumes the owner creates.
+
+**How M5.1 was implemented,** where recommendations 1 and 2 left a choice. Approved to build by the
+owner on 2026-11-08, built the same day, and accepted as built:
+
+- The mark is the presence of `real_ledger`'s one row, with no kind column to keep consistent.
+  `init --real` checks the location, creates the ledger as before, then writes the row. A failure
+  between the two leaves an empty synthetic ledger, which a repeat `init --real` refuses to
+  overwrite, as `init` always has.
+- The link rule compares the absolute path with the resolved one, so a link anywhere on the way,
+  the database itself included, refuses. macOS's `/tmp` and `/var` are links, so no real ledger
+  lives under them.
+- `open_ledger` and `migrate`, the only two ways a command opens a ledger, check it before the
+  schema version, so an unsafe ledger is refused before anything else is said about it.
+- Privacy is no group or other permission bit, not an exact mode, and the refusal names the
+  `chmod` that fixes it. Ownership compares with the effective user.
+- An import checks every file before importing any, so a refusal imports nothing. The search for
+  `.git` follows links.
+- **Not detected:** iCloud's Desktop and Documents sync makes `~/Desktop` and `~/Documents` synced
+  with no folder from the list in the path, and the path alone cannot tell. M5.5's checklist asks
+  the owner to rule it out.
+- pytest's temporary folder can sit inside this repository, a git work tree, so the tests treat a
+  work tree found above their own folder as absent and still find one made inside it.
+
+**How M5.2 was implemented,** under point 3 as amended. Approved to build by the owner on
+2026-11-08, built the same day on synthetic data, and accepted as built on 2026-11-09. The second
+amendment followed:
+
+- **The keys** come from real `diskutil info -plist` output on macOS Golden Gate 27.2: the startup
+  Data volume, run on this repository's volume, and the owner's empty image, with their approval.
+  A real ledger needs `MountPoint` equal to its folder's mount point, `BusProtocol` `Disk Image`
+  (the startup volume reports `Apple Fabric`), `FilesystemType` `apfs`, and `Encryption` and
+  `GlobalPermissionsEnabled` each the boolean `true`. A non-zero exit, an `Error` key, output that
+  is not a plist dictionary, or a missing key or other type refuses. Messages name the mount point,
+  never a value diskutil returned.
+- diskutil refuses a folder ("Could not find disk"), so the probe walks up to the nearest mount
+  point and asks about that. A ledger whose folder is the mount point is refused before asking.
+  Under the startup Data volume the walk reaches `/` through its firmlinks, which is refused as
+  not a disk image either way.
+- **Encryption of the image file alone is not reported by diskutil.** The owner's image, made with
+  `hdiutil create -encryption AES-256`, holds an APFS volume reporting `Encryption` false, while
+  `hdiutil isencrypted` says YES. Under the second amendment, a volume diskutil does not report
+  encrypted is looked up in `hdiutil info -plist` (keys from a real run, with the owner's
+  approval): `images`, each with `system-entities` holding `dev-entry` and `mount-point`, and
+  `image-encrypted`. The entity must be `/dev/` plus diskutil's `DeviceIdentifier`, at the same
+  mount point, in exactly one image, and `image-encrypted` the boolean `true`. hdiutil is asked
+  only when diskutil does not report encryption.
+- **Ownership on a mounted image must be checked on the real image.** A new image ignored
+  ownership (`GlobalPermissionsEnabled` false), which makes M5.1's owner and mode checks
+  meaningless, so the probe refuses it and names `sudo diskutil enableOwnership`. The rule was
+  added with the owner after the real image showed it. On 2026-11-08 the owner enabled ownership,
+  and the ledger folder was shown `drwx------`, owned by the owner.
+- `db/volume_probes.py` holds the application's only subprocess calls: `/usr/sbin/diskutil` and
+  `/usr/bin/hdiutil` by their full paths, through one runner with a 30-second timeout, and failing
+  to run either refuses. Tests replace both with recordings in
+  `tests/fixtures/synthetic/volume_probes`, so the suite never runs them or mounts a volume.
+- `temp_store = MEMORY` is set by the same check that every open of a real ledger runs, before
+  `migrate` migrates. `init --real` migrates its empty ledger before the mark, so it holds nothing
+  to spill. SQLite unlinks temporary files as it opens them, so the test reads the temp folder's
+  modification time in a child process, since SQLite reads `SQLITE_TMPDIR` once per process. The
+  same sort on a synthetic ledger is the control that shows it spills.
+- **Point 4's journal needs no code.** SQLite gives a journal its database's mode whatever the
+  umask, and a test shows `0600` beside the database with the umask cleared.
+- **Not detected:** whether the image's password is strong or where it is kept, and where the
+  image file itself lives. It is not under `/Volumes`, so the synced-folder rule does not see it.
+
+**How M5.3 was implemented,** where recommendations 5 and 6 left a choice. The owner approved the
+lead engineer's recommendations on 2026-11-09, built the same day on synthetic data, and accepted
+as built. No migration: `import_attempt.failure_code` takes any code.
+
+- **The bytes archived** are the ones read once, hashed and parsed, never a second read of the
+  file. The copy is the last step before `COMMIT`, so a file that fails to parse leaves none.
+- **A file already holding the name** is rehashed. Matching bytes are kept as the original,
+  untouched. Anything else, a link or a folder included, fails the import as `archive_failed` and
+  is never overwritten, so `archive verify` shows it altered.
+- **The folder** is `originals/` beside the database, flat, with no extension on a name. `import`
+  creates it `0700` before importing, and `import`, `archive verify` and `storage` refuse it when it
+  is a link, not a folder, not owned by the user or open to group or others. Ordinary opens do not
+  check it. A copy is written to `.<hash>.<random>.partial` with `O_EXCL`, synced, set `0400`,
+  renamed, and the folder synced. A failed copy removes its partial file.
+- **A repeat import copies nothing,** even when its original is missing: `archive verify` reports
+  that.
+- **`archive verify`** lists missing and altered originals with their document, and every other
+  entry as not referenced. It exits 1 unless the archive is intact, and refuses a synthetic ledger.
+- **`storage`** counts every file under the installed `personal_finance` package as software, not
+  the interpreter or `.venv`. The database counts with any `-journal`, `-wal` and `-shm` beside it.
+  Originals are split into referenced and not referenced. Sizes are exact bytes, read without
+  following links. Backups read "none recorded" until M5.4 adds the table recording them.
+- **Not handled:** two real ledgers in one folder share `originals/`, and each lists the other's
+  originals as not referenced.
+
+**How M5.4 was implemented,** under points 7 and 8, point 7 as amended. The owner approved M5.4,
+with the lead engineer's recommendations for the choices points 7 and 8 left open, on 2026-11-09,
+and it was built the same day on synthetic data, and accepted as built. Migration 0018 adds
+`backup_record`.
+
+- **`--to` names the new backup folder,** which must not exist. It is created `0700`, holding
+  `ledger.db`, `originals/<sha256>` and `manifest.json`, each `0400`. For a real ledger, the folder
+  holding it passes points 2 and 3 as a ledger's folder would, and its mount point must differ from
+  the ledger's. A missing or altered original refuses the backup, naming `archive verify`. Only
+  referenced originals are copied.
+- **The copy is one step of SQLite's online backup API,** so it is one committed state, read under
+  one lock while writers wait. The manifest describes the copy, not the live ledger, and the
+  originals copied are the ones the copy references, rehashed as they are read.
+- **The logical digest** covers `user_version`, every `sqlite_master` row, and every table's column
+  names and rows, ordered by primary key, or by every column for `review_issue_subject`, which has
+  none. Values carry their storage class, so `1`, `1.0`, `'1'` and `x'31'` differ.
+- **The new backup is checked as `backup verify` would check it** before its `backup_record` row is
+  written. Any failure, a busy ledger at that write included, removes the folder. A backup holds
+  the rows of earlier backups, not its own. `storage` reports the recorded sizes and never reads a
+  backup's volume.
+- **`backup verify` refuses,** in this order: a manifest not of this shape, a missing or unlisted
+  file, a file that is not regular or does not match its size and hash, SQLite's integrity check,
+  its foreign key check, a schema version that differs from the manifest or is newer than the code,
+  the digest, the real-ledger mark, and originals that differ from the documents the ledger
+  references. It opens the copy read-only and immutable, writes nothing, and exits 1 when the
+  backup is not intact.
+- **`backup restore`** checks the backup, gates a real backup's new path as `init --real` does, and
+  refuses a folder that already has `originals/`. It writes the originals and a `.partial` ledger,
+  checks those written copies again, then links the ledger into place, so an existing path is never
+  replaced. Any failure removes everything it wrote. An older schema restores unchanged and names
+  `pf migrate`.
+- **A synthetic ledger** is backed up and restored with no gates and no originals.
+- **The code version** is `personal_finance.__version__`, now the one place it is written, read by
+  `pyproject.toml`. It is recorded, not checked.
+- **Not detected:** two disk images whose files share a disk (point 7 as amended), and a manifest
+  rewritten together with the files it describes. The manifest is not signed.
+
+**How M5.5 was implemented,** under points 9 and 10. The owner approved M5.5 on 2026-11-09 to be
+built unattended, choosing the lead engineer's most fail-closed recommendation wherever a choice
+was left open, and it was built the same day on synthetic data, and accepted as built. The owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09 on `/Volumes/CommonCents` and `/Volumes/CommonCentsBackup`, and reported every step verified.
+
+- **W1 parses every module, never imports it,** and refuses more than point 9's list: `_socket`,
+  `_ssl`, `asyncio`, `socketserver`, `xmlrpc`, `poplib`, `imaplib`, `nntplib`, `telnetlib`,
+  `webbrowser`, `multiprocessing`, `concurrent`, `pty` and `ctypes`, every `os` call that runs a
+  program, and every dynamic import (`__import__`, `importlib.import_module`), whatever it names.
+  Module aliases are resolved. The allowance is `subprocess` in `db/volume_probes.py` alone, and
+  the test also requires that module to make one `subprocess.run` call and name only `diskutil` and
+  `hdiutil`.
+- **The checklist ends where M6 begins.** No real layout exists, so the owner's ledger is created,
+  backed up and restored empty, and the statements are moved into the image for M6 to import.
+  Deleting the copies outside the image is recommended, and left to the owner.
+- **The walkthrough ran in-process,** with the probes answered by the suite's recordings and the
+  work tree above `build/` ignored, as the tests do. Mounting an image writes outside the
+  repository, so none was mounted, and the macOS steps (`hdiutil create` and `attach`, `diskutil
+  enableOwnership`) were not run. Each is followed in the checklist by a `pf` step that checks it.
+- **Point F's tripwire** is not built, as recommended. The security proposal stays unapplied
+  (point E): the checklist asks the owner.
