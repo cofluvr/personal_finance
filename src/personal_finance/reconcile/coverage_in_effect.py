@@ -86,3 +86,8 @@ def complete_coverage_by_basis(conn, account_id) -> dict[str, list[tuple[date, d
         if start <= last:
             spans_by_basis[basis].append((date.fromisoformat(start), date.fromisoformat(last)))
     return dict(spans_by_basis)
+
+
+def spans_cover_every_day(days, spans) -> bool:
+    """Whether every one of the days lies inside one of the spans, first and last day inclusive."""
+    return all(any(first <= day <= last for first, last in spans) for day in days)

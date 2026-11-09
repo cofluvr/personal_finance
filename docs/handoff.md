@@ -1,10 +1,10 @@
-# Session Handoff: M4.1 Accepted
+# Session Handoff: M4.2 Built, Awaiting Acceptance
 
 For a fresh session. Written 2026-11-08. **M1, M2 and M3 are complete and accepted.** The owner
 approved the M4 plan, D-057 in [decisions.md](decisions.md), with the lead engineer's
-recommendations, including points A to E. **M4.1, the 32,766-variable limit, is built and was
-accepted as built on 2026-11-08.** M4.2 to M4.4 each need their own approval. Slices and acceptance
-criteria are in [plan.md](plan.md).
+recommendations, including points A to E. M4.1, the 32,766-variable limit, was accepted as built.
+**M4.2, balance observations and statement reconciliation, is built and awaits acceptance.** M4.3
+and M4.4 each need their own approval. Slices and acceptance criteria are in [plan.md](plan.md).
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -31,8 +31,8 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`: it records M4.1, built and accepted. Earlier markers are in the archive |
-| Latest gating run | Full suite, 1749 passed, exit code 0, gating the commit recording M4.1 |
+| Latest commit | Run `git log -1`: it records M4.2, built. Earlier markers are in the archive |
+| Latest gating run | Full suite, 1836 passed, exit code 0, gating the commit recording M4.2 |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -52,6 +52,10 @@ Then only what the task needs:
 
 - For building M4.2 to M4.4: D-057 in [decisions.md](decisions.md), PRD-backend §5, §17 and §20,
   and D-013 and D-034 in [decisions-d001-d052.md](decisions-d001-d052.md).
+- For changes to M4.2: `reports/balances.py`, `reconcile/balance_observations.py`, the `balance`
+  commands in `cli.py`, migration 0016, `tests/scenarios/test_balance_observations.py`,
+  `tests/scenarios/test_balance_observation_migration.py`, and "How M4.2 was implemented" under
+  D-057.
 - For changes to M4.1: `db/id_lists.py`, its four callers (`transaction_facts`, `_separated`, and
   both queries in `reports/import_summary.py`), and `tests/scenarios/test_id_lists.py`.
 - For changes to M3.4 (D-056): `reports/totals.py`, `run_totals`, `print_income_and_spending`
@@ -77,7 +81,11 @@ Pitfalls that recurred across M1 to M3.4:
 - **Deliberate breaks,** run as in "Testing for review". Check which test caught each break, not
   only that one did. Removing a loop's only line is a syntax error, not a catch: use `pass`. A
   replacement that renames a function is a bad break. A break that matches nothing must stop the
-  script, not run on unchanged code.
+  script, not run on unchanged code. Give every break run a fresh bytecode cache
+  (`PYTHONPYCACHEPREFIX`): in M4.2 a break of the same size, written in the same second as the one
+  before, ran that one's stale `.pyc` and credited a catch to the wrong break.
+- **Closed review items.** D-045 closes an item by removing it. Only D-052's same-document
+  pending and posted items stay as `resolved` rows, so a test about resolved items needs that shape.
 - **Tests that pass for the wrong reason.** Give each schema refusal a control insert that succeeds.
   Pass test helper arguments by keyword. Count the tests actually run: a nested function or a test
   class imported by name changes the count.
@@ -162,16 +170,17 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Approval of M4.2, balance observations and statement reconciliation.
+- Acceptance of M4.2 as built, including the choices under "How M4.2 was implemented" in D-057.
+- Approval of M4.3, monthly reports with disclosures.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved through M4.1 | **Must be renewed** for anything further |
+| Local commits on `feature/m2-review` | Approved through M4.2 | **Must be renewed** for anything further |
 | M1, M2 and M3 | Accepted as built | None |
-| M4 | Plan approved (D-057). M4.1 accepted as built | Approval of each later slice |
+| M4 | Plan approved (D-057). M4.1 accepted as built. M4.2 built, awaiting acceptance | Acceptance of M4.2, and approval of each later slice |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |

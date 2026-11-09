@@ -7,7 +7,7 @@ a version 14 ledger: 0015 creates tables only. Migration stops at 15, so that on
 import sqlite3
 
 import pytest
-from test_decisions import ALL_TABLES, ONE_SIDED_TABLES
+from test_decisions import ALL_TABLES, BALANCE_TABLES, ONE_SIDED_TABLES
 from test_one_sided_transfers import OneSidedLedger, stated
 from test_supersession import holding
 from test_transfer_migration import markers, migrations_up_to
@@ -15,12 +15,13 @@ from test_transfers import matched
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 
-VERSION_14_TABLES = tuple(table for table in ALL_TABLES if table not in ONE_SIDED_TABLES)
+VERSION_14_TABLES = tuple(table for table in ALL_TABLES
+                          if table not in (*ONE_SIDED_TABLES, *BALANCE_TABLES))
 
 
 def set_back_to_version_14(path) -> None:
     conn = connect(path)
-    for table in ONE_SIDED_TABLES:
+    for table in (*BALANCE_TABLES, *ONE_SIDED_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
     conn.execute("PRAGMA user_version = 14")

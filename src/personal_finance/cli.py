@@ -27,6 +27,7 @@ from personal_finance.ingest.layouts import LAYOUTS
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.money import format_cents
 from personal_finance.reconcile.apply import STATE_ACTIVE, reconcile_account, stale_accounts
+from personal_finance.reconcile.balance_observations import record_observation, undo_observation
 from personal_finance.reconcile.cross_document import (
     PRIMARY_CRITERIA,
     RULE_CANDIDATES,
@@ -77,6 +78,12 @@ from personal_finance.reconcile.transfers import (
     state_one_sided,
     undo_one_sided,
     undo_transfer,
+)
+from personal_finance.reports.balances import (
+    check_balances,
+    list_observations,
+    load_observation,
+    observation_revision,
 )
 from personal_finance.reports.classification_evidence import (
     classification_undo_outlook,
@@ -802,6 +809,41 @@ def build_parser() -> argparse.ArgumentParser:
 
     totals = command("totals", handler=run_totals, help="show account movement")
     totals.add_argument("--account", help="account name or ID")
+
+    balance = commands.add_parser(
+        "balance", help="record posted balances and check them against transactions"
+    )
+    balance_commands = balance.add_subparsers(dest="balance_command", required=True)
+    balance_record = command(
+        "record", balance_commands, handler=run_balance_record,
+        help="record an account's posted balance at the end of one day",
+    )
+    balance_record.add_argument("--account", required=True, help="account name or ID")
+    balance_record.add_argument("--date", required=True, help="the day, YYYY-MM-DD")
+    stated_amount = balance_record.add_mutually_exclusive_group(required=True)
+    stated_amount.add_argument(
+        "--balance", help="the balance of any account but a credit card or loan, such as "
+                          "--balance=-12.50 when overdrawn")
+    stated_amount.add_argument(
+        "--owed", help="what a credit card or loan owes, such as --owed=-5.00 for a credit balance")
+    balance_list = command(
+        "list", balance_commands, handler=run_balance_list,
+        help="list balance observations, with the token to undo each active one",
+    )
+    balance_list.add_argument("--account", help="account name or ID")
+    balance_check = command(
+        "check", balance_commands, handler=run_balance_check,
+        help="compare consecutive balance observations with the transactions between them",
+    )
+    balance_check.add_argument("--account", required=True, help="account name or ID")
+    balance_undo = command(
+        "undo", balance_commands, handler=run_balance_undo,
+        help="stop a balance observation applying, keeping it on record",
+    )
+    balance_undo.add_argument("--account", required=True, help="account name or ID")
+    balance_undo.add_argument("--observation", required=True, dest="observation_id",
+                              help="an observation ID from balance list")
+    balance_undo.add_argument("--token", required=True, help="its token from balance list")
     return parser
 
 
@@ -2650,6 +2692,131 @@ def run_totals(args) -> int:
                  *describe_transfers(transfers), *describe_one_sided(one_sided),
                  *describe_income_and_spending(groups)):
         print(f"- {line}")
+    return 0
+
+
+BALANCE_NOTICE = (
+    "An observation is evidence about balances only. It is not transaction evidence, so it changes "
+    "no total, review item or coverage. Run balance check to compare it with the transactions."
+)
+
+BALANCE_UNDO_NOTICE = (
+    "The intervals either side of it are one interval again. Run balance check to see them."
+)
+
+
+def shown_balance(observation, cents) -> str:
+    """A balance as the account states it: what a card or loan owes, else its balance."""
+    return f"owed {format_cents(-cents)}" if observation.states_owed else format_cents(cents)
+
+
+def run_balance_record(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    owed = args.owed is not None
+    observation_id = record_observation(
+        conn, account_id, args.date, args.owed if owed else args.balance, owed=owed)
+
+    observation = load_observation(conn, observation_id)
+    print(
+        f"Balance observation {observation_id} recorded: {shown(observation.account_name)} on "
+        f"{observation.observed_on}, {shown_balance(observation, observation.balance_cents)}."
+    )
+    print(f"  {BALANCE_NOTICE}")
+    return 0
+
+
+def run_balance_list(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    observations = list_observations(conn, account_id)
+    for observation in observations:
+        print(
+            f"Observation {observation.observation_id}: {shown(observation.account_name)} on "
+            f"{observation.observed_on}, {shown_balance(observation, observation.balance_cents)}, "
+            f"{observation.state}, made {observation.created_at}"
+        )
+        if observation.state == STATE_ACTIVE:
+            print(f"  Token: {observation_revision(conn, observation)}")
+        else:
+            print(f"  Undone: {observation.undone_at}. It stays on record and no longer applies.")
+    active = sum(observation.state == STATE_ACTIVE for observation in observations)
+    print(f"Balance observations: {len(observations)}, of which active: {active}")
+    return 0
+
+
+def run_balance_check(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account)
+    check = check_balances(conn, account_id)
+
+    print(f"Active balance observations: {len(check.observations)}")
+    if len(check.observations) < 2:
+        print("An interval needs two observations, so there is nothing to compare yet.")
+    for interval in check.intervals:
+        opening, closing = interval.opening, interval.closing
+        difference = interval.difference_cents
+        if opening.states_owed:
+            difference = -difference
+        outcome = "agrees" if difference == 0 else f"differs by {format_cents(difference)}"
+        print(f"After {opening.observed_on} through {closing.observed_on}: {outcome}")
+        print(
+            f"  Opening {shown_balance(opening, opening.balance_cents)}, account movement "
+            f"{format_cents(interval.activity.cents)} over {interval.activity.transactions} "
+            f"transactions, expected {shown_balance(closing, interval.expected_closing_cents)}, "
+            f"observed {shown_balance(closing, closing.balance_cents)}"
+        )
+        if interval.covered:
+            print("  Covered: complete posting-basis coverage spans every day of it.")
+        else:
+            print(
+                "  Not covered: complete posting-basis coverage does not span every day of it, so "
+                "transactions may be missing."
+            )
+        for label, counted in (
+            ("Pending, left out", interval.pending_left_out),
+            ("Of unknown status, counted", interval.unknown_status),
+            ("With no posting date, counted by transaction date", interval.without_posting_date),
+        ):
+            if counted.transactions:
+                print(f"  {label}: {counted.transactions} transactions, "
+                      f"{format_cents(counted.cents)}")
+        if interval.open_review_items:
+            print(
+                f"  Open review items: {len(interval.open_review_items)}, holding "
+                f"{interval.transactions_in_open_review_items} transactions here"
+            )
+
+    print("Disclosures:")
+    print(
+        "- Agreement is evidence, not coverage. It declares no coverage, settles no review item "
+        "and changes no total. A difference is shown, never absorbed into an adjustment."
+    )
+    print(
+        "- Activity uses effective amounts, and each transaction's effective posting date, else "
+        "its transaction date. Types, transfers and classifications do not enter it."
+    )
+    if check.unresolved_records:
+        print(
+            f"- {check.unresolved_records} unresolved records of this account are no transaction, "
+            "so no interval counts them, and they may explain a difference."
+        )
+    if stale_accounts(conn, DEFAULT_RULES, account_id):
+        print(
+            "- This account has not been reconciled under the current matching rules, so "
+            "overlapping files may be counted twice. Run reconcile."
+        )
+    return 0
+
+
+def run_balance_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    undo_observation(conn, account_id, args.observation_id, args.token)
+
+    print(f"Balance observation {args.observation_id} undone. It stays on record and no longer "
+          "applies.")
+    print(f"  {BALANCE_UNDO_NOTICE}")
     return 0
 
 

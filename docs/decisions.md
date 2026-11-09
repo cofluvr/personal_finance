@@ -76,7 +76,7 @@ and keep its index line.
 | D-054 | Transfers across accounts — Approved, implemented and accepted in M3.2 |
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
-| D-057 | M4 plan: balances and reports — Approved, M4.1 implemented and accepted |
+| D-057 | M4 plan: balances and reports — Approved, M4.1 implemented and accepted, M4.2 implemented |
 
 ## Rules in brief
 
@@ -160,6 +160,8 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Unconfirmed transfer kinds | Neither income, spending nor transfers, disclosed as a bound on both | D-011, D-056 |
 | Reporting periods | In M4, with D-013. Totals cover the ledger or one account | D-056 |
 | ID lists | One JSON array parameter read with `json_each`, never one SQL parameter per ID | D-057 |
+| Balance observations | A posted balance at the end of one day, stated by a person. A card or loan states what it owes, stored negated. One active per account and day. Never transaction evidence | D-057 |
+| Statement reconciliation | Consecutive observations, activity after the earlier day through the later one, by effective posting date else transaction date. Agreement is evidence, not coverage, and a difference is never absorbed | D-057 |
 
 ## Not yet decided
 
@@ -168,7 +170,7 @@ and loan projection assumptions (Phase 1B), pairing protocol and snapshot
 compatibility (Phase 1C), backup and recovery design (M5), resource benchmarks
 (M4).
 
-## D-057 M4 plan: balances and reports — Approved, M4.1 implemented and accepted
+## D-057 M4 plan: balances and reports — Approved, M4.1 implemented and accepted, M4.2 implemented
 
 Proposed on 2026-11-08, and approved by the owner the same day with the lead engineer's
 recommendations, including points A to E, with M4.1 approved to build. Each later slice needs its
@@ -273,3 +275,24 @@ on 2026-11-08:
   matches directly is quadratic in an account's sides (about 37 seconds for 16,384 matches). Each
   person's match pays one such scan. That is recorded in [status.md](status.md), and M4.4's shape
   pays it once, at build time.
+
+**How M4.2 was implemented,** where recommendations 2 to 5 left a choice. Built on 2026-11-08 and
+awaiting acceptance:
+
+- Every transaction, pending ones too, is placed on its effective posting date, else its effective
+  transaction date (D-049). That date decides the interval for activity and for every disclosure,
+  including open review items. An interval runs after the earlier observation's day through the
+  later one's, and coverage is checked over those days.
+- `unknown` status and no posting date are disclosed within the activity, so one transaction can
+  be in both lines.
+- `balance list` shows each active observation's token, since D-057 names no `balance show`. The
+  token `b1` covers the observation's day and balance and those of the active observations either
+  side of it, whose intervals undoing it joins. It names no generated ID and reads no transaction,
+  so undo needs no current account.
+- A trigger also enforces one active observation per account and day. An amount owed whose
+  negation leaves the INTEGER range is refused as an invalid amount.
+- For a card or loan, `differs by` is in owed terms: observed owed less expected owed.
+- Beyond recommendation 4's list, `balance check` also discloses the account's unresolved records,
+  which are no transaction, so no interval counts them.
+- The "every day inside a span" test moved to `spans_cover_every_day` in
+  `reconcile/coverage_in_effect.py`, shared with D-055's coverage window, its second use.

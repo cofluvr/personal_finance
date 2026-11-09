@@ -9,20 +9,20 @@ import sqlite3
 
 import pytest
 from test_classifications import against_its_direction
-from test_decisions import ALL_TABLES, ONE_SIDED_TABLES, TRANSFER_TABLES
+from test_decisions import ALL_TABLES, BALANCE_TABLES, ONE_SIDED_TABLES, TRANSFER_TABLES
 from test_supersession import holding
 from test_transfers import IN_ROW, OUT_ROW, TransferLedger, matched
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 
 VERSION_13_TABLES = tuple(table for table in ALL_TABLES
-                          if table not in (*TRANSFER_TABLES, *ONE_SIDED_TABLES))
+                          if table not in (*TRANSFER_TABLES, *ONE_SIDED_TABLES, *BALANCE_TABLES))
 VERSION_13_KEPT = tuple(table for table in VERSION_13_TABLES if table != "account_reconciliation")
 
 
 def set_back_to_version_13(path) -> None:
     conn = connect(path)
-    for table in (*ONE_SIDED_TABLES, *TRANSFER_TABLES):
+    for table in (*BALANCE_TABLES, *ONE_SIDED_TABLES, *TRANSFER_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
     conn.execute("PRAGMA user_version = 13")

@@ -152,12 +152,13 @@ Approved with D-056 on 2026-11-08.
 ## M4 plan
 
 Approved on 2026-11-08 as D-057, with the lead engineer's recommendations, including points A to
-E. M4.1 was approved, built and accepted as built. Each later slice needs its own approval.
+E. M4.1 was approved, built and accepted as built. M4.2 was approved and built, and awaits
+acceptance. Each later slice needs its own approval.
 
 | Slice | Scope | Status |
 |---|---|---|
 | M4.1 | The 32,766-variable limit, with no change in behaviour | Accepted |
-| M4.2 | Balance observations and statement reconciliation | Proposed |
+| M4.2 | Balance observations and statement reconciliation | Built, awaiting acceptance |
 | M4.3 | Monthly reports with disclosures (D-013) | Proposed |
 | M4.4 | The 100,000-transaction benchmark and provisional resource targets | Proposed |
 

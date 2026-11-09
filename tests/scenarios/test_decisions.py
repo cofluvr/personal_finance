@@ -55,8 +55,9 @@ ALL_TABLES = (*SOURCE_TABLES, "ledger_transaction", "transaction_source", "revie
               "transaction_classification", "transfer_match", "transfer_match_side",
               "transfer_match_record", "transfer_match_event", "transfer_match_effect",
               "one_sided_transfer", "one_sided_transfer_record", "one_sided_transfer_event",
-              "one_sided_transfer_effect")
-# Created by 0010, 0011, 0013, 0014 and 0015, children first (D-050, D-051, D-053, D-054, D-055).
+              "one_sided_transfer_effect", "balance_observation", "balance_observation_event")
+# Created by 0010, 0011, 0013, 0014, 0015 and 0016, children first (D-050, D-051, D-053, D-054,
+# D-055, D-057).
 RESOLUTION_TABLES = ("record_resolution_event", "record_resolution")
 DECLARATION_TABLES = ("coverage_declaration_event", "coverage_declaration")
 CLASSIFICATION_TABLES = ("transaction_classification", "type_classification_event",
@@ -65,6 +66,7 @@ TRANSFER_TABLES = ("transfer_match_effect", "transfer_match_event", "transfer_ma
                    "transfer_match_side", "transfer_match")
 ONE_SIDED_TABLES = ("one_sided_transfer_effect", "one_sided_transfer_event",
                     "one_sided_transfer_record", "one_sided_transfer")
+BALANCE_TABLES = ("balance_observation_event", "balance_observation")
 
 
 def declared(start, end):
@@ -95,7 +97,7 @@ class Ledger:
     def run(self, *command):
         self.capsys.readouterr()
         words = list(command)
-        position = 2 if words[0] in ("account", "review") else 1
+        position = 2 if words[0] in ("account", "review", "balance") else 1
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
                          ["review", "correction"], ["review", "resolution"],
                          ["review", "coverage"], ["review", "classification"],
