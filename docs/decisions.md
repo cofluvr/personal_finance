@@ -265,6 +265,13 @@ pf backup restore --from BACKUP --to NEW_DB
    checks and must not be on the ledger's own volume, so one lost disk is not both copies. A
    backup holds the whole ledger, so records, rules fingerprints, decisions, corrections,
    classifications, matches and observations are all in it, and goals will be once they exist.
+
+   **Amended by the owner on 2026-11-09, approving M5.4.** The owner keeps the backup's encrypted
+   disk image file in `~/CommonCents_LocalBackups`, on the same internal disk as the ledger's image.
+   "Not on the ledger's own volume" means a different mounted volume: the backup's folder sits
+   inside a mounted disk image other than the ledger's, passing points 2 and 3. Two images whose
+   files share a disk are not detected. Such a backup survives a damaged ledger or image, a bad
+   import or migration, and deletion, but not the loss of the disk or the Mac.
 8. **Restore never overwrites.** `pf backup restore` writes to a new path that passes every gate,
    then checks the manifest's hashes, `PRAGMA integrity_check` and `foreign_key_check`, the schema
    version against the code (as `open_ledger`), and the logical digest, and refuses on any
