@@ -1,6 +1,9 @@
-# Session Handoff: M7 Complete
+# Session Handoff: M8 Planned
 
-For a fresh session. Written 2026-11-09. **M1 to M7 are complete.** M7 is D-060 in
+For a fresh session. Written 2026-11-09. **M1 to M7 are complete. D-062, the M8 plan, awaits the
+owner's review,** in [decisions.md](decisions.md), its criteria UA1 to UD4 in [plan.md](plan.md).
+Nothing of M8 is built. Its point 1 is a security change (W1 allowing `http.server` in
+`ui/server.py`), and point 3 recommends a read-only UI. M7 is D-060 in
 [decisions-d001-d052.md](decisions-d001-d052.md), as amended, recorded complete by the owner: U.S. Bank's
 document turned out to be a credit card's Recent Activity List printed to PDF, which states no
 period or balance, so its coverage is declared, as for a CSV. D-061 confirmed the Capital One bank
@@ -16,8 +19,8 @@ format and checks each row's account number. Every fixture is invented.
 
 **Not built:** M7.4, since the printout holds one card and each entry names it. M7.5, since the
 owner holds no Capital One card PDF. No U.S. Bank card CSV layout, since the owner holds no such
-export: `us_bank_v1` is not that card's format. **Next:** M8, the local review UI, needs its own
-plan as D-062, and point F per layout, under "Awaiting the owner".
+export: `us_bank_v1` is not that card's format. **Next:** the owner's decisions A to E on D-062,
+then M8.1 if approved, and point F per layout, under "Awaiting the owner".
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -45,7 +48,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
 | Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance `c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e`, its docs `7a0d446`, M5.5 `4548b12`, its docs `df53e65`, and M5's acceptance the commit after it |
-| Latest gating run | Full suite, exit code 0, on M7's closeout: see its commit message. About 7 minutes |
+| Latest gating run | Full suite, exit code 0, on the D-062 plan commit: 2329 passed. About 7 minutes |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -80,6 +83,11 @@ Then only what the task needs:
   in `cli.py`, `tests/scenarios/test_backups.py`, and "How M5.4 was implemented" under D-058.
 - For changes to M5.5: `tests/unit/test_no_network_imports.py`, [real-data-readiness.md](real-data-readiness.md),
   "Network and dependencies" in [status.md](status.md), and "How M5.5 was implemented" under D-058.
+- For M8: D-062 and its criteria in [plan.md](plan.md), the "Qualifications on M2.1" below, F2,
+  `run_totals`, `run_report_monthly`, `run_documents`, `run_transactions`, `run_review_list`,
+  `run_review_show` and `main` in `cli.py`, `open_ledger`, `tests/unit/test_no_network_imports.py`,
+  `tests/scenarios/test_privacy.py` and `tests/conftest.py`'s socket guard. D-037, D-040, D-043 and
+  D-058 points 3 and 9 in the full text when a point names them.
 - For M7: D-060, its acceptance criteria in [plan.md](plan.md), [layouts.md](layouts.md),
   `ingest/` (`pdf_reader.py`, `pdf_documents.py`, `layouts.py`, `csv_reader.py`, `pipeline.py`), `tests/unit/test_pdf_reader.py`, `tests/synthetic_pdf.py`,
   `tests/scenarios/test_us_bank_activity_pdf.py`, `tests/scenarios/test_csv_pdf_matching.py`,
@@ -229,7 +237,7 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for D-059, M6, D-060, M7, D-061 and M7's closeout on 2026-11-09, used for them | **Must be renewed** for any change after the review |
+| Local commits on `feature/m2-review` | Approved for D-059, M6, D-060, M7, D-061, M7's closeout and the D-062 plan on 2026-11-09, used for them | **Must be renewed** for any change after the review |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |
@@ -260,7 +268,7 @@ branch is feature/m2-review, the working tree is clean, and run the test suite w
 code before changing anything. Do not contact GitHub.
 
 Next task, from the owner:
-[PASTE IT HERE: for example, draft D-062, the M8 plan]
+[PASTE IT HERE: for example, build M8.1 of D-062, as approved]
 
 Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as the next
 free decision number, and approval before any of it is built. Each slice of it then needs its own

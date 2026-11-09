@@ -385,6 +385,57 @@ I7 is not needed: the formats' descriptions agree, so D-006 is not amended.
 | I10 | D5 to D13 pass for `capital_one_card_statement_v1`, and I1 to I4 against `capital_one_card_v1` |
 | I11 | Only if the two layouts read different dates (D-060 point 4): the basis date must agree and the other where both have it, and every outcome of the existing exhaustive import-order tests is unchanged |
 
+## M8 plan
+
+Proposed on 2026-11-09 as D-062, **pending the owner's review.** Nothing is built until it is
+approved, and then each slice separately. Point 1 changes a security control (W1), and so needs the
+owner's approval as one.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M8.1 | One builder per report, the CLI printing its lines byte for byte as now. No server | Proposed |
+| M8.2 | `pf ui`: the loopback server, its protections, and the totals and monthly pages | Proposed |
+| M8.3 | Import results, transactions, the review queue and one review item, read-only | Proposed |
+| M8.4 | Review decisions from the browser | Only if the owner chooses D-062 point 3's alternative |
+
+### M8.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| UA1 | `totals`, `report monthly`, `documents`, `transactions`, `review list` and `review show` each print the lines of one builder in `reports/report_text.py`, and their output on every scenario ledger and on generated ledgers is byte for byte the output captured in `build/` from the commit before M8.1 |
+| UA2 | The builders print nothing and open no ledger. Only the CLI prints, and D-037's escaping tests for embedded newlines and terminal control characters pass unchanged. Every earlier criterion still passes |
+
+### M8.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| UB1 | W1 allows `http` in `ui/server.py` alone, as `from http.server import BaseHTTPRequestHandler, HTTPServer` and nothing else. Any other import of `http`, `socket` or `socketserver` there, or of `http` anywhere else, fails, and without the allowance W1 fails on that module alone, as the control |
+| UB2 | The server binds the constant `("127.0.0.1", 0)`: shown by W1's AST check, and by a launch whose socket name is `127.0.0.1` over `AF_INET`, with address reuse off and every name lookup replaced by a failure. `pf ui` takes no host or port, and opens the ledger, through its gate, before binding |
+| UB3 | A request whose `Host` is not exactly `127.0.0.1:<port>` (missing, repeated, another port, `localhost`, a trailing dot, a foreign name) gets the fixed `421` page, before any cookie or ledger is read, including with a valid cookie |
+| UB4 | Without the session cookie every route gives the fixed `403` page with no data. A wrong, missing or reused launch key is refused. The right key, once, sets an `HttpOnly; SameSite=Strict; Path=/` cookie and redirects to `/`. Secrets come from `secrets` and compare with `hmac.compare_digest`, and another launch's cookie is refused |
+| UB5 | Every method but `GET` gets `405`, its body unread, and a present `Origin` other than `http://127.0.0.1:<port>` is refused. Every request leaves the ledger's files and logical digest unchanged, and a builder replaced by one that writes fails as the fixed error page, the ledger unchanged |
+| UB6 | Every response, errors included, carries D-062 point 4's `Content-Security-Policy`, `nosniff`, `no-referrer`, `DENY`, `same-origin` and `no-store` headers, and `Server` names no Python version. No page holds a script, an inline style or any address but a path on this server |
+| UB7 | No request writes to stdout or stderr: success, refusal, a malformed request line, and an exception carrying sentinels, which gives the fixed unexpected-error page alone. A session leaves only the ledger and its support files. A real ledger whose probe fails on the second request gets the gate's refusal, with no data |
+| UB8 | The visible text of the totals and monthly pages equals `totals` and `report monthly` line for line, for the ledger, each account and month ranges, on the M3.4, M4.3 and M7.3 scenario ledgers and generated ledgers. `ui/server.py` imports no computation from `reports/` or `reconcile/`. Every earlier criterion still passes |
+
+### M8.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| UC1 | The import results, transactions, review queue and review item pages each equal `documents`, `transactions`, `review list` and `review show` line for line, and each queue item links to its page |
+| UC2 | A cell holding `<script>`, quotes, `&`, a newline, an escape character or U+202E shows as the CLI shows it, HTML-escaped once, and adds no element or attribute to the page |
+| UC3 | The item page shows its account ID, item ID, revision token and the `pf review` command to decide it, and no form. An unknown item gives a page repeating nothing it was given. A stale account's warning shows as in the CLI |
+| UC4 | On a ledger holding an ID retired before migration 0004, no page shows a creation timestamp, so F2 is not needed. Every earlier criterion still passes |
+
+### M8.4 acceptance criteria, only if chosen
+
+| ID | Test |
+|---|---|
+| UD1 | A decision form posts account ID, item ID and revision token to the functions the CLI calls. A token rendered before an import, a reconcile or another decision refuses, changing nothing, and a stale account refuses with the CLI's message. The UI never reconciles |
+| UD2 | A `POST` without the session's form token, with a wrong one, with a missing or foreign `Origin`, a `cross-site` `Sec-Fetch-Site`, another content type or a body over 8 KB is refused, changing nothing. The same request with each correct succeeds, as the control |
+| UD3 | A resubmitted form refuses, its token having changed, and no refusal repeats what it was given |
+| UD4 | Each `POST` opens its write connection through the gate. Every earlier criterion still passes |
+
 ## Backlog benchmarks
 
 Not scheduled, and not part of A39 acceptance.

@@ -1,6 +1,6 @@
-# Decision Log: Full Text of D-001 to D-060
+# Decision Log: Full Text of D-001 to D-061
 
-Moved out of [decisions.md](decisions.md) on 2026-11-08, unchanged, D-053 once D-054 was written, D-058 once D-059 was, D-059 once D-060 was, and D-060 once D-061 was. The index, the rules in brief and
+Moved out of [decisions.md](decisions.md) on 2026-11-08, unchanged, D-053 once D-054 was written, D-058 once D-059 was, D-059 once D-060 was, D-060 once D-061 was, and D-061 once D-062 was. The index, the rules in brief and
 the newest decisions are in decisions.md. Status values are defined there. Read a decision here
 when a task touches it: search for its heading, such as `## D-049`.
 
@@ -2735,3 +2735,40 @@ count once. The owner holds no Capital One card PDF, so M7.5 is not built, and M
 The CSV the owner sampled last is a Capital One card export, matching `capital_one_card_v1` as
 built. `us_bank_card_activity_pdf_v1` stays unverified until D-059 point F passes on a real
 printout.
+
+## D-061 Capital One bank format confirmed, and its rows' account number checked — Approved, implemented
+
+Directed by the owner on 2026-11-09, outside M7's slices, with the header and two rows of each of
+two real Capital One exports, a 360 Performance Savings account and a 360 Checking account. No
+value from them is kept in this repository: the fixtures invent every value, keeping the format.
+
+**The format matches `capital_one_bank_v1` as built,** so no parser changed: the exact header,
+`MM/DD/YY` dates, `Transaction Amount` never negative with `Transaction Type` `Debit` or `Credit`
+giving its direction, and `Balance` a running balance after each row, newest first. Amounts drop
+trailing zeros (`1400`, `14.1`), which the parser already read. The fixture now lists newest first
+in that style, with a Zelle receipt and a web payment in the wording the exports showed. Still
+assumed: the date is the transaction date, and the export holds posted transactions only, which
+D-059 point F checks.
+
+**The owner's choices on the account layer,** each recommended by the lead engineer:
+
+1. **The Account Number is checked.** Each row names its account's last four digits. A layout may
+   name such a column, and `capital_one_bank_v1` names `Account Number`. Every row of a new
+   document must name the importing account's registered last four digits (`pf account add
+   --last4`), or the file fails as `account_number_mismatch`, importing nothing, so the savings
+   export cannot import into checking. A row too short to hold the column is unresolved as before,
+   and is not checked. An account registered without last four digits fails the file as
+   `account_number_unknown`: nothing would show which account the file belongs to. A repeat import
+   of identical bytes is unchanged (D-022). Files that pass are read exactly as before, so the
+   layout keeps its ID and parser version: the check refuses files, and changes no meaning.
+2. **A transfer between the two accounts uses M3.2 unchanged.** The savings export's "Withdrawal
+   to 360 Checking" row, classified `transfer`, is a candidate against the checking deposit of the
+   opposite amount, and `review transfer match` matches them (D-054). A scenario test shows it on
+   invented exports. The checking side's wording is a guess, which matching never reads.
+
+**Open:** `pf` has no command to change an account, so an account added without last four digits
+cannot gain them. If the real ledger holds such a Capital One bank account, setting them once, never
+changing them after, is a follow-up for the owner's approval.
+
+**Tests:** `tests/scenarios/test_capital_one_accounts.py`, and the layout's J1 to J7 case on the
+new fixture, with its account's last four digits. Seven deliberate breaks of the check, all caught.

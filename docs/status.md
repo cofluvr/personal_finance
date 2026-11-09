@@ -45,7 +45,7 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M7.3: CSV and PDF counting once | Complete, on D-006 unchanged, against a test-only CSV layout (D-060) |
 | M7.4 and M7.5 | Not built: one card per printout, and the owner holds no Capital One card PDF |
 | **M7 overall** | **Complete,** recorded by the owner on 2026-11-09 |
-| M8 | Not started |
+| M8 | Planned in D-062, pending the owner's review. Nothing built |
 
 ## What exists
 
