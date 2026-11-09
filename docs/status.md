@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
+Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
 
 | Milestone | Status |
 |---|---|
@@ -31,7 +31,8 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | **M4 overall** | **Complete and accepted** |
 | M5.1: real ledgers, their location and file permissions | Accepted (D-058) |
 | M5.2: encryption, an encrypted volume checked on every open | Accepted (D-002, D-058) |
-| M5.3 to M5.5 | Planned in D-058, not started |
+| M5.3: archiving originals, and storage by kind | Built, awaiting review (D-017, D-058) |
+| M5.4 and M5.5 | Planned in D-058, not started |
 | M6 to M8 | Not started |
 
 ## What exists
@@ -41,6 +42,10 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 - `personal_finance.db.id_lists`: any number of IDs as one SQL parameter (D-057).
 - `personal_finance.db.real_ledger`: the real-ledger mark, and the location, encrypted-volume and
   import checks every open of a real ledger runs, with its temporary files kept in memory (D-058).
+- `personal_finance.db.originals`: archiving a real ledger's originals on import, and verifying
+  them (D-017, D-058).
+- `personal_finance.reports.storage`: software, database, originals and backups storage apart
+  (D-058).
 - `personal_finance.db.volume_probes`: the only subprocess calls, `diskutil info -plist` on a mount
   point and `hdiutil info -plist` (D-058).
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
@@ -107,14 +112,14 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `review classifications`, `review classification show`, `review classification undo`,
   `review transfers`, `review transfer match`, `review transfer one-sided`, `review transfer show`,
   `review transfer undo`, `totals`, `report monthly`, `balance record`, `balance list`,
-  `balance check`, `balance undo`, run
+  `balance check`, `balance undo`, `archive verify`, `storage`, run
   through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
 
 No real institution layout is supported. **It must not be used with real financial
-data** (M5 gate). A real ledger's location and encrypted disk image are checked (M5.1, M5.2), but nothing is
-archived or backed up yet, and the gate stays closed until M5.5's checklist is run. Only candidate items, decision conflicts and automatically merged transactions
+data** (M5 gate). A real ledger's location and encrypted disk image are checked (M5.1, M5.2), and its originals are archived (M5.3), but nothing is
+backed up yet, and the gate stays closed until M5.5's checklist is run. Only candidate items, decision conflicts and automatically merged transactions
 can be acted on.
 
 ## Acceptance criteria progress
@@ -270,8 +275,10 @@ rewriting 20,000 match outcomes (D-057).
   Coverage a document's metadata states can only be withdrawn. One document at a time (D-051). A
   repeat import with a different declaration still fails with `coverage_conflict`, which names the
   command.
-- The original file is not kept. Row contents and the file's hash are stored, and
-  archiving arrives at M5.
+- Only a real ledger keeps originals. A synthetic one stores row contents and the file's hash only.
+- Two real ledgers in one folder share `originals/`, and each lists the other's originals as not
+  referenced. `archive verify` checks content, not modes, and nothing repairs or deletes an
+  original. The syncs that make a copy durable are not tested.
 - A pending and a posted row with one reliable ID merge whatever their amount. Without one, a changed
   amount raises a candidate for review, never a merge, and many alike descriptions in one block make
   that quadratic. Within one document, only rows D-021 flags, with equal amounts, can be confirmed

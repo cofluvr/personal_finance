@@ -1,9 +1,10 @@
-# Session Handoff: M5.2 Accepted, M5.3 Next
+# Session Handoff: M5.3 Built, Awaiting Review
 
-For a fresh session. Written 2026-11-08. **M1 to M4 are complete and accepted.** The owner approved
+For a fresh session. Written 2026-11-09. **M1 to M4 are complete and accepted.** The owner approved
 the M5 plan, D-058 in [decisions.md](decisions.md), with the lead engineer's recommendations,
 including points A to F. **M5.1, real ledgers and their location, and M5.2, encryption, are built
-and accepted,** M5.2 under point 3 as the owner amended it twice. **M5.3 is approved to build.**
+and accepted,** M5.2 under point 3 as the owner amended it twice. **M5.3, archiving originals and
+storage by kind, is built and awaits the owner's review** ("How M5.3 was implemented" under D-058).
 M5.4 and M5.5 each need their own approval, and M5.4 needs the backup destination. Slices and acceptance criteria are in
 [plan.md](plan.md).
 
@@ -32,8 +33,8 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, and its second amendment the commit after it |
-| Latest gating run | Full suite, 2041 passed, exit code 0, on M5.2's second amendment |
+| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457` and its docs the commit after it |
+| Latest gating run | Full suite, 2073 passed, exit code 0, on M5.3's docs commit |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on a separate encrypted drive, chosen in M5.4 (D-058 point 7) |
@@ -61,7 +62,10 @@ Then only what the task needs:
   `disk_image_is_encrypted` and `check_real_ledger_on_open` in `db/real_ledger.py`,
   `tests/scenarios/test_encrypted_volume.py`, the recordings in
   `tests/fixtures/synthetic/volume_probes`, and "How M5.2 was implemented" under D-058.
-- For building M5.3 to M5.5: their recommendations and criteria in D-058 and [plan.md](plan.md),
+- For changes to M5.3: `db/originals.py`, `reports/storage.py`, the archive step in
+  `ingest/pipeline.py`, `run_import`, `run_archive_verify` and `run_storage` in `cli.py`,
+  `tests/scenarios/test_originals.py`, and "How M5.3 was implemented" under D-058.
+- For building M5.4 and M5.5: their recommendations and criteria in D-058 and [plan.md](plan.md),
   D-002, D-017, D-019 and D-025 in [decisions-d001-d052.md](decisions-d001-d052.md), PRD-backend
   §19 to §21, and [security-controls-proposal.md](security-controls-proposal.md), which stays
   unapplied (point E).
@@ -193,7 +197,7 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Review of M5.3 once built. M5.4 needs the backup drive, which the owner will have ready.
+- Review of M5.3. M5.4 needs the backup drive, which the owner will have ready.
 - A first `pf init --real` on the real image is the owner's to run, or needs their approval. The
   gate stays closed to real documents until M5.5's checklist is run.
 - Pushing. Not authorized from here.
@@ -202,9 +206,9 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved through M5.2's second amendment and M5.3 | **Must be renewed** for M5.4 |
+| Local commits on `feature/m2-review` | Approved through M5.3, used for it | **Must be renewed** for M5.4 or M5.3 changes |
 | M1 to M4 | Accepted as built | None |
-| M5 | Plan approved (D-058). M5.1 and M5.2 accepted as built. M5.3 approved | Approval of M5.4 and M5.5 |
+| M5 | Plan approved (D-058). M5.1 and M5.2 accepted as built. M5.3 built | Review of M5.3, approval of M5.4 and M5.5 |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
