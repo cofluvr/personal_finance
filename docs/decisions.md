@@ -77,7 +77,7 @@ and keep its index line.
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
-| D-058 | M5 plan: the real-data gate — Approved, M5.1 to M5.3 implemented and accepted |
+| D-058 | M5 plan: the real-data gate — Approved, M5.1 to M5.3 implemented and accepted, M5.4 implemented |
 
 ## Rules in brief
 
@@ -169,6 +169,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Real ledger location | Refused inside a git work tree or a synced folder, through a symbolic link, not owned by the user, or open to group or others. Checked, never repaired. Its imports never come from a git work tree | D-019, D-058 |
 | Originals | A real ledger keeps each new document's bytes in `originals/` under its SHA-256, `0400`, before the import commits. Never overwritten or deleted. Identity never reads it | D-017, D-058 |
 | Encrypted volume | A real ledger's folder is inside, never at the root of, a mounted disk image whose APFS volume honours ownership, and which diskutil reports encrypted or hdiutil reports encrypted as an image. FileVault on the startup volume does not count. Any other answer refuses. Temporary files stay in memory | D-002, D-058 |
+| Backups | A new folder, on a mounted volume other than a real ledger's and gated as its folder is, holding the ledger, its referenced originals and a manifest of hashes, sizes, versions and a logical digest. Restore never overwrites, and checks every file, integrity, foreign keys, schema and digest first | D-058 |
 
 ## Not yet decided
 
@@ -176,7 +177,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-058 M5 plan: the real-data gate — Approved, M5.1 to M5.3 implemented and accepted
+## D-058 M5 plan: the real-data gate — Approved, M5.1 to M5.3 implemented and accepted, M5.4 implemented
 
 Proposed on 2026-11-08, and approved by the owner the same day with the lead engineer's
 recommendations, including points A to F, with M5.1 approved to build. Each later slice needs its
@@ -405,3 +406,40 @@ as built. No migration: `import_attempt.failure_code` takes any code.
   following links. Backups read "none recorded" until M5.4 adds the table recording them.
 - **Not handled:** two real ledgers in one folder share `originals/`, and each lists the other's
   originals as not referenced.
+
+**How M5.4 was implemented,** under points 7 and 8, point 7 as amended. The owner approved M5.4,
+with the lead engineer's recommendations for the choices points 7 and 8 left open, on 2026-11-09,
+and it was built the same day on synthetic data. It awaits review. Migration 0018 adds
+`backup_record`.
+
+- **`--to` names the new backup folder,** which must not exist. It is created `0700`, holding
+  `ledger.db`, `originals/<sha256>` and `manifest.json`, each `0400`. For a real ledger, the folder
+  holding it passes points 2 and 3 as a ledger's folder would, and its mount point must differ from
+  the ledger's. A missing or altered original refuses the backup, naming `archive verify`. Only
+  referenced originals are copied.
+- **The copy is one step of SQLite's online backup API,** so it is one committed state, read under
+  one lock while writers wait. The manifest describes the copy, not the live ledger, and the
+  originals copied are the ones the copy references, rehashed as they are read.
+- **The logical digest** covers `user_version`, every `sqlite_master` row, and every table's column
+  names and rows, ordered by primary key, or by every column for `review_issue_subject`, which has
+  none. Values carry their storage class, so `1`, `1.0`, `'1'` and `x'31'` differ.
+- **The new backup is checked as `backup verify` would check it** before its `backup_record` row is
+  written. Any failure, a busy ledger at that write included, removes the folder. A backup holds
+  the rows of earlier backups, not its own. `storage` reports the recorded sizes and never reads a
+  backup's volume.
+- **`backup verify` refuses,** in this order: a manifest not of this shape, a missing or unlisted
+  file, a file that is not regular or does not match its size and hash, SQLite's integrity check,
+  its foreign key check, a schema version that differs from the manifest or is newer than the code,
+  the digest, the real-ledger mark, and originals that differ from the documents the ledger
+  references. It opens the copy read-only and immutable, writes nothing, and exits 1 when the
+  backup is not intact.
+- **`backup restore`** checks the backup, gates a real backup's new path as `init --real` does, and
+  refuses a folder that already has `originals/`. It writes the originals and a `.partial` ledger,
+  checks those written copies again, then links the ledger into place, so an existing path is never
+  replaced. Any failure removes everything it wrote. An older schema restores unchanged and names
+  `pf migrate`.
+- **A synthetic ledger** is backed up and restored with no gates and no originals.
+- **The code version** is `personal_finance.__version__`, now the one place it is written, read by
+  `pyproject.toml`. It is recorded, not checked.
+- **Not detected:** two disk images whose files share a disk (point 7 as amended), and a manifest
+  rewritten together with the files it describes. The manifest is not signed.

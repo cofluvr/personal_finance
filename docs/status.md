@@ -32,7 +32,7 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M5.1: real ledgers, their location and file permissions | Accepted (D-058) |
 | M5.2: encryption, an encrypted volume checked on every open | Accepted (D-002, D-058) |
 | M5.3: archiving originals, and storage by kind | Accepted (D-017, D-058) |
-| M5.4: backup, verification and restore | Approved, not started (D-058) |
+| M5.4: backup, verification and restore | Built, awaiting review (D-058) |
 | M5.5 | Planned in D-058, not started |
 | M6 to M8 | Not started |
 
@@ -47,14 +47,16 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   them (D-017, D-058).
 - `personal_finance.reports.storage`: software, database, originals and backups storage apart
   (D-058).
+- `personal_finance.db.backups`: backing up a ledger with a manifest and logical digest, checking a
+  backup, and restoring one to a new path (D-058).
 - `personal_finance.db.volume_probes`: the only subprocess calls, `diskutil info -plist` on a mount
   point and `hdiutil info -plist` (D-058).
 - Migrations `0001_initial`, `0002_block_replace`, `0003_reconciliation`,
   `0004_identity_and_primary`, `0005_decisions`, `0006_confirmation`, `0007_separation`,
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
   `0011_coverage_declarations`, `0012_pending_posted_links`, `0013_type_classifications`,
-  `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations` and
-  `0017_real_ledger`,
+  `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations`,
+  `0017_real_ledger` and `0018_backup_records`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts, explicit coverage, atomic
   per-file import.
@@ -113,14 +115,15 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `review classifications`, `review classification show`, `review classification undo`,
   `review transfers`, `review transfer match`, `review transfer one-sided`, `review transfer show`,
   `review transfer undo`, `totals`, `report monthly`, `balance record`, `balance list`,
-  `balance check`, `balance undo`, `archive verify`, `storage`, run
+  `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
+  `backup verify`, `backup restore`, run
   through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
 
 No real institution layout is supported. **It must not be used with real financial
-data** (M5 gate). A real ledger's location and encrypted disk image are checked (M5.1, M5.2), and its originals are archived (M5.3), but nothing is
-backed up yet, and the gate stays closed until M5.5's checklist is run. Only candidate items, decision conflicts and automatically merged transactions
+data** (M5 gate). A real ledger's location and encrypted disk image are checked (M5.1, M5.2), its originals are archived (M5.3), and it can be backed up
+and restored (M5.4), but the gate stays closed until M5.5's checklist is run. Only candidate items, decision conflicts and automatically merged transactions
 can be acted on.
 
 ## Acceptance criteria progress
@@ -277,6 +280,10 @@ rewriting 20,000 match outcomes (D-057).
   repeat import with a different declaration still fails with `coverage_conflict`, which names the
   command.
 - Only a real ledger keeps originals. A synthetic one stores row contents and the file's hash only.
+- A backup is taken only when the owner runs `backup create`: nothing is scheduled or rotated, and
+  nothing deletes an old backup. Its manifest is not signed, so it shows accidental change, not a
+  deliberate rewrite of both files and manifest. Two disk images whose files share one disk are not
+  told apart, so such a backup does not survive losing that disk (D-058 point 7, as amended).
 - Two real ledgers in one folder share `originals/`, and each lists the other's originals as not
   referenced. `archive verify` checks content, not modes, and nothing repairs or deletes an
   original. The syncs that make a copy durable are not tested.

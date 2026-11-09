@@ -1,11 +1,12 @@
-# Session Handoff: M5.3 Accepted, M5.4 Approved
+# Session Handoff: M5.4 Built
 
 For a fresh session. Written 2026-11-09. **M1 to M4 are complete and accepted.** The owner approved
 the M5 plan, D-058 in [decisions.md](decisions.md), with the lead engineer's recommendations,
 including points A to F. **M5.1, real ledgers and their location, M5.2, encryption, and M5.3, archiving
 originals and storage by kind, are built and accepted,** M5.2 under point 3 as the owner amended it
-twice. **M5.4, backup, verification and restore, is approved** and waits on the owner's answer about
-the backup destination. M5.5 needs its own approval. Slices and acceptance criteria are in
+twice. **M5.4, backup, verification and restore, is built and awaits the
+owner's review** ("How M5.4 was implemented" under D-058), with point 7 as the owner amended it. M5.5
+needs its own approval. Slices and acceptance criteria are in
 [plan.md](plan.md).
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
@@ -33,11 +34,11 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its docs `4582256`, and its acceptance the commit after it |
-| Latest gating run | Full suite, 2073 passed, exit code 0, on M5.3's docs commit `4582256` |
+| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance `c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e` and its docs the commit after it |
+| Latest gating run | Full suite, 2157 passed, exit code 0, on M5.4 `5e6e05e` |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
-| Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on a separate encrypted drive, chosen in M5.4 (D-058 point 7) |
+| Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted as its own volume (D-058 point 7, as amended). That folder is the owner's too: never read, list or search it |
 | Real ledger's image | `~/CommonCents.sparsebundle`, mounted by the owner only when needed at `/Volumes/CommonCents`, with the ledger folder `/Volumes/CommonCents/ledger` (`0700`, the owner's). It holds the owner's statements: never read, list or search it. Run diskutil, hdiutil or `stat` on it only with the owner's approval each time. Checked 2026-11-09: encrypted as an image file (`image-encrypted` true), its APFS volume not (`Encryption` false), ownership honoured, so the gate accepts it. No `pf` command has run on it |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -65,7 +66,9 @@ Then only what the task needs:
 - For changes to M5.3: `db/originals.py`, `reports/storage.py`, the archive step in
   `ingest/pipeline.py`, `run_import`, `run_archive_verify` and `run_storage` in `cli.py`,
   `tests/scenarios/test_originals.py`, and "How M5.3 was implemented" under D-058.
-- For building M5.4 and M5.5: their recommendations and criteria in D-058 and [plan.md](plan.md),
+- For changes to M5.4: `db/backups.py`, migration 0018, the `backup` commands and `run_storage`
+  in `cli.py`, `tests/scenarios/test_backups.py`, and "How M5.4 was implemented" under D-058.
+- For building M5.5: its recommendations and criteria in D-058 and [plan.md](plan.md),
   D-002, D-017, D-019 and D-025 in [decisions-d001-d052.md](decisions-d001-d052.md), PRD-backend
   §19 to §21, and [security-controls-proposal.md](security-controls-proposal.md), which stays
   unapplied (point E).
@@ -197,7 +200,7 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- The backup destination for M5.4, and its other open choices.
+- Review of M5.4.
 - A first `pf init --real` on the real image is the owner's to run, or needs their approval. The
   gate stays closed to real documents until M5.5's checklist is run.
 - Pushing. Not authorized from here.
