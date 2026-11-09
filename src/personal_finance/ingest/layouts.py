@@ -165,23 +165,42 @@ def _parse_capital_one_bank_row(cells: Mapping[str, str]) -> ParsedRow:
     return _finish(row, problems)
 
 
-_US_BANK_DIRECTION = {"DEBIT": -1, "CREDIT": 1}
+_DEBIT_OR_CREDIT = {"DEBIT": -1, "CREDIT": 1}
+
+
+def _signed_agreeing(amount_text: str, direction_text: str, problems: list[str]) -> int | None:
+    """A signed amount, which a Debit or Credit column must agree with."""
+    direction = _DEBIT_OR_CREDIT.get(direction_text.strip().upper())
+    if direction is None:
+        problems.append("invalid_direction")
+    amount = _amount(amount_text, problems)
+    if amount is not None and amount * (direction or 0) < 0 and not problems:
+        problems.append("conflicting_amount")
+    return None if problems else amount
 
 
 def _parse_us_bank_row(cells: Mapping[str, str]) -> ParsedRow:
-    """A signed Amount, which the Transaction column must agree with."""
     problems: list[str] = []
-    direction = _US_BANK_DIRECTION.get(cells["Transaction"].strip().upper())
-    if direction is None:
-        problems.append("invalid_direction")
-    amount = _amount(cells["Amount"], problems)
-    if amount is not None and amount * (direction or 0) < 0 and not problems:
-        problems.append("conflicting_amount")
-    signed = None if problems else amount
+    signed = _signed_agreeing(cells["Amount"], cells["Transaction"], problems)
     row = ParsedRow(
         posting_date=_date(cells["Date"], "%Y-%m-%d", problems),
         amount_cents=signed,
         description=cells["Name"].strip() or None,
+    )
+    return _finish(row, problems)
+
+
+def _parse_bfsfcu_row(cells: Mapping[str, str]) -> ParsedRow:
+    """Only Posted is known from a real export, so any other status leaves the row unresolved."""
+    problems: list[str] = []
+    signed = _signed_agreeing(cells["Amount"], cells["Transaction Type"], problems)
+    if cells["Posting Status"].strip().upper() != "POSTED":
+        problems.append("invalid_status")
+    row = ParsedRow(
+        posting_date=_date(cells["Posting Date"], "%m/%d/%Y", problems),
+        amount_cents=signed,
+        description=cells["Description"].strip() or None,
+        settlement_status="posted",
     )
     return _finish(row, problems)
 
@@ -263,6 +282,33 @@ AMEX_CARD_V1 = Layout(
     pending_in_complete_coverage={"posting": False},
 )
 
+# BFSFCU's export, the one layout whose header and row format came from a real export, its
+# values never kept (D-059 point E). Effective Date can fall after Posting Date, so it is not
+# read as the transaction date. It, the Transaction ID and the other columns stay in the raw
+# cells, unread.
+BFSFCU_V1 = Layout(
+    layout_id="bfsfcu_v1",
+    parser_version="1",
+    columns=(
+        "Transaction ID",
+        "Posting Date",
+        "Effective Date",
+        "Transaction Type",
+        "Posting Status",
+        "Amount",
+        "Check Number",
+        "Reference Number",
+        "Description",
+        "Transaction Category",
+        "Type",
+        "Balance",
+        "Memo",
+        "Extended Description",
+    ),
+    parse_row=_parse_bfsfcu_row,
+    pending_in_complete_coverage={"posting": False},
+)
+
 LAYOUTS = {
     layout.layout_id: layout
     for layout in (
@@ -272,5 +318,6 @@ LAYOUTS = {
         CAPITAL_ONE_BANK_V1,
         US_BANK_V1,
         AMEX_CARD_V1,
+        BFSFCU_V1,
     )
 }

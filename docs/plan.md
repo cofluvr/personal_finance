@@ -292,7 +292,7 @@ until D-059 point F passes on one real file of it, by the steps in
 | M6.1 | Capital One: `capital_one_card_v1` and `capital_one_bank_v1` | Built, awaits review |
 | M6.2 | U.S. Bank: `us_bank_v1`, its CSV activity list | Built, awaits review |
 | M6.3 | American Express: `amex_card_v1` | Built, awaits review |
-| M6.4 | BFSFCU | Approved, waits for its header and two rows (D-059 point E) |
+| M6.4 | BFSFCU: `bfsfcu_v1`, from the format of a real export | Built, awaits review |
 
 ### M6 acceptance criteria, for each layout
 

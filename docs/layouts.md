@@ -77,8 +77,8 @@ Complete coverage and pending transactions:
 | Property | Meaning |
 |---|---|
 | Header | Must match exactly, or the file fails as `header_mismatch` and imports nothing |
-| Status | `unknown`: no export states it, and D-006 never reads it as `posted` |
-| Transaction ID | None, guarantee `none` (D-059 point B). Identical rows in one file are separate events, kept apart by row number |
+| Status | `unknown` where the export does not state it, which D-006 never reads as `posted`. `bfsfcu_v1` states it |
+| Transaction ID | None read, guarantee `none` (D-059 point B). Identical rows in one file are separate events, kept apart by row number |
 | Metadata | None. A `#` line fails the header |
 | Coverage | User declaration only, on the bases listed under each. Pending rows are not in the export, so a complete claim says nothing about them |
 | Unread columns | Category, card or account number and running balance stay in the raw cells (D-014, D-057) |
@@ -125,6 +125,22 @@ Columns: `Date, Description, Amount`.
 | Amount | Signed, **positive for a charge**, so stored negated: a charge is money out, a payment or credit money in. Nothing in a row can confirm the sign |
 | Date | `MM/DD/YYYY`, the posting date. Coverage on the `posting` basis only |
 | Assumptions | The sign, the export holds posted transactions only, and its date is the posting date. The sign is checked only by D-059 point F |
+
+## bfsfcu_v1
+
+Columns, each quoted: `Transaction ID, Posting Date, Effective Date, Transaction Type, Posting
+Status, Amount, Check Number, Reference Number, Description, Transaction Category, Type, Balance,
+Memo, Extended Description`. The header and row format come from the owner's real export (D-059
+point E). No value from it is kept, and the layout stays unverified until point F passes.
+
+| Property | Meaning |
+|---|---|
+| Amount | Signed, negative for money out, with five decimals. A digit beyond the cent leaves the row `invalid_amount`. `Transaction Type` `Debit` or `Credit` must agree, else `conflicting_amount`, and any other value is `invalid_direction` |
+| Status | `Posting Status` `Posted`. Any other value, `Pending` included, leaves the row `invalid_status`, since only `Posted` has been seen |
+| Date | `Posting Date`, `M/D/YYYY`, the posting date. Coverage on the `posting` basis only. `Effective Date` can fall after it, so it is not read as the transaction date |
+| Unread | `Transaction ID`, `Reference Number`, `Check Number`, `Effective Date`, the categories, `Balance`, `Memo` and `Extended Description` |
+| Order | Newest first. Order carries no meaning |
+| Assumptions | Pending transactions are absent or marked otherwise than `Posted` |
 
 ## Test-only layouts
 

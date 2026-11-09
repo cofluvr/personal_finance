@@ -78,7 +78,7 @@ and keep its index line.
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
 | D-058 | M5 plan: the real-data gate — Approved, implemented and accepted in M5 |
-| D-059 | M6 plan: first real CSV layouts — Approved with points A to F, M6.1 to M6.3 built, M6.4 waits for its header |
+| D-059 | M6 plan: first real CSV layouts — Approved with points A to F, M6.1 to M6.4 built |
 
 ## Rules in brief
 
@@ -178,7 +178,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-059 M6 plan: first real CSV layouts — Approved with points A to F, M6.1 to M6.3 built, M6.4 waits for its header
+## D-059 M6 plan: first real CSV layouts — Approved with points A to F, M6.1 to M6.4 built
 
 Directed by the owner on 2026-11-09, to be built unattended overnight with each slice gated on the
 full suite and committed locally: the sequence Capital One (card and bank), U.S. Bank, American
@@ -241,6 +241,9 @@ the owner's review. Acceptance tests, J1 to J8 for every layout, are in [plan.md
 sound. Points A to D are resolved. Point E stays open: M6.4 is approved to build once the header
 and two rows of a BFSFCU export reach this repository, which they had not when this was recorded.
 Point F is the owner's to run, with the steps in [layout-verification.md](layout-verification.md).
+The owner supplied a BFSFCU export's header and four rows the same day, and M6.4 was built from their
+format, with every value invented: `bfsfcu_v1`, the one layout that states its status, so it is the
+exception to the common rule below.
 
 **Layout rules common to M6:** coverage by user declaration only; settlement status `unknown`,
 since no export states it, which D-006 never reads as `posted` and `balance check` discloses; a

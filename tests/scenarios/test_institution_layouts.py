@@ -15,6 +15,7 @@ from personal_finance.cli import main
 from personal_finance.ingest.coverage import declare_complete
 from personal_finance.ingest.layouts import (
     AMEX_CARD_V1,
+    BFSFCU_V1,
     CAPITAL_ONE_BANK_V1,
     CAPITAL_ONE_CARD_V1,
     LAYOUTS,
@@ -43,6 +44,7 @@ class LayoutCase:
     second_interval: tuple[str, str]
     overlap_basis: str
     unoffered_bases: tuple[str, ...] = field(default=())
+    expected_status: str = "unknown"
 
     @property
     def id(self) -> str:
@@ -167,6 +169,38 @@ CASES = (
         overlap_basis="posting",
         unoffered_bases=("transaction",),
     ),
+    LayoutCase(
+        layout=BFSFCU_V1,
+        fixture="bfsfcu.csv",
+        expected_rows=(
+            (None, "2026-10-31", 3, "Credit Dividend"),
+            (None, "2026-10-22", -1825, "POS Purchase: SYNTHETIC GROCERY 000    Anytown        XX"),
+            (None, "2026-10-22", -1825, "POS Purchase: SYNTHETIC GROCERY 000    Anytown        XX"),
+            (None, "2026-10-15", 40000, "Deposit: SYNTHETIC EMPLOYER PAYROLL"),
+            (None, "2026-10-09", -210, "ATM Withdrawal: Foreign Transaction Fee 000000"),
+            (None, "2026-10-08", -7000,
+             "ATM Withdrawal: 00000000 SYNTHETIC BANK          Anytown        XX"),
+            (None, "2026-09-30", 2, "Credit Dividend"),
+        ),
+        unresolved_rows=(
+            ({"Amount": ""}, "missing_amount"),
+            ({"Amount": "0.03500"}, "invalid_amount"),
+            ({"Amount": "-0.03000"}, "conflicting_amount"),
+            ({"Transaction Type": "Debit"}, "conflicting_amount"),
+            ({"Transaction Type": ""}, "invalid_direction"),
+            ({"Posting Status": "Pending"}, "invalid_status"),
+            ({"Posting Status": ""}, "invalid_status"),
+            ({"Posting Date": ""}, "missing_date"),
+            ({"Posting Date": "2026-10-31"}, "invalid_date"),
+        ),
+        first_ends=5,
+        second_starts=3,
+        first_interval=("2026-10-09", "2026-10-31"),
+        second_interval=("2026-09-30", "2026-10-15"),
+        overlap_basis="posting",
+        unoffered_bases=("transaction",),
+        expected_status="posted",
+    ),
 )
 
 pytestmark = pytest.mark.parametrize("case", CASES, ids=lambda case: case.id)
@@ -224,7 +258,9 @@ class TestJ2Rows:
             (row.transaction_date, row.posting_date, row.amount_cents, row.description)
             for row in parsed
         ] == list(case.expected_rows)
-        assert {(row.settlement_status, row.external_id) for row in parsed} == {("unknown", None)}
+        assert {(row.settlement_status, row.external_id) for row in parsed} == {
+            (case.expected_status, None)
+        }
 
     def test_money_out_is_negative_and_money_in_positive(self, case):
         amounts = [cents for _, _, cents, _ in case.expected_rows]
@@ -236,7 +272,7 @@ class TestJ3Unresolved:
         for overrides, reason in case.unresolved_rows:
             row = case.layout.parse_row({**case.first_row_cells(), **overrides})
             assert row.reason_code == reason, overrides
-            if reason in ("missing_date", "invalid_date"):
+            if reason in ("missing_date", "invalid_date", "invalid_status"):
                 assert row.amount_cents == case.expected_rows[0][2], overrides
             else:
                 assert row.amount_cents is None, overrides

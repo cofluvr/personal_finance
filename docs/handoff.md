@@ -1,10 +1,10 @@
-# Session Handoff: M6 Reviewed, M6.4 Waits for Its Header
+# Session Handoff: M6.1 to M6.4 Built, Point F Next
 
 For a fresh session. Written 2026-11-09. **M1 to M5 are complete and accepted.** The owner directed
 M6 on 2026-11-09, to be built unattended overnight: D-059 in [decisions.md](decisions.md). **M6.1 to
-M6.3 are built and committed, and await the owner's review. M6.4, BFSFCU, is not built.** Every
-layout is **unverified**: no sample reached this repository, so each is written from the lead
-engineer's knowledge of the export, on invented fixtures. Read D-059's points A to F first: they are
+M6.4 are built and committed.** Every layout is **unverified** until point F passes, on invented
+fixtures. M6.1 to M6.3 are written from the lead engineer's knowledge of each export, and M6.4 from
+the format of the owner's real BFSFCU export, keeping none of its values. Read D-059's points A to F first: they are
 where the owner's directions met earlier rules, and what was done instead.
 
 | Slice | Commit | Layouts | Breaks |
@@ -13,10 +13,11 @@ where the owner's directions met earlier rules, and what was done instead.
 | M6.1 | `729e44b` | `capital_one_card_v1`, `capital_one_bank_v1` | 18 applied, 18 caught |
 | M6.2 | `15f5958` | `us_bank_v1`, and a fix to `capital_one_bank_v1` | 13 applied, 13 caught |
 | M6.3 | `8e70069` | `amex_card_v1` | 8 applied, 8 caught |
+| M6.4 | this commit | `bfsfcu_v1`, and one shared Debit/Credit agreement rule | 14 applied, 14 caught |
 
-**The owner approved D-059's points A to F on 2026-11-09.** Next: M6.4, BFSFCU, once its export's
-header and two rows reach this repository (they had not yet), and the owner's point F run per
-layout, by [layout-verification.md](layout-verification.md), before any real import.
+**The owner approved D-059's points A to F on 2026-11-09.** Next: the owner's point F run per
+layout, by [layout-verification.md](layout-verification.md), before any real import, then
+acceptance of M6.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -44,7 +45,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
 | Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance `c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e`, its docs `7a0d446`, M5.5 `4548b12`, its docs `df53e65`, and M5's acceptance the commit after it |
-| Latest gating run | Full suite, 2237 passed, exit code 0, on M6.3 `8e70069` |
+| Latest gating run | Full suite, exit code 0, on M6.4: see its commit message |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -213,9 +214,8 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- For M6.4: the header row of a BFSFCU export and two rows in its format, values invented.
 - Point F per layout, by [layout-verification.md](layout-verification.md), and its results.
-- Acceptance of M6.1 to M6.3 once point F passes for them.
+- Acceptance of M6.1 to M6.4 once point F passes for them.
 - Pushing. Not authorized from here.
 
 ## Permissions
@@ -224,7 +224,7 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 |---|---|---|
 | Local commits on `feature/m2-review` | Approved for D-059 and M6 on 2026-11-09, used for them | **Must be renewed** for changes after the review |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
-| M6 | D-059 approved with points A to F. M6.1 to M6.3 built. M6.4 approved, waits for its header | Build M6.4 once the header arrives |
+| M6 | D-059 approved with points A to F. M6.1 to M6.4 built | Point F results, then acceptance |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
