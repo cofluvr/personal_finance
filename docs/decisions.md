@@ -79,7 +79,7 @@ and keep its index line.
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
 | D-058 | M5 plan: the real-data gate — Approved, implemented and accepted in M5 |
 | D-059 | M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6 |
-| D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, M7.1 and M7.2 built |
+| D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, M7.1 to M7.3 built |
 | D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
 
 ## Rules in brief
@@ -173,6 +173,8 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Originals | A real ledger keeps each new document's bytes in `originals/` under its SHA-256, `0400`, before the import commits. Never overwritten or deleted. Identity never reads it | D-017, D-058 |
 | Encrypted volume | A real ledger's folder is inside, never at the root of, a mounted disk image whose APFS volume honours ownership, and which diskutil reports encrypted or hdiutil reports encrypted as an image. FileVault on the startup volume does not count. Any other answer refuses. Temporary files stay in memory | D-002, D-058 |
 | Account number in rows | A layout whose rows name the account's last four digits refuses a file naming another, or an account with none registered, importing nothing | D-061 |
+| PDF layouts | A layout groups a PDF's lines into rows, keeping each. A line it does not know is an unresolved row, never skipped. A document stating no period takes a declaration, as a CSV | D-060 |
+| CSV and PDF | One event in both counts once only by D-006's exact rule, unchanged. An ID-bearing row against an ID-less one stays a possible duplicate | D-006, D-026, D-060 |
 | PDF text | pypdf alone reads it, pinned by hash, imported by `ingest/pdf_reader.py` only, with `jbig2dec` unset and its log silenced. W1 parses pypdf too, allowing only its JBIG2 decoder's `subprocess` | D-020, D-060 |
 | Backups | A new folder, on a mounted volume other than a real ledger's and gated as its folder is, holding the ledger, its referenced originals and a manifest of hashes, sizes, versions and a logical digest. Restore never overwrites, and checks every file, integrity, foreign keys, schema and digest first | D-058 |
 
@@ -182,7 +184,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-060 M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, M7.1 and M7.2 built
+## D-060 M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, M7.1 to M7.3 built
 
 Proposed on 2026-11-09, for the owner's review. Delivers plan.md's M7 row (text PDFs and CSV-to-PDF
 matching, "same activity in both formats counts once") against PRD-backend §5 (statements with
@@ -448,6 +450,20 @@ D-057:
 - **Breaks:** 16 applied, 13 caught. `$` stripping was dead code, since `parse_cents` reads `$`, and
   was deleted. A branch for an account line without digits was unreachable and was removed. A last
   entry with no account line was a test gap, now closed and caught.
+
+**How M7.3 was implemented.** No code: D-006's exact rule already counts the same activity once.
+The owner's samples show the CSV and the printout with the same date, the same description and the
+same signed amount, so point 4's amendment of D-006 and its date rule are not needed, and I7 and I11
+fall away. `tests/scenarios/test_csv_pdf_matching.py` pairs the printout with a test-only CSV
+layout of the owner's CSV fields, under an invented header, both declared complete on the posting
+basis: I1 in either order by A16's comparison, I2 for a missing declaration, another basis, a row
+outside an interval and an unresolved row, I3 for a CSV spanning two printouts, I4 for identical
+rows, I5 for D-026's limitation as kept, and I6 for unchanged `totals` and `report monthly` output.
+A declaration vouches for its whole end date (D-007), so no closing-day row stays a possible
+duplicate. Breaks: 8 applied to the rules it relies on, 6 caught here. The different-basis and
+boundary-date checks cannot change this pairing, since the CSV's rows carry no transaction date and
+declared coverage has no boundary day, and both are caught by `tests/unit/test_cross_document.py`.
+The real pairing waits for a production layout of U.S. Bank's card CSV, then one I1 test on it.
 ## D-061 Capital One bank format confirmed, and its rows' account number checked — Approved, implemented
 
 Directed by the owner on 2026-11-09, outside M7's slices, with the header and two rows of each of

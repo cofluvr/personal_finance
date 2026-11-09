@@ -1,24 +1,23 @@
-# Session Handoff: M7.1 Built, Awaiting Review
+# Session Handoff: M7 Built as Far as Its Inputs Allow, Awaiting Review
 
-For a fresh session. Written 2026-11-09. **M1 to M6 are complete.** M6, the first real CSV layouts,
-is D-059 in [decisions-d001-d052.md](decisions-d001-d052.md), with points A to F as the owner approved them. Its
-fixtures are invented. The Capital One card, Capital One bank, Amex and BFSFCU formats are
-confirmed from the owner's real exports, keeping none of their values, and the U.S. Bank format is
-not. D-061 confirmed the Capital One bank format and checks its rows' account number.
+For a fresh session. Written 2026-11-09. **M1 to M6 are complete,** and so is the part of M7 the
+owner's inputs allow. M7 is D-060 in [decisions.md](decisions.md), as amended: U.S. Bank's
+document turned out to be a credit card's Recent Activity List printed to PDF, which states no
+period or balance, so its coverage is declared, as for a CSV. D-061 confirmed the Capital One bank
+format and checks each row's account number. Every fixture is invented.
 
-| Slice | Commit | Layouts | Breaks |
+| Slice | Commit | What | Breaks |
 |---|---|---|---|
-| D-059 | `64a4791` | The plan, J1 to J8 | |
-| M6.1 | `729e44b` | `capital_one_card_v1`, `capital_one_bank_v1` | 18 applied, 18 caught |
-| M6.2 | `15f5958` | `us_bank_v1`, and a fix to `capital_one_bank_v1` | 13 applied, 13 caught |
-| M6.3 | `8e70069` | `amex_card_v1` | 8 applied, 8 caught |
-| M6.4 | `3c19a70` | `bfsfcu_v1`, and one shared Debit/Credit agreement rule | 14 applied, 14 caught |
+| D-060 | `b78ab14` | The M7 plan, D1 to D14 and I1 to I11 | |
+| M7.1 | `9a9eafe` | pypdf, fenced from running `jbig2dec`, and `pf pdf text` | 13 on the final code, all caught, and 3 on the logging fence |
+| D-061 | `7e4f506` | Capital One bank: format confirmed, account number checked | 7 applied, 7 caught |
+| M7.2 | `2626591` | `us_bank_card_activity_pdf_v1` | 16 applied, 13 caught, 2 dead code deleted, 1 gap closed |
+| M7.3 | the commit after it | CSV and PDF counting once, on D-006 unchanged | 8 applied, 6 caught here, 2 equivalent here and caught by unit tests |
 
-**M7 is under way.** D-060, the M7 plan, was approved on 2026-11-09, with point 1 amended to fence
-pypdf's JBIG2 decoder. M7.1, reading PDF text with pypdf and `pf pdf text`, is built and committed
-locally. **Next:** the owner's review of M7.1, and the U.S. Bank statement's format (D-060 point 2),
-which M7.2 starts from. Separately, the owner's point F run per M6 layout, by
-[layout-verification.md](layout-verification.md), before its first real import.
+**Not built:** M7.4, since the printout holds one card and each entry names it. M7.5, since no
+Capital One card PDF's structure was supplied. A production CSV layout for U.S. Bank's card
+export, whose header was not supplied: `us_bank_v1` is not its format. **Next:** the owner's review
+of M7, and the inputs under "Awaiting the owner".
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -46,7 +45,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
 | Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance `c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e`, its docs `7a0d446`, M5.5 `4548b12`, its docs `df53e65`, and M5's acceptance the commit after it |
-| Latest gating run | Full suite, exit code 0, on M7.1: see its commit message. About 7 minutes |
+| Latest gating run | Full suite, exit code 0, on M7.3: see its commit message. About 7 minutes |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -82,8 +81,9 @@ Then only what the task needs:
 - For changes to M5.5: `tests/unit/test_no_network_imports.py`, [real-data-readiness.md](real-data-readiness.md),
   "Network and dependencies" in [status.md](status.md), and "How M5.5 was implemented" under D-058.
 - For M7: D-060, its acceptance criteria in [plan.md](plan.md), [layouts.md](layouts.md),
-  `ingest/` (`pdf_reader.py`, `layouts.py`, `csv_reader.py`, `pipeline.py`),
-  `tests/unit/test_pdf_reader.py`, `tests/synthetic_pdf.py`, `reconcile/cross_document.py`
+  `ingest/` (`pdf_reader.py`, `pdf_documents.py`, `layouts.py`, `csv_reader.py`, `pipeline.py`), `tests/unit/test_pdf_reader.py`, `tests/synthetic_pdf.py`,
+  `tests/scenarios/test_us_bank_activity_pdf.py`, `tests/scenarios/test_csv_pdf_matching.py`,
+  `reconcile/cross_document.py`
   (`_match_exact` and `_coverage_gap`), and `tests/unit/test_no_network_imports.py`. D-005, D-006,
   D-020, D-024, D-026 and D-027 in the full text when a point names them.
 - For changes to M6: D-059, D-061 for `capital_one_bank_v1`'s account number check, [layouts.md](layouts.md), `ingest/layouts.py`,
@@ -220,21 +220,20 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Review of M7.1.
-- For M7.2, U.S. Bank's statement format, by D-060 point 2 a, b, d and e: the lines
-  `bin/pf pdf text` prints for one statement, values invented, whether it holds several accounts,
-  and matching CSV and PDF transactions. Point 2c is answered: not secured.
+- Review of M7: M7.1, M7.2, M7.3, and D-060's amendments for the activity printout.
+- The header row of U.S. Bank's card CSV export, for its production layout. `us_bank_v1` is not
+  its format, so it must not be used for that card.
+- For M7.5, a Capital One card PDF's lines from `bin/pf pdf text`, values invented, if wanted.
+- Point F for `us_bank_card_activity_pdf_v1`, by the PDF section of
+  [layout-verification.md](layout-verification.md).
 - Point F per layout, by [layout-verification.md](layout-verification.md), and its results.
-- A header and rows of a U.S. Bank export, values invented, to confirm its format.
-- Whether the real ledger already holds a Capital One bank account added without `--last4`. If so,
-  it cannot import `capital_one_bank_v1` (D-061), and a command to set the digits once needs approval.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for D-059, M6, D-060's plan, M7.1 and D-061 on 2026-11-09, used for them | **Must be renewed** for each later M7 slice |
+| Local commits on `feature/m2-review` | Approved for D-059, M6, D-060's plan, M7.1, D-061, M7.2 and M7.3 on 2026-11-09, used for them | **Must be renewed** for each later M7 slice |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |

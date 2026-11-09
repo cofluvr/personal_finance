@@ -963,3 +963,15 @@ what was last pushed from here.
 - Setup is verified on this Mac and Python 3.12.6 only. Dependency pins have no hashes.
 - A file's summary counts are as of its import. Only the run and account lines are final.
 - The full list is in [status.md](../status.md).
+
+## M6 slices
+
+M6 is D-059, complete on 2026-11-09.
+
+| Slice | Commit | Layouts | Breaks |
+|---|---|---|---|
+| D-059 | `64a4791` | The plan, J1 to J8 | |
+| M6.1 | `729e44b` | `capital_one_card_v1`, `capital_one_bank_v1` | 18 applied, 18 caught |
+| M6.2 | `15f5958` | `us_bank_v1`, and a fix to `capital_one_bank_v1` | 13 applied, 13 caught |
+| M6.3 | `8e70069` | `amex_card_v1` | 8 applied, 8 caught |
+| M6.4 | `3c19a70` | `bfsfcu_v1`, and one shared Debit/Credit agreement rule | 14 applied, 14 caught |

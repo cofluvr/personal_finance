@@ -320,7 +320,7 @@ the owner's format sample (D-060 point 2).
 |---|---|---|
 | M7.1 | Reading a PDF's text: pypdf, `pf pdf text`, W1 extended | Built, awaiting review |
 | M7.2 | U.S. Bank's card activity printout, `us_bank_card_activity_pdf_v1`. It states no period or balance (D-060, as amended) | Built, awaiting review |
-| M7.3 | U.S. Bank's CSV and PDF counting once | Not started |
+| M7.3 | U.S. Bank's CSV and PDF counting once, on D-006 unchanged, against a test-only CSV layout until the card CSV's header arrives | Built, awaiting review |
 | M7.4 | Several accounts in one statement | Not built: U.S. Bank's printout holds one, and each entry names its card |
 | M7.5 | Capital One's card statement, `capital_one_card_statement_v1` | Not built: waits for its structure |
 
@@ -357,6 +357,8 @@ does not wrap in this printout, so D5's joining is not built. D14's migration is
 | D14 | Migration 0019 works on a populated ledger, makes no account stale and is atomic on failure. [layout-verification.md](layout-verification.md) has the PDF steps, walked through on the fixture in `build/`. Every earlier criterion still passes |
 
 ### M7.3 acceptance criteria
+
+I7 is not needed: the formats' descriptions agree, so D-006 is not amended.
 
 | ID | Test |
 |---|---|

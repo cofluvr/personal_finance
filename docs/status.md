@@ -42,7 +42,8 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | **M6 overall** | **Complete.** Point F runs per layout before its first real import |
 | M7.1: reading PDF text | Built (D-060), awaiting the owner's review |
 | M7.2: U.S. Bank card activity printout, `us_bank_card_activity_pdf_v1` | Built (D-060, as amended), awaiting the owner's review |
-| M7.3 to M7.5 | See plan.md's M7 table |
+| M7.3: CSV and PDF counting once | Built on D-006 unchanged, against a test-only CSV layout (D-060) |
+| M7.4 and M7.5 | Not built: one card per printout, and no Capital One card PDF structure supplied |
 | M8 | Not started |
 
 ## What exists
