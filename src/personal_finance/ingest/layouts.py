@@ -1,7 +1,9 @@
 """Tested document layouts. See layouts.md for what each one promises.
 
-Both layouts here are invented for development. A layout's meaning never changes
-once used: a change in meaning needs a new layout_id, so that stored documents
+The synthetic layouts are invented for development. The institution layouts are
+written from the lead engineer's knowledge of each export, not from a sample, and stay
+unverified until a real file reconciles with its statement (D-059). A layout's meaning
+never changes once used: a change in meaning needs a new layout_id, so that stored documents
 keep the meaning they were imported under.
 """
 
@@ -102,27 +104,62 @@ def _parse_checking_row(cells: Mapping[str, str]) -> ParsedRow:
     return _finish(row, problems)
 
 
+def _debit_or_credit(debit_text: str, credit_text: str, problems: list[str]) -> int | None:
+    """Money out as negative cents from a positive debit, money in from a positive credit."""
+    debit = _amount(debit_text, problems)
+    credit = _amount(credit_text, problems)
+    if problems:
+        return None
+    if debit is not None and credit is not None:
+        problems.append("conflicting_amount")
+        return None
+    if (debit or 0) < 0 or (credit or 0) < 0:
+        problems.append("invalid_amount")
+        return None
+    if debit is not None:
+        return -debit
+    return credit
+
+
 def _parse_card_row(cells: Mapping[str, str]) -> ParsedRow:
     problems: list[str] = []
-    debit = _amount(cells["Debit"], problems)
-    credit = _amount(cells["Credit"], problems)
-
-    amount = None
-    if not problems:
-        if debit is not None and credit is not None:
-            problems.append("conflicting_amount")
-        elif (debit or 0) < 0 or (credit or 0) < 0:
-            problems.append("invalid_amount")
-        elif debit is not None:
-            amount = -debit
-        else:
-            amount = credit
-
+    amount = _debit_or_credit(cells["Debit"], cells["Credit"], problems)
     row = ParsedRow(
         posting_date=_date(cells["Date"], "%m/%d/%Y", problems),
         amount_cents=amount,
         description=cells["Description"].strip() or None,
         settlement_status="posted",
+    )
+    return _finish(row, problems)
+
+
+def _parse_capital_one_card_row(cells: Mapping[str, str]) -> ParsedRow:
+    problems: list[str] = []
+    amount = _debit_or_credit(cells["Debit"], cells["Credit"], problems)
+    row = ParsedRow(
+        transaction_date=_date(cells["Transaction Date"], "%Y-%m-%d", problems),
+        posting_date=_date(cells["Posted Date"], "%Y-%m-%d", problems),
+        amount_cents=amount,
+        description=cells["Description"].strip() or None,
+    )
+    return _finish(row, problems)
+
+
+_CAPITAL_ONE_BANK_DIRECTION = {"DEBIT": -1, "CREDIT": 1}
+
+
+def _parse_capital_one_bank_row(cells: Mapping[str, str]) -> ParsedRow:
+    problems: list[str] = []
+    direction = _CAPITAL_ONE_BANK_DIRECTION.get(cells["Transaction Type"].strip().upper())
+    if direction is None:
+        problems.append("invalid_direction")
+    amount = _amount(cells["Transaction Amount"], problems)
+    if amount is not None and amount < 0 and not problems:
+        problems.append("invalid_amount")
+    row = ParsedRow(
+        transaction_date=_date(cells["Transaction Date"], "%m/%d/%y", problems),
+        amount_cents=None if problems or amount is None else direction * amount,
+        description=cells["Transaction Description"].strip() or None,
     )
     return _finish(row, problems)
 
@@ -146,4 +183,33 @@ SYNTHETIC_CARD_V1 = Layout(
     pending_in_complete_coverage={"posting": False},
 )
 
-LAYOUTS = {layout.layout_id: layout for layout in (SYNTHETIC_CHECKING_V1, SYNTHETIC_CARD_V1)}
+# Capital One's card export. Card No. and Category stay in the raw cells, unread.
+CAPITAL_ONE_CARD_V1 = Layout(
+    layout_id="capital_one_card_v1",
+    parser_version="1",
+    columns=("Transaction Date", "Posted Date", "Card No.", "Description", "Category", "Debit", "Credit"),
+    parse_row=_parse_capital_one_card_row,
+    pending_in_complete_coverage={"transaction": False, "posting": False},
+)
+
+# Capital One's checking and savings export. Account Number and Balance stay in the raw
+# cells, unread: a balance is a person's observation, never transaction evidence (D-057).
+CAPITAL_ONE_BANK_V1 = Layout(
+    layout_id="capital_one_bank_v1",
+    parser_version="1",
+    columns=(
+        "Account Number",
+        "Transaction Description",
+        "Transaction Date",
+        "Transaction Type",
+        "Transaction Amount",
+        "Balance",
+    ),
+    parse_row=_parse_capital_one_bank_row,
+    pending_in_complete_coverage={"transaction": False},
+)
+
+LAYOUTS = {
+    layout.layout_id: layout
+    for layout in (SYNTHETIC_CHECKING_V1, SYNTHETIC_CARD_V1, CAPITAL_ONE_CARD_V1, CAPITAL_ONE_BANK_V1)
+}

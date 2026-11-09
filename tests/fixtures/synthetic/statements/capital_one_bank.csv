@@ -1,0 +1,6 @@
+Account Number,Transaction Description,Transaction Date,Transaction Type,Transaction Amount,Balance
+0000,Deposit from SYNTHETIC EMPLOYER PAYROLL,01/02/26,Credit,1850.00,2850.00
+0000,Debit Card Purchase - SYNTHETIC MARKET,01/06/26,Debit,23.50,2826.50
+0000,Debit Card Purchase - SYNTHETIC MARKET,01/06/26,Debit,23.50,2803.00
+0000,Withdrawal to SYNTHETIC CARD PAYMENT,01/20/26,Debit,250.00,2553.00
+0000,Monthly Interest Paid,01/31/26,Credit,0.42,2553.42

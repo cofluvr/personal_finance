@@ -288,7 +288,7 @@ unverified until D-059 point F passes on one real file of it.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M6.1 | Capital One: `capital_one_card_v1` and `capital_one_bank_v1` | Not started |
+| M6.1 | Capital One: `capital_one_card_v1` and `capital_one_bank_v1` | Built, awaits review |
 | M6.2 | U.S. Bank: `us_bank_v1`, its CSV activity list | Not started |
 | M6.3 | American Express: `amex_card_v1` | Not started |
 | M6.4 | BFSFCU | Waits for a redacted header (D-059 point E) |
