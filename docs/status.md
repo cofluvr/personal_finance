@@ -26,8 +26,10 @@ Last updated: 2026-11-08. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | **M3 overall** | **Complete and accepted** |
 | M4.1: the 32,766-variable limit | Accepted (D-057) |
 | M4.2: balance observations and statement reconciliation | Accepted (D-057) |
-| M4.3: monthly reports with disclosures | Built, awaiting acceptance (D-013, D-057) |
-| M4.4 to M8 | Not started |
+| M4.3: monthly reports with disclosures | Accepted (D-013, D-057) |
+| M4.4: the 100,000-transaction benchmark | Built, awaiting acceptance (D-057) |
+| **M4 overall** | **Built. Complete once M4.4 is accepted** |
+| M5 to M8 | Not started |
 
 ## What exists
 
@@ -124,7 +126,9 @@ The security controls proposal is **not applied** and provides no protection
 ## Reconciliation measurements
 
 In [benchmarks.md](benchmarks.md). Reconciliation is quadratic in fully overlapping files, in
-distinct spellings per block, and in the units of a group a decision touches.
+distinct spellings per block, and in the units of a group a decision touches. On the
+100,000-transaction shape every report runs below two seconds, and each write spends about 0.9s
+rewriting 20,000 match outcomes (D-057).
 
 ## Known limitations
 

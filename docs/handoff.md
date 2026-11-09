@@ -1,11 +1,11 @@
-# Session Handoff: M4.3 Built, Awaiting Acceptance
+# Session Handoff: M4.4 Built, Awaiting Acceptance
 
 For a fresh session. Written 2026-11-08. **M1, M2 and M3 are complete and accepted.** The owner
 approved the M4 plan, D-057 in [decisions.md](decisions.md), with the lead engineer's
-recommendations, including points A to E. M4.1, the 32,766-variable limit, and M4.2, balance
-observations and statement reconciliation, were accepted as built. **M4.3, monthly reports with
-disclosures, is built and awaits acceptance.** M4.4, the 100,000-transaction benchmark, needs its
-own approval. Slices and acceptance criteria are in [plan.md](plan.md).
+recommendations, including points A to E. M4.1 to M4.3 (the variable limit, balance observations
+and monthly reports) were accepted as built. **M4.4, the 100,000-transaction benchmark, is built and
+awaits acceptance, which completes M4.** The next milestone is M5, the real-data gate, which needs
+its own plan as D-058. Slices and acceptance criteria are in [plan.md](plan.md).
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -32,8 +32,8 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`: it records M4.3, built. Earlier markers are in the archive |
-| Latest gating run | Full suite, 1881 passed, exit code 0, gating the commit recording M4.3 |
+| Latest commit | Run `git log -1`: it records M4.4, built. Earlier markers are in the archive |
+| Latest gating run | Full suite, 1881 passed, exit code 0, gating the commit recording M4.4 |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -51,9 +51,14 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 
 Then only what the task needs:
 
-- For building M4.4: D-057 in [decisions.md](decisions.md), recommendation 8 and criteria Z1 to
-  Z6, PRD-backend §20, D-034 in [decisions-d001-d052.md](decisions-d001-d052.md),
-  [benchmarks.md](benchmarks.md), and `tests/benchmarks/measure_reconciliation.py`.
+- For planning M5: its row in [plan.md](plan.md), PRD-backend §19 and §21, D-002, D-017, D-019
+  and D-025 in [decisions-d001-d052.md](decisions-d001-d052.md), and
+  [security-controls-proposal.md](security-controls-proposal.md), which stays unapplied until the
+  owner approves a plan. Once M4.4 is accepted, move D-057's full text to
+  [decisions-d001-d052.md](decisions-d001-d052.md) before writing D-058.
+- For changes to M4.4: `scale_ledger` and `measure_scale` in
+  `tests/benchmarks/measure_reconciliation.py` (`--scale`), the M4.4 section of
+  [benchmarks.md](benchmarks.md), and "How M4.4 was implemented" under D-057.
 - For changes to M4.3: `reports/monthly.py`, `IncomeAndSpendingTally` in `reports/totals.py`,
   `run_report_monthly` and `print_month` in `cli.py`, `tests/scenarios/test_monthly_report.py`,
   the `outcome()` of both order tests, and "How M4.3 was implemented" under D-057.
@@ -100,6 +105,9 @@ Pitfalls that recurred across M1 to M3.4:
   that migration 0001 already refuses. Read the table's CHECKs before designing for a state.
 - **New command groups** need adding to the test `Ledger.run` helper, which inserts `--db` after
   the group's words (`report` was added in M4.3).
+- **Name benchmark rows by stable keys.** M4.4's first runs bound records of the wrong account
+  through an external ID repeated across accounts, then classified a randomly chosen matched side,
+  which the product rightly refused. Key by account and external ID, never by generated ID order.
 - **Benchmarks** must be able to reach the cost they claim to measure. Three documents, not two, are
   needed for a confirmation to link anything.
 - **Shell.** zsh has no `PIPESTATUS`, so `pytest | tail && git commit` gates on `tail`: it
@@ -179,18 +187,19 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Acceptance of M4.3 as built, including the choices under "How M4.3 was implemented" in D-057,
-  above all the `no date` line left out.
-- Approval of M4.4, the 100,000-transaction benchmark and provisional resource targets.
+- Acceptance of M4.4 as built, including the choices under "How M4.4 was implemented" in D-057,
+  which completes M4.
+- A plan for M5, the real-data gate, as D-058, when asked.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved through M4.3 | **Must be renewed** for anything further |
+| Local commits on `feature/m2-review` | Approved through M4.4 | **Must be renewed** for anything further |
 | M1, M2 and M3 | Accepted as built | None |
-| M4 | Plan approved (D-057). M4.1 and M4.2 accepted as built. M4.3 built, awaiting acceptance | Acceptance of M4.3, and approval of M4.4 |
+| M4 | Plan approved (D-057). M4.1 to M4.3 accepted as built. M4.4 built, awaiting acceptance | Acceptance of M4.4 |
+| M5 | Not planned | A plan as D-058, and its approval, before any of it is built |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -218,12 +227,11 @@ branch is feature/m2-review, the working tree is clean, and run the test suite w
 code before changing anything. Do not contact GitHub.
 
 Next task, from the owner:
-[PASTE IT HERE: for example, build M4.4, the 100,000-transaction benchmark]
+[PASTE IT HERE: for example, propose a plan for M5, the real-data gate]
 
-Task: do only what the owner asks. A slice of M4 needs the owner's approval before it is built,
-under D-057. A new milestone, such as M5, needs its own plan as a new decision, D-058, and
-approval before any of it is built. Do not reopen D-042 to D-057 unless you find a concrete
-contradiction.
+Task: do only what the owner asks. A new milestone, such as M5, needs its own plan as a new
+decision, D-058, and approval before any of it is built. Each slice of it then needs its own
+approval. Do not reopen D-042 to D-057 unless you find a concrete contradiction.
 
 Follow the working principles in docs/handoff.md, and its "Keeping these docs small" rules when
 you update the docs. Pushing needs my explicit approval each time. No network, no new
