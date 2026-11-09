@@ -1,4 +1,4 @@
-# Session Handoff: M6.1 to M6.3 Built Unattended, Awaiting Review
+# Session Handoff: M6 Reviewed, M6.4 Waits for Its Header
 
 For a fresh session. Written 2026-11-09. **M1 to M5 are complete and accepted.** The owner directed
 M6 on 2026-11-09, to be built unattended overnight: D-059 in [decisions.md](decisions.md). **M6.1 to
@@ -14,9 +14,9 @@ where the owner's directions met earlier rules, and what was done instead.
 | M6.2 | `15f5958` | `us_bank_v1`, and a fix to `capital_one_bank_v1` | 13 applied, 13 caught |
 | M6.3 | `8e70069` | `amex_card_v1` | 8 applied, 8 caught |
 
-**For the owner's review, in order:** D-059 points B (identity by position not adopted) and C (fees
-and transfer groups not built); the assumptions under each layout in [layouts.md](layouts.md),
-above all `amex_card_v1`'s sign; then point F, run once per layout before any real import.
+**The owner approved D-059's points A to F on 2026-11-09.** Next: M6.4, BFSFCU, once its export's
+header and two rows reach this repository (they had not yet), and the owner's point F run per
+layout, by [layout-verification.md](layout-verification.md), before any real import.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -213,9 +213,9 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Review of D-059 and of M6.1 to M6.3, built unattended on the owner's direction.
-- D-059 point F on one real file of each layout, the owner's step, before any real import.
-- For M6.4: the header row of a BFSFCU export and two invented rows in its format.
+- For M6.4: the header row of a BFSFCU export and two rows in its format, values invented.
+- Point F per layout, by [layout-verification.md](layout-verification.md), and its results.
+- Acceptance of M6.1 to M6.3 once point F passes for them.
 - Pushing. Not authorized from here.
 
 ## Permissions
@@ -224,7 +224,7 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 |---|---|---|
 | Local commits on `feature/m2-review` | Approved for D-059 and M6 on 2026-11-09, used for them | **Must be renewed** for changes after the review |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
-| M6 | D-059 directed by the owner. M6.1 to M6.3 built unattended. M6.4 not built | Review of D-059 points A to F and M6.1 to M6.3. M6.4 waits for its header |
+| M6 | D-059 approved with points A to F. M6.1 to M6.3 built. M6.4 approved, waits for its header | Build M6.4 once the header arrives |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |

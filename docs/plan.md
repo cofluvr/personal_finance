@@ -282,16 +282,17 @@ and `/Volumes/CommonCentsBackup`, and reported every step verified. M6 is planne
 
 ## M6 plan
 
-Directed by the owner on 2026-11-09 as D-059, to be built unattended, each slice gated on the full
-suite and committed locally. Points A to F of D-059 await the owner's review. Every layout is
-unverified until D-059 point F passes on one real file of it.
+Directed by the owner on 2026-11-09 as D-059, built unattended, each slice gated on the full suite
+and committed locally. The owner approved points A to F the same day. Every layout is unverified
+until D-059 point F passes on one real file of it, by the steps in
+[layout-verification.md](layout-verification.md).
 
 | Slice | Scope | Status |
 |---|---|---|
 | M6.1 | Capital One: `capital_one_card_v1` and `capital_one_bank_v1` | Built, awaits review |
 | M6.2 | U.S. Bank: `us_bank_v1`, its CSV activity list | Built, awaits review |
 | M6.3 | American Express: `amex_card_v1` | Built, awaits review |
-| M6.4 | BFSFCU | Waits for a redacted header (D-059 point E) |
+| M6.4 | BFSFCU | Approved, waits for its header and two rows (D-059 point E) |
 
 ### M6 acceptance criteria, for each layout
 
