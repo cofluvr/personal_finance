@@ -1,4 +1,4 @@
-# Session Handoff: M6 Complete, D-060 Awaiting Review
+# Session Handoff: M7.1 Built, Awaiting Review
 
 For a fresh session. Written 2026-11-09. **M1 to M6 are complete.** M6, the first real CSV layouts,
 is D-059 in [decisions-d001-d052.md](decisions-d001-d052.md), with points A to F as the owner approved them. Its
@@ -13,10 +13,11 @@ real exports, keeping none of their values, and the Capital One bank and U.S. Ba
 | M6.3 | `8e70069` | `amex_card_v1` | 8 applied, 8 caught |
 | M6.4 | `3c19a70` | `bfsfcu_v1`, and one shared Debit/Credit agreement rule | 14 applied, 14 caught |
 
-**Next:** the owner's review of D-060, the M7 plan (text PDF statements, and CSV and PDF counting
-once), drafted on 2026-11-09 and committed locally. Nothing of M7 is built. Its first slice needs the
-owner's D-020 decision on pypdf, the first runtime dependency. Separately, the owner's point F run
-per M6 layout, by [layout-verification.md](layout-verification.md), before its first real import.
+**M7 is under way.** D-060, the M7 plan, was approved on 2026-11-09, with point 1 amended to fence
+pypdf's JBIG2 decoder. M7.1, reading PDF text with pypdf and `pf pdf text`, is built and committed
+locally. **Next:** the owner's review of M7.1, and the U.S. Bank statement's format (D-060 point 2),
+which M7.2 starts from. Separately, the owner's point F run per M6 layout, by
+[layout-verification.md](layout-verification.md), before its first real import.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -44,12 +45,12 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
 | Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance `c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e`, its docs `7a0d446`, M5.5 `4548b12`, its docs `df53e65`, and M5's acceptance the commit after it |
-| Latest gating run | Full suite, exit code 0, 2252 passed in 7 minutes, before and after D-060 (docs only) |
+| Latest gating run | Full suite, exit code 0, on M7.1: see its commit message. About 7 minutes |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
 | Real ledger's image | `~/CommonCents.sparsebundle`, mounted by the owner only when needed at `/Volumes/CommonCents`, with the ledger folder `/Volumes/CommonCents/ledger` (`0700`, the owner's). It holds the owner's statements: never read, list or search it. Run diskutil, hdiutil or `stat` on it only with the owner's approval each time. Checked 2026-11-09: encrypted as an image file (`image-encrypted` true), its APFS volume not (`Encryption` false), ownership honoured, so the gate accepts it. The owner ran the readiness checklist on it on 2026-11-09, so the real ledger lives at `/Volumes/CommonCents/ledger/ledger.db` |
-| Runtime dependencies | None |
+| Runtime dependencies | pypdf 6.21.2, pinned by hash in `requirements.txt`, already in `.venv` (D-060 point 1, as amended) |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
 | Entry point | `bin/pf`, using this checkout's `.venv`. An installed `pf` script also works |
 | Data | Synthetic only. Keep databases outside the repository. Institution fixtures in `tests/fixtures/synthetic/statements` are invented |
@@ -80,7 +81,8 @@ Then only what the task needs:
 - For changes to M5.5: `tests/unit/test_no_network_imports.py`, [real-data-readiness.md](real-data-readiness.md),
   "Network and dependencies" in [status.md](status.md), and "How M5.5 was implemented" under D-058.
 - For M7: D-060, its acceptance criteria in [plan.md](plan.md), [layouts.md](layouts.md),
-  `ingest/` (`layouts.py`, `csv_reader.py`, `pipeline.py`), `reconcile/cross_document.py`
+  `ingest/` (`pdf_reader.py`, `layouts.py`, `csv_reader.py`, `pipeline.py`),
+  `tests/unit/test_pdf_reader.py`, `tests/synthetic_pdf.py`, `reconcile/cross_document.py`
   (`_match_exact` and `_coverage_gap`), and `tests/unit/test_no_network_imports.py`. D-005, D-006,
   D-020, D-024, D-026 and D-027 in the full text when a point names them.
 - For changes to M6: D-059, [layouts.md](layouts.md), `ingest/layouts.py`,
@@ -217,9 +219,10 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Review of D-060, the M7 plan, and the D-020 decision on pypdf (its point 1), before M7.1.
-- Whether U.S. Bank's statement asks for a password or shows as secured (D-060 point 2c), before
-  M7.1.
+- Review of M7.1.
+- For M7.2, U.S. Bank's statement format, by D-060 point 2 a, b, d and e: the lines
+  `bin/pf pdf text` prints for one statement, values invented, whether it holds several accounts,
+  and matching CSV and PDF transactions. Point 2c is answered: not secured.
 - Point F per layout, by [layout-verification.md](layout-verification.md), and its results.
 - A header and rows of a Capital One bank and a U.S. Bank export, values invented, to confirm
   those two formats.
@@ -229,12 +232,12 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for D-059 and M6, and for D-060's plan, on 2026-11-09, used for them | **Must be renewed** for each M7 slice |
+| Local commits on `feature/m2-review` | Approved for D-059, M6, D-060's plan and M7.1 on 2026-11-09, used for them | **Must be renewed** for each later M7 slice |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
-| Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
-| Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
+| Installing dependencies | Approved for the declared dependencies and build requirements, and on 2026-11-09 for pypdf 6.21.2 | Ask for anything new, an upgrade of pypdf included |
+| Network access | Approved for the clean-install dependencies, and on 2026-11-09 for pypdf's release list and install. Used, and now closed | Ask for any use |
 
 Never approved, and not to be assumed:
 

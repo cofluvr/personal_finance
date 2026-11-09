@@ -79,7 +79,7 @@ and keep its index line.
 | D-057 | M4 plan: balances and reports — Approved, implemented and accepted in M4 |
 | D-058 | M5 plan: the real-data gate — Approved, implemented and accepted in M5 |
 | D-059 | M6 plan: first real CSV layouts — Approved with points A to F, implemented in M6 |
-| D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Proposed |
+| D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, point 1 amended, M7.1 built |
 
 ## Rules in brief
 
@@ -171,6 +171,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Real ledger location | Refused inside a git work tree or a synced folder, through a symbolic link, not owned by the user, or open to group or others. Checked, never repaired. Its imports never come from a git work tree | D-019, D-058 |
 | Originals | A real ledger keeps each new document's bytes in `originals/` under its SHA-256, `0400`, before the import commits. Never overwritten or deleted. Identity never reads it | D-017, D-058 |
 | Encrypted volume | A real ledger's folder is inside, never at the root of, a mounted disk image whose APFS volume honours ownership, and which diskutil reports encrypted or hdiutil reports encrypted as an image. FileVault on the startup volume does not count. Any other answer refuses. Temporary files stay in memory | D-002, D-058 |
+| PDF text | pypdf alone reads it, pinned by hash, imported by `ingest/pdf_reader.py` only, with `jbig2dec` unset and its log silenced. W1 parses pypdf too, allowing only its JBIG2 decoder's `subprocess` | D-020, D-060 |
 | Backups | A new folder, on a mounted volume other than a real ledger's and gated as its folder is, holding the ledger, its referenced originals and a manifest of hashes, sizes, versions and a logical digest. Restore never overwrites, and checks every file, integrity, foreign keys, schema and digest first | D-058 |
 
 ## Not yet decided
@@ -179,7 +180,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-060 M7 plan: text PDF statements, and CSV and PDF counting once — Proposed
+## D-060 M7 plan: text PDF statements, and CSV and PDF counting once — Approved, point 1 amended, M7.1 built
 
 Proposed on 2026-11-09, for the owner's review. Delivers plan.md's M7 row (text PDFs and CSV-to-PDF
 matching, "same activity in both formats counts once") against PRD-backend §5 (statements with
@@ -355,3 +356,49 @@ day as covered (D-027); IDs from PDFs, and ID-bearing rows pairing by count; det
 sections beyond the balances and the period (rewards, payment due, minimum payment, year-to-date
 totals), which stay unread; investment and loan statements; fee parents and split transfers (D-059
 point C); the local UI (M8).
+
+**The owner's review, on 2026-11-09.** D-060 approved, with pypdf as the dependency under D-020, and
+M7.1 approved to build and commit locally. U.S. Bank's statement opens with no password and Preview
+shows it not secured (point 2c), so point 1 stands.
+
+**Point 1, as amended the same day.** The newest pypdf release at least two weeks old, 6.21.2,
+failed point 1's own test: its `filters.py` imports `subprocess`, which its JBIG2 image decoder uses
+to run `jbig2dec` when that program is on the path. The owner chose to adopt it with a fenced
+allowance rather than look for an older release or write a standard-library reader: W1 allows
+`subprocess` in pypdf's `filters.py` alone, and only as `run` calls inside its JBIG2 decoder, and
+the reader runs pypdf with `jbig2dec` unset, so the program never runs. `jbig2dec` is not installed
+on the owner's Mac.
+
+**How M7.1 was implemented:**
+
+- **The dependency.** pypdf 6.21.2, uploaded 2026-10-21, BSD-3-Clause, pure Python, needing
+  `typing_extensions` only below Python 3.11, all confirmed from PyPI's metadata. Pinned with its
+  wheel's SHA-256 in `requirements.txt`, installed with `--require-hashes --no-deps`, and declared
+  in `pyproject.toml`. The network was used for PyPI's release list and that one install, and is
+  closed.
+- **`ingest/pdf_reader.py`** returns each page's lines in pypdf's layout mode, which keeps columns
+  placed apart, where plain mode joins them with one space. Trailing spaces and blank lines are
+  dropped, and a blank page keeps its place. An encrypted PDF is refused before any page is read,
+  even one that opens with an empty password. Any error inside pypdf is `unreadable_pdf`, and a PDF
+  whose pages hold no text is `no_text_layer`. `EXTRACTOR_VERSION` names the pypdf release, for the
+  stored parser version from M7.2.
+- **pypdf's log.** Its warnings can quote a file's bytes, such as `invalid pdf header: b'Date,'`,
+  and Python prints them to stderr when no handler takes them. The reader gives pypdf's logger a
+  null handler and stops it propagating. Its `warnings.warn` calls are API deprecations only, so
+  nothing filters warnings. D-037's source rule refuses `logging` in `src/`, so it now allows it in
+  `pdf_reader.py` alone, and a test pins that its only uses are that null handler and propagation,
+  so no record is ever written.
+- **The launcher tests** (D-038) gave each copied checkout a standard-library-only environment, to
+  show the application needed no package. Each now gets the declared runtime dependencies copied
+  from the project's `.venv`, with no network, showing it needs nothing more.
+- **`pf pdf text FILE`** prints each page's lines, escaped as D-037, opening no ledger and writing
+  nothing. A failure prints only its code, with exit code 2.
+- **Tests.** PDFs are written by `tests/synthetic_pdf.py`, standard library only. The JBIG2 fence is
+  shown with `subprocess.run` replaced by a failure: under a configuration naming a program, the
+  decoder runs it without the reader and refuses inside it, and a PDF holding a JBIG2 image reads
+  without running anything. pypdf's text extraction never decodes an image, so no file reaches the
+  decoder through the reader: the promised test "fails as `unreadable_pdf`" became these two.
+  pytest attaches its log capture to pypdf's logger, so the log is tested by running `bin/pf` in a
+  subprocess, whose stderr must be the error line alone.
+- **Moved to M7.2:** D2's import of a failing PDF and D4's stored parser version, since no PDF layout
+  exists to import with.

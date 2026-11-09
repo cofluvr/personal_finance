@@ -46,6 +46,7 @@ from personal_finance.db.real_ledger import (
 from personal_finance.ingest.coverage import DATE_BASES, declare_complete
 from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import LAYOUTS
+from personal_finance.ingest.pdf_reader import read_pdf_lines
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.money import format_cents
 from personal_finance.reconcile.apply import STATE_ACTIVE, reconcile_account, stale_accounts
@@ -914,7 +915,30 @@ def build_parser() -> argparse.ArgumentParser:
     balance_undo.add_argument("--observation", required=True, dest="observation_id",
                               help="an observation ID from balance list")
     balance_undo.add_argument("--token", required=True, help="its token from balance list")
+
+    pdf = commands.add_parser("pdf", help="read a PDF statement without importing it")
+    pdf_commands = pdf.add_subparsers(dest="pdf_command", required=True)
+    pdf_text = pdf_commands.add_parser(
+        "text", help="print a PDF's text as an import would read it. Opens no ledger, writes nothing"
+    )
+    pdf_text.add_argument("file", type=Path, metavar="FILE")
+    pdf_text.set_defaults(handler=run_pdf_text)
     return parser
+
+
+def run_pdf_text(args) -> int:
+    """Each page's lines, as a PDF layout reads them, so their structure can be described."""
+    try:
+        pages = read_pdf_lines(args.file.read_bytes())
+    except OSError:
+        raise CommandError("the file could not be read: unreadable_file") from None
+    except ImportFailure as failure:
+        raise CommandError(f"the file could not be read as a PDF: {failure.code}") from None
+    for number, lines in enumerate(pages, start=1):
+        print(f"Page {number}")
+        for line in lines:
+            print(f"  {shown(line)}")
+    return 0
 
 
 def open_ledger(path: Path, *, read_only: bool = False) -> sqlite3.Connection:

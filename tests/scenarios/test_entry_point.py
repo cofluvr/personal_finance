@@ -1,7 +1,8 @@
 """The pf launcher, run for real against a copy of the code (D-038).
 
-Each copy gets its own stdlib-only environment, so the application is shown to need no
-installed packages, and the project's .venv is neither used nor changed.
+Each copy gets its own environment holding only the declared runtime dependencies, copied from
+the project's .venv with no network, so the application is shown to need nothing more, and the
+project's .venv is neither used nor changed.
 """
 
 import importlib
@@ -27,7 +28,21 @@ def checkout(parent: Path, *, environment: bool = True) -> Path:
     shutil.copytree(ROOT / "src", root / "src", ignore=shutil.ignore_patterns("__pycache__"))
     if environment:
         venv.create(root / ".venv", with_pip=False)
+        add_runtime_dependencies(root / ".venv")
     return root
+
+
+def add_runtime_dependencies(environment: Path) -> None:
+    """Copy each package pyproject.toml declares, at its pinned version, from the project's .venv."""
+    declared = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
+    version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    installed = ROOT / ".venv" / "lib" / version / "site-packages"
+    target = environment / "lib" / version / "site-packages"
+    for requirement in declared:
+        name, pinned = requirement.split("==")
+        for entry in (name, f"{name}-{pinned}.dist-info"):
+            shutil.copytree(installed / entry, target / entry,
+                            ignore=shutil.ignore_patterns("__pycache__"))
 
 
 def pf(launcher, *arguments, cwd):

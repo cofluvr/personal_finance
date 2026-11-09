@@ -311,25 +311,28 @@ until D-059 point F passes on one real file of it, by the steps in
 
 ## M7 plan
 
-Proposed on 2026-11-09 as D-060, for the owner's review. Nothing is built until it is approved, and
-then each slice separately. M7.1 needs the owner's D-020 decision on the dependency first, and
-M7.2 the owner's format sample (D-060 point 2).
+Approved on 2026-11-09 as D-060, with pypdf as the dependency and point 1 amended for its JBIG2
+decoder. Each slice needs its own approval. M7.1 was approved and built the same day. M7.2 waits for
+the owner's format sample (D-060 point 2).
 
 | Slice | Scope | Status |
 |---|---|---|
-| M7.1 | Reading a PDF's text: pypdf, `pf pdf text`, W1 extended | Proposed |
-| M7.2 | U.S. Bank's statement, `us_bank_statement_v1`, with its period, balances and in-document check | Proposed. Waits for the format sample |
-| M7.3 | U.S. Bank's CSV and PDF counting once | Proposed |
+| M7.1 | Reading a PDF's text: pypdf, `pf pdf text`, W1 extended | Built, awaiting review |
+| M7.2 | U.S. Bank's statement, `us_bank_statement_v1`, with its period, balances and in-document check | Waits for the format sample |
+| M7.3 | U.S. Bank's CSV and PDF counting once | Not started |
 | M7.4 | Several accounts in one statement | Only if U.S. Bank's statement holds them |
-| M7.5 | Capital One's card statement, `capital_one_card_statement_v1` | Proposed |
+| M7.5 | Capital One's card statement, `capital_one_card_statement_v1` | Not started |
 
 ### M7.1 acceptance criteria
+
+D2's import of a failing PDF and D4's stored parser version need a PDF layout, so they are tested
+in M7.2 (D-060, "How M7.1 was implemented").
 
 | ID | Test |
 |---|---|
 | D1 | The reader returns each page's lines in order from a PDF generated in the test from known lines, and `pf pdf text` prints them with page numbers, escaped as D-037, writing nothing and opening no ledger |
 | D2 | An encrypted PDF, one with no text, bytes that are not a PDF and a truncated PDF fail as `encrypted_pdf`, `no_text_layer` or `unreadable_pdf`. An import of one imports nothing and goes on to the next file |
-| D3 | W1 parses the installed pypdf modules with the same refusals, and only `ingest/pdf_reader.py` imports pypdf |
+| D3 | W1 parses the installed pypdf modules with the same refusals, allowing only `subprocess` in its JBIG2 decoder, which the reader never lets run, and only `ingest/pdf_reader.py` imports pypdf |
 | D4 | pypdf is pinned by version and hash and declared in `pyproject.toml`, the stored parser version names its version, and [status.md](status.md) states the dependency once. Every earlier criterion still passes |
 
 ### M7.2 acceptance criteria, for each PDF layout

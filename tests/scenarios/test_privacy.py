@@ -407,6 +407,10 @@ def source_trees():
         yield path, ast.parse(path.read_text(encoding="utf-8"))
 
 
+# The PDF reader imports logging only to silence pypdf, whose warnings can quote a file (D-060).
+SILENCING_PYPDF = ("pdf_reader.py", "logging")
+
+
 def test_source_rule_no_logging_or_diagnostic_modules():
     """Supplements the behaviour above. It does not replace it."""
     banned = {"logging", "traceback", "faulthandler", "cgitb"}
@@ -420,7 +424,22 @@ def test_source_rule_no_logging_or_diagnostic_modules():
             else:
                 continue
             found += [(path.name, name) for name in names if name.split(".")[0] in banned]
-    assert found == []
+    assert found == [SILENCING_PYPDF]
+
+
+def test_the_pdf_reader_uses_logging_only_to_silence_pypdf():
+    """Its one logger is pypdf's, given a handler that writes nothing and kept from the root, so
+    no record from it is ever written. Any other use of logging fails here."""
+    tree = ast.parse((SOURCE / "ingest" / "pdf_reader.py").read_text(encoding="utf-8"))
+    uses = sorted(ast.unparse(node) for node in ast.walk(tree)
+                  if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                  and node.value.id in ("logging", "_pypdf_log"))
+    assert uses == ["_pypdf_log.addHandler", "_pypdf_log.propagate", "logging.NullHandler",
+                    "logging.getLogger"]
+    pypdf_log = logging.getLogger("pypdf")
+    assert pypdf_log.propagate is False
+    assert any(type(handler) is logging.NullHandler for handler in pypdf_log.handlers)
+    assert "logging.getLogger('pypdf')" in ast.unparse(tree)
 
 
 def test_source_rule_only_the_cli_prints():

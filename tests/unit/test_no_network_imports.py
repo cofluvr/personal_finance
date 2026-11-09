@@ -4,12 +4,17 @@ Every module under src/ is parsed, not run. Point 9's modules are refused, with 
 network or run another program, and `os`'s calls that run a program. Dynamic imports are refused
 whatever they name, since a name built at run time cannot be checked. The one allowance is
 `subprocess` in db/volume_probes.py, for `diskutil` and `hdiutil`.
+
+pypdf, the one runtime dependency, is parsed the same way (D-060 point 1). Its one allowance is
+`subprocess` in its filters.py, used only by its JBIG2 decoder to run jbig2dec, which
+ingest/pdf_reader.py never lets it run.
 """
 
 import ast
 import shutil
 from pathlib import Path
 
+import pypdf
 import pytest
 
 import personal_finance
@@ -28,15 +33,17 @@ PROGRAM_RUNNING_OS_CALLS = {
     "spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe",
 }
 ALLOWED = {("db/volume_probes.py", "subprocess")}
+PYPDF_FOLDER = Path(pypdf.__file__).parent
+PYPDF_ALLOWED = {("filters.py", "subprocess")}
 
 
-def refused_uses(source: str, relative_path: str) -> list[str]:
+def refused_uses(source: str, relative_path: str, allowed=ALLOWED) -> list[str]:
     """Each refused import, dynamic import or program-running `os` call in one module's source."""
     found = []
 
     def refuse_module(module_name: str, line: int) -> None:
         top_level = module_name.split(".")[0]
-        if top_level in REFUSED_MODULES and (relative_path, top_level) not in ALLOWED:
+        if top_level in REFUSED_MODULES and (relative_path, top_level) not in allowed:
             found.append(f"{relative_path}:{line} imports {module_name}")
 
     tree = ast.parse(source)
@@ -69,12 +76,12 @@ def refused_uses(source: str, relative_path: str) -> list[str]:
     return found
 
 
-def refused_uses_under(package_folder: Path) -> tuple[list[str], list[str]]:
+def refused_uses_under(package_folder: Path, allowed=ALLOWED) -> tuple[list[str], list[str]]:
     found, modules = [], []
     for path in sorted(package_folder.rglob("*.py")):
         relative_path = path.relative_to(package_folder).as_posix()
         modules.append(relative_path)
-        found += refused_uses(path.read_text(encoding="utf-8"), relative_path)
+        found += refused_uses(path.read_text(encoding="utf-8"), relative_path, allowed)
     return found, modules
 
 
@@ -145,3 +152,40 @@ def test_harmless_imports_pass_as_a_control(tmp_path):
     module.write_text(module.read_text()
                       + "\nimport os, json, sqlite3, hashlib\nfrom os import path\nos.fspath\n")
     assert refused_uses_under(copy) == ([], refused_uses_under(PACKAGE_FOLDER)[1])
+
+
+def test_pypdf_reaches_no_network_and_runs_no_program_outside_its_allowance():
+    found, modules = refused_uses_under(PYPDF_FOLDER, PYPDF_ALLOWED)
+    assert found == []
+    assert {"filters.py", "_reader.py", "_page.py"} <= set(modules)
+
+
+def test_without_its_allowance_pypdf_is_refused_as_the_control():
+    found, _ = refused_uses_under(PYPDF_FOLDER, allowed=set())
+    assert [entry.split(":")[0] for entry in found] == ["filters.py"]
+
+
+def test_pypdfs_allowance_is_only_its_jbig2_decoder_running_a_program():
+    """Every use of subprocess in filters.py is a `run` inside JBIG2Decode, so a release that
+    uses it anywhere else fails here and is reviewed before it is adopted."""
+    tree = ast.parse((PYPDF_FOLDER / "filters.py").read_text(encoding="utf-8"))
+    decoder = next(node for node in ast.walk(tree)
+                   if isinstance(node, ast.ClassDef) and node.name == "JBIG2Decode")
+
+    def subprocess_uses(root):
+        return [node for node in ast.walk(root) if isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name) and node.value.id == "subprocess"]
+
+    assert [use.attr for use in subprocess_uses(decoder)] == ["run", "run"]
+    assert len(subprocess_uses(tree)) == 2
+
+
+def test_only_the_pdf_reader_imports_pypdf():
+    importers = []
+    for path in sorted(PACKAGE_FOLDER.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names = ([alias.name for alias in node.names] if isinstance(node, ast.Import)
+                     else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            if any(name.split(".")[0] == "pypdf" for name in names):
+                importers.append(path.relative_to(PACKAGE_FOLDER).as_posix())
+    assert importers == ["ingest/pdf_reader.py"]

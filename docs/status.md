@@ -40,7 +40,9 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M6.3: American Express card | Complete (D-059). Format confirmed |
 | M6.4: BFSFCU | Complete (D-059). Format confirmed |
 | **M6 overall** | **Complete.** Point F runs per layout before its first real import |
-| M7 and M8 | Not started |
+| M7.1: reading PDF text | Built (D-060), awaiting the owner's review |
+| M7.2 to M7.5 | Not started. M7.2 waits for the U.S. Bank statement's format |
+| M8 | Not started |
 
 ## What exists
 
@@ -122,7 +124,7 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `review transfers`, `review transfer match`, `review transfer one-sided`, `review transfer show`,
   `review transfer undo`, `totals`, `report monthly`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
-  `backup verify`, `backup restore`, run
+  `backup verify`, `backup restore`, `pdf text`, run
   through the `bin/pf` launcher (D-038).
 
 ## What does not exist yet
@@ -130,7 +132,8 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 Five institution layouts exist, `capital_one_card_v1`, `capital_one_bank_v1`, `us_bank_v1`,
 `amex_card_v1` and `bfsfcu_v1`, on invented fixtures. The Capital One card, Amex and BFSFCU formats
 are confirmed from real exports, and the Capital One bank and U.S. Bank formats are not. None is to
-import into the real ledger until D-059 point F passes on a real file of it. PDFs wait for M7. Fees linked to a parent and transfer groups are not built (D-059 point C).
+import into the real ledger until D-059 point F passes on a real file of it. A PDF's text can be
+read with `pf pdf text`, but no PDF layout exists, so no PDF imports until M7.2. Fees linked to a parent and transfer groups are not built (D-059 point C).
 The M5 gate is open: the owner ran [real-data-readiness.md](real-data-readiness.md) on 2026-11-09, and
 real data belongs only in a real ledger on the encrypted image, never in a synthetic one. Only candidate items, decision conflicts and automatically merged transactions
 can be acted on.
@@ -144,11 +147,17 @@ Stated here once (D-058 point 9, W2).
   `/usr/sbin/diskutil info -plist` and `/usr/bin/hdiutil info -plist`, for a real ledger only,
   with a 30-second timeout. `tests/unit/test_no_network_imports.py` parses every module and fails
   on any added use. Every command works with no network connection (PRD §21).
-- **Runtime dependencies: none.** Only Python 3.12's standard library and its SQLite. Nothing is
-  downloaded or sent at run time: no telemetry, no update check and no log (D-037).
+- **One runtime dependency: pypdf 6.21.2** (D-060 point 1, as amended), pure Python and BSD-3-Clause,
+  with no dependency of its own on Python 3.12. Pinned by version and hash in `requirements.txt`,
+  installed with `--require-hashes`, and imported by `ingest/pdf_reader.py` alone. W1 parses its
+  modules too. Its one allowance is `subprocess` in its `filters.py`, where its JBIG2 image decoder
+  runs `jbig2dec` if that program is on the path. The reader runs pypdf with that program unset, so
+  it never runs, and silences pypdf's log, which can quote a file's bytes. Otherwise only Python
+  3.12's standard library and its SQLite. Nothing is downloaded or sent at run time: no telemetry,
+  no update check and no log (D-037).
 - **Development dependencies:** pytest 9.2.0 and Hypothesis 6.170.14, pinned in
-  `requirements-dev.txt` without hashes, and setuptools `>=68` to build. Installing them is the
-  only step that needs a network, once. A later build can use another setuptools, and an editable
+  `requirements-dev.txt` without hashes, and setuptools `>=68` to build. Installing them and pypdf
+  is the only step that needs a network, once. A later build can use another setuptools, and an editable
   install is untested.
 - **The test socket guard** blocks Python sockets in the test process, not subprocesses or native
   code. The suite never runs the two probes.

@@ -97,6 +97,7 @@ nothing came from a cache or was written to one, and no unrelated request was ma
 ```sh
 git clone --no-hardlinks <this repository> "build/m1-clean/source checkout"
 python3 -m venv .venv
+.venv/bin/python -m pip install --require-hashes --no-deps -r requirements.txt
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m pytest
 ```
