@@ -1,10 +1,11 @@
-# Session Handoff: M4.2 Built, Awaiting Acceptance
+# Session Handoff: M4.3 Built, Awaiting Acceptance
 
 For a fresh session. Written 2026-11-08. **M1, M2 and M3 are complete and accepted.** The owner
 approved the M4 plan, D-057 in [decisions.md](decisions.md), with the lead engineer's
-recommendations, including points A to E. M4.1, the 32,766-variable limit, was accepted as built.
-**M4.2, balance observations and statement reconciliation, is built and awaits acceptance.** M4.3
-and M4.4 each need their own approval. Slices and acceptance criteria are in [plan.md](plan.md).
+recommendations, including points A to E. M4.1, the 32,766-variable limit, and M4.2, balance
+observations and statement reconciliation, were accepted as built. **M4.3, monthly reports with
+disclosures, is built and awaits acceptance.** M4.4, the 100,000-transaction benchmark, needs its
+own approval. Slices and acceptance criteria are in [plan.md](plan.md).
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -31,8 +32,8 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`: it records M4.2, built. Earlier markers are in the archive |
-| Latest gating run | Full suite, 1836 passed, exit code 0, gating the commit recording M4.2 |
+| Latest commit | Run `git log -1`: it records M4.3, built. Earlier markers are in the archive |
+| Latest gating run | Full suite, 1881 passed, exit code 0, gating the commit recording M4.3 |
 | Python | 3.12.6, project `.venv` already present |
 | Runtime dependencies | None |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
@@ -50,8 +51,12 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 
 Then only what the task needs:
 
-- For building M4.2 to M4.4: D-057 in [decisions.md](decisions.md), PRD-backend §5, §17 and §20,
-  and D-013 and D-034 in [decisions-d001-d052.md](decisions-d001-d052.md).
+- For building M4.4: D-057 in [decisions.md](decisions.md), recommendation 8 and criteria Z1 to
+  Z6, PRD-backend §20, D-034 in [decisions-d001-d052.md](decisions-d001-d052.md),
+  [benchmarks.md](benchmarks.md), and `tests/benchmarks/measure_reconciliation.py`.
+- For changes to M4.3: `reports/monthly.py`, `IncomeAndSpendingTally` in `reports/totals.py`,
+  `run_report_monthly` and `print_month` in `cli.py`, `tests/scenarios/test_monthly_report.py`,
+  the `outcome()` of both order tests, and "How M4.3 was implemented" under D-057.
 - For changes to M4.2: `reports/balances.py`, `reconcile/balance_observations.py`, the `balance`
   commands in `cli.py`, migration 0016, `tests/scenarios/test_balance_observations.py`,
   `tests/scenarios/test_balance_observation_migration.py`, and "How M4.2 was implemented" under
@@ -91,6 +96,10 @@ Pitfalls that recurred across M1 to M3.4:
   class imported by name changes the count.
 - **Renaming a test** breaks `docs/m1-acceptance.md` if a criterion names it. Gate such a commit on
   `tests/unit/test_acceptance_matrix.py` too: `7a07bf4` missed it in M3.4.
+- **Check the schema before planning a case.** D-057 planned a `no date` line for transactions
+  that migration 0001 already refuses. Read the table's CHECKs before designing for a state.
+- **New command groups** need adding to the test `Ledger.run` helper, which inserts `--db` after
+  the group's words (`report` was added in M4.3).
 - **Benchmarks** must be able to reach the cost they claim to measure. Three documents, not two, are
   needed for a confirmation to link anything.
 - **Shell.** zsh has no `PIPESTATUS`, so `pytest | tail && git commit` gates on `tail`: it
@@ -170,17 +179,18 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Acceptance of M4.2 as built, including the choices under "How M4.2 was implemented" in D-057.
-- Approval of M4.3, monthly reports with disclosures.
+- Acceptance of M4.3 as built, including the choices under "How M4.3 was implemented" in D-057,
+  above all the `no date` line left out.
+- Approval of M4.4, the 100,000-transaction benchmark and provisional resource targets.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved through M4.2 | **Must be renewed** for anything further |
+| Local commits on `feature/m2-review` | Approved through M4.3 | **Must be renewed** for anything further |
 | M1, M2 and M3 | Accepted as built | None |
-| M4 | Plan approved (D-057). M4.1 accepted as built. M4.2 built, awaiting acceptance | Acceptance of M4.2, and approval of each later slice |
+| M4 | Plan approved (D-057). M4.1 and M4.2 accepted as built. M4.3 built, awaiting acceptance | Acceptance of M4.3, and approval of M4.4 |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Was approved for the declared dependencies and build requirements only | Ask for anything new. None is expected |
 | Network access | Was approved for the clean-install dependencies only. Used, and now closed | Ask for any use |
@@ -208,10 +218,11 @@ branch is feature/m2-review, the working tree is clean, and run the test suite w
 code before changing anything. Do not contact GitHub.
 
 Next task, from the owner:
-[PASTE IT HERE: for example, propose a plan for M4, balances and reports]
+[PASTE IT HERE: for example, build M4.4, the 100,000-transaction benchmark]
 
-Task: do only what the owner asks. A new milestone needs its own plan as a new decision, D-057,
-and approval before any of it is built. Do not reopen D-042 to D-056 unless you find a concrete
+Task: do only what the owner asks. A slice of M4 needs the owner's approval before it is built,
+under D-057. A new milestone, such as M5, needs its own plan as a new decision, D-058, and
+approval before any of it is built. Do not reopen D-042 to D-057 unless you find a concrete
 contradiction.
 
 Follow the working principles in docs/handoff.md, and its "Keeping these docs small" rules when

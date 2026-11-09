@@ -76,7 +76,7 @@ and keep its index line.
 | D-054 | Transfers across accounts — Approved, implemented and accepted in M3.2 |
 | D-055 | Card payments, one-sided transfers and coverage warnings — Approved, implemented and accepted in M3.3 |
 | D-056 | Income and spending — Approved, implemented and accepted in M3.4 |
-| D-057 | M4 plan: balances and reports — Approved, M4.1 implemented and accepted, M4.2 implemented |
+| D-057 | M4 plan: balances and reports — Approved, M4.1 and M4.2 implemented and accepted, M4.3 implemented |
 
 ## Rules in brief
 
@@ -162,6 +162,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | ID lists | One JSON array parameter read with `json_each`, never one SQL parameter per ID | D-057 |
 | Balance observations | A posted balance at the end of one day, stated by a person. A card or loan states what it owes, stored negated. One active per account and day. Never transaction evidence | D-057 |
 | Statement reconciliation | Consecutive observations, activity after the earlier day through the later one, by effective posting date else transaction date. Agreement is evidence, not coverage, and a difference is never absorbed | D-057 |
+| Monthly reports | A transaction's month is its effective transaction date, else its effective posting date. Months add to `totals`, D-056's groups add to each month, and a month is covered only by complete transaction-basis coverage of every day | D-013, D-057 |
 
 ## Not yet decided
 
@@ -170,7 +171,7 @@ and loan projection assumptions (Phase 1B), pairing protocol and snapshot
 compatibility (Phase 1C), backup and recovery design (M5), resource benchmarks
 (M4).
 
-## D-057 M4 plan: balances and reports — Approved, M4.1 implemented and accepted, M4.2 implemented
+## D-057 M4 plan: balances and reports — Approved, M4.1 and M4.2 implemented and accepted, M4.3 implemented
 
 Proposed on 2026-11-08, and approved by the owner the same day with the lead engineer's
 recommendations, including points A to E, with M4.1 approved to build. Each later slice needs its
@@ -276,8 +277,8 @@ on 2026-11-08:
   person's match pays one such scan. That is recorded in [status.md](status.md), and M4.4's shape
   pays it once, at build time.
 
-**How M4.2 was implemented,** where recommendations 2 to 5 left a choice. Built on 2026-11-08 and
-awaiting acceptance:
+**How M4.2 was implemented,** where recommendations 2 to 5 left a choice. Accepted by the owner as built
+on 2026-11-08:
 
 - Every transaction, pending ones too, is placed on its effective posting date, else its effective
   transaction date (D-049). That date decides the interval for activity and for every disclosure,
@@ -296,3 +297,26 @@ awaiting acceptance:
   which are no transaction, so no interval counts them.
 - The "every day inside a span" test moved to `spans_cover_every_day` in
   `reconcile/coverage_in_effect.py`, shared with D-055's coverage window, its second use.
+
+**How M4.3 was implemented,** where recommendations 6 and 7 left a choice. Approved to build by
+the owner on 2026-11-08, built the same day and awaiting acceptance:
+
+- `pf report monthly` is read-only, needs no migration and changes no token. `totals` is unchanged.
+  D-056's five groups are tallied by `IncomeAndSpendingTally` in `reports/totals.py`, which
+  `income_and_spending` and the monthly report share, its second use.
+- **No `no date` line.** Migration 0001 refuses a transaction with neither date, and no correction
+  clears one, so that line would always be empty. A transaction without either date stops the
+  report with an internal error instead, as T10 does. G1's "or `no date`" holds trivially.
+- Without a range, the months run from the first month holding a transaction to the last, empty
+  months between included, so a gap shows. With `--from` or `--to`, every month of the range is
+  shown, a missing end defaulting to the data's, and transactions in months outside it are
+  disclosed by count and amount, so the report still adds to `totals`.
+- Pending transactions count, as in `totals`, and each month says how many.
+- Coverage lists every registered account for the ledger, including one with no documents, as
+  covered or not covered for each month.
+- An unsettled match or one-sided transfer names no transaction, so it is disclosed in the month of
+  the current transactions holding the records it binds. Each disclosure counts transactions.
+- A matched side counts as crossing months when its other side, in any account, is dated in
+  another month. Only the sides in the report's scope are counted, in the months shown.
+- Unresolved records and accounts not reconciled under the current rules are disclosed once, for
+  the whole report.
