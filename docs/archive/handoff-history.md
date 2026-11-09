@@ -991,3 +991,14 @@ M7 is D-060, complete on 2026-11-09.
 **Not built:** M7.4, since the printout holds one card and each entry names it. M7.5, since the
 owner holds no Capital One card PDF. No U.S. Bank card CSV layout, since the owner holds no such
 export: `us_bank_v1` is not that card's format.
+
+## M8 slices
+
+M8 is D-062, complete on 2026-11-09, verified by the owner in a browser.
+
+| Slice | Commit | What | Breaks |
+|---|---|---|---|
+| D-062 | `c530b8c` | The M8 plan, UA1 to UD4 | |
+| M8.1 | `6bf46c2` | One builder per report in `reports/report_text.py`, the CLI printing its lines | 13 applied, 13 caught, 1 gap closed |
+| M8.2 | `b31b2a1` | `pf ui` on 127.0.0.1, its protections, totals and monthly pages | 27 applied, 24 caught, 3 gaps closed |
+| M8.3 | `719f89f` | Import results, transactions, review queue and item pages | 12 applied, 11 caught, 1 gap closed |

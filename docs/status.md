@@ -49,7 +49,8 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M8.2: `pf ui`, the loopback server, totals and monthly pages | Complete (D-062) |
 | M8.3: import results, transactions, review queue and item pages | Complete (D-062) |
 | M8.4: decisions from the browser | Not built: the owner chose a read-only M8 |
-| **M8 overall** | **Built,** awaiting the owner's review |
+| **M8 overall** | **Complete,** verified by the owner in a browser on 2026-11-09 |
+| M9: spending categories | Planned in D-063, pending the owner's review. Nothing built |
 
 ## What exists
 

@@ -30,9 +30,11 @@ UI arrives later and calls the same core code. The data has three layers:
 | **M6** First real CSV layouts | Only layouts supplied as redacted samples, one at a time | Each layout has fixture tests |
 | **M7** PDF parsing | Text PDFs and CSV-to-PDF matching | Same activity in both formats counts once |
 | **M8** Local review UI | Loopback-only import results, review queue, transactions | Host and CSRF checks; UI totals match the CLI |
+| **M9** Spending categories (proposed, D-063) | The first Phase 1B milestone: a category list and categorizing spending by a person | Categories add exactly to spending; types unchanged byte for byte |
 
 M5 is mandatory before any actual financial document is processed. Phase 1B
-planning, Phase 1C sync and iOS are planned once Phase 1A passes.
+planning, Phase 1C sync and iOS are planned once Phase 1A passes. D-063 proposes that Phase 1A
+passes with M8, and a Phase 1B sequence of M9 to M14, of which only M9 is proposed for approval.
 
 ## Required financial test cases
 
@@ -389,7 +391,7 @@ I7 is not needed: the formats' descriptions agree, so D-006 is not amended.
 
 Approved by the owner on 2026-11-09 as D-062, with A to E: read-only, so M8.4 is not built. Point
 1 changes a security control (W1), approved as one. M8.1 to M8.3 approved to build in order.
-**M8 is built,** awaiting the owner's review.
+**M8 is complete,** verified by the owner in a browser on 2026-11-09.
 
 | Slice | Scope | Status |
 |---|---|---|
@@ -435,6 +437,52 @@ Approved by the owner on 2026-11-09 as D-062, with A to E: read-only, so M8.4 is
 | UD2 | A `POST` without the session's form token, with a wrong one, with a missing or foreign `Origin`, a `cross-site` `Sec-Fetch-Site`, another content type or a body over 8 KB is refused, changing nothing. The same request with each correct succeeds, as the control |
 | UD3 | A resubmitted form refuses, its token having changed, and no refusal repeats what it was given |
 | UD4 | Each `POST` opens its write connection through the gate. Every earlier criterion still passes |
+
+## M9 plan
+
+Proposed on 2026-11-09 as D-063, **pending the owner's review.** Nothing is built until it is
+approved, and then each slice separately. No security control changes.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M9.1 | The category list: migration 0019, PRD §10's starting set, `pf category add` and `list` | Proposed |
+| M9.2 | Categorizing one transaction, D-053's model extracted for types and categories, migration 0020 | Proposed |
+| M9.3 | Spending by category in `totals` and `report monthly`, and so on the UI's pages | Proposed |
+
+### M9.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| CA1 | Migration 0019 works on a populated ledger, synthetic and real: it adds `category` holding the starting twelve, makes no account stale, changes no token, total or report, and is atomic on failure. A ledger at 0018 is refused until `migrate` |
+| CA2 | `pf category add` adds a top-level category or a subcategory of one. An empty or repeated name, an unknown parent and a parent that is itself a subcategory are refused, changing nothing. Triggers refuse any update, delete or replace of a category, each with a control insert that succeeds |
+| CA3 | `pf category list` lists each category under its parent, escaped as D-040, and opens the ledger read-only. Every earlier criterion still passes |
+
+### M9.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| CB1 | `review categorize` checks the account is current, then account, transaction ID and transaction token together, under one write lock (D-043). A stale token, another account's transaction, an unknown category and a transaction not in spending are refused, changing nothing |
+| CB2 | A categorization binds its transaction's records, and survives a repeat import, a reconcile and a re-export joining the transaction. Agreeing ones apply. Disagreeing ones, or records now in several transactions, leave it uncategorized and disclosed, as does a type that leaves spending, in the state `not_spending` |
+| CB3 | Superseding follows D-048. Undo needs the `g1` token and account, never refuses, and leaves the superseded categorization or none. `review confirm` and `review separate` refuse to leave one unsettled |
+| CB4 | `review show`, `review transaction show`, `review categorizations` and `review categorization show` show categorizations apart from source values, with their outcome, escaped |
+| CB5 | Every types command's output, refusal and token is byte for byte as before the extraction, on every ledger the suite builds. Tokens `r`, `t`, `d` and `c` keep their digests on a ledger with no categorization, with versions bumped and a test pinning each definition |
+| CB6 | Migration 0020 works on a populated ledger and is atomic on failure, and backup and restore keep categorizations, compared as M5.4's restore test compares. Every earlier criterion still passes |
+
+### M9.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| CC1 | `totals` and `report monthly` list spending by category, and the categories and `uncategorized` add exactly to D-056's Spending, for the ledger, each account and each month, on generated ledgers |
+| CC2 | A subcategory is listed under its parent and included in the parent's line. A refund reduces its category |
+| CC3 | Disclosures give uncategorized spending's count and amount, and the categorizations that do not apply, by reason |
+| CC4 | Every other line of both reports is byte for byte as before, on every ledger the suite builds |
+| CC5 | The UI's totals and monthly pages equal the CLI on categorized ledgers, with category names holding HTML shown as text. Every earlier criterion still passes |
+
+### Not in M9
+
+Rules and bulk categorization (M10), household attribution and splits (M11), tags, fixed and
+discretionary classes, income categories, renaming, merging or deleting a category, categorizing from
+the UI, a normalized merchant, local AI, and budgets.
 
 ## Backlog benchmarks
 
