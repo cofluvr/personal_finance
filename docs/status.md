@@ -46,7 +46,8 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M7.4 and M7.5 | Not built: one card per printout, and the owner holds no Capital One card PDF |
 | **M7 overall** | **Complete,** recorded by the owner on 2026-11-09 |
 | M8.1: one builder per report | Complete (D-062) |
-| M8.2 and M8.3 | Approved, not built |
+| M8.2: `pf ui`, the loopback server, totals and monthly pages | Complete (D-062) |
+| M8.3 | Approved, not built |
 
 ## What exists
 
@@ -59,6 +60,8 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   them (D-017, D-058).
 - `personal_finance.reports.report_text`: the text of `totals`, `report monthly`, `documents`,
   `transactions`, `review list` and `review show`, built as lines that the CLI prints (D-062).
+- `personal_finance.ui.server`: `pf ui`'s read-only pages on 127.0.0.1, and their protections
+  (D-062).
 - `personal_finance.reports.storage`: software, database, originals and backups storage apart
   (D-058).
 - `personal_finance.db.backups`: backing up a ledger with a manifest and logical digest, checking a
@@ -157,6 +160,11 @@ Stated here once (D-058 point 9, W2).
   `/usr/sbin/diskutil info -plist` and `/usr/bin/hdiutil info -plist`, for a real ledger only,
   with a 30-second timeout. `tests/unit/test_no_network_imports.py` parses every module and fails
   on any added use. Every command works with no network connection (PRD §21).
+- **One listening socket, on loopback only** (D-062 point 1). `pf ui` serves read-only pages from
+  `ui/server.py`, the one module W1 allows to import from `http`, and only `http.server`'s
+  `BaseHTTPRequestHandler` and `HTTPServer`. It binds `127.0.0.1` at a port the system picks, with
+  no option to change it, looks up no name, and connects to nothing. A request needs the exact
+  Host, and the cookie from that launch's one-use key, and only `GET` is answered.
 - **One runtime dependency: pypdf 6.21.2** (D-060 point 1, as amended), pure Python and BSD-3-Clause,
   with no dependency of its own on Python 3.12. Pinned by version and hash in `requirements.txt`,
   installed with `--require-hashes`, and imported by `ingest/pdf_reader.py` alone. W1 parses its

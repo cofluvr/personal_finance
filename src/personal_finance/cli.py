@@ -761,6 +761,11 @@ def build_parser() -> argparse.ArgumentParser:
     monthly.add_argument("--from", dest="first_month", help="the first month, YYYY-MM, inclusive")
     monthly.add_argument("--to", dest="last_month", help="the last month, YYYY-MM, inclusive")
 
+    command(
+        "ui", handler=run_ui,
+        help="serve read-only pages of this ledger on 127.0.0.1, to this browser only, until Ctrl-C",
+    )
+
     balance = commands.add_parser(
         "balance", help="record posted balances and check them against transactions"
     )
@@ -2357,6 +2362,28 @@ def run_report_monthly(args) -> int:
     return 0
 
 
+def run_ui(args) -> int:
+    # Imported here, since the server imports this module for open_ledger and its messages.
+    from personal_finance.ui.server import LoopbackServer
+
+    # Through the gate before any port opens, so an unsafe ledger is refused first (D-058).
+    open_ledger(args.db, read_only=True).close()
+    server = LoopbackServer(args.db)
+    print(f"Serving {args.db} read-only, on 127.0.0.1 only. Open this address once:")
+    print(f"  {server.launch_address}")
+    print("It works once, in one browser. Use a private window, so the browser keeps no history "
+          "of these pages. Stop with Ctrl-C.")
+    sys.stdout.flush()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        # Ctrl-C is how pf ui is stopped, so it is not an error here.
+        print("Stopped.")
+    finally:
+        server.server_close()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -2367,13 +2394,16 @@ def main(argv: list[str] | None = None) -> int:
         # The reader went away, as in `pf transactions | head`. Nothing went wrong here.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return BROKEN_PIPE_EXIT
-    except (CommandError, DecisionRefused, UnsafeLocation, BackupRefused) as error:
-        print(f"Error: {error}", file=sys.stderr)
+    except Exception as error:
+        print(f"Error: {explained_error(error)}", file=sys.stderr)
         return 2
-    except sqlite3.OperationalError as error:
-        reason = BUSY_EXPLANATION if "locked" in str(error) else "database error"
-        print(f"Error: {reason}", file=sys.stderr)
-        return 2
-    except Exception:
-        print(f"Error: {UNEXPECTED_ERROR}", file=sys.stderr)
-        return 2
+
+
+def explained_error(error: Exception) -> str:
+    """What an error may say, the same in the CLI and the local UI. Expected errors keep their
+    sanitized messages, and any other says only that something went wrong (D-037)."""
+    if isinstance(error, (CommandError, DecisionRefused, UnsafeLocation, BackupRefused)):
+        return str(error)
+    if isinstance(error, sqlite3.OperationalError):
+        return BUSY_EXPLANATION if "locked" in str(error) else "database error"
+    return UNEXPECTED_ERROR

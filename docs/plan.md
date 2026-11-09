@@ -393,7 +393,7 @@ Approved by the owner on 2026-11-09 as D-062, with A to E: read-only, so M8.4 is
 | Slice | Scope | Status |
 |---|---|---|
 | M8.1 | One builder per report, the CLI printing its lines byte for byte as now. No server | Complete |
-| M8.2 | `pf ui`: the loopback server, its protections, and the totals and monthly pages | Proposed |
+| M8.2 | `pf ui`: the loopback server, its protections, and the totals and monthly pages | Complete |
 | M8.3 | Import results, transactions, the review queue and one review item, read-only | Proposed |
 | M8.4 | Review decisions from the browser | Not built: the owner chose a read-only M8 |
 

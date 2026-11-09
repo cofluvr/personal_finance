@@ -392,3 +392,28 @@ approved to build in order, each gated on the full suite and committed locally.
   import them from there.
 - **A test gap closed:** nothing checked that a report for one account leaves another account's
   staleness out. `test_report_text.py` now does, for `totals` and `report monthly`.
+
+**How M8.2 was implemented:**
+
+- **W1's allowance names a module, not a package:** `("ui/server.py", "http.server")`, so `import
+  http.client` or `from http import client` there is still refused. Tests pin that module's
+  network imports to the two classes, and its one address to `(LOOPBACK_ADDRESS, 0)` with that
+  name the constant `127.0.0.1`.
+- **What `http.server` needed overriding,** beyond point 5's list: it answers a request it cannot
+  read as HTTP/0.9, which has no status line or headers, so the handler's default version is
+  HTTP/1.0 and every refusal carries the security headers. Any `do_<METHOD>` lookup but `do_GET`
+  returns the refusal, so an unknown method gets `405` too, not `501`.
+- **Addresses:** a page takes only the parameters it names, each at most once, each value up to
+  100 letters, digits, `-` or `_`, else a `400` before the ledger is opened, so no address is
+  decoded. Accounts are chosen by ID in a form that reloads the page by `GET`. An expected error
+  shows its message with `400`, and the unexpected one `500`, through `explained_error`, now shared
+  with `main`.
+- **`pf ui`** opens the ledger through its gate, then binds, prints the one-use address and asks
+  for a private window. Ctrl-C stops it with exit code 0: it is how the server ends, so it is not
+  the cancellation D-037 leaves uncaught.
+- **Tests** (`test_local_ui.py`) send real requests over `socket.socketpair()`, so the handler's
+  parsing is real and nothing connects. The pages equal `totals` and `report monthly` on a ledger
+  with duplicates, types, a one-sided transfer and a stale account, on M7.3's CSV and PDF counting
+  once, and on M4.3's generated ledgers, whose builder is now `generated_ledger()` for both tests.
+- **Three test gaps closed** by deliberate breaks: `handle_error`'s traceback, HTML in account names
+  on these pages, and a refused address told apart from an unknown account.

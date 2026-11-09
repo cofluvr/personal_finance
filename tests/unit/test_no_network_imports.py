@@ -2,8 +2,10 @@
 
 Every module under src/ is parsed, not run. Point 9's modules are refused, with others that reach the
 network or run another program, and `os`'s calls that run a program. Dynamic imports are refused
-whatever they name, since a name built at run time cannot be checked. The one allowance is
-`subprocess` in db/volume_probes.py, for `diskutil` and `hdiutil`.
+whatever they name, since a name built at run time cannot be checked. Two allowances: `subprocess`
+in db/volume_probes.py, for `diskutil` and `hdiutil`, and `http.server` in ui/server.py, for the
+local UI's two classes, bound to 127.0.0.1 alone (D-062 point 1). An allowance names a module, and
+`http.server` allows neither `http` itself nor `http.client`.
 
 pypdf, the one runtime dependency, is parsed the same way (D-060 point 1). Its one allowance is
 `subprocess` in its filters.py, used only by its JBIG2 decoder to run jbig2dec, which
@@ -32,7 +34,7 @@ PROGRAM_RUNNING_OS_CALLS = {
     "execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe",
     "spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe",
 }
-ALLOWED = {("db/volume_probes.py", "subprocess")}
+ALLOWED = {("db/volume_probes.py", "subprocess"), ("ui/server.py", "http.server")}
 PYPDF_FOLDER = Path(pypdf.__file__).parent
 PYPDF_ALLOWED = {("filters.py", "subprocess")}
 
@@ -43,7 +45,8 @@ def refused_uses(source: str, relative_path: str, allowed=ALLOWED) -> list[str]:
 
     def refuse_module(module_name: str, line: int) -> None:
         top_level = module_name.split(".")[0]
-        if top_level in REFUSED_MODULES and (relative_path, top_level) not in allowed:
+        if (top_level in REFUSED_MODULES and (relative_path, top_level) not in allowed
+                and (relative_path, module_name) not in allowed):
             found.append(f"{relative_path}:{line} imports {module_name}")
 
     tree = ast.parse(source)
@@ -89,7 +92,7 @@ def test_no_module_reaches_the_network_or_runs_a_program():
     found, modules = refused_uses_under(PACKAGE_FOLDER)
     assert found == []
     assert {"cli.py", "db/volume_probes.py", "db/backups.py", "ingest/pipeline.py",
-            "reports/storage.py"} <= set(modules)
+            "reports/storage.py", "ui/server.py"} <= set(modules)
 
 
 def test_the_one_allowance_is_used_by_one_call_to_a_fixed_program():
@@ -130,6 +133,14 @@ ADDED = [
     ("cli.py", "import os\nos.posix_spawn"),
     ("cli.py", "import os as operating_system\noperating_system.system('true')"),
     ("cli.py", "import importlib as loader\nloader.import_module('ssl')"),
+    ("ui/server.py", "import socket"),
+    ("ui/server.py", "import socketserver"),
+    ("ui/server.py", "import http.client"),
+    ("ui/server.py", "from http import client"),
+    ("ui/server.py", "import urllib.parse"),
+    ("ui/server.py", "import subprocess"),
+    ("reports/report_text.py", "from http.server import HTTPServer"),
+    ("cli.py", "import http.server"),
 ]
 
 
@@ -143,6 +154,45 @@ def test_an_added_import_fails(tmp_path, relative_path, added):
     found, _ = refused_uses_under(copy)
     assert len(found) >= 1
     assert all(entry.startswith(f"{relative_path}:") for entry in found)
+
+
+def test_without_its_allowance_the_server_alone_is_refused_as_the_control():
+    found, _ = refused_uses_under(PACKAGE_FOLDER, allowed={("db/volume_probes.py", "subprocess")})
+    assert found and all(entry.startswith("ui/server.py:") for entry in found)
+
+
+def test_the_server_imports_two_classes_from_http_and_nothing_else_of_the_network():
+    """D-062 point 1: not SimpleHTTPRequestHandler, which serves the working directory, not
+    CGIHTTPRequestHandler, which runs programs, and not a threading server."""
+    tree = ast.parse((PACKAGE_FOLDER / "ui" / "server.py").read_text(encoding="utf-8"))
+    network = {"http", "socket", "socketserver"}
+    imports = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports += [(alias.name, None) for alias in node.names
+                        if alias.name.split(".")[0] in network]
+        elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] in network:
+            imports.append((node.module, sorted(alias.name for alias in node.names)))
+    assert imports == [("http.server", ["BaseHTTPRequestHandler", "HTTPServer"])]
+
+
+def test_the_server_binds_the_loopback_constant_and_nothing_else():
+    """The one address the server is given is the tuple (LOOPBACK_ADDRESS, 0), and that name is
+    the constant 127.0.0.1. No other address appears, and no code sets one."""
+    source = (PACKAGE_FOLDER / "ui" / "server.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    assignments = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == "LOOPBACK_ADDRESS"
+                           for target in node.targets)]
+    assert [ast.unparse(node.value) for node in assignments] == ["'127.0.0.1'"]
+    addresses = [ast.unparse(node) for node in ast.walk(tree) if isinstance(node, ast.Tuple)
+                 and any(isinstance(element, ast.Name) and element.id == "LOOPBACK_ADDRESS"
+                         for element in node.elts)]
+    assert addresses == ["(LOOPBACK_ADDRESS, 0)"]
+    assert not any(isinstance(node, ast.Attribute) and node.attr == "server_address"
+                   and isinstance(node.ctx, ast.Store) for node in ast.walk(tree))
+    assert "0.0.0.0" not in source and "'::'" not in source and "localhost" not in source
+    assert "allow_reuse_address = False" in source
 
 
 def test_harmless_imports_pass_as_a_control(tmp_path):

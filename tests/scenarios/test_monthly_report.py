@@ -112,41 +112,46 @@ rows = st.lists(
 )
 
 
+def generated_ledger(folder, capsys, checking_rows, savings_days, one_sided):
+    """Rows of A over three months, with either date or both, a posting date up to four days
+    later, random types and status, and card rows in S. Also used by the local UI's tests."""
+    ledger = build(folder, capsys)
+    lines = []
+    for index, (cents, money_in, _, day, dates, lag, status) in enumerate(checking_rows):
+        transaction_day = f"2026-{1 + (day - 1) // 30:02d}-{1 + (day - 1) % 30 % 28:02d}"
+        posting_day = transaction_day[:8] + f"{min(int(transaction_day[8:]) + lag, 28):02d}"
+        if status == "PENDING":
+            dates = "transaction"
+        lines.append(",".join((
+            f"R{index}", transaction_day if dates != "posting" else "",
+            posting_day if dates != "transaction" else "", f"SYNTHETIC ROW {index}",
+            amount(cents) if money_in else f"-{amount(cents)}", status)))
+    ledger.rows("a.csv", *lines)
+    transferred = None
+    for transaction, (_, money_in, choice, *_) in zip(rows_of(ledger, "a.csv"),
+                                                      checking_rows, strict=True):
+        types = IN_TYPES if money_in else OUT_TYPES
+        if types[choice]:
+            ledger.classify_ok(transaction, types[choice])
+        if types[choice] == "transfer":
+            transferred = transaction
+    if one_sided and transferred:
+        ledger.one_sided_ok(transferred, "S")
+    if savings_days:
+        ledger.card("s.csv", *(
+            f"{1 + (day - 1) // 30:02d}/{1 + (day - 1) % 30 % 28:02d}/2026,SYNTHETIC SAVED "
+            f"{index},,1.00" for index, day in enumerate(savings_days)), account="S")
+    return ledger
+
+
 @settings(max_examples=40, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(checking_rows=rows, savings_days=st.lists(st.integers(1, 89), max_size=4),
        one_sided=st.booleans())
 def test_every_transaction_is_in_one_month_and_the_months_add_to_totals(  # G1, G3
         capsys, checking_rows, savings_days, one_sided):
-    """Rows of A over three months, with either date or both, a posting date up to four days
-    later, random types and status, and card rows in S."""
     with tempfile.TemporaryDirectory() as folder:
-        ledger = build(Path(folder), capsys)
-        lines = []
-        for index, (cents, money_in, _, day, dates, lag, status) in enumerate(checking_rows):
-            transaction_day = f"2026-{1 + (day - 1) // 30:02d}-{1 + (day - 1) % 30 % 28:02d}"
-            posting_day = transaction_day[:8] + f"{min(int(transaction_day[8:]) + lag, 28):02d}"
-            if status == "PENDING":
-                dates = "transaction"
-            lines.append(",".join((
-                f"R{index}", transaction_day if dates != "posting" else "",
-                posting_day if dates != "transaction" else "", f"SYNTHETIC ROW {index}",
-                amount(cents) if money_in else f"-{amount(cents)}", status)))
-        ledger.rows("a.csv", *lines)
-        transferred = None
-        for transaction, (_, money_in, choice, *_) in zip(rows_of(ledger, "a.csv"),
-                                                          checking_rows, strict=True):
-            types = IN_TYPES if money_in else OUT_TYPES
-            if types[choice]:
-                ledger.classify_ok(transaction, types[choice])
-            if types[choice] == "transfer":
-                transferred = transaction
-        if one_sided and transferred:
-            ledger.one_sided_ok(transferred, "S")
-        if savings_days:
-            ledger.card("s.csv", *(
-                f"{1 + (day - 1) // 30:02d}/{1 + (day - 1) % 30 % 28:02d}/2026,SYNTHETIC SAVED "
-                f"{index},,1.00" for index, day in enumerate(savings_days)), account="S")
+        ledger = generated_ledger(Path(folder), capsys, checking_rows, savings_days, one_sided)
         for account in (None, "A", "S", "Card"):
             assert_months_add_to_totals(ledger, account)
         # A range keeps every transaction, in its months or outside them.
