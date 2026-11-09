@@ -17,6 +17,7 @@ from personal_finance.ingest.layouts import (
     CAPITAL_ONE_BANK_V1,
     CAPITAL_ONE_CARD_V1,
     LAYOUTS,
+    US_BANK_V1,
     Layout,
 )
 from personal_finance.ingest.pipeline import import_files
@@ -111,6 +112,34 @@ CASES = (
         overlap_basis="transaction",
         unoffered_bases=("posting",),
     ),
+    LayoutCase(
+        layout=US_BANK_V1,
+        fixture="us_bank.csv",
+        expected_rows=(
+            (None, "2026-01-02", 210000, "ELECTRONIC DEPOSIT SYNTHETIC EMPLOYER"),
+            (None, "2026-01-05", -3127, "DEBIT PURCHASE -VISA SYNTHETIC MART 000"),
+            (None, "2026-01-05", -3127, "DEBIT PURCHASE -VISA SYNTHETIC MART 000"),
+            (None, "2026-01-12", -8810, "WEB AUTHORIZED PMT SYNTHETIC UTILITY"),
+            (None, "2026-01-21", -495, "MONTHLY MAINTENANCE FEE"),
+            (None, "2026-01-29", 1500, "ELECTRONIC DEPOSIT SYNTHETIC REFUND"),
+        ),
+        unresolved_rows=(
+            ({"Amount": ""}, "missing_amount"),
+            ({"Amount": "21OO.00"}, "invalid_amount"),
+            ({"Amount": "-2100.00"}, "conflicting_amount"),
+            ({"Transaction": "DEBIT"}, "conflicting_amount"),
+            ({"Transaction": ""}, "invalid_direction"),
+            ({"Transaction": "TRANSFER"}, "invalid_direction"),
+            ({"Date": ""}, "missing_date"),
+            ({"Date": "01/02/2026"}, "invalid_date"),
+        ),
+        first_ends=5,
+        second_starts=1,
+        first_interval=("2026-01-01", "2026-01-21"),
+        second_interval=("2026-01-04", "2026-01-31"),
+        overlap_basis="posting",
+        unoffered_bases=("transaction",),
+    ),
 )
 
 pytestmark = pytest.mark.parametrize("case", CASES, ids=lambda case: case.id)
@@ -148,12 +177,12 @@ class TestJ1Header:
     def test_the_exact_header_is_accepted(self, conn, account, tmp_path, case):
         result = import_text(conn, tmp_path, case, "statement.csv", case.text())
         assert result.outcome != "failed", result
-        assert tuple(case.lines()[0].split(",")) == case.layout.columns
+        assert tuple(next(csv.reader([case.lines()[0]]))) == case.layout.columns
 
     def test_any_other_header_fails_importing_nothing(self, conn, account, tmp_path, case):
         body = case.lines()[1:]
         for number, columns in enumerate(header_variants(case.layout.columns)):
-            text = "\n".join([",".join(columns), *body]) + "\n"
+            text = "\n".join([",".join(f'"{column}"' for column in columns), *body]) + "\n"
             result = import_text(conn, tmp_path, case, f"variant{number}.csv", text)
             assert result.failure_code == "header_mismatch", columns
         assert stored_documents(conn) == 0
@@ -180,12 +209,15 @@ class TestJ3Unresolved:
         for overrides, reason in case.unresolved_rows:
             row = case.layout.parse_row({**case.first_row_cells(), **overrides})
             assert row.reason_code == reason, overrides
-            assert row.amount_cents is None or reason in ("missing_date", "invalid_date")
+            if reason in ("missing_date", "invalid_date"):
+                assert row.amount_cents == case.expected_rows[0][2], overrides
+            else:
+                assert row.amount_cents is None, overrides
 
     def test_an_unresolved_row_keeps_its_cells(self, conn, account, tmp_path, case):
         overrides, reason = case.unresolved_rows[0]
         cells = {**case.first_row_cells(), **overrides}
-        line = ",".join(cells[column] for column in case.layout.columns)
+        line = ",".join(f'"{cells[column]}"' for column in case.layout.columns)
         text = "\n".join([case.lines()[0], line]) + "\n"
         result = import_text(conn, tmp_path, case, "bad.csv", text)
         assert result.outcome != "failed", result

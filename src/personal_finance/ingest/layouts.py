@@ -156,10 +156,32 @@ def _parse_capital_one_bank_row(cells: Mapping[str, str]) -> ParsedRow:
     amount = _amount(cells["Transaction Amount"], problems)
     if amount is not None and amount < 0 and not problems:
         problems.append("invalid_amount")
+    signed = None if problems or amount is None else direction * amount
     row = ParsedRow(
         transaction_date=_date(cells["Transaction Date"], "%m/%d/%y", problems),
-        amount_cents=None if problems or amount is None else direction * amount,
+        amount_cents=signed,
         description=cells["Transaction Description"].strip() or None,
+    )
+    return _finish(row, problems)
+
+
+_US_BANK_DIRECTION = {"DEBIT": -1, "CREDIT": 1}
+
+
+def _parse_us_bank_row(cells: Mapping[str, str]) -> ParsedRow:
+    """A signed Amount, which the Transaction column must agree with."""
+    problems: list[str] = []
+    direction = _US_BANK_DIRECTION.get(cells["Transaction"].strip().upper())
+    if direction is None:
+        problems.append("invalid_direction")
+    amount = _amount(cells["Amount"], problems)
+    if amount is not None and amount * (direction or 0) < 0 and not problems:
+        problems.append("conflicting_amount")
+    signed = None if problems else amount
+    row = ParsedRow(
+        posting_date=_date(cells["Date"], "%Y-%m-%d", problems),
+        amount_cents=signed,
+        description=cells["Name"].strip() or None,
     )
     return _finish(row, problems)
 
@@ -209,7 +231,22 @@ CAPITAL_ONE_BANK_V1 = Layout(
     pending_in_complete_coverage={"transaction": False},
 )
 
+# U.S. Bank's CSV activity list. Memo stays in the raw cells, unread.
+US_BANK_V1 = Layout(
+    layout_id="us_bank_v1",
+    parser_version="1",
+    columns=("Date", "Transaction", "Name", "Memo", "Amount"),
+    parse_row=_parse_us_bank_row,
+    pending_in_complete_coverage={"posting": False},
+)
+
 LAYOUTS = {
     layout.layout_id: layout
-    for layout in (SYNTHETIC_CHECKING_V1, SYNTHETIC_CARD_V1, CAPITAL_ONE_CARD_V1, CAPITAL_ONE_BANK_V1)
+    for layout in (
+        SYNTHETIC_CHECKING_V1,
+        SYNTHETIC_CARD_V1,
+        CAPITAL_ONE_CARD_V1,
+        CAPITAL_ONE_BANK_V1,
+        US_BANK_V1,
+    )
 }

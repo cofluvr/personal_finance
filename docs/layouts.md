@@ -104,6 +104,18 @@ Transaction Amount, Balance`.
 | Date | `MM/DD/YY`, the transaction date. Coverage on the `transaction` basis only |
 | Assumptions | The export holds posted transactions only, the date is the transaction date, and Balance is a running balance |
 
+## us_bank_v1
+
+Columns: `Date, Transaction, Name, Memo, Amount`, each quoted. U.S. Bank's CSV activity list;
+its PDF statements are M7 (D-059 point D).
+
+| Property | Meaning |
+|---|---|
+| Amount | Signed, negative for money out. `Transaction` `DEBIT` or `CREDIT` must agree, else `conflicting_amount`. Any other value leaves the row `invalid_direction` |
+| Description | `Name`. `Memo` stays in the raw cells, unread |
+| Date | `YYYY-MM-DD`, the posting date. Coverage on the `posting` basis only |
+| Assumptions | The export holds posted transactions only, and its date is the posting date |
+
 ## Test-only layouts
 
 Tests may define extra synthetic layouts, such as one with unreliable external IDs
