@@ -8,9 +8,12 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from test_classifications import disagreeing_after_undo as classifications_disagreeing
+from test_confirmations import confirm_ok
 from test_corrections import disagreeing_after_undo as corrections_disagreeing
+from test_corrections import merged_by_id_then_split
 from test_decisions import ALL_TABLES, CHECKING_HEADER, declared, pair_up
 from test_one_sided_transfers import OneSidedLedger, stated
+from test_pending_posted import PENDING, POSTED
 from test_resolutions import CAFE_NO_AMOUNT
 from test_supersession import holding
 from test_transfers import IN_ROW, rows_of
@@ -295,10 +298,28 @@ class TestDisclosures:  # G5
         assert february.open_review_items == set()
         assert "  Open review items: 1, holding 2 transactions here\n" in ledger.report()
 
+    def test_a_resolved_review_item_is_not(self, ledger):
+        # Confirming a pending and a posted row of one document leaves their item resolved, still
+        # naming the one transaction they become (D-052).
+        ledger.checking("a.csv", PENDING, POSTED.format(amount="-20.00"))
+        (item,) = ledger.items("same_document_pending_posted")
+        confirm_ok(ledger, item, tuple(ledger.transactions(item)))
+        conn = ledger.conn()
+        assert conn.execute("SELECT status FROM review_issue_subject subject "
+                            "JOIN review_issue issue ON issue.id = subject.review_issue_id"
+                            ).fetchall() == [("resolved",)]
+        conn.close()
+        assert ledger.month("2026-01").open_review_items == set()
+        assert "Open review items" not in ledger.report()
+
     def test_unsettled_corrections(self, ledger):
         corrections_disagreeing(ledger)
         assert ledger.month("2026-01").transactions_with_unsettled_correction == 1
         assert "  With an unsettled correction: 1 transactions\n" in ledger.report()
+
+    def test_corrections_whose_basis_changed(self, ledger):
+        merged_by_id_then_split(ledger)
+        assert ledger.month("2026-01").transactions_with_unsettled_correction == 2
 
     def test_unsettled_classifications(self, ledger):
         classifications_disagreeing(ledger)
@@ -364,6 +385,10 @@ class TestCrossMonthMatches:  # G6
         assert (january.matched_sides_with_other_side_in_another_month,
                 february.matched_sides_with_other_side_in_another_month) == (1, 1)
         assert ledger.months("S").months[0].matched_sides_with_other_side_in_another_month == 1
+        # The side in A is outside S's report even when its month is shown there.
+        january, february = ledger.months("S", "2026-01").months
+        assert (january.matched_sides_with_other_side_in_another_month,
+                february.matched_sides_with_other_side_in_another_month) == (0, 1)
         assert "  Matched transfers whose other side is in another month: 1, so this month's " \
                "movement includes them\n" in ledger.report()
         assert ledger.undo_match(match)[0] == 0
@@ -398,6 +423,8 @@ class TestRange:  # G7
         self.built(ledger)
         assert [month.month for month in ledger.months(None, "2026-03", "2026-03").months] == \
             ["2026-03"]
+        assert ledger.report("--from", "2026-03", "--to", "2026-03").startswith(
+            "2026-03: net account movement -2.00 over 1 transactions")
 
     def test_either_end_alone(self, ledger):
         self.built(ledger)
