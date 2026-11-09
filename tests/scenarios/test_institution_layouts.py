@@ -14,6 +14,7 @@ import pytest
 from personal_finance.cli import main
 from personal_finance.ingest.coverage import declare_complete
 from personal_finance.ingest.layouts import (
+    AMEX_CARD_V1,
     CAPITAL_ONE_BANK_V1,
     CAPITAL_ONE_CARD_V1,
     LAYOUTS,
@@ -137,6 +138,32 @@ CASES = (
         second_starts=1,
         first_interval=("2026-01-01", "2026-01-21"),
         second_interval=("2026-01-04", "2026-01-31"),
+        overlap_basis="posting",
+        unoffered_bases=("transaction",),
+    ),
+    LayoutCase(
+        layout=AMEX_CARD_V1,
+        fixture="amex_card.csv",
+        expected_rows=(
+            (None, "2026-01-04", -1225, "SYNTHETIC BAKERY       ANYTOWN             XX"),
+            (None, "2026-01-04", -1225, "SYNTHETIC BAKERY       ANYTOWN             XX"),
+            (None, "2026-01-11", -14699, "SYNTHETIC AIRLINE      000-000-0000        XX"),
+            (None, "2026-01-16", 50000, "AUTOPAY PAYMENT - THANK YOU"),
+            (None, "2026-01-22", 2350, "SYNTHETIC OUTFITTERS   ANYTOWN             XX"),
+            (None, "2026-01-27", -6400, "SYNTHETIC GARAGE       ANYTOWN             XX"),
+        ),
+        unresolved_rows=(
+            ({"Amount": ""}, "missing_amount"),
+            ({"Amount": "12.2.5"}, "invalid_amount"),
+            ({"Amount": "12.255"}, "invalid_amount"),
+            ({"Date": ""}, "missing_date"),
+            ({"Date": "2026-01-04"}, "invalid_date"),
+            ({"Date": "13/04/2026"}, "invalid_date"),
+        ),
+        first_ends=4,
+        second_starts=2,
+        first_interval=("2026-01-01", "2026-01-16"),
+        second_interval=("2026-01-08", "2026-01-31"),
         overlap_basis="posting",
         unoffered_bases=("transaction",),
     ),

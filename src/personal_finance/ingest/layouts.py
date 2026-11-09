@@ -186,6 +186,19 @@ def _parse_us_bank_row(cells: Mapping[str, str]) -> ParsedRow:
     return _finish(row, problems)
 
 
+def _parse_amex_row(cells: Mapping[str, str]) -> ParsedRow:
+    """A charge is positive in this export, so the sign is reversed."""
+    problems: list[str] = []
+    amount = _amount(cells["Amount"], problems)
+    signed = None if amount is None else -amount
+    row = ParsedRow(
+        posting_date=_date(cells["Date"], "%m/%d/%Y", problems),
+        amount_cents=signed,
+        description=cells["Description"].strip() or None,
+    )
+    return _finish(row, problems)
+
+
 SYNTHETIC_CHECKING_V1 = Layout(
     layout_id="synthetic_checking_v1",
     parser_version="1",
@@ -240,6 +253,16 @@ US_BANK_V1 = Layout(
     pending_in_complete_coverage={"posting": False},
 )
 
+# American Express's card export. Nothing in a row can confirm the sign, so a statement
+# reconciliation is the only check of it (D-059 point F).
+AMEX_CARD_V1 = Layout(
+    layout_id="amex_card_v1",
+    parser_version="1",
+    columns=("Date", "Description", "Amount"),
+    parse_row=_parse_amex_row,
+    pending_in_complete_coverage={"posting": False},
+)
+
 LAYOUTS = {
     layout.layout_id: layout
     for layout in (
@@ -248,5 +271,6 @@ LAYOUTS = {
         CAPITAL_ONE_CARD_V1,
         CAPITAL_ONE_BANK_V1,
         US_BANK_V1,
+        AMEX_CARD_V1,
     )
 }

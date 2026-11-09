@@ -116,6 +116,16 @@ its PDF statements are M7 (D-059 point D).
 | Date | `YYYY-MM-DD`, the posting date. Coverage on the `posting` basis only |
 | Assumptions | The export holds posted transactions only, and its date is the posting date |
 
+## amex_card_v1
+
+Columns: `Date, Description, Amount`.
+
+| Property | Meaning |
+|---|---|
+| Amount | Signed, **positive for a charge**, so stored negated: a charge is money out, a payment or credit money in. Nothing in a row can confirm the sign |
+| Date | `MM/DD/YYYY`, the posting date. Coverage on the `posting` basis only |
+| Assumptions | The sign, the export holds posted transactions only, and its date is the posting date. The sign is checked only by D-059 point F |
+
 ## Test-only layouts
 
 Tests may define extra synthetic layouts, such as one with unreliable external IDs
