@@ -56,7 +56,8 @@ Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | **M9 overall** | **Complete and accepted** on 2026-11-09, verified by the owner on the real ledger: migrated to version 20 after a verified backup, and categorizing confirmed in the CLI and the UI |
 | M10.1: category rules, their preview, outcome and precedence | Complete (D-064) |
 | M10.2: undoing a category rule | Complete (D-064) |
-| M10.3: rules in the reports, the source of a category, the benchmark row | Not started |
+| M10.3: rules in the reports, the source of a category, the benchmark row | Complete (D-064) |
+| **M10 overall** | **Built,** awaiting the owner's acceptance. The real ledger is still at version 20 |
 
 ## What exists
 
@@ -225,15 +226,17 @@ The security controls proposal is **not applied** and provides no protection
 In [benchmarks.md](benchmarks.md). Reconciliation is quadratic in fully overlapping files, in
 distinct spellings per block, and in the units of a group a decision touches. On the
 100,000-transaction shape every report runs below two seconds, and each write spends about 0.9s
-rewriting 20,000 match outcomes (D-057).
+rewriting 20,000 match outcomes (D-057). With 300 category rules each write spends about 0.5s more
+rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close to its target
+(D-064).
 
 ## Known limitations
 
 - Categories cover spending only, by a person one transaction at a time, or by category rules on
   spending a person has typed (D-064): no income categories, and no renaming, merging or deleting a
   category (D-063). A ledger shows spending by category only while some categorization reaches a
-  transaction. Until M10.3, a rule's outcome shows in `category rules`, `category rule show` and
-  tokens, and not yet in `totals` or `report monthly`.
+  transaction or a rule's outcome does. A rule matches only "description contains": no amount
+  ranges, priorities or editing, and changing a rule is undo then add (D-064).
 - An undo, a classification or a transfer that leaves a categorization unsettled does not say so in
   its own output, unlike `review confirm` and `review separate`, which refuse. `totals` and `review
   categorizations` disclose it.

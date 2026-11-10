@@ -164,6 +164,7 @@ from personal_finance.reports.report_text import (
     describe_pending,
     describe_resolutions,
     describe_role,
+    describe_rule,
     document_list_lines,
     monthly_report_lines,
     review_item_report,
@@ -1980,11 +1981,9 @@ RULE_NOTICE = (
 def rule_sentence(definition: RuleDefinition, category_name: str,
                   account_name: str | None) -> str:
     """What a rule says, in words."""
-    account = f"in account {shown(account_name)}" if account_name else "in every account"
-    kind = definition.financial_type or "any spending type"
-    dated = f"dated from {definition.from_date}" if definition.from_date else "any date"
-    return (f"spending whose description contains '{shown(definition.description_contains)}', "
-            f"{account}, {kind}, {dated}, takes {shown(category_name)}")
+    account_words = f"in account {shown(account_name)}" if account_name else "in every account"
+    return describe_rule(category_name, definition.description_contains, account_words,
+                         definition.financial_type, definition.from_date)
 
 
 def rule_outcome_text(outcome, name_by_category) -> str:

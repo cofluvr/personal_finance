@@ -10,7 +10,8 @@ Not part of the test suite. Run from the repository root:
     and dismissing unresolved rows, --declared for coverage declared after import, --pending for
     pending rows posted at another amount, --classified for financial types, --transfers for
     transfer matches across two accounts, --one-sided for one-sided transfers, --income for income
-    and spending in totals, --scale for the 100,000-transaction shape of M4.4, or rows per month
+    and spending in totals, --scale for the 100,000-transaction shape of M4.4, --scale
+    --category-rules N for it with N category rules (D-064), or rows per month
     such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
@@ -49,6 +50,7 @@ from personal_finance.reconcile.classification_effects import (
     load_active_classifications,
     write_classification_effects,
 )
+from personal_finance.reconcile.category_rules import add_rule, checked_definition, undo_rule
 from personal_finance.reconcile.classifications import classify_transaction, undo_classification
 from personal_finance.reconcile.correction_effects import (
     correction_chain_states,
@@ -71,6 +73,12 @@ from personal_finance.reconcile.decisions import (
 )
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reports.report_text import DIRECT_PAIRS_SHOWN
+from personal_finance.reports.category_rule_evidence import (
+    load_rule,
+    reach_of_rules,
+    rule_preview_outlook,
+    rule_undo_outlook,
+)
 from personal_finance.reports.classification_evidence import (
     classification_undo_outlook,
     load_classification,
@@ -1877,9 +1885,150 @@ def measure_scale() -> None:
         conn.close()
 
 
+def scale_category_rules(count: int) -> list[tuple]:
+    """count category rules over the shape's spending descriptions, SYNTHETIC X0-n on the card and
+    loan and SYNTHETIC X1-n on checking, as (category ID, text, account, type, first date). Texts
+    are number prefixes, so a shorter one reaches the transactions a longer one does, and their
+    categories cycle, so some agree and some disagree. Every fifth is narrowed to an account, a
+    type or a first date."""
+    found = []
+    for number in range(count):
+        group, prefix = ("x1", 10 + number // 5) if number % 5 == 4 else ("x0", 10 + number)
+        account = type_ = from_date = None
+        if number % 5 == 1:
+            account = "card"
+        elif number % 5 == 2:
+            type_ = "interest"
+        elif number % 5 == 3:
+            from_date = "2024-01-01"
+        found.append((1 + number % 12, f"SYNTHETIC {group}-{prefix}", account, type_, from_date))
+    return found
+
+
+def measure_category_rules(count: int) -> None:
+    """Rules on the 100,000-transaction shape: totals and report monthly, a rule's preview, add and
+    undo, and one classification and one import, each of which rewrites every rule's outcome, with
+    the counts the rules reach (D-064 point 9, RC4). Rules and a few person's categorizations are
+    written directly. Stops, as point 9 says, if a preview or add costs more than twice the import
+    of one row, or a report misses two seconds."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path = scale_ledger(root)
+        conn.execute("BEGIN")
+        for number, (category_id, text, account, type_, from_date) in enumerate(
+                scale_category_rules(count)):
+            rule_id = f"r{number:06}"
+            conn.execute(
+                """INSERT INTO category_rule (id, account_id, category_id, description_contains,
+                                              normalization_version, financial_type, from_date)
+                   VALUES (?, ?, ?, ?, 1, ?, ?)""",
+                (rule_id, account, category_id, text, type_, from_date))
+            conn.execute("INSERT INTO category_rule_event (rule_id, event) VALUES (?, 'made')",
+                         (rule_id,))
+        # A person's categorization on 500 card purchases that rules reach, which comes first.
+        for number, (transaction_id, record_id) in enumerate(conn.execute(
+            """SELECT entry.id, entry.primary_source_record_id FROM ledger_transaction entry
+               WHERE entry.account_id = 'card' AND entry.external_id LIKE 'X0-1%'
+               ORDER BY entry.external_id LIMIT 500""").fetchall()):
+            assignment_id = f"g{number:06}"
+            conn.execute(
+                """INSERT INTO category_assignment (id, account_id, category_id,
+                                                    target_transaction_id, target_revision)
+                   VALUES (?, 'card', 12, ?, 't8-0')""", (assignment_id, transaction_id))
+            conn.execute("INSERT INTO category_assignment_record VALUES (?, ?)",
+                         (assignment_id, record_id))
+            conn.execute("INSERT INTO category_assignment_event (assignment_id, event) "
+                         "VALUES (?, 'made')", (assignment_id,))
+        rewrite_started = time.perf_counter()
+        write_transfer_effects(conn)
+        rewrite_seconds = time.perf_counter() - rewrite_started
+        conn.execute("COMMIT")
+        build_seconds = time.perf_counter() - started
+        spending, applied, disagreeing, by_person, rules = conn.execute(
+            """SELECT (SELECT COUNT(*) FROM transaction_classification
+                       WHERE state = 'applied'
+                         AND financial_type IN ('purchase', 'fee', 'interest', 'refund')),
+                      (SELECT COUNT(*) FROM transaction_rule_category WHERE state = 'applied'),
+                      (SELECT COUNT(*) FROM transaction_rule_category
+                       WHERE state = 'rule_conflict'),
+                      (SELECT COUNT(*) FROM transaction_category WHERE state = 'applied'),
+                      (SELECT COUNT(*) FROM category_rule)"""
+        ).fetchone()
+        reach = reach_of_rules(conn)
+        person_first = sum(1 for found in reach.values() if found.categorized_by_person)
+        print(
+            f"shape rules={rules} spending={spending} categorized_by_rules={applied} "
+            f"rule_conflict={disagreeing} categorized_by_person={by_person} "
+            f"rules_with_a_person_first={person_first} first_rewrite={rewrite_seconds:.3f}s "
+            f"build={build_seconds:.1f}s",
+            flush=True,
+        )
+        # The shape reaches the cost it claims: rules categorize thousands of transactions,
+        # disagree on many, and yield to a person on some, and every rule is active.
+        assert rules == count == len(reach)
+        assert applied > 1_000 and disagreeing > 1_000 and by_person == 500 and person_first > 0
+        conn.close()
+
+        database = str(path)
+        totals_seconds = timed_command("totals", "--db", database)
+        monthly_seconds = timed_command("report", "monthly", "--db", database)
+        rule_words = ["--category", "Food", "--description-contains", "synthetic x0-3"]
+        preview_seconds = timed_command("category", "rule", "preview", "--db", database,
+                                        *rule_words)
+        conn = connect(path)
+        definition = checked_definition(conn, "Food", "synthetic x0-3")
+        revision = rule_preview_outlook(conn, definition).revision
+        started = time.perf_counter()
+        added = add_rule(conn, "Food", "synthetic x0-3", revision)
+        add_seconds = time.perf_counter() - started
+        assert added.outlook.changes, "the added rule must change something"
+        undo_revision = rule_undo_outlook(conn, load_rule(conn, added.rule_id)).revision
+        started = time.perf_counter()
+        undone = undo_rule(conn, added.rule_id, undo_revision)
+        undo_seconds = time.perf_counter() - started
+        assert len(undone.changes) == len(added.outlook.changes)
+
+        (unclassified,) = conn.execute(
+            """SELECT entry.id FROM ledger_transaction entry
+               WHERE entry.account_id = 'savings' AND entry.external_id = 'X1-0' AND NOT EXISTS (
+                   SELECT 1 FROM transaction_classification kind
+                   WHERE kind.transaction_id = entry.id)""").fetchone()
+        started = time.perf_counter()
+        classify_transaction(conn, "savings", unclassified,
+                             transaction_revision(load_merge_evidence(conn, unclassified)),
+                             "income")
+        classify_seconds = time.perf_counter() - started
+        later = root / "later.csv"
+        later.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+                         "LATER,2026-12-30,2026-12-30,SYNTHETIC X0-31,-9.00,POSTED\n")
+        started = time.perf_counter()
+        (result,) = import_files(conn, [later], account_id="savings",
+                                 layout=SYNTHETIC_CHECKING_V1)
+        import_seconds = time.perf_counter() - started
+        assert result.outcome == "imported"
+        conn.close()
+        print(
+            f"totals={totals_seconds:7.3f}s report_monthly={monthly_seconds:7.3f}s "
+            f"rule_preview={preview_seconds:7.3f}s rule_add={add_seconds:7.3f}s "
+            f"rule_undo={undo_seconds:7.3f}s one_classification={classify_seconds:7.3f}s "
+            f"one_import={import_seconds:7.3f}s changed_by_the_rule={len(added.outlook.changes)}",
+            flush=True,
+        )
+        stops = [name for name, seconds in (("preview", preview_seconds), ("add", add_seconds))
+                 if seconds > 2 * import_seconds]
+        stops += [name for name, seconds in (("totals", totals_seconds),
+                                             ("report monthly", monthly_seconds)) if seconds > 2]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--scale"]:
         measure_scale()
+        return
+    if sys.argv[1:2] == ["--scale"] and sys.argv[2:3] == ["--category-rules"]:
+        measure_category_rules(int(sys.argv[3]))
         return
     if sys.argv[1:] == ["--worst"]:
         worst_cases()

@@ -1,11 +1,13 @@
-# Session Handoff: M10 in Progress
+# Session Handoff: M10 Built
 
 For a fresh session. Written 2026-11-10. **M1 to M9 are complete and accepted,** and `main` holds
 them at `19ee858`. M10, categorization rules (D-064), was approved by the owner with A to H on
-2026-11-10 and is being built on `feature/m10-rules`: M10.1 and M10.2 are complete. No security control
+2026-11-10 and built on `feature/m10-rules`: M10.1 to M10.3 are complete, awaiting the owner's
+acceptance. The real ledger is still at version 20. No security control
 changed, no dependency was added, and the UI stays read-only. Every fixture is invented.
 
-**Next:** M10.3, rules in the reports and the benchmark row, approved. Point F with the owner on their
+**Next:** the owner's review and acceptance of M10. On the real ledger that means a verified
+backup, then `pf migrate` to version 21. Point F with the owner on their
 already-imported files is still open.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
@@ -241,6 +243,7 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
   throwaway ledger, with the owner, at the final review.
 - [real-data-readiness.md](real-data-readiness.md) names the backup volume `CommonCentsBackups`.
   The owner's is `/Volumes/CommonCentsBackup`. A doc fix, not made.
+- M10's acceptance, and on the real ledger a verified backup, then `pf migrate` to version 21.
 - Pushing. Not authorized from here.
 
 ## Permissions

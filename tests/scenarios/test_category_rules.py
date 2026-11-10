@@ -2,8 +2,11 @@
 
 import re
 import sqlite3
+import tempfile
+from pathlib import Path
 
 import pytest
+from hypothesis import HealthCheck, given, settings
 from test_categorizations import CategoryLedger
 from test_classifications import single
 from test_confirmations import confirm_ok
@@ -14,7 +17,14 @@ from test_decisions import (
     CATEGORY_TABLES,
     pair_up,
 )
+from test_local_ui import UiClient, account_ids, assert_pages_equal_the_cli, parsed_page
 from test_separations import ID_ROW, merged_two
+from test_spending_by_category import (
+    assert_categories_add_to_spending,
+    generated,
+    rows,
+    without_categories,
+)
 from test_supersession import holding
 from test_transfer_migration import markers, migrations_up_to
 
@@ -39,6 +49,8 @@ from personal_finance.reconcile.category_rules import (
 from personal_finance.reconcile.decisions import STALE_ACCOUNT
 from personal_finance.reconcile.rules import MatchingRules
 from personal_finance.reports import category_rule_evidence
+from personal_finance.reports.monthly import monthly_report
+from personal_finance.reports.totals import income_and_spending
 
 LEDGER_TABLES = (*ALL_TABLES, "account", *CATEGORY_TABLES, *CATEGORIZATION_TABLES,
                  *CATEGORY_RULE_TABLES)
@@ -828,3 +840,194 @@ class TestUndo:  # RB1, RB2
 
 
 PINNED_UNDO_REVISION = "q1-2a5a190106cbe279"
+
+
+
+# Rules in the reports and pages (RC1 to RC3).
+
+def rule_lines_removed(text):
+    """A report's lines without the 'By category' block and every line about categories or rules,
+    as test_spending_by_category.without_categories, and the rules' own lines."""
+    return [line for line in without_categories(text)
+            if "category rules" not in line and "Categorized by category rules" not in line]
+
+
+def generated_with_rules(folder, capsys, generated_rows):
+    """M9's generated ledger, and rules over its rows: two that agree on some, one that disagrees
+    with them on others, one undone, and one for card B alone."""
+    ledger = generated(folder, capsys, generated_rows)
+    ledger.__class__ = RuleLedger
+    for category, contains, account in (("Food", "row 1", None), ("Food", "synthetic row 1", None),
+                                        ("Travel", "row 2", None), ("Travel", "row 1 1", None),
+                                        ("Other", "row", "B")):
+        ledger.add_rule_ok(category, contains, account=account)
+    undone = ledger.add_rule_ok("Health", "synthetic")
+    ledger.undo_rule_ok(undone)
+    return ledger
+
+
+@settings(max_examples=20, deadline=None,
+          suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
+@given(generated_rows=rows)
+def test_categories_add_to_spending_with_rules(capsys, generated_rows):  # RC1
+    with tempfile.TemporaryDirectory() as folder:
+        ledger = generated_with_rules(Path(folder), capsys, generated_rows)
+        conn = ledger.conn()
+        for account in (None, ledger.account_id("A"), ledger.account_id("B")):
+            assert_categories_add_to_spending(income_and_spending(conn, account))
+            for month in monthly_report(conn, account).months:
+                assert_categories_add_to_spending(month.income_and_spending)
+        # Every applied rule's category counts in spending's categories.
+        by_rules = conn.execute(
+            "SELECT COUNT(*) FROM transaction_rule_category WHERE state = 'applied'").fetchone()[0]
+        categorized = sum(group.transactions for category, group
+                          in income_and_spending(conn).spending_by_category if category)
+        assert categorized >= by_rules
+        conn.close()
+
+
+@settings(max_examples=12, deadline=None,
+          suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
+@given(generated_rows=rows)
+def test_every_other_line_is_as_with_rules_switched_off(capsys, generated_rows):  # RC2
+    commands = [("totals",), ("report", "monthly"), ("totals", "--account", "B"),
+                ("report", "monthly", "--account", "A", "--from", "2026-02")]
+    with tempfile.TemporaryDirectory() as folder:
+        ledger = generated_with_rules(Path(folder), capsys, generated_rows)
+        shown = [ledger.run(*words) for words in commands]
+        # Switched off: the derived outcomes cleared in a copy, nothing else changed.
+        off = ledger.folder / "off.db"
+        off.write_bytes(ledger.path.read_bytes())
+        conn = connect(off)
+        conn.execute("DELETE FROM transaction_rule_category")
+        conn.close()
+        ledger.db, original = str(off), ledger.db
+        plain = [ledger.run(*words) for words in commands]
+        ledger.db = original
+        for (code, out, err), (plain_code, plain_out, plain_err) in zip(shown, plain, strict=True):
+            assert (code, err) == (plain_code, plain_err)
+            assert rule_lines_removed(out) == rule_lines_removed(plain_out)
+
+
+class TestReports:  # RC1, RC2, RC3
+    def test_rules_categorize_spending_in_totals(self, ledger):
+        transaction = bought(ledger, "a.csv", CAFE_ROW)
+        bought(ledger, "b.csv", SHOP_ROW)
+        bought(ledger, "c.csv", "01/14/2026,SYNTHETIC CAFE SHOP,2.00,")
+        ledger.categorize_ok(transaction, "Health")
+        ledger.add_rule_ok("Food", "cafe")
+        ledger.add_rule_ok("Travel", "shop")
+        totals = ledger.run("totals")[1]
+        assert ("    By category:\n      Food: 0 transactions, 0.00\n" not in totals)
+        assert ("    By category:\n      Health: 1 transactions, 6.50\n"
+                "      Travel: 1 transactions, 9.00\n"
+                "      uncategorized: 1 transactions, 2.00\n") in totals
+        assert ("- Spending categorized by category rules: 1 transactions, 9.00. A categorization "
+                "of your own comes first wherever one reaches. Run category rules.\n") in totals
+        assert ("- Spending left uncategorized because category rules disagree: 1 transactions, "
+                "2.00. Run category rules.\n") in totals
+
+    def test_the_disclosure_uses_the_corrected_amount_and_the_account(self, ledger):
+        ledger.add_account("B", "credit_card")
+        transaction = bought(ledger, "a.csv", CAFE_ROW)
+        bought(ledger, "b.csv", SHOP_ROW, account="B")
+        ledger.correct_ok(transaction, "amount", "-7.25")
+        ledger.add_rule_ok("Food", "synthetic")
+        disclosed = "- Spending categorized by category rules: {}. "
+        assert disclosed.format("2 transactions, 16.25") in ledger.run("totals")[1]
+        assert disclosed.format("1 transactions, 7.25") in ledger.run("totals", "--account", "A")[1]
+        assert disclosed.format("1 transactions, 9.00") in ledger.run("totals", "--account", "B")[1]
+
+    def test_a_category_name_holding_control_characters_is_escaped(self, ledger):
+        name = "Caf\x1b[2Je"
+        assert ledger.run("category", "add", name)[0] == 0
+        transaction = bought(ledger, "a.csv", CAFE_ROW)
+        ledger.add_rule_ok(name, "cafe")
+        for shown in (ledger.transaction_show(transaction), ledger.run("category", "rules")[1]):
+            assert "\x1b" not in shown and "takes Caf\\x1b[2Je" in shown
+
+    def test_monthly_says_how_many_each_month(self, ledger):
+        bought(ledger, "a.csv", CAFE_ROW)
+        bought(ledger, "b.csv", "02/03/2026,SYNTHETIC CAFE SHOP,2.00,")
+        ledger.add_rule_ok("Food", "cafe")
+        ledger.add_rule_ok("Travel", "shop")
+        monthly = ledger.run("report", "monthly")[1]
+        january, february = monthly.split("2026-02:")
+        assert "  Categorized by category rules: 1 transactions\n" in january
+        # Rules alone show the categories, each month counting its own.
+        assert "    By category:\n      Food: 1 transactions, 6.50\n" in january
+        assert "    By category:\n      uncategorized: 1 transactions, 2.00\n" in february
+        assert "    By category:\n      Food: 1 transactions, 6.50\n" in ledger.run("totals")[1]
+        assert "  Uncategorized because category rules disagree: 1 transactions\n" in february
+        assert "Categorized by category rules" not in february
+
+    def test_with_every_rule_undone_the_reports_are_as_never_having_one(self, tmp_path, capsys):
+        shown = []
+        for name, with_rules in (("undone", True), ("never", False)):
+            (tmp_path / name).mkdir()
+            ledger = RuleLedger(tmp_path / name, capsys)
+            bought(ledger, "a.csv", CAFE_ROW)
+            bought(ledger, "b.csv", SHOP_ROW)
+            if with_rules:
+                for rule in (ledger.add_rule_ok("Food", "cafe"),
+                             ledger.add_rule_ok("Travel", "synthetic")):
+                    ledger.undo_rule_ok(rule)
+            shown.append([ledger.run(*words) for words in (
+                ("totals",), ("report", "monthly"), ("transactions",),
+                ("review", "transaction", "show", holding(ledger, "a.csv")))])
+        assert without_ids(shown[0]) == without_ids(shown[1])
+
+    def test_a_transaction_says_where_its_category_comes_from(self, ledger):
+        transaction = bought(ledger, "a.csv", CAFE_ROW)
+        food = ledger.add_rule_ok("Food", "cafe")
+        shown = ledger.transaction_show(transaction)
+        assert (f"  Category rules:\n    Category rule {food}: spending whose description contains "
+                "'cafe', in every account, any spending type, any date, takes Food\n"
+                "    Category: Food, by these rules. A categorization of your own would come "
+                "first\n") in shown
+        travel = ledger.add_rule_ok("Travel", "synthetic", account="A")
+        shown = ledger.transaction_show(transaction)
+        assert f"Category rule {travel}: spending whose description contains 'synthetic', in " \
+               "this account" in shown
+        assert "    Category: the rules disagree, so it is uncategorized." in shown
+        ledger.categorize_ok(transaction, "Health")
+        shown = ledger.transaction_show(transaction)
+        assert "Category rules:" not in shown and "Categorizations:" in shown
+
+    def test_review_show_says_it_too(self, ledger):
+        item, one, _ = pair_up(ledger)
+        ledger.classify_ok(one, "purchase")
+        rule = ledger.add_rule_ok("Food", "synthetic")
+        (item,) = ledger.items()
+        assert f"Category rule {rule}: spending whose description" in ledger.show(item)
+
+    def test_pages_equal_the_cli_with_rules_holding_html(self, ledger):
+        text = '<b>caf&amp;"q\'</b><script>x</script>'
+        bought(ledger, "a.csv", f"01/10/2026,{text.replace(',', ' ')},6.50,")
+        ledger.add_rule_ok("Food", text)
+        assert ledger.rule_outcomes() == [(("a.csv",), "applied", "Food")]
+        client = UiClient(ledger.path)
+        client.sign_in()
+        try:
+            for target in ("/", "/monthly"):
+                page = parsed_page(client.get(target).body)
+                assert not {"b", "script"} & set(page.tags), target
+        finally:
+            client.close()
+        assert_pages_equal_the_cli(ledger.capsys, ledger.path, account_ids(ledger.path),
+                                   [(None, None)])
+
+
+@settings(max_examples=6, deadline=None,
+          suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
+@given(generated_rows=rows)
+def test_pages_equal_the_cli_with_rules(capsys, generated_rows):  # RC3
+    with tempfile.TemporaryDirectory() as folder:
+        ledger = generated_with_rules(Path(folder), capsys, generated_rows)
+        assert_pages_equal_the_cli(capsys, ledger.path, account_ids(ledger.path),
+                                   [(None, None), ("2026-01", "2026-01"), ("2026-02", None)])
+
+
+def without_ids(shown):
+    """Output with every generated ID, which differs between ledgers, masked."""
+    return re.sub(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", "ID", repr(shown))

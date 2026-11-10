@@ -53,6 +53,7 @@ from personal_finance.reports.review_evidence import (
 from personal_finance.reports.totals import (
     GroupTotal,
     account_movement,
+    category_rule_outcomes,
     combined,
     income_and_spending,
     one_sided_summary,
@@ -520,6 +521,7 @@ def add_transaction_evidence(out, entry, shared) -> None:
     add_corrections(out, entry)
     add_classifications(out, entry)
     add_categorizations(out, entry)
+    add_category_rules(out, entry)
     add_transfers(out, entry)
 
 
@@ -578,6 +580,34 @@ def add_categorizations(out, entry) -> None:
         )
     state = entry.categorizations[0].state
     out.add(f"    Category: {CATEGORIZATION_STATE_EXPLANATIONS[state]}")
+
+
+def describe_rule(category_name, description_contains, account_words, financial_type,
+                  from_date) -> str:
+    """What a category rule says, in words (D-064). account_words names where it reaches."""
+    kind = financial_type or "any spending type"
+    dated = f"dated from {from_date}" if from_date else "any date"
+    return (f"spending whose description contains '{shown(description_contains)}', "
+            f"{account_words}, {kind}, {dated}, takes {shown(category_name)}")
+
+
+def add_category_rules(out, entry) -> None:
+    """The category rules matching a transaction no person's categorization reaches, and their
+    outcome (D-064). A transaction no rule's outcome reaches shows nothing here."""
+    if not entry.category_rules:
+        return
+    out.add("  Category rules:")
+    for rule in entry.category_rules:
+        account_words = "in every account" if rule.every_account else "in this account"
+        out.add(f"    Category rule {rule.rule_id}: "
+                + describe_rule(rule.category, rule.description_contains, account_words,
+                                rule.financial_type, rule.from_date))
+    if entry.category_rules[0].state == "applied":
+        out.add(f"    Category: {shown(entry.category_rules[0].category)}, by these rules. A "
+                "categorization of your own would come first")
+    else:
+        out.add(f"    Category: the rules disagree, so it is {UNCATEGORIZED}. Undo or narrow one "
+                "with category rule, or categorize it")
 
 
 def add_transfers(out, entry) -> None:
@@ -649,9 +679,13 @@ def out_and_in(group) -> str:
 
 
 def categories_in_use(conn):
-    """The category list while a categorization reaches some transaction, else None, so that a
-    ledger never categorized, or with every categorization undone, reports as before (D-063)."""
-    if conn.execute("SELECT 1 FROM transaction_category LIMIT 1").fetchone() is None:
+    """The category list while a categorization or a category rule's outcome reaches some
+    transaction, else None, so that a ledger never categorized, or with every categorization and
+    rule undone, reports as before (D-063, D-064)."""
+    if conn.execute(
+        """SELECT 1 FROM transaction_category
+           UNION ALL SELECT 1 FROM transaction_rule_category LIMIT 1"""
+    ).fetchone() is None:
         return None
     return list_categories(conn)
 
@@ -726,6 +760,12 @@ def add_month(out, month, categories=None) -> None:
     ):
         if count:
             out.add(f"  With {label}: {count} transactions")
+    if month.transactions_categorized_by_rules:
+        out.add(f"  Categorized by category rules: {month.transactions_categorized_by_rules} "
+                "transactions")
+    if month.transactions_where_rules_disagree:
+        out.add(f"  {UNCATEGORIZED.capitalize()} because category rules disagree: "
+                f"{month.transactions_where_rules_disagree} transactions")
     if month.matched_sides_with_other_side_in_another_month:
         out.add(
             f"  Matched transfers whose other side is in another month: "
@@ -746,6 +786,23 @@ def describe_income_and_spending(groups) -> list[str]:
         f"{format_cents(unconfirmed.in_cents + unclassified.in_cents)}, the money out and in of "
         "transactions of a transfer kind not confirmed and of unclassified transactions."
     ]
+
+
+def describe_category_rules(outcomes) -> list[str]:
+    """Spending the category rules categorize, and where they disagree, shown only while a rule's
+    outcome reaches a transaction (D-064)."""
+    lines = []
+    if outcomes.categorized.transactions:
+        lines.append(
+            f"Spending categorized by category rules: {spent(outcomes.categorized)}. A "
+            "categorization of your own comes first wherever one reaches. Run category rules."
+        )
+    if outcomes.disagreeing.transactions:
+        lines.append(
+            f"Spending left {UNCATEGORIZED} because category rules disagree: "
+            f"{spent(outcomes.disagreeing)}. Run category rules."
+        )
+    return lines
 
 
 def describe_categories(groups, unsettled, categories) -> list[str]:
@@ -852,6 +909,7 @@ def totals_report_lines(conn, account_id) -> ReportLines:
     stale = stale_accounts(conn, DEFAULT_RULES, account_id)
     categories = categories_in_use(conn)
     unsettled_categories = unsettled_categorizations_by_state(conn, account_id)
+    rule_outcomes = category_rule_outcomes(conn, account_id)
 
     out = ReportLines()
     out.add(f"Account inflows: {format_cents(movement.inflow_cents)}")
@@ -918,7 +976,8 @@ def totals_report_lines(conn, account_id) -> ReportLines:
                  *describe_pending(movement), *describe_classifications(movement),
                  *describe_transfers(transfers), *describe_one_sided(one_sided),
                  *describe_income_and_spending(groups),
-                 *describe_categories(groups, unsettled_categories, categories)):
+                 *describe_categories(groups, unsettled_categories, categories),
+                 *describe_category_rules(rule_outcomes)):
         out.add(f"- {line}")
     return out
 
