@@ -30,8 +30,11 @@ from personal_finance.reconcile.category_rule_effects import (
 from personal_finance.reconcile.category_rules import (
     RULE_ALREADY_ACTIVE,
     RULE_DATE_INVALID,
+    RULE_NOT_ACTIVE,
+    RULE_NOT_FOUND,
     RULE_TEXT_BLANK,
     STALE_PREVIEW,
+    STALE_RULE_REVISION,
 )
 from personal_finance.reconcile.decisions import STALE_ACCOUNT
 from personal_finance.reconcile.rules import MatchingRules
@@ -81,6 +84,18 @@ class RuleLedger(CategoryLedger):
     def rule_show(self, rule):
         code, out, err = self.run("category", "rule", "show", rule)
         assert code == 0, err
+        return out
+
+    def rule_revision(self, rule):
+        return re.search(r"Revision: (q1-[0-9a-f]{16})", self.rule_show(rule))[1]
+
+    def undo_rule(self, rule, revision=None):
+        return self.run("category", "rule", "undo", rule,
+                        "--revision", revision or self.rule_revision(rule))
+
+    def undo_rule_ok(self, rule, **options):
+        code, out, err = self.undo_rule(rule, **options)
+        assert (code, err) == (0, ""), err
         return out
 
     def rule_outcomes(self):
@@ -706,3 +721,110 @@ class TestTokens:  # RA6
 
 
 PINNED_PREVIEW_REVISION = "p1-d06ee505532f0efd"
+
+
+
+class TestUndo:  # RB1, RB2
+    def refused(self, ledger, message, rule, revision):
+        before = ledger.everything()
+        code, out, err = ledger.undo_rule(rule, revision)
+        assert (code, out) == (2, "") and err == f"Error: {message}\n"
+        assert ledger.everything() == before
+
+    def test_show_previews_it_and_undo_does_it(self, ledger):
+        transaction = bought(ledger, "a.csv", CAFE_ROW)
+        rule = ledger.add_rule_ok("Food", "cafe")
+        out = ledger.rule_show(rule)
+        assert re.search(r"  Revision: q1-[0-9a-f]{16}\nUndoing this rule now:\nChanges: 1\n"
+                         rf"  Transaction {transaction}: A, 2026-01-10, -6\.50, SYNTHETIC CAFE: "
+                         r"Food by rules now, uncategorized after\n", out)
+        out = ledger.undo_rule_ok(rule)
+        assert out.startswith(f"Category rule {rule} undone: changed 1 transactions. It stays on "
+                              "record.\n  This re-derives from the evidence held now")
+        assert ledger.rule_outcomes() == []
+        shown = ledger.rule_show(rule)
+        assert "Status: undone" in shown and "Undone: " in shown and "Revision" not in shown
+        assert f"Category rule {rule}: undone," in ledger.run("category", "rules")[1]
+
+    def test_it_equals_a_ledger_where_the_rule_was_never_added(self, tmp_path, capsys):
+        found = []
+        for name, with_undone in (("undone", True), ("never", False)):
+            (tmp_path / name).mkdir()
+            ledger = RuleLedger(tmp_path / name, capsys)
+            bought(ledger, "a.csv", CAFE_ROW)
+            bought(ledger, "b.csv", SHOP_ROW)
+            ledger.add_rule_ok("Travel", "synthetic")
+            if with_undone:
+                rule = ledger.add_rule_ok("Food", "cafe")
+                assert ledger.rule_outcomes()[0][1] == "rule_conflict"
+                ledger.undo_rule_ok(rule)
+            found.append((ledger.rule_outcomes(), ledger.run("totals")[1]))
+        assert found[0] == found[1]
+        assert found[0][0] == [(("a.csv",), "applied", "Travel"), (("b.csv",), "applied", "Travel")]
+
+    def test_a_person_s_categorization_is_unchanged(self, ledger):
+        transaction = bought(ledger, "a.csv", CAFE_ROW)
+        categorization = ledger.categorize_ok(transaction, "Travel")
+        rule = ledger.add_rule_ok("Food", "cafe")
+        before = ledger.category_outcomes()
+        assert "Changes: 0\n" in ledger.rule_show(rule)
+        ledger.undo_rule_ok(rule)
+        assert ledger.category_outcomes() == before
+        assert ledger.categorization_state(categorization) == "active"
+
+    def test_it_reaches_transactions_imported_since(self, ledger):
+        bought(ledger, "a.csv", CAFE_ROW)
+        rule = ledger.add_rule_ok("Food", "cafe")
+        bought(ledger, "b.csv", "01/20/2026,SYNTHETIC CAFE,3.00,")
+        assert "Changes: 2\n" in ledger.rule_show(rule)
+        assert "changed 2 transactions" in ledger.undo_rule_ok(rule)
+        assert ledger.rule_outcomes() == []
+
+    def test_a_stale_token(self, ledger):
+        bought(ledger, "a.csv", CAFE_ROW)
+        rule = ledger.add_rule_ok("Food", "cafe")
+        self.refused(ledger, STALE_RULE_REVISION, rule, "q1-0000000000000000")
+
+    def test_a_token_made_before_an_import(self, ledger):
+        bought(ledger, "a.csv", CAFE_ROW)
+        rule = ledger.add_rule_ok("Food", "cafe")
+        token = ledger.rule_revision(rule)
+        bought(ledger, "b.csv", "01/20/2026,SYNTHETIC CAFE,3.00,")
+        self.refused(ledger, STALE_RULE_REVISION, rule, token)
+
+    def test_an_undone_rule(self, ledger):
+        bought(ledger, "a.csv", CAFE_ROW)
+        rule = ledger.add_rule_ok("Food", "cafe")
+        token = ledger.rule_revision(rule)
+        ledger.undo_rule_ok(rule, revision=token)
+        self.refused(ledger, RULE_NOT_ACTIVE, rule, token)
+
+    def test_an_unknown_rule(self, ledger):
+        bought(ledger, "a.csv", CAFE_ROW)
+        self.refused(ledger, RULE_NOT_FOUND, "no-such", "q1-0000000000000000")
+
+    def test_a_stale_account_is_checked_before_the_token(self, ledger):
+        bought(ledger, "a.csv", CAFE_ROW)
+        rule = ledger.add_rule_ok("Food", "cafe")
+        conn = ledger.conn()
+        conn.execute("UPDATE account_reconciliation SET rules_fingerprint = ?", ("0" * 64,))
+        conn.close()
+        assert "undo will be refused until it is" in ledger.rule_show(rule)
+        self.refused(ledger, STALE_ACCOUNT, rule, "q1-0000000000000000")
+
+    def test_adding_it_again_after_undo(self, ledger):
+        bought(ledger, "a.csv", CAFE_ROW)
+        rule = ledger.add_rule_ok("Food", "cafe")
+        ledger.undo_rule_ok(rule)
+        again = ledger.add_rule_ok("Food", "cafe")
+        assert again != rule and ledger.rule_outcomes() == [(("a.csv",), "applied", "Food")]
+
+    def test_the_undo_token_is_pinned(self, ledger):
+        """Computed for this ledger when M10.2 was built, as a regression pin."""
+        assert category_rule_evidence.RULE_UNDO_REVISION_VERSION == 1
+        bought(ledger, "a.csv", CAFE_ROW)
+        rule = ledger.add_rule_ok("Food", "cafe")
+        assert ledger.rule_revision(rule) == PINNED_UNDO_REVISION
+
+
+PINNED_UNDO_REVISION = "q1-2a5a190106cbe279"

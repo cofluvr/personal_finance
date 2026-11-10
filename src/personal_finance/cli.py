@@ -66,7 +66,7 @@ from personal_finance.reconcile.categorizations import (
 )
 from personal_finance.reconcile.category_effects import NOT_SPENDING, SPENDING_TYPES
 from personal_finance.reconcile.category_rule_effects import RULE_APPLIED, RuleDefinition
-from personal_finance.reconcile.category_rules import add_rule, checked_definition
+from personal_finance.reconcile.category_rules import add_rule, checked_definition, undo_rule
 from personal_finance.reconcile.classifications import classify_transaction, undo_classification
 from personal_finance.reconcile.correction_effects import (
     FIELD_APPLIED,
@@ -110,8 +110,9 @@ from personal_finance.reports.category_rule_evidence import (
     StoredRule,
     list_rules,
     load_rule,
-    preview_outlook,
     reach_of_rules,
+    rule_preview_outlook,
+    rule_undo_outlook,
     shown_transactions,
 )
 from personal_finance.reports.categorization_evidence import (
@@ -413,6 +414,11 @@ def build_parser() -> argparse.ArgumentParser:
     rule_show = command("show", rule_commands, handler=run_category_rule_show,
                         help="show a rule and where it reaches")
     rule_show.add_argument("rule_id", help="a rule ID from category rules")
+    rule_undo = command("undo", rule_commands, handler=run_category_rule_undo,
+                        help="stop a category rule applying, keeping it on record")
+    rule_undo.add_argument("rule_id", help="a rule ID from category rules")
+    rule_undo.add_argument("--revision", required=True,
+                           help="the revision from category rule show")
 
     importer = command("import", handler=run_import, help="import files")
     importer.add_argument("--account", required=True, help="account name or ID")
@@ -1959,6 +1965,12 @@ def run_review_classification_show(args) -> int:
     return 0
 
 
+RULE_UNDO_NOTICE = (
+    "This re-derives from the evidence held now, without this rule. It does not restore an "
+    "earlier snapshot, so it can change other transactions than adding the rule did. A person's "
+    "categorizations are unchanged."
+)
+
 RULE_NOTICE = (
     "A person's categorization comes first wherever one reaches. The rule reaches transactions "
     "imported later too, and never binds records."
@@ -2012,7 +2024,7 @@ def shown_account_name(conn, account_id: str) -> str:
 def run_category_rule_preview(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     definition, category_name, account_name = definition_of(conn, args)
-    outlook = preview_outlook(conn, definition)
+    outlook = rule_preview_outlook(conn, definition)
     print(f"Category rule preview: {rule_sentence(definition, category_name, account_name)}")
     print(
         f"Matches: {outlook.matched} spending transactions. A person's categorization comes "
@@ -2091,6 +2103,24 @@ def run_category_rule_show(args) -> int:
                 f"{entry.shown_date}, {shown_amount(entry.amount_cents)}, "
                 f"{shown(entry.description)}"
             )
+    outlook = rule_undo_outlook(conn, rule)
+    print(f"  Revision: {outlook.revision}")
+    print("Undoing this rule now:")
+    print_rule_changes(conn, outlook)
+    if stale_accounts(conn, DEFAULT_RULES, rule.definition.account_id):
+        print(
+            "An account this rule can reach has not been reconciled under the current matching "
+            "rules, so undo will be refused until it is. Run reconcile."
+        )
+    return 0
+
+
+def run_category_rule_undo(args) -> int:
+    conn = open_ledger(args.db)
+    outlook = undo_rule(conn, args.rule_id, args.revision)
+    print(f"Category rule {args.rule_id} undone: changed {len(outlook.changes)} transactions. "
+          "It stays on record.")
+    print(f"  {RULE_UNDO_NOTICE}")
     return 0
 
 

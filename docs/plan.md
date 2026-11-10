@@ -496,7 +496,7 @@ security control changes.
 | Slice | Scope | Status |
 |---|---|---|
 | M10.1 | Category rules: migration 0021, matching, preview, add, list and show, the derived outcome on every write, precedence, tokens | Complete |
-| M10.2 | Undoing a category rule with its `q1` token | Proposed |
+| M10.2 | Undoing a category rule with its `q1` token | Complete |
 | M10.3 | Spending by category counting rules, disclosures, the source of a category, UI parity, the benchmark row | Proposed |
 
 ### M10.1 acceptance criteria

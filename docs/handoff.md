@@ -2,10 +2,10 @@
 
 For a fresh session. Written 2026-11-10. **M1 to M9 are complete and accepted,** and `main` holds
 them at `19ee858`. M10, categorization rules (D-064), was approved by the owner with A to H on
-2026-11-10 and is being built on `feature/m10-rules`: M10.1 is complete. No security control
+2026-11-10 and is being built on `feature/m10-rules`: M10.1 and M10.2 are complete. No security control
 changed, no dependency was added, and the UI stays read-only. Every fixture is invented.
 
-**Next:** M10.2, undoing a rule, then M10.3, both approved. Point F with the owner on their
+**Next:** M10.3, rules in the reports and the benchmark row, approved. Point F with the owner on their
 already-imported files is still open.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session

@@ -1,4 +1,4 @@
-"""Adding category rules stated by a person. See decisions.md D-064.
+"""Adding and undoing category rules stated by a person. See decisions.md D-064.
 
 Every command checks everything under one write lock and either commits with the rules' outcomes
 rewritten or changes nothing, in D-043's order: every account the rule can reach is current, then
@@ -22,7 +22,12 @@ from personal_finance.reconcile.category_rule_effects import (
 )
 from personal_finance.reconcile.decisions import STALE_ACCOUNT, DecisionRefused
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
-from personal_finance.reports.category_rule_evidence import RuleOutlook, preview_outlook
+from personal_finance.reports.category_rule_evidence import (
+    RuleOutlook,
+    load_rule,
+    rule_preview_outlook,
+    rule_undo_outlook,
+)
 
 RULE_TEXT_BLANK = (
     "a category rule needs description text that is not blank once spaces are collapsed. "
@@ -31,6 +36,12 @@ RULE_TEXT_BLANK = (
 RULE_DATE_INVALID = "--from must be a date written YYYY-MM-DD. Nothing was changed."
 RULE_ALREADY_ACTIVE = (
     "category rule {rule} is active and says exactly this already. Nothing was changed."
+)
+RULE_NOT_FOUND = "category rule not found. Run category rules. Nothing was changed."
+RULE_NOT_ACTIVE = "this category rule has already been undone. Nothing was changed."
+STALE_RULE_REVISION = (
+    "this revision does not match what undoing the rule would change now. Nothing was changed. "
+    "Run category rule show and check the changes again."
 )
 STALE_PREVIEW = (
     "this preview does not match what the rule would change now. Nothing was changed. Run "
@@ -111,7 +122,7 @@ def _add_rule(conn, category_name, description_contains, preview_revision, accou
     for active in load_active_rules(conn):
         if same_meaning(active.definition, definition):
             raise DecisionRefused(RULE_ALREADY_ACTIVE.format(rule=active.rule_id))
-    outlook = preview_outlook(conn, definition)
+    outlook = rule_preview_outlook(conn, definition)
     if outlook.revision != preview_revision:
         raise DecisionRefused(STALE_PREVIEW)
 
@@ -126,3 +137,37 @@ def _add_rule(conn, category_name, description_contains, preview_revision, accou
     conn.execute("INSERT INTO category_rule_event (rule_id, event) VALUES (?, 'made')", (rule_id,))
     write_rule_category_effects(conn)
     return RuleAdded(rule_id, outlook)
+
+
+def undo_rule(
+    conn: sqlite3.Connection,
+    rule_id: str,
+    revision: str,
+    rules: MatchingRules = DEFAULT_RULES,
+) -> RuleOutlook:
+    """Stop a rule applying, keeping it on record, and rewrite the rules' outcomes. The result
+    equals a ledger where the rule was never added (D-043). Rules constrain no identity, so this
+    never refuses for contradiction. Returns what undoing it changed."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        result = _undo_rule(conn, rule_id, revision, rules)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    return result
+
+
+def _undo_rule(conn, rule_id, revision, rules) -> RuleOutlook:
+    rule = load_rule(conn, rule_id)
+    if rule is None:
+        raise DecisionRefused(RULE_NOT_FOUND)
+    refuse_unless_current(conn, rule.definition.account_id, rules)
+    if rule.undone_at:
+        raise DecisionRefused(RULE_NOT_ACTIVE)
+    outlook = rule_undo_outlook(conn, rule)
+    if outlook.revision != revision:
+        raise DecisionRefused(STALE_RULE_REVISION)
+    conn.execute("INSERT INTO category_rule_event (rule_id, event) VALUES (?, 'undone')", (rule_id,))
+    write_rule_category_effects(conn)
+    return outlook

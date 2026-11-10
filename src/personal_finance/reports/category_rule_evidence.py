@@ -76,7 +76,7 @@ class RuleReach:
     categorized_by_person: tuple[str, ...]
 
 
-def preview_outlook(conn: sqlite3.Connection, definition: RuleDefinition) -> RuleOutlook:
+def rule_preview_outlook(conn: sqlite3.Connection, definition: RuleDefinition) -> RuleOutlook:
     """What adding a rule would change, and its p1 token."""
     rules_now = load_active_rules(conn)
     proposed = CategoryRule(PROPOSED_RULE_ID, definition)
@@ -85,7 +85,7 @@ def preview_outlook(conn: sqlite3.Connection, definition: RuleDefinition) -> Rul
                     f"p{PREVIEW_REVISION_VERSION}")
 
 
-def undo_outlook(conn: sqlite3.Connection, rule: StoredRule) -> RuleOutlook:
+def rule_undo_outlook(conn: sqlite3.Connection, rule: StoredRule) -> RuleOutlook:
     """What undoing an active rule would change, and its q1 token. Only an active rule has one,
     so its state is not covered."""
     rules_now = load_active_rules(conn)

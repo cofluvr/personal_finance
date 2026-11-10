@@ -55,7 +55,7 @@ Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M9.3: spending by category in totals, monthly and the UI | Accepted (D-063) |
 | **M9 overall** | **Complete and accepted** on 2026-11-09, verified by the owner on the real ledger: migrated to version 20 after a verified backup, and categorizing confirmed in the CLI and the UI |
 | M10.1: category rules, their preview, outcome and precedence | Complete (D-064) |
-| M10.2: undoing a category rule | Not started |
+| M10.2: undoing a category rule | Complete (D-064) |
 | M10.3: rules in the reports, the source of a category, the benchmark row | Not started |
 
 ## What exists
@@ -113,9 +113,9 @@ Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   list, which category applies to which spending transaction, and categorizing and undoing under
   one write lock (D-063). `reports.categorization_evidence` holds the `g2` undo token.
 - `personal_finance.reconcile.category_rule_effects` and `category_rules`: which category rules
-  reach which spending transaction and the category they give, derived on every write, and adding a
-  rule under one write lock (D-064). `reports.category_rule_evidence` holds the preview and the
-  `p1` token.
+  reach which spending transaction and the category they give, derived on every write, and adding and
+  undoing a rule under one write lock (D-064). `reports.category_rule_evidence` holds the
+  preview and undo outlooks, and the `p1` and `q1` tokens.
 - `personal_finance.reconcile.transfer_effects` and `transfers`: which transfer matches and one-sided
   transfers apply and which pairs are candidates, read after each account derives alone, and
   matching, stating and undoing under one write lock (D-054, D-055).
@@ -152,7 +152,8 @@ Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `review classifications`, `review classification show`, `review classification undo`,
   `review transfers`, `review transfer match`, `review transfer one-sided`, `review transfer show`,
   `review transfer undo`, `category add`, `category list`, `category rules`,
-  `category rule preview`, `category rule add`, `category rule show`, `review categorize`,
+  `category rule preview`, `category rule add`, `category rule show`, `category rule undo`,
+  `review categorize`,
   `review categorizations`, `review categorization show`, `review categorization undo`, `totals`,
   `report monthly`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
@@ -232,7 +233,7 @@ rewriting 20,000 match outcomes (D-057).
   spending a person has typed (D-064): no income categories, and no renaming, merging or deleting a
   category (D-063). A ledger shows spending by category only while some categorization reaches a
   transaction. Until M10.3, a rule's outcome shows in `category rules`, `category rule show` and
-  tokens, and not yet in `totals` or `report monthly`. Until M10.2, a rule cannot be undone.
+  tokens, and not yet in `totals` or `report monthly`.
 - An undo, a classification or a transfer that leaves a categorization unsettled does not say so in
   its own output, unlike `review confirm` and `review separate`, which refuse. `totals` and `review
   categorizations` disclose it.

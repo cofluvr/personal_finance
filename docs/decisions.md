@@ -83,7 +83,7 @@ and keep its index line.
 | D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
 | D-062 | M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8, verified by the owner |
 | D-063 | M9 plan: spending categories — Approved with A to E, implemented and accepted in M9 |
-| D-064 | M10 plan: categorization rules — Approved with A to H, M10.1 built |
+| D-064 | M10 plan: categorization rules — Approved with A to H, M10.1 and M10.2 built |
 
 ## Rules in brief
 
@@ -187,7 +187,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Spending by category | Under Spending, adding to it exactly, while a categorization reaches a transaction. `g1` undo token, and `r10`, `t8`, `d7`, `c3` keeping digests | D-063 |
 | Category rules | Spending whose normalized effective description contains a text, narrowed by account, spending type and first date, takes a category. Derived wherever categories are, from the evidence held now, binding no records, so later imports are reached in any order | D-064 |
 | Rule precedence | A person's categorization first, in every state. Agreeing rules apply, disagreeing ones leave `rule_conflict`, disclosed | D-064 |
-| Rule tokens | `rule add` needs the `p1` preview of every change. `r11`, `t9`, `d8`, `c4` and `g2` add rules, keeping digests while none reaches | D-064 |
+| Rule tokens | `rule add` needs the `p1` preview of every change, and `rule undo` the `q1` outlook of every change. `r11`, `t9`, `d8`, `c4` and `g2` add rules, keeping digests while none reaches | D-064 |
 | Backups | A new folder, on a mounted volume other than a real ledger's and gated as its folder is, holding the ledger, its referenced originals and a manifest of hashes, sizes, versions and a logical digest. Restore never overwrites, and checks every file, integrity, foreign keys, schema and digest first | D-058 |
 
 ## Not yet decided
@@ -196,7 +196,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-064 M10 plan: categorization rules — Approved with A to H, M10.1 built
+## D-064 M10 plan: categorization rules — Approved with A to H, M10.1 and M10.2 built
 
 Proposed on 2026-11-10. M10 is the second Phase 1B milestone of D-063 point 2: **categorization
 rules**, meeting PRD §10's correction actions "apply a rule to future matches", "apply a rule to
@@ -486,3 +486,21 @@ compared as M9 compared.
   token versions move, every digest kept. 32 are two ledgers stamped schema 21 to mean newer than
   the code, which reads them as current. 3 are the comparison's own rewriting of a stored
   description holding "t8-", identical compared exactly.
+
+**How M10.2 was implemented:**
+
+- `category rule undo RULE_ID --revision q1-…` under one write lock: the rule is found first, since
+  its account says which accounts must be current, then those accounts, then that it is active, then
+  the token. It appends `undone` and rewrites the rules' outcomes, so the result is a ledger where
+  the rule was never added, compared with one in a test. A person's categorizations are untouched.
+- `category rule show` gives an active rule's `q1` and every change undo would make, before and
+  after, as a preview does. `q1` covers the definition and that list, so a later import, correction,
+  classification, categorization or rule that changes it refuses the token.
+- The changes adding a rule made are not stored, so undo's output always says it re-derives from the
+  evidence held now and can change other transactions than adding did, rather than comparing.
+- An undone rule stays on record, listed as `undone`, and the same rule can be added again as a new
+  rule. Backup and restore keep rules and their events: the backup tests' rich ledger now holds a
+  rule and an undone rule, and every list and show is compared after restore.
+- **Compared as CB5:** M10.2's code against M10.1's on the same 2,477 ledgers, every run identical:
+  51,379 runs, 51,379 identical.
+
