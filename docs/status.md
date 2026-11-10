@@ -50,10 +50,10 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M8.3: import results, transactions, review queue and item pages | Complete (D-062) |
 | M8.4: decisions from the browser | Not built: the owner chose a read-only M8 |
 | **M8 overall** | **Complete,** verified by the owner in a browser on 2026-11-09 |
-| M9.1: the category list | Complete (D-063) |
-| M9.2: categorizing one spending transaction, types and categories on one model | Complete (D-063) |
-| M9.3: spending by category in totals, monthly and the UI | Complete (D-063) |
-| **M9 overall** | **Complete,** for the owner's review |
+| M9.1: the category list | Accepted (D-063) |
+| M9.2: categorizing one spending transaction, types and categories on one model | Accepted (D-063) |
+| M9.3: spending by category in totals, monthly and the UI | Accepted (D-063) |
+| **M9 overall** | **Complete and accepted** on 2026-11-09, verified by the owner on the real ledger: migrated to version 20 after a verified backup, and categorizing confirmed in the CLI and the UI |
 
 ## What exists
 

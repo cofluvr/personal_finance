@@ -442,7 +442,7 @@ Approved by the owner on 2026-11-09 as D-062, with A to E: read-only, so M8.4 is
 
 Approved by the owner on 2026-11-09 as D-063, with A to E, and PRD §10's starting categories as
 named, with no subcategories. M9.1 to M9.3 approved to build in order. No security control changes.
-**M9 is complete,** for the owner's review.
+**M9 is complete and accepted,** verified by the owner on the real ledger on 2026-11-09.
 
 | Slice | Scope | Status |
 |---|---|---|

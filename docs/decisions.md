@@ -82,7 +82,7 @@ and keep its index line.
 | D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, implemented in M7 |
 | D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
 | D-062 | M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8, verified by the owner |
-| D-063 | M9 plan: spending categories — Approved with A to E, implemented in M9 |
+| D-063 | M9 plan: spending categories — Approved with A to E, implemented and accepted in M9 |
 
 ## Rules in brief
 
@@ -192,7 +192,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-063 M9 plan: spending categories — Approved with A to E, implemented in M9
+## D-063 M9 plan: spending categories — Approved with A to E, implemented and accepted in M9
 
 Proposed on 2026-11-09. **M1 to M8 deliver every Phase 1A item** of PRD-backend §3, so M9 opens
 Phase 1B, which plan.md leaves to be planned once Phase 1A passes (point 1). M9 is the first of its
@@ -393,3 +393,7 @@ M8.1 compared.
   M9.2 is identical in all 41,101. Those ledgers hold no categorization, so on categorized
   generated ledgers a test removes the new lines and compares every other line with the reports
   as they are with categories switched off.
+
+**The owner's acceptance, on 2026-11-09.** M9 accepted. Verified on the real ledger: a verified
+backup, `pf migrate` to version 20, and categorizing confirmed in the CLI and the local UI. Merged
+into `main` by fast-forward the same day.

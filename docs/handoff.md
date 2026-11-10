@@ -1,13 +1,13 @@
-# Session Handoff: M9 Built
+# Session Handoff: M9 Accepted
 
-For a fresh session. Written 2026-11-09. **M1 to M9 are built.** M9, spending categories (D-063,
-approved with A to E), is complete in three commits, M9.1 to M9.3, **for the owner's review.** PRD
-§10's twelve starting categories stand, with no subcategories. No security control changed, no
-dependency was added, and the UI stays read-only. Every fixture is invented.
+For a fresh session. Written 2026-11-09. **M1 to M9 are complete and accepted.** M9, spending
+categories (D-063), was accepted by the owner and verified on the real ledger: a verified backup,
+`pf migrate` to version 20, and categorizing in the CLI and the UI. `feature/m2-review` was merged
+into `main` by fast-forward. No security control changed, no dependency was added, and the UI stays
+read-only. Every fixture is invented.
 
-**Next:** the owner's review of M9, then point F with the owner on their already-imported files,
-and the owner's own backup of the real ledger before `pf migrate` brings it to version 20. Nothing
-of M10 is planned.
+**Next:** M10, categorization rules, planned as the next decision for the owner's review. Point F
+with the owner on their already-imported files is still open.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -227,9 +227,6 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- The review of M9.1 to M9.3.
-- The real ledger: the owner's own `pf backup create` and `verify` before `pf migrate`, since 0019
-  and 0020 are new. The ledger is at version 18 until then, and `pf` refuses it.
 - Point F for `us_bank_card_activity_pdf_v1`, by the PDF section of
   [layout-verification.md](layout-verification.md).
 - Point F per layout, by [layout-verification.md](layout-verification.md), and its results. The
@@ -243,12 +240,12 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for the D-063 approval and M9.1 to M9.3 on 2026-11-09, used for them | **Must be renewed** for any change after the review |
+| Local commits | Approved for the D-063 approval, M9.1 to M9.3, M9's acceptance, the merge into `main` and the M10 plan on 2026-11-09, used for them | **Must be renewed** for any change after the M10 review |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |
 | M8 | Complete, verified by the owner in a browser on 2026-11-09 | Decisions from the browser (M8.4) need a new approval, as a security change |
-| M9 | Built, M9.1 to M9.3, on 2026-11-09 | The owner's review |
+| M9 | Accepted on 2026-11-09, verified on the real ledger | None |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Approved for the declared dependencies and build requirements, and on 2026-11-09 for pypdf 6.21.2 | Ask for anything new, an upgrade of pypdf included |
 | Network access | Approved for the clean-install dependencies, and on 2026-11-09 for pypdf's release list and install. Used, and now closed | Ask for any use |
