@@ -442,12 +442,13 @@ Approved by the owner on 2026-11-09 as D-062, with A to E: read-only, so M8.4 is
 
 Approved by the owner on 2026-11-09 as D-063, with A to E, and PRD §10's starting categories as
 named, with no subcategories. M9.1 to M9.3 approved to build in order. No security control changes.
+**M9 is complete,** for the owner's review.
 
 | Slice | Scope | Status |
 |---|---|---|
 | M9.1 | The category list: migration 0019, PRD §10's starting set, `pf category add` and `list` | Complete |
 | M9.2 | Categorizing one transaction, D-053's model extracted for types and categories, migration 0020 | Complete |
-| M9.3 | Spending by category in `totals` and `report monthly`, and so on the UI's pages | Approved |
+| M9.3 | Spending by category in `totals` and `report monthly`, and so on the UI's pages | Complete |
 
 ### M9.1 acceptance criteria
 

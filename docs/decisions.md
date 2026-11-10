@@ -82,7 +82,7 @@ and keep its index line.
 | D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, implemented in M7 |
 | D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
 | D-062 | M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8, verified by the owner |
-| D-063 | M9 plan: spending categories — Approved with A to E |
+| D-063 | M9 plan: spending categories — Approved with A to E, implemented in M9 |
 
 ## Rules in brief
 
@@ -181,6 +181,9 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Local UI | `pf ui` serves read-only pages on `127.0.0.1` at a port the system picks, with no option to change it. Exact Host, a one-use launch key for an `HttpOnly`, `SameSite=Strict` cookie, `GET` only, no script, no logging, the ledger opened read-only through the gate on every request. Decisions stay in the terminal | D-062 |
 | W1 and `http` | Only `ui/server.py` imports from `http`, and only `http.server`'s `BaseHTTPRequestHandler` and `HTTPServer` | D-058, D-062 |
 | PDF text | pypdf alone reads it, pinned by hash, imported by `ingest/pdf_reader.py` only, with `jbig2dec` unset and its log silenced. W1 parses pypdf too, allowing only its JBIG2 decoder's `subprocess` | D-020, D-060 |
+| Categories | Append-only, one level of subcategories, PRD §10's twelve to start. Names exact, never `uncategorized` | D-063 |
+| Categorizations | D-053's model through one shared implementation. Spending only: an applied purchase, fee, interest or refund with no transfer confirmed. Otherwise `not_spending`, disclosed | D-063 |
+| Spending by category | Under Spending, adding to it exactly, while a categorization reaches a transaction. `g1` undo token, and `r10`, `t8`, `d7`, `c3` keeping digests | D-063 |
 | Backups | A new folder, on a mounted volume other than a real ledger's and gated as its folder is, holding the ledger, its referenced originals and a manifest of hashes, sizes, versions and a logical digest. Restore never overwrites, and checks every file, integrity, foreign keys, schema and digest first | D-058 |
 
 ## Not yet decided
@@ -189,7 +192,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-063 M9 plan: spending categories — Approved with A to E
+## D-063 M9 plan: spending categories — Approved with A to E, implemented in M9
 
 Proposed on 2026-11-09. **M1 to M8 deliver every Phase 1A item** of PRD-backend §3, so M9 opens
 Phase 1B, which plan.md leaves to be planned once Phase 1A passes (point 1). M9 is the first of its
@@ -369,3 +372,24 @@ M8.1 compared.
   types check, and a completion's undo waits for a categorization binding its record. Other
   commands that can leave a categorization unsettled, such as an undo or a classification, do not
   say so in their own output: `totals` and `review categorizations` disclose it.
+
+**How M9.3 was implemented:**
+
+- The income and spending tally takes each transaction's applied category, and refuses one outside
+  spending as a broken invariant. `totals` and `report monthly` list spending by category under
+  Spending's types, a subcategory under its parent and in its line, then `uncategorized`.
+- **Shown only while a categorization reaches a transaction,** so a ledger never categorized, or
+  with every categorization undone, reports byte for byte as before. Disclosures give uncategorized
+  spending's count and amount, and categorizations that do not apply by reason, for the scope
+  asked. A month adds "With an unsettled categorization" as it does for types.
+- **CB5 and CC4, compared as M8.1:** the suite's ledgers before M9, 2,364 of them, read by the code
+  before M9 and, migrated, by M9.2's and M9.3's. 41,101 runs: per ledger `totals`, `report
+  monthly` for the ledger and each account over four month ranges, `documents`, `transactions`,
+  `review list`, `review classifications`, and review, classification, decision, correction and
+  transaction shows, capped at 50 per kind, since a few stress ledgers hold 32,768 decisions.
+  41,072 are identical once token versions move up, every digest kept. 26 are two ledgers stamped
+  schema 19 to mean newer than the code, which reads them as older at 20. 3 were the comparison's
+  own rewriting of a stored description holding "t7-", identical compared exactly. M9.3 against
+  M9.2 is identical in all 41,101. Those ledgers hold no categorization, so on categorized
+  generated ledgers a test removes the new lines and compares every other line with the reports
+  as they are with categories switched off.

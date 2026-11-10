@@ -14,6 +14,7 @@ from typing import NamedTuple
 
 from personal_finance.money import format_cents
 from personal_finance.reconcile.apply import stale_accounts
+from personal_finance.reconcile.categories import UNCATEGORIZED, list_categories
 from personal_finance.reconcile.category_effects import NOT_SPENDING
 from personal_finance.reconcile.classification_effects import (
     TYPE_AGAINST_DIRECTION,
@@ -50,10 +51,13 @@ from personal_finance.reports.review_evidence import (
     rows_sharing_a_document,
 )
 from personal_finance.reports.totals import (
+    GroupTotal,
     account_movement,
+    combined,
     income_and_spending,
     one_sided_summary,
     transfer_summary,
+    unsettled_categorizations_by_state,
 )
 
 
@@ -644,13 +648,47 @@ def out_and_in(group) -> str:
             f"{format_cents(group.in_cents)} in")
 
 
-def add_income_and_spending(out, groups) -> None:
+def categories_in_use(conn):
+    """The category list while a categorization reaches some transaction, else None, so that a
+    ledger never categorized, or with every categorization undone, reports as before (D-063)."""
+    if conn.execute("SELECT 1 FROM transaction_category LIMIT 1").fetchone() is None:
+        return None
+    return list_categories(conn)
+
+
+def spent(group) -> str:
+    return f"{group.transactions} transactions, {format_cents(group.out_cents - group.in_cents)}"
+
+
+def add_spending_by_category(out, groups, categories) -> None:
+    """Spending by category, a subcategory under its parent and in its line, then uncategorized,
+    adding to Spending exactly (D-063)."""
+    if categories is None or not groups.spending.transactions:
+        return
+    by_category = dict(groups.spending_by_category)
+    out.add("    By category:")
+    for parent in categories:
+        if parent.parent_id is not None:
+            continue
+        children = [child for child in categories
+                    if child.parent_id == parent.category_id and child.category_id in by_category]
+        within = [by_category[category.category_id] for category in (parent, *children)
+                  if category.category_id in by_category]
+        if not within:
+            continue
+        out.add(f"      {shown(parent.name)}: {spent(combined(within))}")
+        for child in children:
+            out.add(f"        {shown(child.name)}: {spent(by_category[child.category_id])}")
+    out.add(f"      {UNCATEGORIZED}: {spent(by_category.get(None, GroupTotal()))}")
+
+
+def add_income_and_spending(out, groups, categories=None) -> None:
     """Five groups, each transaction in one, adding to net account movement (D-056)."""
     out.add("Income and spending, as you classified and matched them:")
-    add_income_and_spending_groups(out, groups)
+    add_income_and_spending_groups(out, groups, categories)
 
 
-def add_income_and_spending_groups(out, groups) -> None:
+def add_income_and_spending_groups(out, groups, categories=None) -> None:
     income, spending = groups.income, groups.spending
     out.add(f"  Income: {income.transactions} transactions, "
           f"{format_cents(income.in_cents - income.out_cents)}")
@@ -659,6 +697,7 @@ def add_income_and_spending_groups(out, groups) -> None:
     for financial_type, group in groups.spending_by_type:
         out.add(f"    {financial_type}: {group.transactions} transactions, "
               f"{format_cents(group.out_cents - group.in_cents)}")
+    add_spending_by_category(out, groups, categories)
     out.add(f"  Confirmed transfers: {out_and_in(groups.confirmed_transfers)}")
     for financial_type, group in groups.confirmed_transfers_by_type:
         out.add(f"    {financial_type}: {out_and_in(group)}")
@@ -666,20 +705,21 @@ def add_income_and_spending_groups(out, groups) -> None:
     out.add(f"  Unclassified: {out_and_in(groups.unclassified)}")
 
 
-def add_month(out, month) -> None:
+def add_month(out, month, categories=None) -> None:
     out.add(
         f"{month.month}: net account movement {format_cents(month.net_cents)} over "
         f"{month.transactions} transactions, of which pending: {month.pending_transactions}"
     )
     out.add(f"  Dated by transaction date: {month.dated_by_transaction_date}, "
           f"by posting date: {month.dated_by_posting_date}")
-    add_income_and_spending_groups(out, month.income_and_spending)
+    add_income_and_spending_groups(out, month.income_and_spending, categories)
     if month.open_review_items:
         out.add(f"  Open review items: {len(month.open_review_items)}, holding "
               f"{month.transactions_in_open_review_items} transactions here")
     for count, label in (
         (month.transactions_with_unsettled_correction, "an unsettled correction"),
         (month.transactions_with_unsettled_classification, "an unsettled classification"),
+        (month.transactions_with_unsettled_categorization, "an unsettled categorization"),
         (month.transactions_with_unsettled_match, "a transfer match that no longer applies"),
         (month.transactions_with_unsettled_one_sided_transfer,
          "a one-sided transfer that no longer applies"),
@@ -706,6 +746,28 @@ def describe_income_and_spending(groups) -> list[str]:
         f"{format_cents(unconfirmed.in_cents + unclassified.in_cents)}, the money out and in of "
         "transactions of a transfer kind not confirmed and of unclassified transactions."
     ]
+
+
+def describe_categories(groups, unsettled, categories) -> list[str]:
+    """Uncategorized spending, and categorizations that do not apply, by why (D-063)."""
+    lines = []
+    uncategorized = dict(groups.spending_by_category).get(None, GroupTotal())
+    if categories is not None and uncategorized.transactions:
+        lines.append(
+            f"Spending not categorized: {spent(uncategorized)}. It counts in Spending, as "
+            f"{UNCATEGORIZED}. Run review categorize on each."
+        )
+    for count, reason in (
+        (unsettled.conflicts, "categorizations disagree"),
+        (unsettled.basis_changed, "a categorization binds records now in several transactions"),
+        (unsettled.not_spending, "their transaction is no longer spending"),
+    ):
+        if count:
+            lines.append(
+                f"Transactions left {UNCATEGORIZED} because {reason}: {count}. Run review "
+                "categorizations."
+            )
+    return lines
 
 
 def describe_transfers(transfers) -> list[str]:
@@ -788,6 +850,8 @@ def totals_report_lines(conn, account_id) -> ReportLines:
     transfers = transfer_summary(conn, account_id)
     one_sided = one_sided_summary(conn, account_id)
     stale = stale_accounts(conn, DEFAULT_RULES, account_id)
+    categories = categories_in_use(conn)
+    unsettled_categories = unsettled_categorizations_by_state(conn, account_id)
 
     out = ReportLines()
     out.add(f"Account inflows: {format_cents(movement.inflow_cents)}")
@@ -814,7 +878,7 @@ def totals_report_lines(conn, account_id) -> ReportLines:
         f"  Of a transfer kind with no match, candidate or one-sided transfer: "
         f"{transfers.unpaired_transfer_kind} transactions"
     )
-    add_income_and_spending(out, groups)
+    add_income_and_spending(out, groups, categories)
     out.add("Disclosures:")
     out.add("- These are account movements. They include transfers and card payments.")
     out.add(f"- {MATCHING_NOTICE}")
@@ -853,7 +917,8 @@ def totals_report_lines(conn, account_id) -> ReportLines:
     for line in (*describe_resolutions(movement), *describe_declarations(movement),
                  *describe_pending(movement), *describe_classifications(movement),
                  *describe_transfers(transfers), *describe_one_sided(one_sided),
-                 *describe_income_and_spending(groups)):
+                 *describe_income_and_spending(groups),
+                 *describe_categories(groups, unsettled_categories, categories)):
         out.add(f"- {line}")
     return out
 
@@ -861,12 +926,13 @@ def totals_report_lines(conn, account_id) -> ReportLines:
 def monthly_report_lines(conn, account_id, first_month, last_month) -> ReportLines:
     report = monthly_report(conn, account_id, first_month, last_month)
     stale = stale_accounts(conn, DEFAULT_RULES, account_id)
+    categories = categories_in_use(conn)
 
     out = ReportLines()
     if not report.months:
         out.add("No transactions, so there are no months to show.")
     for month in report.months:
-        add_month(out, month)
+        add_month(out, month, categories)
         if month.accounts_covered:
             out.add("  Covered for the whole month: "
                     + ", ".join(shown(name) for name in month.accounts_covered))
