@@ -9,7 +9,7 @@ import sqlite3
 
 import pytest
 from test_balance_observations import BalanceLedger
-from test_decisions import ALL_TABLES, BACKUP_TABLES, REAL_LEDGER_TABLES
+from test_decisions import ALL_TABLES, BACKUP_TABLES, REAL_LEDGER_TABLES, drop_category_tables
 from test_one_sided_transfers import stated
 from test_transfer_migration import markers, migrations_up_to
 
@@ -21,6 +21,7 @@ VERSION_16_TABLES = (*ALL_TABLES, "account", "import_run")
 
 def set_back_to_version_16(path) -> None:
     conn = connect(path)
+    drop_category_tables(conn)
     for table in (*BACKUP_TABLES, *REAL_LEDGER_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")

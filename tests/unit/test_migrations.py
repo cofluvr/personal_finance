@@ -40,6 +40,7 @@ def test_new_database_has_the_expected_tables(conn):
         "backup_record",
         "balance_observation",
         "balance_observation_event",
+        "category",
         "coverage_declaration",
         "coverage_declaration_event",
         "decision",

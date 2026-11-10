@@ -21,6 +21,7 @@ from test_decisions import (
     ONE_SIDED_TABLES,
     TRANSFER_TABLES,
     pair_up,
+    drop_category_tables,
 )
 from test_resolutions import CAFE_NO_AMOUNT
 
@@ -34,6 +35,7 @@ VERSION_10_TABLES = tuple(table for table in ALL_TABLES
 
 def set_back_to_version_10(path) -> None:
     conn = connect(path)
+    drop_category_tables(conn)
     for table in (*BACKUP_TABLES, *REAL_LEDGER_TABLES, *BALANCE_TABLES, *ONE_SIDED_TABLES, *TRANSFER_TABLES, *CLASSIFICATION_TABLES, *DECLARATION_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")

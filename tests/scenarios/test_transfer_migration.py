@@ -9,7 +9,7 @@ import sqlite3
 
 import pytest
 from test_classifications import against_its_direction
-from test_decisions import ALL_TABLES, BACKUP_TABLES, BALANCE_TABLES, ONE_SIDED_TABLES, TRANSFER_TABLES, REAL_LEDGER_TABLES
+from test_decisions import ALL_TABLES, BACKUP_TABLES, BALANCE_TABLES, ONE_SIDED_TABLES, TRANSFER_TABLES, REAL_LEDGER_TABLES, drop_category_tables
 from test_supersession import holding
 from test_transfers import IN_ROW, OUT_ROW, TransferLedger, matched
 
@@ -22,6 +22,7 @@ VERSION_13_KEPT = tuple(table for table in VERSION_13_TABLES if table != "accoun
 
 def set_back_to_version_13(path) -> None:
     conn = connect(path)
+    drop_category_tables(conn)
     for table in (*BACKUP_TABLES, *REAL_LEDGER_TABLES, *BALANCE_TABLES, *ONE_SIDED_TABLES, *TRANSFER_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")

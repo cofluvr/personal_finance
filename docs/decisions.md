@@ -331,3 +331,16 @@ point 3, and any subcategories wanted at the start.
 categories stand as named in point 3, with no subcategories at the start. M9.1 to M9.3 approved to
 build in order, each gated on the full suite and committed locally, with CB5 and CC4 compared as
 M8.1 compared.
+
+**How M9.1 was implemented:**
+
+- Migration 0019 adds `category` with an `INTEGER PRIMARY KEY`, so categories list in the order
+  made, PRD §10's twelve first. Its checks refuse a blank name and `uncategorized`, a trigger
+  refuses a parent that is missing or is itself a subcategory, and three more refuse any update,
+  delete or replace, by ID or by name, since `INSERT OR REPLACE` on a unique name would otherwise
+  delete a row without a delete trigger firing.
+- `reconcile/categories.py` checks the same under one write lock first, so a refusal says why.
+  `pf category add` and `list` escape names as D-040 does.
+- **Older migration tests:** 0019's table is not empty, so every set-back now drops it first
+  through `drop_category_tables`, and the backup test faking an older schema drops the newest
+  migration's tables, read from its file, instead of naming 0018's.

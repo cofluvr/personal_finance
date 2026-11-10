@@ -59,6 +59,7 @@ from personal_finance.reconcile.classification_effects import (
     TYPE_AGAINST_DIRECTION,
     UNCLASSIFIED,
 )
+from personal_finance.reconcile.categories import add_category, list_categories
 from personal_finance.reconcile.classifications import classify_transaction, undo_classification
 from personal_finance.reconcile.correction_effects import (
     FIELD_APPLIED,
@@ -340,6 +341,15 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--type", required=True, choices=ACCOUNT_TYPES)
     add.add_argument("--institution")
     add.add_argument("--last4")
+
+    category = commands.add_parser("category", help="name the categories spending can take")
+    category_commands = category.add_subparsers(dest="category_command", required=True)
+    category_add = command("add", category_commands, handler=run_category_add,
+                           help="add a category, or a subcategory of a top-level one")
+    category_add.add_argument("name", help="the category's name, compared exactly")
+    category_add.add_argument("--parent", help="the top-level category this one is under")
+    command("list", category_commands, handler=run_category_list,
+            help="list the categories, each under its parent")
 
     importer = command("import", handler=run_import, help="import files")
     importer.add_argument("--account", required=True, help="account name or ID")
@@ -910,6 +920,24 @@ def run_account_add(args) -> int:
     except sqlite3.IntegrityError:
         raise CommandError("account name is already used, or last4 is not four digits") from None
     print(f"Added account {args.name}: {account_id}")
+    return 0
+
+
+def run_category_add(args) -> int:
+    conn = open_ledger(args.db)
+    category = add_category(conn, args.name, args.parent)
+    under = f", under {shown(args.parent)}" if category.parent_id is not None else ""
+    print(f"Added category {shown(category.name)}{under}")
+    return 0
+
+
+def run_category_list(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    categories = list_categories(conn)
+    for category in categories:
+        indent = "  " if category.parent_id is not None else ""
+        print(f"{indent}{shown(category.name)}")
+    print(f"Categories: {len(categories)}")
     return 0
 
 

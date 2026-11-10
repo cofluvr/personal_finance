@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 from test_confirmations import confirm_ok
-from test_decisions import ALL_TABLES, BACKUP_TABLES, BALANCE_TABLES, CAFE, REAL_LEDGER_TABLES
+from test_decisions import ALL_TABLES, BACKUP_TABLES, BALANCE_TABLES, CAFE, REAL_LEDGER_TABLES, drop_category_tables
 from test_separations import SeparationLedger
 from test_supersession import chain_of_three
 from test_decisions import (
@@ -43,6 +43,7 @@ VERSION_9_TABLES = (*BACKUP_TABLES, *REAL_LEDGER_TABLES, *BALANCE_TABLES, *ONE_S
 
 def set_back(path: Path) -> None:
     conn = connect(path)
+    drop_category_tables(conn)
     for table in VERSION_9_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")

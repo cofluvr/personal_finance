@@ -9,6 +9,7 @@ document is synthetic.
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -695,7 +696,10 @@ class TestRestore:
         ledger.card("jan.csv", CAFE)
         backup_folder = tmp_path / "backup"
         created(ledger, backup_folder)
-        change_ledger_copy(backup_folder, "DROP TABLE backup_record",
+        # The newest migration's tables, dropped, make the copy a ledger of the version before.
+        newest = load_migrations()[-1].path.read_text()
+        tables = reversed(re.findall(r"^CREATE TABLE (\w+)", newest, re.MULTILINE))
+        change_ledger_copy(backup_folder, *(f"DROP TABLE {table}" for table in tables),
                            f"PRAGMA user_version = {LATEST - 1}")
         rewrite_manifest(backup_folder, digest=True, schema_version=LATEST - 1)
         restored = tmp_path / "restored.db"

@@ -7,7 +7,7 @@ a version 14 ledger: 0015 creates tables only. Migration stops at 15, so that on
 import sqlite3
 
 import pytest
-from test_decisions import ALL_TABLES, BACKUP_TABLES, BALANCE_TABLES, ONE_SIDED_TABLES, REAL_LEDGER_TABLES
+from test_decisions import ALL_TABLES, BACKUP_TABLES, BALANCE_TABLES, ONE_SIDED_TABLES, REAL_LEDGER_TABLES, drop_category_tables
 from test_one_sided_transfers import OneSidedLedger, stated
 from test_supersession import holding
 from test_transfer_migration import markers, migrations_up_to
@@ -21,6 +21,7 @@ VERSION_14_TABLES = tuple(table for table in ALL_TABLES
 
 def set_back_to_version_14(path) -> None:
     conn = connect(path)
+    drop_category_tables(conn)
     for table in (*BACKUP_TABLES, *REAL_LEDGER_TABLES, *BALANCE_TABLES, *ONE_SIDED_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")

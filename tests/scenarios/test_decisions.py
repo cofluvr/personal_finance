@@ -71,6 +71,15 @@ BALANCE_TABLES = ("balance_observation_event", "balance_observation")
 REAL_LEDGER_TABLES = ("real_ledger",)
 # Created by 0018, and empty until a backup is made, so set-backs drop it too (D-058).
 BACKUP_TABLES = ("backup_record",)
+# Created by 0019, holding the starting categories, so set-backs drop it without finding it empty
+# (D-063).
+CATEGORY_TABLES = ("category",)
+
+
+def drop_category_tables(conn) -> None:
+    """Undo 0019 on a ledger at the latest version, before setting it back further."""
+    for table in CATEGORY_TABLES:
+        conn.execute(f"DROP TABLE {table}")
 
 
 def declared(start, end):
@@ -102,7 +111,7 @@ class Ledger:
         self.capsys.readouterr()
         words = list(command)
         position = 2 if words[0] in ("account", "archive", "backup", "review", "balance",
-                                    "report") else 1
+                                    "report", "category") else 1
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
                          ["review", "correction"], ["review", "resolution"],
                          ["review", "coverage"], ["review", "classification"],
