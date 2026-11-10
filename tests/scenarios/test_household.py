@@ -290,8 +290,8 @@ class TestShare:  # HA3
         assert "From: Michael, 2 transactions" in out and "To: unattributed" in out
         transaction = holding(household, "a.csv")
         assert household.household_line(transaction) == (
-            "unattributed: its account's default is shared and no household share is active. Set "
-            "one with household share set")
+            "unattributed: its account's default or its allocation is shared and no household share "
+            "is active. Set one with household share set")
         household.set_share_ok("Michael=40", "M=60")
         assert household.household_line(transaction) == (
             "shared, by the account's default and the household share: Michael -2.60, M -3.91")

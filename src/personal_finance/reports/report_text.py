@@ -16,11 +16,18 @@ from personal_finance.money import format_cents
 from personal_finance.reconcile.apply import stale_accounts
 from personal_finance.reconcile.categories import UNCATEGORIZED, list_categories
 from personal_finance.reconcile.category_effects import NOT_SPENDING
+from personal_finance.reconcile.allocation_effects import AMOUNT_DIFFERS
 from personal_finance.reconcile.household_effects import (
+    ALLOCATED,
+    BY_MEMBER,
+    BY_PERCENT,
+    BY_SHARE,
     NO_DEFAULT,
     NO_SHARE,
     SHARED,
     UNATTRIBUTED,
+    format_percent,
+    parsed,
 )
 from personal_finance.reconcile.classification_effects import (
     TYPE_AGAINST_DIRECTION,
@@ -180,9 +187,43 @@ CLASSIFICATION_STATE_EXPLANATIONS = {
 # Why a transaction is unattributed (D-065).
 ATTRIBUTION_EXPLANATIONS = {
     NO_DEFAULT: "its account has no default. Set one with household account set",
-    NO_SHARE: (f"its account's default is {SHARED} and no household share is active. Set one with "
-               "household share set"),
+    NO_SHARE: (f"its account's default or its allocation is {SHARED} and no household share is "
+               "active. Set one with household share set"),
+    FIELD_IN_CONFLICT: "allocations disagree. Undo all but one to settle it",
+    FIELD_BASIS_CHANGED: (
+        "an allocation binds records now in several transactions. Undo it, then allocate each "
+        "transaction"
+    ),
+    AMOUNT_DIFFERS: (
+        "an allocation by amount no longer sums to its amount. Undo it, or what changed the amount"
+    ),
 }
+
+# What each outcome on an allocated transaction means (D-065).
+ALLOCATION_STATE_EXPLANATIONS = {
+    FIELD_APPLIED: "the stated allocation applies",
+    **{state: f"{UNATTRIBUTED}: {why}" for state, why in ATTRIBUTION_EXPLANATIONS.items()
+       if state not in (NO_DEFAULT, NO_SHARE)},
+}
+
+
+def describe_allocation(names, value) -> str:
+    """A stored allocation in words, given each member's name by ID."""
+    kind, parts = parsed(value)
+    return describe_named_allocation(kind, [(names[member_id], part) for member_id, part in parts])
+
+
+def describe_named_allocation(kind, parts) -> str:
+    """An allocation in words, its parts by member name in member order. Parts by amount are never
+    printed here, since routine lists show no amounts (D-037)."""
+    if kind == BY_MEMBER:
+        return f"to {shown(parts[0][0])}"
+    if kind == BY_SHARE:
+        return f"as {SHARED}, by the household share"
+    if kind == BY_PERCENT:
+        return "by percent: " + ", ".join(f"{shown(name)} {format_percent(weight)}"
+                                          for name, weight in parts)
+    return "by amount: " + ", ".join(shown(name) for name, _ in parts)
 
 # What each outcome on a categorized transaction means (D-063).
 CATEGORIZATION_STATE_EXPLANATIONS = {
@@ -535,6 +576,7 @@ def add_transaction_evidence(out, entry, shared) -> None:
     add_classifications(out, entry)
     add_categorizations(out, entry)
     add_category_rules(out, entry)
+    add_allocations(out, entry)
     add_household(out, entry)
     add_transfers(out, entry)
 
@@ -625,19 +667,35 @@ def add_category_rules(out, entry) -> None:
 
 
 def add_household(out, entry) -> None:
-    """Who the transaction's effective amount belongs to, where an account's default reaches it
-    (D-065). A transaction none reaches shows nothing here."""
+    """Who the transaction's effective amount belongs to, where an allocation or an account's
+    default reaches it (D-065). A transaction neither reaches shows nothing here."""
     household = entry.household
     if household is None:
         return
+    by_whom = "an allocation" if household.by_allocation else "the account's default"
+    parts = ", ".join(f"{shown(name)} {format_cents(cents)}" for name, cents in household.parts)
     if household.kind == UNATTRIBUTED:
         out.add(f"  Household: {UNATTRIBUTED}: {ATTRIBUTION_EXPLANATIONS[household.reason]}")
     elif household.kind == SHARED:
-        parts = ", ".join(f"{shown(name)} {format_cents(cents)}" for name, cents in household.parts)
-        out.add(f"  Household: {SHARED}, by the account's default and the household share: "
-                f"{parts}")
+        out.add(f"  Household: {SHARED}, by {by_whom} and the household share: {parts}")
+    elif household.kind == ALLOCATED:
+        out.add(f"  Household: {ALLOCATED}, by {by_whom}: {parts}")
     else:
-        out.add(f"  Household: {shown(household.kind)}, by the account's default")
+        ((name, _),) = household.parts
+        out.add(f"  Household: {shown(name)}, by {by_whom}")
+
+
+def add_allocations(out, entry) -> None:
+    """Allocations stay apart from the source values, like categorizations (D-065). A transaction
+    none reaches shows nothing here."""
+    if not entry.allocations:
+        return
+    out.add("  Allocations:")
+    for allocation in entry.allocations:
+        out.add(f"    Allocation {allocation.allocation_id}: "
+                f"{describe_named_allocation(*allocation.allocation)}, "
+                f"binding {describe_side(allocation.bound_records)}")
+    out.add(f"    Allocation: {ALLOCATION_STATE_EXPLANATIONS[entry.allocations[0].state]}")
 
 
 def add_transfers(out, entry) -> None:

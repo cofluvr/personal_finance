@@ -1,9 +1,10 @@
 """Household members, the household share, each account's attribution, and what they make of each
 transaction's effective amount. See decisions.md D-065.
 
-Nothing here writes. The share and the account defaults bind no records and are resolved when
-read, so no write rewrites a row per transaction. Amounts are integer cents and weights integer
-basis points: no floating point anywhere (D-003).
+Nothing here writes. A person's allocation on the transaction comes first, as its derived outcome
+gives it, then the account's default, else unattributed (point 3). The share and the account
+defaults bind no records and are resolved when read, so no write rewrites a row per transaction.
+Amounts are integer cents and weights integer basis points: no floating point anywhere (D-003).
 """
 
 import re
@@ -17,6 +18,16 @@ from personal_finance.db.id_lists import ids_as_json_array
 SHARED = "shared"
 UNATTRIBUTED = "unattributed"
 RESERVED_MEMBER_NAMES = (SHARED, UNATTRIBUTED)
+
+# The kinds of attribution: one member's whole amount, the share's parts, or parts a person typed.
+PERSONAL = "personal"
+ALLOCATED = "allocated"
+
+# The kinds of allocation a person states, as stored before the colon of its canonical value.
+BY_MEMBER = "member"
+BY_SHARE = "shared"
+BY_PERCENT = "percent"
+BY_AMOUNT = "amount"
 
 # Weights sum to exactly this: 100.00 percent.
 WHOLE_IN_BASIS_POINTS = 10_000
@@ -111,12 +122,37 @@ class Household:
 class Attribution:
     """Who one transaction's effective amount belongs to."""
 
-    # A member's name, shared, or unattributed.
+    # personal, shared, allocated or unattributed.
     kind: str
     # (member ID, cents) in member order, summing to the effective amount. Empty when unattributed.
     parts: tuple[tuple[int, int], ...]
-    # Why it is unattributed, else None.
+    # Why it is unattributed: no_default, no_share, or the state of allocations that do not apply.
+    # Else None.
     reason: str | None
+    # Whether a person's allocation on the transaction decides it, rather than the account's
+    # default.
+    by_allocation: bool = False
+
+
+def canonical(kind: str, parts) -> str:
+    """An allocation's value: its kind, then (member ID, value) parts sorted by member ID, so two
+    allocations agree exactly when their values are equal."""
+    return f"{kind}:" + ",".join(f"{member_id}={value}" for member_id, value in sorted(parts))
+
+
+def parsed(value: str) -> tuple[str, tuple[tuple[int, int], ...]]:
+    """An allocation's kind and its (member ID, value) parts, in member order."""
+    kind, _, parts = value.partition(":")
+    return kind, tuple(
+        (int(member_id), int(part_value))
+        for member_id, _, part_value in (part.partition("=") for part in parts.split(",") if part)
+    )
+
+
+def named_value(names: dict[int, str], value: str) -> list:
+    """An allocation's kind and parts by member name, in member order, for tokens and output."""
+    kind, parts = parsed(value)
+    return [kind, [[names[member_id], part] for member_id, part in parts]]
 
 
 def load_household(conn: sqlite3.Connection) -> Household:
@@ -164,17 +200,34 @@ def attribution_by_default(household: Household, account_id: str,
     if default is None:
         return Attribution(UNATTRIBUTED, (), NO_DEFAULT)
     if default.member_id is not None:
-        return Attribution(household.name_of(default.member_id),
-                           ((default.member_id, amount_cents),), None)
+        return Attribution(PERSONAL, ((default.member_id, amount_cents),), None)
     return attribution_by_share(household.share, amount_cents)
 
 
-def attribution_by_share(share: Share | None, amount_cents: int) -> Attribution:
+def attribution_by_share(share: Share | None, amount_cents: int,
+                         by_allocation: bool = False) -> Attribution:
     if share is None:
-        return Attribution(UNATTRIBUTED, (), NO_SHARE)
+        return Attribution(UNATTRIBUTED, (), NO_SHARE, by_allocation)
     member_ids = [member_id for member_id, _ in share.parts]
     cents = allocate_cents(amount_cents, [weight for _, weight in share.parts])
-    return Attribution(SHARED, tuple(zip(member_ids, cents)), None)
+    return Attribution(SHARED, tuple(zip(member_ids, cents)), None, by_allocation)
+
+
+def attribution_by_allocation(household: Household, value: str, amount_cents: int) -> Attribution:
+    """What an applied allocation makes of an effective amount. Parts by amount are magnitudes,
+    signed by the transaction's direction, and sum to it, or the allocation would not apply."""
+    kind, parts = parsed(value)
+    if kind == BY_SHARE:
+        return attribution_by_share(household.share, amount_cents, by_allocation=True)
+    if kind == BY_MEMBER:
+        ((member_id, _),) = parts
+        return Attribution(PERSONAL, ((member_id, amount_cents),), None, True)
+    member_ids = [member_id for member_id, _ in parts]
+    if kind == BY_PERCENT:
+        cents = allocate_cents(amount_cents, [weight for _, weight in parts])
+    else:
+        cents = tuple(-part if amount_cents < 0 else part for _, part in parts)
+    return Attribution(ALLOCATED, tuple(zip(member_ids, cents)), None, True)
 
 
 @dataclass(frozen=True)
@@ -207,9 +260,27 @@ def effective_amounts(conn: sqlite3.Connection, account_id: str | None = None,
 def attributed_transactions(conn: sqlite3.Connection, household: Household,
                             account_id: str | None = None,
                             transaction_ids=None) -> list[AttributedTransaction]:
-    """Each transaction's effective attribution: the account's default, else unattributed."""
-    return [
-        AttributedTransaction(transaction_id, account, cents,
-                              attribution_by_default(household, account, cents))
-        for transaction_id, account, cents in effective_amounts(conn, account_id, transaction_ids)
-    ]
+    """Each transaction's effective attribution: a person's applied allocation, else unattributed
+    where allocations reach it and none applies, else the account's default, else unattributed."""
+    allocated = {
+        transaction_id: (state, value)
+        for transaction_id, state, value in conn.execute(
+            """SELECT derived.transaction_id, derived.state, derived.allocation
+               FROM transaction_allocation derived
+               JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+               WHERE (:account IS NULL OR entry.account_id = :account)
+                 AND (:ids IS NULL OR entry.id IN (SELECT value FROM json_each(:ids)))""",
+            {"account": account_id,
+             "ids": None if transaction_ids is None else ids_as_json_array(transaction_ids)},
+        )
+    }
+    found = []
+    for transaction_id, account, cents in effective_amounts(conn, account_id, transaction_ids):
+        if transaction_id not in allocated:
+            attribution = attribution_by_default(household, account, cents)
+        else:
+            state, value = allocated[transaction_id]
+            attribution = (Attribution(UNATTRIBUTED, (), state, True) if value is None
+                           else attribution_by_allocation(household, value, cents))
+        found.append(AttributedTransaction(transaction_id, account, cents, attribution))
+    return found

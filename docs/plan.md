@@ -561,7 +561,7 @@ transaction, so PRD §6's splits are **allocations**.
 | Slice | Scope | Status |
 |---|---|---|
 | M11.1 | Members, the household share and account attribution: migration 0022, `allocate_cents`, `household` commands, `h1` and `a1` | Complete |
-| M11.2 | Allocating one transaction: migration 0023, the stated model extended, `review allocate`, chains, `s1`, `r12`, `t10`, `d9`, `c5` | Approved, not built |
+| M11.2 | Allocating one transaction: migration 0023, the stated model extended, `review allocate`, chains, `s1`, `r12`, `t10`, `d9`, `c5` | Complete |
 | M11.3 | `pf report household`: side-by-side, personal and shared views, its UI page, the benchmark row | Approved, not built |
 
 ### M11.1 acceptance criteria

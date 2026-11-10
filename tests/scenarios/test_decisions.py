@@ -86,15 +86,30 @@ HOUSEHOLD_TABLES = ("account_attribution_event", "account_attribution", "househo
                     "household_share_part", "household_share", "household_member")
 
 
+# Created by 0023, and empty until something is allocated, so set-backs check that first (D-065).
+ALLOCATION_TABLES = ("transaction_allocation", "allocation_statement_event",
+                     "allocation_statement_record", "allocation_statement_part",
+                     "allocation_statement")
+
+
+def drop_allocation_tables(conn) -> None:
+    """Undo 0023 on a ledger at the latest version, before setting it back further."""
+    for table in ALLOCATION_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
 def drop_household_tables(conn) -> None:
-    """Undo 0022 on a ledger at the latest version, before setting it back further."""
+    """Undo 0023 and 0022 on a ledger at the latest version, before setting it back further."""
+    drop_allocation_tables(conn)
     for table in HOUSEHOLD_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
 
 
 def drop_category_rule_tables(conn) -> None:
-    """Undo 0022 and 0021 on a ledger at the latest version, before setting it back further."""
+    """Undo 0023, 0022 and 0021 on a ledger at the latest version, before setting it back
+    further."""
     drop_household_tables(conn)
     for table in CATEGORY_RULE_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -102,8 +117,7 @@ def drop_category_rule_tables(conn) -> None:
 
 
 def drop_category_tables(conn) -> None:
-    """Undo 0022, 0021, 0020 and 0019 on a ledger at the latest version, before setting it back
-    further."""
+    """Undo 0023 to 0019 on a ledger at the latest version, before setting it back further."""
     drop_category_rule_tables(conn)
     for table in CATEGORIZATION_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -149,7 +163,8 @@ class Ledger:
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
                          ["review", "correction"], ["review", "resolution"],
                          ["review", "coverage"], ["review", "classification"],
-                         ["review", "transfer"], ["review", "categorization"]):
+                         ["review", "transfer"], ["review", "categorization"],
+                         ["review", "allocation"]):
             position = 3
         words[position:position] = ["--db", self.db]
         code = main(words)
@@ -189,7 +204,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r11-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r12-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)
@@ -212,7 +227,7 @@ class Ledger:
 
     def decision_revision(self, decision):
         out = self.run("review", "decision", "show", decision)[1]
-        return re.search(r"Revision: (d8-[0-9a-f]{16})", out)[1]
+        return re.search(r"Revision: (d9-[0-9a-f]{16})", out)[1]
 
     def undo(self, decision, revision=None, account="A"):
         return self.run("review", "undo", decision, "--account", account,
@@ -1074,7 +1089,7 @@ class TestUndoToken:  # S21
 
     def test_the_token_has_the_documented_form(self, ledger):
         _, token = self.decided(ledger)
-        assert re.fullmatch(r"d8-[0-9a-f]{16}", token)
+        assert re.fullmatch(r"d9-[0-9a-f]{16}", token)
 
 
 class TestConstraintsApplied:

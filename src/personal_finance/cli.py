@@ -80,6 +80,8 @@ from personal_finance.reconcile.record_resolutions import (
     dismiss_record,
     undo_resolution,
 )
+from personal_finance.reconcile.allocation_effects import AMOUNT_DIFFERS
+from personal_finance.reconcile.allocations import Stated, allocate_transaction, undo_allocation
 from personal_finance.reconcile.household import (
     add_member,
     set_account_default,
@@ -158,6 +160,12 @@ from personal_finance.reports.coverage_evidence import (
     load_declaration,
     load_document_coverage,
 )
+from personal_finance.reports.allocation_evidence import (
+    allocation_undo_outlook,
+    list_allocations,
+    load_allocation,
+    member_names,
+)
 from personal_finance.reports.household_evidence import (
     account_names,
     account_reach,
@@ -177,6 +185,7 @@ from personal_finance.reports.report_text import (
     add_decided_pairs,
     add_document_evidence,
     add_transaction_evidence,
+    describe_allocation,
     describe_classifications,
     describe_conflicts,
     describe_corrections,
@@ -313,6 +322,16 @@ CATEGORIZE_NOTICE = (
     "Totals list spending by category. Spending itself is unchanged, matching never reads "
     "categories, and new records are not bound, but a re-export that joins this transaction keeps "
     "the category applied."
+)
+
+ALLOCATE_NOTICE = (
+    "Totals and report monthly are unchanged, and report household counts each member's part. "
+    "Matching never reads allocations, and new records are not bound, but a re-export that joins "
+    "this transaction keeps the allocation applied."
+)
+
+ALLOCATION_UNDO_NOTICE = (
+    "The transaction takes the allocation this one superseded, else its account's default."
 )
 
 CATEGORIZATION_UNDO_NOTICE = (
@@ -810,6 +829,56 @@ def build_parser() -> argparse.ArgumentParser:
         help="list transfer candidates, stored transfer matches and one-sided transfers",
     )
     transfers.add_argument("--account", help="account name or ID")
+
+    allocate = command(
+        "allocate", review_commands, handler=run_review_allocate,
+        help="state who a transaction's effective amount belongs to",
+    )
+    allocate.add_argument("transaction_id", help="a transaction ID from transactions")
+    allocate.add_argument("--account", required=True, help="account name or ID")
+    allocate.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    allocated_to = allocate.add_mutually_exclusive_group(required=True)
+    allocated_to.add_argument("--member", help="a name from household members, for all of it")
+    allocated_to.add_argument("--shared", action="store_true",
+                              help="divided by the household share active when read")
+    allocated_to.add_argument("--percent", action="append", metavar="NAME=PERCENT",
+                              help="a member and their percent, at most two decimals; repeat")
+    allocated_to.add_argument("--amount", action="append", metavar="NAME=AMOUNT",
+                              help="a member and their part, as 12.50, summing to the amount; "
+                                   "repeat")
+    allocate.add_argument(
+        "--supersedes", metavar="ALLOCATION_ID",
+        help="the allocation applying to this transaction now, which this one replaces",
+    )
+    allocate.add_argument(
+        "--supersedes-revision", metavar="REVISION",
+        help="the revision from review allocation show for the allocation being replaced",
+    )
+
+    allocations = command(
+        "allocations", review_commands, handler=run_review_allocations,
+        help="list stored allocations",
+    )
+    allocations.add_argument("--account", help="account name or ID")
+
+    allocation = review_commands.add_parser("allocation", help="inspect or undo one allocation")
+    allocation_commands = allocation.add_subparsers(dest="allocation_command", required=True)
+    allocation_show = command(
+        "show", allocation_commands, handler=run_review_allocation_show,
+        help="show what an allocation binds and what undoing it would do",
+    )
+    allocation_show.add_argument("allocation_id", help="an allocation ID from review allocations")
+    allocation_undo = command(
+        "undo", allocation_commands, handler=run_review_allocation_undo,
+        help="stop an allocation applying, keeping it on record",
+    )
+    allocation_undo.add_argument("allocation_id", help="an allocation ID from review allocations")
+    allocation_undo.add_argument("--account", required=True, help="account name or ID")
+    allocation_undo.add_argument(
+        "--revision", required=True, help="the revision from review allocation show"
+    )
 
     transfer = review_commands.add_parser(
         "transfer", help="match, inspect or undo a transfer between two accounts"
@@ -1904,6 +1973,7 @@ def run_review_undo(args) -> int:
     print_newly_unsettled(result.newly_unsettled_correction_fields)
     print_newly_unclassified(result.newly_unclassified_transactions)
     print_newly_unmatched(result.newly_unsettled_matches)
+    print_newly_unattributed(result.newly_unattributed_transactions)
     print(f"  {UNDO_NOTICE}")
     return 0
 
@@ -2442,6 +2512,134 @@ def run_review_categorization_undo(args) -> int:
         )
     print(f"  {CATEGORIZATION_UNDO_NOTICE}")
     return 0
+
+
+def run_review_allocate(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    stated = Stated(args.member, args.shared, tuple(args.percent or ()), tuple(args.amount or ()))
+    result = allocate_transaction(
+        conn, account_id, args.transaction_id, args.revision, stated,
+        supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
+    )
+    names = member_names(conn)
+    print(
+        f"Allocation {result.allocation_id} recorded: transaction {args.transaction_id} is "
+        f"allocated {describe_allocation(names, result.allocation)}, binding "
+        f"{result.bound_record_count} records."
+    )
+    if args.supersedes:
+        print(f"  Supersedes allocation {args.supersedes}. It stays on record.")
+    print(f"  {ALLOCATE_NOTICE}")
+    return 0
+
+
+def run_review_allocations(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_allocations(conn, account_id)
+    names = member_names(conn)
+    for allocation_id, account, created_at, state, value, bound_count in rows:
+        print(
+            f"Allocation {allocation_id}: {state}, {describe_allocation(names, value)}, "
+            f"{bound_count} records, {shown(account)}, {created_at}"
+        )
+    print(f"Allocations: {len(rows)}")
+    unsettled = conn.execute(
+        """SELECT derived.transaction_id, derived.state FROM transaction_allocation derived
+           JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+           WHERE derived.state <> 'applied' AND (:account IS NULL OR entry.account_id = :account)
+           ORDER BY derived.transaction_id""",
+        {"account": account_id},
+    ).fetchall()
+    for transaction_id, state in unsettled:
+        print(f"Transaction {transaction_id}: {ATTRIBUTION_EXPLANATIONS[state]}")
+    if rows:
+        print("To see what an allocation binds, run review allocation show.")
+    return 0
+
+
+# How an allocated transaction's outcome reads in an undo preview.
+ALLOCATION_PREVIEW_STATES = {
+    None: "by the account's default",
+    FIELD_APPLIED: "allocated",
+    FIELD_IN_CONFLICT: f"{UNATTRIBUTED}, allocations disagree",
+    FIELD_BASIS_CHANGED: f"{UNATTRIBUTED}, basis changed",
+    AMOUNT_DIFFERS: f"{UNATTRIBUTED}, amounts no longer sum",
+}
+
+
+def run_review_allocation_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    allocation = load_allocation(conn, args.allocation_id)
+    if allocation is None:
+        raise CommandError("allocation not found. Run review allocations.")
+
+    print(f"Allocation {allocation.statement_id}")
+    print(f"  Account: {shown(allocation.account_name)} ({allocation.account_id})")
+    print(f"  Allocation: {describe_allocation(member_names(conn), allocation.shown_value)}")
+    print(f"  Status: {allocation.state}")
+    print(f"  Made: {allocation.created_at}")
+    if allocation.undone_at:
+        print(f"  Undone: {allocation.undone_at}. It stays on record and no longer applies.")
+    if allocation.superseded_by:
+        print(
+            f"  Superseded by allocation {allocation.superseded_by}. It stays on record and no "
+            "longer applies, unless that allocation is undone."
+        )
+    if allocation.newest_of_chain != allocation.superseded_by:
+        print(
+            f"  Newest of its chain: allocation {allocation.newest_of_chain}, the only one that "
+            "can be undone. Each undo restores the allocation before it."
+        )
+    if allocation.supersedes_id:
+        print(f"  Supersedes allocation {allocation.supersedes_id}")
+    print(f"  From transaction: {allocation.target_transaction_id}")
+    print("Bound records:")
+    for record in allocation.bound_records:
+        where = record.transaction_id or "no transaction"
+        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
+
+    if allocation.state == STATE_ACTIVE:
+        outlook = allocation_undo_outlook(conn, allocation)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this allocation now:")
+        if allocation.supersedes_id:
+            print(f"  Restores allocation {allocation.supersedes_id}, which it superseded")
+        for transaction_id, state_now, state_after in outlook.state_by_transaction:
+            print(
+                f"  Transaction {transaction_id}: {ALLOCATION_PREVIEW_STATES[state_now]} now, "
+                f"{ALLOCATION_PREVIEW_STATES[state_after]} after"
+            )
+        if stale_accounts(conn, DEFAULT_RULES, allocation.account_id):
+            print(
+                "This account has not been reconciled under the current matching rules, so "
+                "undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
+def run_review_allocation_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_allocation(conn, account_id, args.allocation_id, args.revision)
+
+    print(f"Allocation {args.allocation_id} undone. It stays on record and no longer applies.")
+    if result.restored:
+        print(f"  Allocation {result.restored}, which it superseded, applies again.")
+    print_newly_unattributed(result.newly_unattributed_transactions)
+    print(f"  {ALLOCATION_UNDO_NOTICE}")
+    return 0
+
+
+def print_newly_unattributed(count) -> None:
+    if count:
+        print(
+            f"  Transactions now {UNATTRIBUTED}, because allocations disagree, lost their basis or "
+            f"no longer sum to their amount: {count}. Run review allocations."
+        )
 
 
 def run_review_classification_undo(args) -> int:

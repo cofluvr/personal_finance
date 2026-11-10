@@ -21,21 +21,26 @@ from personal_finance.reconcile.category_rule_effects import (
 )
 from personal_finance.reconcile.classification_effects import load_active_classifications
 from personal_finance.reconcile.correction_effects import load_active_corrections
-from personal_finance.reconcile.household_effects import attributed_transactions, load_household
+from personal_finance.reconcile.allocation_effects import load_active_allocations
+from personal_finance.reconcile.household_effects import (
+    attributed_transactions,
+    load_household,
+    named_value,
+)
 from personal_finance.reconcile.rules import DEFAULT_RULES
 from personal_finance.reconcile.transfer_effects import INFLOW, OUTFLOW
 
 # Bump whenever the material evidence changes, so an old token can never appear current. Version
 # 4 adds corrections (D-049), version 5 completed values (D-050), version 6 declared coverage
 # (D-051), version 7 classifications (D-053), version 8 transfer matches (D-054), version 9
-# one-sided transfers (D-055), version 10 categorizations (D-063), and version 11 the category rules'
-# outcome (D-064).
-REVISION_VERSION = 11
+# one-sided transfers (D-055), version 10 categorizations (D-063), version 11 the category rules'
+# outcome (D-064), and version 12 allocations (D-065).
+REVISION_VERSION = 12
 # The same, for one transaction's evidence, which a separation, correction, classification,
 # transfer match, one-sided transfer or categorization names (D-047, D-049, D-050, D-051, D-053,
-# D-054, D-055, D-063). Version 8 adds categorizations, and version 9 the category rules' outcome
-# (D-064).
-TRANSACTION_REVISION_VERSION = 9
+# D-054, D-055, D-063, D-065). Version 8 adds categorizations, version 9 the category rules' outcome
+# (D-064), and version 10 allocations (D-065).
+TRANSACTION_REVISION_VERSION = 10
 
 # Fields left out of a revision. Random IDs and names say where evidence is stored or how
 # it is labelled, not what it says. Records are identified by document hash and row
@@ -47,13 +52,13 @@ IMMATERIAL_FIELDS = frozenset(
     {"issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
      "account_name", "decision_id", "correction_id", "classification_id", "match_id",
      "counterpart_transaction_id", "one_sided_transfer_id", "categorization_id", "rule_id",
-     "household"}
+     "household", "allocation_id"}
 )
 # Fields left out while empty, so that evidence holding none keeps the digest it had before they
 # existed (D-049).
 OMITTED_WHILE_EMPTY = frozenset({"corrections", "completion", "declared", "classifications",
                                  "transfers", "one_sided_transfers", "categorizations",
-                                 "category_rules"})
+                                 "category_rules", "allocations"})
 
 
 @dataclass(frozen=True)
@@ -156,16 +161,31 @@ class CategoryRuleEvidence:
 
 
 @dataclass(frozen=True)
-class HouseholdEvidence:
-    """Who a transaction's effective amount belongs to, where an account's default reaches it
-    (D-065)."""
+class AllocationEvidence:
+    """An active allocation binding a record of one transaction (D-065)."""
 
-    # A member's name, shared, or unattributed.
+    allocation_id: str
+    # Its kind, then each part as a member's name and its value, in member order. Names are unique
+    # and never change, unlike where a member is stored.
+    allocation: list
+    # The outcome on this transaction: applied, conflict, basis_changed or amount_differs.
+    state: str
+    bound_records: tuple[DecidedRecord, ...]
+
+
+@dataclass(frozen=True)
+class HouseholdEvidence:
+    """Who a transaction's effective amount belongs to, where an allocation or an account's
+    default reaches it (D-065)."""
+
+    # personal, shared, allocated or unattributed.
     kind: str
     # (member name, cents) in member order. Empty when unattributed.
     parts: tuple[tuple[str, int], ...]
     # Why it is unattributed, else None.
     reason: str | None
+    # Whether an allocation decides it, rather than the account's default.
+    by_allocation: bool
 
 
 @dataclass(frozen=True)
@@ -220,6 +240,7 @@ class TransactionEvidence:
     one_sided_transfers: tuple[OneSidedTransferEvidence, ...] = ()
     categorizations: tuple[CategorizationEvidence, ...] = ()
     category_rules: tuple[CategoryRuleEvidence, ...] = ()
+    allocations: tuple[AllocationEvidence, ...] = ()
     household: HouseholdEvidence | None = None
 
 
@@ -427,6 +448,7 @@ def load_review_evidence(conn: sqlite3.Connection, issue_id: str) -> ReviewEvide
                       _one_sided_by_transaction(conn, linked),
                       _categorizations_by_transaction(conn, account_id, linked),
                       _category_rules_by_transaction(conn, linked),
+                      _allocations_by_transaction(conn, account_id, linked),
                       _household_by_transaction(conn, linked)),
         tuple(sorted(unresolved, key=_record_key)),
         _documents(conn, account_id, documents),
@@ -462,6 +484,7 @@ def load_merge_evidence(conn: sqlite3.Connection, transaction_id: str) -> MergeE
                            _categorizations_by_transaction(conn, account_id,
                                                            linked_by_transaction),
                            _category_rules_by_transaction(conn, linked_by_transaction),
+                           _allocations_by_transaction(conn, account_id, linked_by_transaction),
                            _household_by_transaction(conn, linked_by_transaction)),
         _documents(conn, account_id, documents),
         account_id in stale_accounts(conn, DEFAULT_RULES, account_id),
@@ -552,13 +575,13 @@ _TRANSACTION = """
 def _transactions(conn, issue_id, linked, corrections_by_transaction,
                   classifications_by_transaction, transfers_by_transaction,
                   one_sided_by_transaction, categorizations_by_transaction,
-                  category_rules_by_transaction,
+                  category_rules_by_transaction, allocations_by_transaction,
                   household_by_transaction) -> tuple[TransactionEvidence, ...]:
     entries = [
         _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
                            transfers_by_transaction, one_sided_by_transaction,
                            categorizations_by_transaction, category_rules_by_transaction,
-                           household_by_transaction)
+                           allocations_by_transaction, household_by_transaction)
         for row in conn.execute(
             _TRANSACTION + """
             JOIN review_issue_subject subject ON subject.transaction_id = entry.id
@@ -572,7 +595,7 @@ def _transactions(conn, issue_id, linked, corrections_by_transaction,
 def _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
                        transfers_by_transaction, one_sided_by_transaction,
                        categorizations_by_transaction, category_rules_by_transaction,
-                       household_by_transaction) -> TransactionEvidence:
+                       allocations_by_transaction, household_by_transaction) -> TransactionEvidence:
     transaction_id, *values, primary_id = row
     records = tuple(sorted(linked.get(transaction_id, ()), key=_record_key))
     primary = next(
@@ -585,23 +608,57 @@ def _transaction_entry(row, linked, corrections_by_transaction, classifications_
                                one_sided_by_transaction.get(transaction_id, ()),
                                categorizations_by_transaction.get(transaction_id, ()),
                                category_rules_by_transaction.get(transaction_id, ()),
+                               allocations_by_transaction.get(transaction_id, ()),
                                household_by_transaction.get(transaction_id))
 
 
 def _household_by_transaction(conn, linked) -> dict[str, HouseholdEvidence]:
-    """The attribution of each transaction an account's default reaches."""
+    """The attribution of each transaction an allocation or an account's default reaches."""
     household = load_household(conn)
-    if not household.defaults:
+    if not household.members:
         return {}
     return {
         entry.transaction_id: HouseholdEvidence(
             entry.attribution.kind,
             tuple((household.name_of(member_id), cents)
                   for member_id, cents in entry.attribution.parts),
-            entry.attribution.reason)
+            entry.attribution.reason, entry.attribution.by_allocation)
         for entry in attributed_transactions(conn, household, transaction_ids=list(linked))
-        if entry.account_id in household.defaults
+        if entry.attribution.by_allocation or entry.account_id in household.defaults
     }
+
+
+def _allocations_by_transaction(conn, account_id, linked) -> dict[str, tuple]:
+    """Active allocations binding each transaction's records, with the outcome there."""
+    active_allocations = load_active_allocations(conn, account_id)
+    if not active_allocations:
+        return {}
+    state_by_transaction = dict(conn.execute(
+        """SELECT derived.transaction_id, derived.state FROM transaction_allocation derived
+           JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+           WHERE entry.account_id = ?""",
+        (account_id,),
+    ))
+    names = dict(conn.execute("SELECT id, name FROM household_member"))
+    found = {}
+    for transaction_id, records in linked.items():
+        record_ids = {record.record_id for record in records}
+        touching = [
+            AllocationEvidence(
+                allocation.correction_id, named_value(names, allocation.corrected_value),
+                state_by_transaction[transaction_id],
+                _decided_records(conn, allocation.bound_record_ids),
+            )
+            for allocation in active_allocations if allocation.bound_record_ids & record_ids
+        ]
+        if touching:
+            found[transaction_id] = tuple(sorted(
+                touching, key=lambda allocation: (
+                    repr(allocation.allocation),
+                    [_decided_key(record) for record in allocation.bound_records],
+                ),
+            ))
+    return found
 
 
 def _corrections_by_transaction(conn, account_id, linked) -> dict[str, tuple]:

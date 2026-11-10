@@ -13,10 +13,10 @@ each milestone M12 to M21 in [decisions-m12-m21.md](decisions-m12-m21.md), as wr
 M17's and M20's security changes and `segno` for M20. All are plans: nothing of M11 or later is
 built. **The owner builds M11 and M12 locally.**
 
-**M11.1 is built** on `feature/m10-rules` (migration 0022, `allocate_cents`, the `household`
-commands, `h1` and `a1`), at the owner's request of 2026-11-10 to build M11.1 to M11.3 in order in
-one session, each slice committed on its own gate, with one review at the end. **Next:** M11.2, then
-M11.3. The real-ledger migration to version 21 still comes first, verified on its own, before 22
+**M11.1 and M11.2 are built** on `feature/m10-rules` (migrations 0022 and 0023, `allocate_cents`,
+the `household` commands, `review allocate` and its chains, and `h1`, `a1`, `s1`, `r12`, `t10`,
+`d9`, `c5`), at the owner's request of 2026-11-10 to build M11.1 to M11.3 in order in one session,
+each slice committed on its own gate, with one review at the end. **Next:** M11.3. The real-ledger migration to version 21 still comes first, verified on its own, before 22
 and 23 (D-065 point 7). Point F with the owner on their already-imported files is still open.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session

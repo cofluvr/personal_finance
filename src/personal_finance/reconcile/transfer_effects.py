@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from personal_finance.db.id_lists import ids_as_json_array
+from personal_finance.reconcile.allocation_effects import write_allocation_effects
 from personal_finance.reconcile.category_effects import write_category_effects
 from personal_finance.reconcile.category_rule_effects import write_rule_category_effects
 from personal_finance.reconcile.classification_effects import PAID_ACCOUNT_TYPES_BY_TYPE
@@ -414,6 +415,7 @@ def write_transfer_effects(conn: sqlite3.Connection) -> None:
     )
     write_category_effects(conn)
     write_rule_category_effects(conn)
+    write_allocation_effects(conn)
 
 
 def unsettled_transfers(conn: sqlite3.Connection) -> frozenset:

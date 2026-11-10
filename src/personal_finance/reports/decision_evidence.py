@@ -14,6 +14,10 @@ from personal_finance.reconcile.apply import (
     load_evidence,
     superseded_by,
 )
+from personal_finance.reconcile.allocation_effects import (
+    effective_allocations,
+    load_active_allocations,
+)
 from personal_finance.reconcile.category_effects import (
     effective_categorizations,
     load_active_categorizations,
@@ -34,6 +38,7 @@ from personal_finance.reconcile.correction_effects import (
     load_active_corrections,
 )
 from personal_finance.reconcile.cross_document import derive
+from personal_finance.reconcile.household_effects import named_value
 from personal_finance.reconcile.rules import MatchingRules
 from personal_finance.reconcile.supersession import successor_and_newest
 
@@ -43,8 +48,9 @@ from personal_finance.reconcile.supersession import successor_and_newest
 # marks records in scope completed by hand, left out where they are not (D-050). Version 6 adds
 # classifications binding records in scope, left out where there are none (D-053). Version 7 adds
 # categorizations the same way (D-063). Version 8 adds the category rules a description in scope
-# can match, left out where there are none (D-064).
-DECISION_REVISION_VERSION = 8
+# can match, left out where there are none (D-064). Version 9 adds allocations binding records in
+# scope, left out where there are none (D-065).
+DECISION_REVISION_VERSION = 9
 
 
 @dataclass(frozen=True)
@@ -387,6 +393,35 @@ def undo_outlook(
         material["categorizations"] = {
             "with_decision": categorization_view(now),
             "without_decision": categorization_view(after),
+        }
+    active_allocations = load_active_allocations(conn, decision.account_id)
+    touching_allocations = [
+        allocation for allocation in active_allocations if allocation.bound_record_ids & scope
+    ]
+    if touching_allocations:
+        allocated_record_ids = set().union(
+            *(allocation.bound_record_ids for allocation in touching_allocations)
+        )
+        names = dict(conn.execute("SELECT id, name FROM household_member"))
+
+        def allocation_view(result):
+            group_by_record_id = {
+                record_id: index
+                for index, group in enumerate(result.groups) for record_id in group.record_ids
+            }
+            # Agreement alone, for a supposed grouping: whether amounts still sum follows from the
+            # corrections above, which are covered.
+            effects = effective_allocations(active_allocations, group_by_record_id, None)
+            return sorted(
+                [keyed(result.groups[index].record_ids), effect.state,
+                 effect.applied_value and named_value(names, effect.applied_value)]
+                for index, effect in effects.items()
+                if allocated_record_ids.intersection(result.groups[index].record_ids)
+            )
+
+        material["allocations"] = {
+            "with_decision": allocation_view(now),
+            "without_decision": allocation_view(after),
         }
     # Which group a record joins decides the description a rule reads, and the groups, records,
     # corrections and types are covered above, so the rules that could match are enough.

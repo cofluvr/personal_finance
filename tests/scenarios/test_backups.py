@@ -30,6 +30,7 @@ from test_decisions import (
     CAFE,
     CATEGORIZATION_TABLES,
     CATEGORY_RULE_TABLES,
+    ALLOCATION_TABLES,
     CATEGORY_TABLES,
     CHECKING_HEADER,
     HOUSEHOLD_TABLES,
@@ -53,7 +54,7 @@ from personal_finance.db.migrate import connect, load_migrations
 LATEST = len(load_migrations())
 LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", *REAL_LEDGER_TABLES, *BACKUP_TABLES,
                  *CATEGORY_TABLES, *CATEGORIZATION_TABLES, *CATEGORY_RULE_TABLES,
-                 *HOUSEHOLD_TABLES)
+                 *HOUSEHOLD_TABLES, *ALLOCATION_TABLES)
 LEDGER_VOLUME = Path("/Volumes/SyntheticLedger")
 BACKUP_VOLUME = Path("/Volumes/SyntheticBackups")
 
@@ -739,11 +740,13 @@ LISTS = [("documents",), ("transactions",), ("totals",), ("report", "monthly"),
          ("review", "list"), ("review", "merges"), ("review", "decisions"),
          ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
          ("review", "resolutions"), ("review", "coverage", "history"), ("balance", "list"),
-         ("storage",), ("category", "list"), ("review", "categorizations"), ("category", "rules")]
+         ("storage",), ("category", "list"), ("review", "categorizations"), ("category", "rules"),
+         ("household", "members"), ("household", "share", "show"), ("review", "allocations")]
 PER_ACCOUNT = [("totals",), ("report", "monthly"), ("review", "merges"), ("review", "decisions"),
                ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
                ("review", "resolutions"), ("review", "coverage", "history"),
-               ("balance", "list"), ("balance", "check"), ("review", "categorizations")]
+               ("balance", "list"), ("balance", "check"), ("review", "categorizations"),
+               ("household", "account", "show"), ("review", "allocations")]
 PER_ID = [
     ("SELECT id FROM ledger_transaction", [("trace",), ("review", "transaction", "show"),
                                            ("review", "merge", "show")]),
@@ -757,6 +760,7 @@ PER_ID = [
     ("SELECT id FROM record_resolution", [("review", "resolution", "show")]),
     ("SELECT id FROM category_assignment", [("review", "categorization", "show")]),
     ("SELECT id FROM category_rule", [("category", "rule", "show")]),
+    ("SELECT id FROM allocation_statement", [("review", "allocation", "show")]),
 ]
 
 
@@ -844,6 +848,7 @@ def build_rich_ledger(ledger, *, checking_rows, decision, match, one_sided, corr
             code, _, err = ledger.run("category", "rule", "undo", rule, "--revision",
                                       re.search(r"Revision: (q1-[0-9a-f]{16})", shown)[1])
             assert code == 0, err
+    build_household(ledger)
 
     items_before = set(ledger.items())
     ledger.card("p1.csv", CAFE, extra=FIRST_HALF, account="S")
@@ -880,6 +885,48 @@ def build_rich_ledger(ledger, *, checking_rows, decision, match, one_sided, corr
     day = date(2026, 1, 1)
     for step, balance in enumerate(balances):
         ledger.record_ok((day + timedelta(days=7 * step)).isoformat(), f"{balance}.00")
+
+
+def household_token(ledger, *words):
+    return re.search(r"Revision: ([ah]1-[0-9a-f]{16})", ledger.run(*words)[1])[1]
+
+
+def build_household(ledger):
+    """Two members, a share once undone and set again, A shared and S Michael's, one default
+    undone, and A's rows allocated each way, one allocation undone (D-065)."""
+    for name in ("Michael", "M"):
+        assert ledger.run("household", "member", "add", name)[0] == 0
+    for parts, undone in ((("Michael=60", "M=40"), True), (("Michael=50", "M=50"), False)):
+        words = [word for part in parts for word in ("--part", part)]
+        code, _, err = ledger.run("household", "share", "set", *words, "--revision",
+                                  household_token(ledger, "household", "share", "show"))
+        assert code == 0, err
+        if undone:
+            assert ledger.run("household", "share", "undo", "--revision", household_token(
+                ledger, "household", "share", "show"))[0] == 0
+    for account, how, undone in (("S", ("--member", "M"), True), ("S", ("--member", "Michael"),
+                                                                    False),
+                                 ("A", ("--shared",), False)):
+        show = ("household", "account", "show", "--account", account)
+        code, _, err = ledger.run("household", "account", "set", "--account", account, *how,
+                                  "--revision", household_token(ledger, *show))
+        assert code == 0, err
+        if undone:
+            assert ledger.run("household", "account", "undo", "--account", account,
+                              "--revision", household_token(ledger, *show))[0] == 0
+    ways = (("--member", "M"), ("--percent", "Michael=30", "--percent", "M=70"), ("--shared",))
+    for index, transaction in enumerate(rows_of(ledger, "a.csv")):
+        code, out, err = ledger.run("review", "allocate", transaction, "--account", "A",
+                                    "--revision", ledger.transaction_revision(transaction),
+                                    *ways[index % len(ways)])
+        assert code == 0, err
+        if index == 1:
+            allocation = re.search(r"Allocation (\S+) recorded", out)[1]
+            shown = ledger.run("review", "allocation", "show", allocation)[1]
+            code, _, err = ledger.run("review", "allocation", "undo", allocation, "--account",
+                                      "A", "--revision",
+                                      re.search(r"Revision: (s1-[0-9a-f]{16})", shown)[1])
+            assert code == 0, err
 
 
 checking_rows = st.lists(st.tuples(st.integers(1, 9999), st.booleans(), st.integers(0, 2),

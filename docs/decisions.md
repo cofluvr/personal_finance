@@ -571,6 +571,56 @@ these go.
   members`, `household share show` and `household account show` show no member, share or default
   on every ledger that opens.
 
+**How M11.2 was implemented:**
+
+- Migration 0023 adds `allocation_statement`, `allocation_statement_part`,
+  `allocation_statement_record` and `allocation_statement_event`, mirroring 0020's tables and
+  append-only by triggers, and the derived `transaction_allocation`. An allocation's value is one
+  canonical text, its kind, a colon, then `member=value` parts sorted by member ID, so D-063's
+  shared code compares it as it compares a category, by equality: kind and parts equal, or not.
+  When an allocation is made, the schema checks that its parts say exactly what its value says and
+  fit its kind: one member at 10,000 basis points, none for `shared`, two or more percentages
+  summing to 10,000, or one or more amounts, each above zero.
+- **The extension of the shared code** is one optional hook on `StatementKind`, `write_value`,
+  which `make_statement` calls after binding records and before the `made` event, to write the
+  parts. Types and categories pass none, so every command of theirs runs as before, compared as CB5
+  below. `stated_fields` itself is unchanged: the canonical text is the value.
+- `reconcile/allocation_effects.py` holds the `StatedField` and the outcome, rewritten for the
+  ledger at the end of `write_transfer_effects`, after categories, so every write rewrites it with
+  corrections final. Its misfit state is `amount_differs`: an allocation by amount fits only while
+  its parts sum to the magnitude of the transaction's effective amount. Percentages, a member and
+  `shared` always fit.
+- `household_effects.attributed_transactions` reads the derived outcome first: applied, it gives the
+  member's whole amount, the share's parts, `allocate_cents` of the percentages, or the amounts
+  signed by the transaction's direction; not applied, `unattributed` by its state, never the
+  account's default; no row, the default as in M11.1. The share reaches what an account default or
+  an allocation attributes `shared`, and a default only what no allocation reaches, so `h1` and `a1`
+  keep their definitions and every digest on a ledger with no allocation.
+- `reconcile/allocations.py`: `review allocate` checks, in D-043's order, the account is current,
+  then the value (an unknown member, malformed or repeated parts, one percentage, percentages not
+  summing to 100.00, `shared` with no active share), then account, transaction and `t10` together,
+  then a chain, then that amounts sum to the effective amount. `review allocation undo` and chains
+  are `statements.py`'s, unchanged. `review confirm` and `review separate` refuse with
+  `LEAVES_ALLOCATION_UNSETTLED` after the types and categories checks, and decision undo reports the
+  transactions it leaves unattributed.
+- `review allocations` and `review allocation show` name members and percentages, never the cents of
+  an allocation by amount, as `review correction show` prints no corrected value (point 10).
+  `review transaction show` prints the allocations apart from the source values, and its
+  `Household:` line says whether an allocation or the account's default decides it.
+- **Tokens:** `r12` and `t10` add the allocations binding a transaction's records, by member names,
+  with the outcome there. `d9` adds the allocations binding records in scope, by agreement, as `d7`
+  added categorizations. `c5` adds, for an amount, the allocations' outcomes on its transactions
+  with and without it. `s1` covers the allocation by member names, the transactions holding its
+  bound records, and the outcome there with and without it, effective amounts included. All are
+  left out while empty, and the 70 places tests pinned `r11`, `t9`, `d8` and `c4` moved to the new
+  versions with every digest unchanged.
+- **Compared as CB5:** the same 2,574 ledgers, read by the code at `b61d85d` and, migrated to 23,
+  by M11.2's: of 59,583 runs, 59,544 are identical once `r11`, `t9`, `d8` and `c4` move, every
+  digest kept. 36 are the two ledgers stamped 22 to mean newer than the code, and 3 the
+  comparison's own rewriting of a stored description holding `t9-`, identical compared exactly.
+  Every types and categories command is among them. Another 15,058 runs of the household commands
+  and `review allocations` show no member, default or allocation on every ledger that opens.
+
 ## D-066 Roadmap to a finished backend: M12 to M21 — Approved
 
 Proposed on 2026-11-10, at the owner's request, after D-065, and **approved by the owner the same

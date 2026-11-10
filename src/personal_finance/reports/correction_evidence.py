@@ -8,6 +8,10 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
+from personal_finance.reconcile.allocation_effects import (
+    effective_allocations,
+    load_active_allocations,
+)
 from personal_finance.reconcile.apply import load_evidence
 from personal_finance.reconcile.category_rule_effects import (
     load_active_rules,
@@ -26,6 +30,7 @@ from personal_finance.reconcile.correction_effects import (
     load_active_corrections,
     transaction_by_record_id,
 )
+from personal_finance.reconcile.household_effects import named_value
 from personal_finance.reconcile.supersession import successor_and_newest
 from personal_finance.reports.decision_evidence import BoundRecord
 
@@ -34,8 +39,10 @@ from personal_finance.reports.decision_evidence import BoundRecord
 # Version 3 adds their categorizations' outcomes now the same way: an amount reaches a category
 # only through its type, which version 2 covers (D-063). Version 4 adds, for any field, the category
 # rules its transactions' descriptions can match and the rules' outcome there now, left out where no
-# rule can match (D-064).
-CORRECTION_REVISION_VERSION = 4
+# rule can match (D-064). Version 5 adds, for an amount, the outcome of allocations on its
+# transactions with and without it, since whether one by amount sums turns on it, left out where
+# none binds them (D-065).
+CORRECTION_REVISION_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -223,6 +230,32 @@ def correction_undo_outlook(
         )
         if categorized:
             material["categorizations"] = categorized
+        allocations = load_active_allocations(conn, account_id)
+        if any(membership.get(record_id) in holding_transactions
+               for allocation in allocations for record_id in allocation.bound_record_ids):
+            names = dict(conn.execute("SELECT id, name FROM household_member"))
+            account_amounts = dict(conn.execute(
+                "SELECT id, amount_cents FROM ledger_transaction WHERE account_id = ?",
+                (account_id,),
+            ))
+
+            def allocation_view(effects):
+                amounts = dict(account_amounts)
+                for (transaction, field), effect in effects.items():
+                    if field == "amount" and effect.state == FIELD_APPLIED:
+                        amounts[transaction] = effect.applied_value
+                outcomes = effective_allocations(allocations, membership, amounts)
+                return sorted(
+                    [keyed(records_by_transaction[transaction]), outcomes[transaction].state,
+                     outcomes[transaction].applied_value
+                     and named_value(names, outcomes[transaction].applied_value)]
+                    for transaction in holding_transactions if transaction in outcomes
+                )
+
+            material["allocations"] = {
+                "with_correction": allocation_view(effects_with_it),
+                "without_correction": allocation_view(effects_without_it),
+            }
     category_rules = rules_matching_texts(
         load_active_rules(conn), account_id,
         [*(description for transaction, description in conn.execute(

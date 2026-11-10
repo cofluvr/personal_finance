@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from personal_finance.reconcile.apply import stale_accounts
 from personal_finance.reconcile.household_effects import (
+    NO_SHARE,
     SHARED,
     AccountDefault,
     AttributedTransaction,
@@ -52,12 +53,14 @@ def share_material(household: Household, share: Share | None):
 
 
 def share_reach(conn: sqlite3.Connection, household: Household) -> Reach:
-    """Every transaction the share reaches, whether or not one is active, and the h1 token."""
+    """Every transaction the share reaches, whether or not one is active, and the h1 token: those
+    an account's default or a person's allocation attributes shared."""
     names = account_names(conn)
+    reached = [entry for entry in attributed_transactions(conn, household)
+               if entry.attribution.kind == SHARED or entry.attribution.reason == NO_SHARE]
     shared_accounts = {account_id for account_id, default in household.defaults.items()
                        if default.member_id is None}
-    reached = [entry for entry in attributed_transactions(conn, household)
-               if entry.account_id in shared_accounts]
+    shared_accounts.update(entry.account_id for entry in reached)
     material = {
         "share": share_material(household, household.share),
         "defaults": sorted([names[account_id], default_words(household, default)]
@@ -68,8 +71,10 @@ def share_reach(conn: sqlite3.Connection, household: Household) -> Reach:
 
 
 def account_reach(conn: sqlite3.Connection, household: Household, account_id: str) -> Reach:
-    """Every transaction of one account its default reaches, and the a1 token."""
-    reached = attributed_transactions(conn, household, account_id)
+    """Every transaction of one account its default reaches, and the a1 token. A person's
+    allocation comes first, so a transaction one reaches is not the default's."""
+    reached = [entry for entry in attributed_transactions(conn, household, account_id)
+               if not entry.attribution.by_allocation]
     material = {
         "account": account_names(conn)[account_id],
         "default": default_words(household, household.defaults.get(account_id)),
