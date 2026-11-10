@@ -30,11 +30,11 @@ UI arrives later and calls the same core code. The data has three layers:
 | **M6** First real CSV layouts | Only layouts supplied as redacted samples, one at a time | Each layout has fixture tests |
 | **M7** PDF parsing | Text PDFs and CSV-to-PDF matching | Same activity in both formats counts once |
 | **M8** Local review UI | Loopback-only import results, review queue, transactions | Host and CSRF checks; UI totals match the CLI |
-| **M9** Spending categories (proposed, D-063) | The first Phase 1B milestone: a category list and categorizing spending by a person | Categories add exactly to spending; types unchanged byte for byte |
+| **M9** Spending categories (D-063) | The first Phase 1B milestone: a category list and categorizing spending by a person | Categories add exactly to spending; types unchanged byte for byte |
 
 M5 is mandatory before any actual financial document is processed. Phase 1B
-planning, Phase 1C sync and iOS are planned once Phase 1A passes. D-063 proposes that Phase 1A
-passes with M8, and a Phase 1B sequence of M9 to M14, of which only M9 is proposed for approval.
+planning, Phase 1C sync and iOS are planned once Phase 1A passes. D-063, approved, records that
+Phase 1A passes with M8, and proposes a Phase 1B sequence of M9 to M14, of which only M9 is approved.
 
 ## Required financial test cases
 
@@ -440,14 +440,14 @@ Approved by the owner on 2026-11-09 as D-062, with A to E: read-only, so M8.4 is
 
 ## M9 plan
 
-Proposed on 2026-11-09 as D-063, **pending the owner's review.** Nothing is built until it is
-approved, and then each slice separately. No security control changes.
+Approved by the owner on 2026-11-09 as D-063, with A to E, and PRD §10's starting categories as
+named, with no subcategories. M9.1 to M9.3 approved to build in order. No security control changes.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M9.1 | The category list: migration 0019, PRD §10's starting set, `pf category add` and `list` | Proposed |
-| M9.2 | Categorizing one transaction, D-053's model extracted for types and categories, migration 0020 | Proposed |
-| M9.3 | Spending by category in `totals` and `report monthly`, and so on the UI's pages | Proposed |
+| M9.1 | The category list: migration 0019, PRD §10's starting set, `pf category add` and `list` | Approved |
+| M9.2 | Categorizing one transaction, D-053's model extracted for types and categories, migration 0020 | Approved |
+| M9.3 | Spending by category in `totals` and `report monthly`, and so on the UI's pages | Approved |
 
 ### M9.1 acceptance criteria
 

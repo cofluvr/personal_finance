@@ -82,7 +82,7 @@ and keep its index line.
 | D-060 | M7 plan: text PDF statements, and CSV and PDF counting once — Approved, points 1 to 3 and 5 amended, implemented in M7 |
 | D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
 | D-062 | M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8, verified by the owner |
-| D-063 | M9 plan: spending categories — Pending, for the owner's review |
+| D-063 | M9 plan: spending categories — Approved with A to E |
 
 ## Rules in brief
 
@@ -189,7 +189,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-063 M9 plan: spending categories — Pending, for the owner's review
+## D-063 M9 plan: spending categories — Approved with A to E
 
 Proposed on 2026-11-09. **M1 to M8 deliver every Phase 1A item** of PRD-backend §3, so M9 opens
 Phase 1B, which plan.md leaves to be planned once Phase 1A passes (point 1). M9 is the first of its
@@ -326,3 +326,8 @@ point 3, and any subcategories wanted at the start.
 - **C. Categorizations as D-053's model, extracted for both fields,** only on spending (point 4).
 - **D. Spending by category in `totals` and `report monthly`** (point 5).
 - **E. The slices M9.1 to M9.3,** in that order.
+
+**The owner's review, on 2026-11-09.** Decisions A to E approved as written. PRD §10's starting
+categories stand as named in point 3, with no subcategories at the start. M9.1 to M9.3 approved to
+build in order, each gated on the full suite and committed locally, with CB5 and CC4 compared as
+M8.1 compared.
