@@ -30,11 +30,13 @@ UI arrives later and calls the same core code. The data has three layers:
 | **M6** First real CSV layouts | Only layouts supplied as redacted samples, one at a time | Each layout has fixture tests |
 | **M7** PDF parsing | Text PDFs and CSV-to-PDF matching | Same activity in both formats counts once |
 | **M8** Local review UI | Loopback-only import results, review queue, transactions | Host and CSRF checks; UI totals match the CLI |
-| **M9** Spending categories (proposed, D-063) | The first Phase 1B milestone: a category list and categorizing spending by a person | Categories add exactly to spending; types unchanged byte for byte |
+| **M9** Spending categories (D-063) | The first Phase 1B milestone: a category list and categorizing spending by a person | Categories add exactly to spending; types unchanged byte for byte |
+| **M10** Categorization rules (D-064, proposed) | Rules by description, account, type and date, with preview and undo, a person's category first | Rules' outcomes derived and reversible; ledgers without rules unchanged byte for byte |
 
 M5 is mandatory before any actual financial document is processed. Phase 1B
-planning, Phase 1C sync and iOS are planned once Phase 1A passes. D-063 proposes that Phase 1A
-passes with M8, and a Phase 1B sequence of M9 to M14, of which only M9 is proposed for approval.
+planning, Phase 1C sync and iOS are planned once Phase 1A passes. D-063, approved, records that
+Phase 1A passes with M8, and proposes a Phase 1B sequence of M9 to M14, of which only M9 is approved.
+D-064 proposes M10's plan for the owner's review.
 
 ## Required financial test cases
 
@@ -440,14 +442,15 @@ Approved by the owner on 2026-11-09 as D-062, with A to E: read-only, so M8.4 is
 
 ## M9 plan
 
-Proposed on 2026-11-09 as D-063, **pending the owner's review.** Nothing is built until it is
-approved, and then each slice separately. No security control changes.
+Approved by the owner on 2026-11-09 as D-063, with A to E, and PRD §10's starting categories as
+named, with no subcategories. M9.1 to M9.3 approved to build in order. No security control changes.
+**M9 is complete and accepted,** verified by the owner on the real ledger on 2026-11-09.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M9.1 | The category list: migration 0019, PRD §10's starting set, `pf category add` and `list` | Proposed |
-| M9.2 | Categorizing one transaction, D-053's model extracted for types and categories, migration 0020 | Proposed |
-| M9.3 | Spending by category in `totals` and `report monthly`, and so on the UI's pages | Proposed |
+| M9.1 | The category list: migration 0019, PRD §10's starting set, `pf category add` and `list` | Complete |
+| M9.2 | Categorizing one transaction, D-053's model extracted for types and categories, migration 0020 | Complete |
+| M9.3 | Spending by category in `totals` and `report monthly`, and so on the UI's pages | Complete |
 
 ### M9.1 acceptance criteria
 
@@ -483,6 +486,54 @@ approved, and then each slice separately. No security control changes.
 Rules and bulk categorization (M10), household attribution and splits (M11), tags, fixed and
 discretionary classes, income categories, renaming, merging or deleting a category, categorizing from
 the UI, a normalized merchant, local AI, and budgets.
+
+## M10 plan
+
+Proposed on 2026-11-10 as D-064, pending the owner's review: decisions A to H, and the inputs it
+names. Nothing is built until it is approved, and then each slice separately. No security control
+changes.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M10.1 | Category rules: migration 0021, matching, preview, add, list and show, the derived outcome on every write, precedence, tokens | Proposed |
+| M10.2 | Undoing a category rule with its `q1` token | Proposed |
+| M10.3 | Spending by category counting rules, disclosures, the source of a category, UI parity, the benchmark row | Proposed |
+
+### M10.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| RA1 | Migration 0021 works on a populated ledger, synthetic and real: it adds `category_rule`, `category_rule_event` and `transaction_rule_category` empty, makes no account stale, changes no token, total or report, and is atomic on failure. A ledger at 0020 is refused until `migrate`. Triggers refuse any update, delete or replace of a rule or event, each with a control insert that succeeds |
+| RA2 | A rule matches when the normalized effective description contains its normalized text, a corrected description included, and every given account, type and from date holds. A blank text, an unknown category, account or type, a type outside spending and a malformed date are refused, changing nothing. Outcomes are the same for every import order, and a change of `MatchingRules` changes none |
+| RA3 | `category rule preview` opens the ledger read-only, leaves its logical digest unchanged, and lists every transaction whose category would change, before and after, with why, escaped as D-040. `category rule add` checks every account the rule can reach is current, then the `p1` token, under one write lock (D-043): a token made before an import, a correction, a classification, a categorization or another rule refuses, as does an active rule with the same definition, changing nothing |
+| RA4 | A person's categorization in any state takes precedence, and no rule applies there. Agreeing rules apply. Disagreeing rules leave the transaction uncategorized in `rule_conflict`, naming both. No rule reaches a transaction outside spending, and a type change or a confirmed transfer takes it out of reach |
+| RA5 | Rules reach transactions imported later, and a repeat import changes nothing. A merge evaluates the merged transaction and a split each part, and `review confirm` and `review separate` never refuse for a rule. The outcome equals a ledger with the same evidence where the rule was added last. `category rules` and `category rule show` list rules, what each categorizes, where it disagrees and where a person takes precedence |
+| RA6 | Tokens `r11`, `t9`, `d8`, `c4` and `g2` keep every digest on a ledger no rule reaches, with a test pinning each definition and `p1`. On the suite's ledgers before M10, every command's output is byte for byte M9's once versions move, compared as CB5. Every earlier criterion still passes |
+
+### M10.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| RB1 | `category rule undo` checks the accounts it can reach are current, then the `q1` token from `category rule show`. A stale token or an undone rule is refused, changing nothing. The rule stays on record with an `undone` event |
+| RB2 | After undo, every outcome equals a ledger where the rule was never added: its transactions return to uncategorized or to the other rules' outcome, a `rule_conflict` it caused resolves, and no person's categorization changes. Undo never refuses for contradiction, and says when its outcome differs from the preview |
+| RB3 | Backup and restore keep rules and their events, compared as M5.4's restore test compares. Every earlier criterion still passes |
+
+### M10.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| RC1 | Spending by category counts a person's category first and a rule's otherwise, and the categories and `uncategorized` add exactly to D-056's Spending, for the ledger, each account and each month, on generated ledgers with rules |
+| RC2 | Disclosures give the count and amount categorized by rules and in `rule_conflict`, shown only while a rule's outcome reaches a transaction. Every other line is byte for byte as before, and with every rule undone the reports are byte for byte as never having had one, compared as CC4 |
+| RC3 | `review show` and `review transaction show` say where a category comes from, the categorization or the rules, escaped. The UI's totals and monthly pages equal the CLI on ledgers with rules, a rule's text holding HTML shown as text |
+| RC4 | `measure_reconciliation.py --scale --category-rules 300` asserts the counts its rules categorize, leave in conflict and yield to a person, and its figures are recorded in [benchmarks.md](benchmarks.md) under D-064 point 9's stopping rule. Every earlier criterion still passes |
+
+### Not in M10
+
+Rules that state a type, amount ranges, starts-with, exact or regular-expression matching, rule
+priorities, editing or superseding a rule, rules from the UI, income categories, a normalized
+merchant, rules from local AI or from existing categorizations, rules for later imports only, tags,
+fixed and discretionary classes, renaming, merging or deleting a category, household attribution
+and splits (M11), and budgets.
 
 ## Backlog benchmarks
 

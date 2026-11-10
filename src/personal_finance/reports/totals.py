@@ -9,11 +9,9 @@ from dataclasses import dataclass
 
 from personal_finance.db.id_lists import ids_as_json_array
 from personal_finance.reconcile.apply import STATE_ACTIVE, decision_states, declared_coverage
+from personal_finance.reconcile.category_effects import CONFIRMED_TRANSFER_SQL, SPENDING_TYPES
 from personal_finance.reconcile.classification_effects import FINANCIAL_TYPES, UNCLASSIFIED
 from personal_finance.reconcile.transfer_effects import TRANSFER_TYPES, transfer_candidates
-
-# Applied types counted as spending, a refund reducing it (PRD §9, D-056).
-SPENDING_TYPES = ("purchase", "fee", "interest", "refund")
 
 
 @dataclass(frozen=True)
@@ -376,6 +374,9 @@ class IncomeAndSpending:
     confirmed_transfers_by_type: tuple[tuple[str, GroupTotal], ...]
     unconfirmed_transfer_kinds: GroupTotal
     unclassified: GroupTotal
+    # Spending by the category applying to each transaction, by category ID in the order made,
+    # and None, last, for spending no category applies to (D-063). It adds to spending exactly.
+    spending_by_category: tuple[tuple[int | None, GroupTotal], ...] = ()
 
     @property
     def spending(self) -> GroupTotal:
@@ -386,28 +387,24 @@ class IncomeAndSpending:
         return combined(group for _, group in self.confirmed_transfers_by_type)
 
 
-# Whether a transfer is confirmed on the transaction `entry`. An effect row names its transactions
-# only while it applies, so naming one confirms it.
-CONFIRMED_TRANSFER_SQL = """
-    EXISTS (SELECT 1 FROM transfer_match_effect matched
-            WHERE matched.outflow_transaction_id = entry.id)
-    OR EXISTS (SELECT 1 FROM transfer_match_effect matched
-               WHERE matched.inflow_transaction_id = entry.id)
-    OR EXISTS (SELECT 1 FROM one_sided_transfer_effect one_sided
-               WHERE one_sided.transaction_id = entry.id)"""
-
-
 class IncomeAndSpendingTally:
     """Adds transactions one at a time to D-056's five groups: first by whether a transfer is
-    confirmed there, then by applied type."""
+    confirmed there, then by applied type, and spending by its applied category too (D-063)."""
 
     def __init__(self):
         self.income = self.unconfirmed_transfer_kinds = self.unclassified = GroupTotal()
         self.spending_by_type: dict[str, GroupTotal] = {}
         self.confirmed_by_type: dict[str, GroupTotal] = {}
+        self.spending_by_category: dict[int | None, GroupTotal] = {}
 
-    def add(self, amount_cents: int, financial_type: str | None,
-            confirmed_transfer: bool) -> None:
+    def add(self, amount_cents: int, financial_type: str | None, confirmed_transfer: bool,
+            category_id: int | None = None) -> None:
+        in_spending = not confirmed_transfer and financial_type in SPENDING_TYPES
+        if category_id is not None and not in_spending:
+            raise AssertionError("a category applies to a transaction outside spending")
+        if in_spending:
+            self.spending_by_category[category_id] = self.spending_by_category.get(
+                category_id, GroupTotal()).adding(amount_cents)
         if confirmed_transfer:
             # D-054's fit rule lets only a transfer kind, or no type, apply on a confirmed side.
             if financial_type not in (None, *TRANSFER_TYPES):
@@ -436,6 +433,8 @@ class IncomeAndSpendingTally:
                   for financial_type in (*FINANCIAL_TYPES, UNCLASSIFIED)
                   if financial_type in self.confirmed_by_type),
             self.unconfirmed_transfer_kinds, self.unclassified,
+            tuple(sorted(self.spending_by_category.items(),
+                         key=lambda item: (item[0] is None, item[0] or 0))),
         )
 
 
@@ -443,18 +442,43 @@ def income_and_spending(conn: sqlite3.Connection,
                         account_id: str | None = None) -> IncomeAndSpending:
     """Groups each transaction by whether a transfer is confirmed there, then by its applied type."""
     tally = IncomeAndSpendingTally()
-    for amount_cents, financial_type, confirmed_transfer in conn.execute(
+    for amount_cents, financial_type, confirmed_transfer, category_id in conn.execute(
         f"""SELECT COALESCE(fix.corrected_amount_cents, entry.amount_cents), kind.financial_type,
-                   {CONFIRMED_TRANSFER_SQL}
+                   {CONFIRMED_TRANSFER_SQL}, categorized.category_id
             FROM ledger_transaction entry
             LEFT JOIN transaction_correction fix
                 ON fix.transaction_id = entry.id AND fix.field = 'amount' AND fix.state = 'applied'
             LEFT JOIN transaction_classification kind ON kind.transaction_id = entry.id
+            LEFT JOIN transaction_category categorized
+                ON categorized.transaction_id = entry.id AND categorized.state = 'applied'
             WHERE :account IS NULL OR entry.account_id = :account""",
         {"account": account_id},
     ):
-        tally.add(amount_cents, financial_type, confirmed_transfer)
+        tally.add(amount_cents, financial_type, confirmed_transfer, category_id)
     return tally.result()
+
+
+@dataclass(frozen=True)
+class UnsettledCategorizations:
+    """Transactions where categorizations reach and none applies, by why (D-063)."""
+
+    conflicts: int
+    basis_changed: int
+    not_spending: int
+
+
+def unsettled_categorizations_by_state(
+    conn: sqlite3.Connection, account_id: str | None = None
+) -> UnsettledCategorizations:
+    return UnsettledCategorizations(*conn.execute(
+        """SELECT COUNT(CASE WHEN derived.state = 'conflict' THEN 1 END),
+                  COUNT(CASE WHEN derived.state = 'basis_changed' THEN 1 END),
+                  COUNT(CASE WHEN derived.state = 'not_spending' THEN 1 END)
+           FROM transaction_category derived
+           JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+           WHERE :account IS NULL OR entry.account_id = :account""",
+        {"account": account_id},
+    ).fetchone())
 
 
 # A pending transaction this much older than its account's latest date is disclosed (D-016).

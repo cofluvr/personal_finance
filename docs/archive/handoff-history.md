@@ -1002,3 +1002,9 @@ M8 is D-062, complete on 2026-11-09, verified by the owner in a browser.
 | M8.1 | `6bf46c2` | One builder per report in `reports/report_text.py`, the CLI printing its lines | 13 applied, 13 caught, 1 gap closed |
 | M8.2 | `b31b2a1` | `pf ui` on 127.0.0.1, its protections, totals and monthly pages | 27 applied, 24 caught, 3 gaps closed |
 | M8.3 | `719f89f` | Import results, transactions, review queue and item pages | 12 applied, 11 caught, 1 gap closed |
+
+## M5 commits, moved from the handoff on 2026-11-09
+
+M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance
+`c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e`, its docs `7a0d446`, M5.5 `4548b12`, its
+docs `df53e65`, and M5's acceptance the commit after it.

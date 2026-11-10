@@ -19,6 +19,7 @@ from test_decisions import (
     ONE_SIDED_TABLES,
     TRANSFER_TABLES,
     pair_up,
+    drop_category_tables,
 )
 from test_resolutions import CAFE_NO_AMOUNT
 from test_supersession import holding
@@ -32,6 +33,7 @@ VERSION_12_TABLES = tuple(table for table in ALL_TABLES
 
 def set_back_to_version_12(path) -> None:
     conn = connect(path)
+    drop_category_tables(conn)
     for table in (*BACKUP_TABLES, *REAL_LEDGER_TABLES, *BALANCE_TABLES, *ONE_SIDED_TABLES, *TRANSFER_TABLES, *CLASSIFICATION_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
@@ -130,7 +132,7 @@ class TestAppendOnly:
     INSERT_CLASSIFICATION = """
         INSERT INTO type_classification (id, account_id, financial_type, target_transaction_id,
                                          target_revision, supersedes_classification_id)
-        VALUES (?, ?, ?, 't', 't7-0', (SELECT id FROM type_classification ORDER BY id LIMIT 1))"""
+        VALUES (?, ?, ?, 't', 't8-0', (SELECT id FROM type_classification ORDER BY id LIMIT 1))"""
 
     def own_account(self, conn):
         return conn.execute("SELECT id FROM account").fetchone()[0]

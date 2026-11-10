@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 
 from personal_finance.ingest.coverage import effective_end
 from personal_finance.reconcile.apply import declared_coverage, load_constraints, stale_accounts
+from personal_finance.reconcile.category_effects import load_active_categorizations
 from personal_finance.reconcile.classification_effects import load_active_classifications
 from personal_finance.reconcile.correction_effects import load_active_corrections
 from personal_finance.reconcile.rules import DEFAULT_RULES
@@ -20,12 +21,13 @@ from personal_finance.reconcile.transfer_effects import INFLOW, OUTFLOW
 
 # Bump whenever the material evidence changes, so an old token can never appear current. Version
 # 4 adds corrections (D-049), version 5 completed values (D-050), version 6 declared coverage
-# (D-051), version 7 classifications (D-053), version 8 transfer matches (D-054), and version 9
-# one-sided transfers (D-055).
-REVISION_VERSION = 9
+# (D-051), version 7 classifications (D-053), version 8 transfer matches (D-054), version 9
+# one-sided transfers (D-055), and version 10 categorizations (D-063).
+REVISION_VERSION = 10
 # The same, for one transaction's evidence, which a separation, correction, classification,
-# transfer match or one-sided transfer names (D-047, D-049, D-050, D-051, D-053, D-054, D-055).
-TRANSACTION_REVISION_VERSION = 7
+# transfer match, one-sided transfer or categorization names (D-047, D-049, D-050, D-051, D-053,
+# D-054, D-055, D-063). Version 8 adds categorizations.
+TRANSACTION_REVISION_VERSION = 8
 
 # Fields left out of a revision. Random IDs and names say where evidence is stored or how
 # it is labelled, not what it says. Records are identified by document hash and row
@@ -34,12 +36,12 @@ TRANSACTION_REVISION_VERSION = 7
 IMMATERIAL_FIELDS = frozenset(
     {"issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
      "account_name", "decision_id", "correction_id", "classification_id", "match_id",
-     "counterpart_transaction_id", "one_sided_transfer_id"}
+     "counterpart_transaction_id", "one_sided_transfer_id", "categorization_id"}
 )
 # Fields left out while empty, so that evidence holding none keeps the digest it had before they
 # existed (D-049).
 OMITTED_WHILE_EMPTY = frozenset({"corrections", "completion", "declared", "classifications",
-                                 "transfers", "one_sided_transfers"})
+                                 "transfers", "one_sided_transfers", "categorizations"})
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,19 @@ class ClassificationEvidence:
 
 
 @dataclass(frozen=True)
+class CategorizationEvidence:
+    """An active categorization binding a record of one transaction (D-063)."""
+
+    categorization_id: str
+    # The category by its name, which is unique and never changes, because its ID says where it
+    # is stored.
+    category: str
+    # The outcome on this transaction: applied, conflict, basis_changed or not_spending.
+    state: str
+    bound_records: tuple[DecidedRecord, ...]
+
+
+@dataclass(frozen=True)
 class TransferEvidence:
     """An active transfer match binding a record of one transaction (D-054)."""
 
@@ -161,6 +176,7 @@ class TransactionEvidence:
     classifications: tuple[ClassificationEvidence, ...] = ()
     transfers: tuple[TransferEvidence, ...] = ()
     one_sided_transfers: tuple[OneSidedTransferEvidence, ...] = ()
+    categorizations: tuple[CategorizationEvidence, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -364,7 +380,8 @@ def load_review_evidence(conn: sqlite3.Connection, issue_id: str) -> ReviewEvide
         details.get("date_end"),
         _transactions(conn, issue_id, linked, corrections_by_transaction,
                       classifications_by_transaction, _transfers_by_transaction(conn, linked),
-                      _one_sided_by_transaction(conn, linked)),
+                      _one_sided_by_transaction(conn, linked),
+                      _categorizations_by_transaction(conn, account_id, linked)),
         tuple(sorted(unresolved, key=_record_key)),
         _documents(conn, account_id, documents),
         bool(accounts & set(stale_accounts(conn, DEFAULT_RULES))),
@@ -395,7 +412,9 @@ def load_merge_evidence(conn: sqlite3.Connection, transaction_id: str) -> MergeE
                            _classifications_by_transaction(conn, account_id,
                                                            linked_by_transaction),
                            _transfers_by_transaction(conn, linked_by_transaction),
-                           _one_sided_by_transaction(conn, linked_by_transaction)),
+                           _one_sided_by_transaction(conn, linked_by_transaction),
+                           _categorizations_by_transaction(conn, account_id,
+                                                           linked_by_transaction)),
         _documents(conn, account_id, documents),
         account_id in stale_accounts(conn, DEFAULT_RULES, account_id),
         account_id,
@@ -484,10 +503,12 @@ _TRANSACTION = """
 
 def _transactions(conn, issue_id, linked, corrections_by_transaction,
                   classifications_by_transaction, transfers_by_transaction,
-                  one_sided_by_transaction) -> tuple[TransactionEvidence, ...]:
+                  one_sided_by_transaction,
+                  categorizations_by_transaction) -> tuple[TransactionEvidence, ...]:
     entries = [
         _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
-                           transfers_by_transaction, one_sided_by_transaction)
+                           transfers_by_transaction, one_sided_by_transaction,
+                           categorizations_by_transaction)
         for row in conn.execute(
             _TRANSACTION + """
             JOIN review_issue_subject subject ON subject.transaction_id = entry.id
@@ -499,7 +520,8 @@ def _transactions(conn, issue_id, linked, corrections_by_transaction,
 
 
 def _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
-                       transfers_by_transaction, one_sided_by_transaction) -> TransactionEvidence:
+                       transfers_by_transaction, one_sided_by_transaction,
+                       categorizations_by_transaction) -> TransactionEvidence:
     transaction_id, *values, primary_id = row
     records = tuple(sorted(linked.get(transaction_id, ()), key=_record_key))
     primary = next(
@@ -509,7 +531,8 @@ def _transaction_entry(row, linked, corrections_by_transaction, classifications_
                                corrections_by_transaction.get(transaction_id, ()),
                                classifications_by_transaction.get(transaction_id, ()),
                                transfers_by_transaction.get(transaction_id, ()),
-                               one_sided_by_transaction.get(transaction_id, ()))
+                               one_sided_by_transaction.get(transaction_id, ()),
+                               categorizations_by_transaction.get(transaction_id, ()))
 
 
 def _corrections_by_transaction(conn, account_id, linked) -> dict[str, tuple]:
@@ -570,6 +593,40 @@ def _classifications_by_transaction(conn, account_id, linked) -> dict[str, tuple
                 touching, key=lambda classification: (
                     classification.financial_type,
                     [_decided_key(record) for record in classification.bound_records],
+                ),
+            ))
+    return found
+
+
+def _categorizations_by_transaction(conn, account_id, linked) -> dict[str, tuple]:
+    """Active categorizations binding each transaction's records, with the outcome there."""
+    active_categorizations = load_active_categorizations(conn, account_id)
+    if not active_categorizations:
+        return {}
+    state_by_transaction = dict(conn.execute(
+        """SELECT derived.transaction_id, derived.state FROM transaction_category derived
+           JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+           WHERE entry.account_id = ?""",
+        (account_id,),
+    ))
+    name_by_category = dict(conn.execute("SELECT id, name FROM category"))
+    found = {}
+    for transaction_id, records in linked.items():
+        record_ids = {record.record_id for record in records}
+        touching = [
+            CategorizationEvidence(
+                categorization.correction_id, name_by_category[categorization.corrected_value],
+                state_by_transaction[transaction_id],
+                _decided_records(conn, categorization.bound_record_ids),
+            )
+            for categorization in active_categorizations
+            if categorization.bound_record_ids & record_ids
+        ]
+        if touching:
+            found[transaction_id] = tuple(sorted(
+                touching, key=lambda categorization: (
+                    categorization.category,
+                    [_decided_key(record) for record in categorization.bound_records],
                 ),
             ))
     return found

@@ -242,13 +242,14 @@ def _undo(conn, account_id, resolution_id, revision, rules) -> ResolutionUndone:
     if resolution_undo_outlook(conn, resolution, rules).revision != revision:
         raise DecisionRefused(STALE_RESOLUTION_REVISION)
     if resolution.kind == RESOLUTION_COMPLETED:
-        decisions, corrections, classifications, matches, one_sided = binding_entries(
-            conn, resolution.record.record_id)
+        decisions, corrections, classifications, matches, one_sided, categorizations = (
+            binding_entries(conn, resolution.record.record_id))
         entries = [f"decision {entry}" for entry in decisions]
         entries += [f"correction {entry}" for entry in corrections]
         entries += [f"classification {entry}" for entry in classifications]
         entries += [f"transfer match {entry}" for entry in matches]
         entries += [f"one-sided transfer {entry}" for entry in one_sided]
+        entries += [f"categorization {entry}" for entry in categorizations]
         if entries:
             raise DecisionRefused(COMPLETION_BOUND.format(entries=", ".join(entries)))
 

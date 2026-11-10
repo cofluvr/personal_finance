@@ -26,7 +26,9 @@ from personal_finance.reports.decision_evidence import BoundRecord
 
 # Bump whenever the material below changes, so an old token can never appear current. Version 2
 # adds the classifications of an amount's transactions, left out where there are none (D-053).
-CORRECTION_REVISION_VERSION = 2
+# Version 3 adds their categorizations' outcomes now the same way: an amount reaches a category
+# only through its type, which version 2 covers (D-063).
+CORRECTION_REVISION_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -201,6 +203,19 @@ def correction_undo_outlook(
                 "with_correction": classification_view(effects_with_it),
                 "without_correction": classification_view(effects_without_it),
             }
+        categorized = sorted(
+            [keyed(records_by_transaction[transaction]), state, category_id]
+            for transaction, state, category_id in conn.execute(
+                """SELECT derived.transaction_id, derived.state, derived.category_id
+                   FROM transaction_category derived
+                   JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+                   WHERE entry.account_id = ?""",
+                (account_id,),
+            )
+            if transaction in holding_transactions
+        )
+        if categorized:
+            material["categorizations"] = categorized
     field_state_by_transaction = tuple(sorted(
         (transaction,
          *(None if view is None else view[0]

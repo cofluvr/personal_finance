@@ -292,10 +292,10 @@ class TestRefusals:  # X3, X4
 
     def test_an_unknown_transaction_on_either_side(self, ledger):
         outflow, inflow = sides(ledger)
-        self.nothing_changes(ledger, lambda: ledger.match("nope", inflow, revision="t7-0"),
+        self.nothing_changes(ledger, lambda: ledger.match("nope", inflow, revision="t8-0"),
                              TRANSACTION_NOT_FOUND.format(transaction="nope"))
         self.nothing_changes(ledger, lambda: ledger.match(outflow, "nope",
-                                                          counterpart_revision="t7-0"),
+                                                          counterpart_revision="t8-0"),
                              TRANSACTION_NOT_FOUND.format(transaction="nope"))
 
     def test_a_transaction_of_another_account_on_either_side(self, ledger):
@@ -313,8 +313,8 @@ class TestRefusals:  # X3, X4
 
     def test_a_stale_token_on_either_side(self, ledger):
         outflow, inflow = sides(ledger)
-        stale = "t7-0000000000000000"
-        last_version = "t5-" + ledger.transaction_revision(outflow)[3:]
+        stale = "t8-0000000000000000"
+        last_version = "t5-" + ledger.transaction_revision(outflow).split("-")[1]
         for token in (stale, last_version):
             self.nothing_changes(ledger, lambda: ledger.match(outflow, inflow, revision=token),
                                  STALE_TRANSACTION_REVISION.format(transaction=outflow))

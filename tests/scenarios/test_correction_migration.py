@@ -22,6 +22,7 @@ from test_decisions import (
     RESOLUTION_TABLES,
     TRANSFER_TABLES,
     pair_up,
+    drop_category_tables,
 )
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
@@ -42,6 +43,7 @@ def up_to_version_9(folder):
 
 def set_back_to_version_8(path) -> None:
     conn = connect(path)
+    drop_category_tables(conn)
     for table in (*BACKUP_TABLES, *REAL_LEDGER_TABLES, *BALANCE_TABLES, *ONE_SIDED_TABLES, *TRANSFER_TABLES, *CLASSIFICATION_TABLES, *DECLARATION_TABLES,
                   *RESOLUTION_TABLES, "transaction_correction",
                   "value_correction_event",
@@ -146,7 +148,7 @@ class TestAppendOnly:
                 """INSERT INTO value_correction (id, account_id, field, corrected_amount_cents,
                                                  corrected_text, target_transaction_id,
                                                  target_revision)
-                   VALUES ('x', (SELECT id FROM account), ?, ?, ?, 't', 't7-0')""",
+                   VALUES ('x', (SELECT id FROM account), ?, ?, ?, 't', 't8-0')""",
                 (field, amount, text),
             )
         conn.close()
@@ -159,7 +161,7 @@ class TestAppendOnly:
                 """INSERT INTO value_correction (id, account_id, field, corrected_text,
                                                  target_transaction_id, target_revision,
                                                  supersedes_correction_id)
-                   VALUES ('x', (SELECT id FROM account), 'description', 'CAFE', 't', 't7-0', ?)""",
+                   VALUES ('x', (SELECT id FROM account), 'description', 'CAFE', 't', 't8-0', ?)""",
                 (correction,),
             )
         conn.close()

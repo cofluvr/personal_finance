@@ -1,14 +1,14 @@
-# Session Handoff: M9 Planned
+# Session Handoff: M9 Accepted
 
-For a fresh session. Written 2026-11-09. **M1 to M8 are complete,** M8 verified by the owner in a
-browser on 2026-11-09. **D-063, the M9 plan, awaits the owner's review,** in
-[decisions.md](decisions.md), its criteria CA1 to CC5 in [plan.md](plan.md). It proposes that Phase 1A
-passes, a Phase 1B sequence M9 to M14, and M9 alone for approval: spending categories, stated by a
-person on D-053's model, with that model's code extracted to serve types and categories alike.
-Nothing of M9 is built, and no security control changes. Every fixture is invented.
+For a fresh session. Written 2026-11-09. **M1 to M9 are complete and accepted.** M9, spending
+categories (D-063), was accepted by the owner and verified on the real ledger: a verified backup,
+`pf migrate` to version 20, and categorizing in the CLI and the UI. `feature/m2-review` was merged
+into `main` by fast-forward. No security control changed, no dependency was added, and the UI stays
+read-only. Every fixture is invented.
 
-**Next:** the owner's decisions A to E on D-063, and whether PRD §10's starting categories stand,
-then M9.1 if approved. Point F per layout stays under "Awaiting the owner".
+**Next:** the owner's review of D-064, the M10 plan for categorization rules, written 2026-11-10 on
+`feature/m10-rules`. Nothing of M10 is built. Point F with the owner on their already-imported files
+is still open.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -34,9 +34,9 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `feature/m2-review`, created from `643e1b1`. Tracks `origin/feature/m2-review` |
-| Latest commit | Run `git log -1`. M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance `c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e`, its docs `7a0d446`, M5.5 `4548b12`, its docs `df53e65`, and M5's acceptance the commit after it |
-| Latest gating run | Full suite, exit code 0, on the D-063 plan commit: see its commit message. About 7 minutes |
+| Branch | `main` holds everything through M9 at `19ee858`. The M10 plan is on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
+| Latest commit | Run `git log -1`. M9's acceptance is `19ee858`, and the M10 plan the commit after it on `feature/m10-rules`. Earlier commits are in the archive |
+| Latest gating run | Full suite, exit code 0, chained to the M10 plan's commit: see its commit message. About 8 minutes |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -50,7 +50,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 ## Read first
 
 1. This file.
-2. [decisions.md](decisions.md): the index, the rules in brief, and D-063 in full. Every earlier
+2. [decisions.md](decisions.md): the index, the rules in brief, and D-064 in full. Every earlier
    decision is accepted, and their full text is in [decisions-d001-d052.md](decisions-d001-d052.md).
 3. [plan.md](plan.md): milestones, and each milestone's slices and acceptance criteria.
 4. [status.md](status.md): what exists, and the known limitations.
@@ -71,12 +71,17 @@ Then only what the task needs:
   in `cli.py`, `tests/scenarios/test_backups.py`, and "How M5.4 was implemented" under D-058.
 - For changes to M5.5: `tests/unit/test_no_network_imports.py`, [real-data-readiness.md](real-data-readiness.md),
   "Network and dependencies" in [status.md](status.md), and "How M5.5 was implemented" under D-058.
-- For M9: D-063 and its criteria in [plan.md](plan.md); D-049, D-053 and D-056 in the full text;
-  `reconcile/classifications.py`, `reconcile/classification_effects.py`,
-  `reports/classification_evidence.py`, migration 0013, `reports/totals.py` (`income_and_spending`),
-  `reports/report_text.py`, and `tests/scenarios/test_classifications.py`. For CB5 and CC4's byte
-  for byte comparisons, the method is "How M8.1 was implemented" under D-062: keep every ledger the
-  suite builds with `--basetemp` under `build/`, and run the commands before and after.
+- For changes to M9: D-063 in the full text and its "How M9.n was implemented", its criteria in
+  [plan.md](plan.md), `reconcile/stated_fields.py`, `reconcile/statements.py`,
+  `reports/stated_evidence.py`, the
+  category modules beside them, migrations 0019 and 0020, `reports/totals.py`, `reports/monthly.py`,
+  `reports/report_text.py`, and `tests/scenarios/test_categories.py`, `test_categorizations.py` and
+  `test_spending_by_category.py`. A change to types or categories changes both: run
+  `test_classifications.py` too. A byte for byte comparison follows "How M9.3 was implemented":
+  keep the suite's ledgers with `--basetemp` under `build/`, migrate copies, and cap per-ID shows.
+- **A new migration** breaks every older migration test's set-back: `drop_category_tables` in
+  `test_decisions.py` drops 0019 and 0020, and grows with each later migration's tables. Also add
+  the tables to `tests/unit/test_migrations.py` and `test_review_show.py`'s `LEDGER_TABLES`.
 - For changes to M8: D-062 in the full text and its criteria in [plan.md](plan.md), `ui/server.py`,
   `reports/report_text.py`, `run_ui`, `explained_error` and the six report handlers in `cli.py`,
   `tests/scenarios/local_ui_client.py`, `test_local_ui.py`, `test_local_ui_review.py`,
@@ -224,22 +229,25 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 ## Awaiting the owner
 
-- Decisions A to E on D-063, and whether PRD §10's starting categories stand as named.
 - Point F for `us_bank_card_activity_pdf_v1`, by the PDF section of
   [layout-verification.md](layout-verification.md).
-- Point F per layout, by [layout-verification.md](layout-verification.md), and its results.
+- Point F per layout, by [layout-verification.md](layout-verification.md), and its results. The
+  owner's layouts are already imported into the real ledger, so point F reuses those files in a
+  throwaway ledger, with the owner, at the final review.
+- [real-data-readiness.md](real-data-readiness.md) names the backup volume `CommonCentsBackups`.
+  The owner's is `/Volumes/CommonCentsBackup`. A doc fix, not made.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits on `feature/m2-review` | Approved for D-059, M6, D-060, M7, D-061, M7's closeout, the D-062 plan, M8.1 to M8.3 and the D-063 plan on 2026-11-09, used for them | **Must be renewed** for any change after the review |
+| Local commits | Approved on 2026-11-09 for the D-063 approval, M9.1 to M9.3, M9's acceptance and the merge into `main`, used for them. Approved on 2026-11-10 for the M10 plan and these handoff fixes on `feature/m10-rules`, used for them | **Must be renewed** for any change after the M10 review |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |
 | M8 | Complete, verified by the owner in a browser on 2026-11-09 | Decisions from the browser (M8.4) need a new approval, as a security change |
-| M9 | Planned in D-063, pending the owner's review | Approval of A to E, then each slice |
+| M9 | Accepted on 2026-11-09, verified on the real ledger | None |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Approved for the declared dependencies and build requirements, and on 2026-11-09 for pypdf 6.21.2 | Ask for anything new, an upgrade of pypdf included |
 | Network access | Approved for the clean-install dependencies, and on 2026-11-09 for pypdf's release list and install. Used, and now closed | Ask for any use |
@@ -263,11 +271,11 @@ only exception.
 
 Read docs/handoff.md first, then only the files and sections its "Read first" list names for
 this task. Open the archive and other decisions only when the task needs them. Confirm the
-branch is feature/m2-review, the working tree is clean, and run the test suite with a real exit
+branch is feature/m10-rules, the working tree is clean, and run the test suite with a real exit
 code before changing anything. Do not contact GitHub.
 
 Next task, from the owner:
-[PASTE IT HERE: for example, build M9.1 of D-063, as approved]
+[PASTE IT HERE: for example, plan M10, categorization rules, as the next free decision number]
 
 Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as the next
 free decision number, and approval before any of it is built. Each slice of it then needs its own

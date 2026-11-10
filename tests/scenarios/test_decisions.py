@@ -71,6 +71,21 @@ BALANCE_TABLES = ("balance_observation_event", "balance_observation")
 REAL_LEDGER_TABLES = ("real_ledger",)
 # Created by 0018, and empty until a backup is made, so set-backs drop it too (D-058).
 BACKUP_TABLES = ("backup_record",)
+# Created by 0019, holding the starting categories, so set-backs drop it without finding it empty
+# (D-063).
+CATEGORY_TABLES = ("category",)
+# Created by 0020, and empty until something is categorized, so set-backs check that first.
+CATEGORIZATION_TABLES = ("transaction_category", "category_assignment_event",
+                         "category_assignment_record", "category_assignment")
+
+
+def drop_category_tables(conn) -> None:
+    """Undo 0020 and 0019 on a ledger at the latest version, before setting it back further."""
+    for table in CATEGORIZATION_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+    for table in CATEGORY_TABLES:
+        conn.execute(f"DROP TABLE {table}")
 
 
 def declared(start, end):
@@ -102,11 +117,11 @@ class Ledger:
         self.capsys.readouterr()
         words = list(command)
         position = 2 if words[0] in ("account", "archive", "backup", "review", "balance",
-                                    "report") else 1
+                                    "report", "category") else 1
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
                          ["review", "correction"], ["review", "resolution"],
                          ["review", "coverage"], ["review", "classification"],
-                         ["review", "transfer"]):
+                         ["review", "transfer"], ["review", "categorization"]):
             position = 3
         words[position:position] = ["--db", self.db]
         code = main(words)
@@ -146,7 +161,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r9-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r10-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)
@@ -169,7 +184,7 @@ class Ledger:
 
     def decision_revision(self, decision):
         out = self.run("review", "decision", "show", decision)[1]
-        return re.search(r"Revision: (d6-[0-9a-f]{16})", out)[1]
+        return re.search(r"Revision: (d7-[0-9a-f]{16})", out)[1]
 
     def undo(self, decision, revision=None, account="A"):
         return self.run("review", "undo", decision, "--account", account,
@@ -461,7 +476,7 @@ class TestRefusals:  # S5
 
     def test_a_version_2_token_of_the_same_digest(self, ledger):
         item, one, two = pair_up(ledger)
-        token = "r2-" + ledger.revision(item)[3:]
+        token = "r2-" + ledger.revision(item).split("-")[1]
         self.refused(ledger, ledger.reject(item, (one, two), revision=token), STALE_REVISION)
 
     def test_a_pair_outside_the_item(self, ledger):
@@ -1031,7 +1046,7 @@ class TestUndoToken:  # S21
 
     def test_the_token_has_the_documented_form(self, ledger):
         _, token = self.decided(ledger)
-        assert re.fullmatch(r"d6-[0-9a-f]{16}", token)
+        assert re.fullmatch(r"d7-[0-9a-f]{16}", token)
 
 
 class TestConstraintsApplied:

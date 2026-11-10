@@ -9,6 +9,7 @@ document is synthetic.
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -27,6 +28,8 @@ from test_decisions import (
     ALL_TABLES,
     BACKUP_TABLES,
     CAFE,
+    CATEGORIZATION_TABLES,
+    CATEGORY_TABLES,
     CHECKING_HEADER,
     FIRST_HALF,
     OTHER,
@@ -46,7 +49,8 @@ from personal_finance.db.backups import logical_digest
 from personal_finance.db.migrate import connect, load_migrations
 
 LATEST = len(load_migrations())
-LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", *REAL_LEDGER_TABLES, *BACKUP_TABLES)
+LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", *REAL_LEDGER_TABLES, *BACKUP_TABLES,
+                 *CATEGORY_TABLES, *CATEGORIZATION_TABLES)
 LEDGER_VOLUME = Path("/Volumes/SyntheticLedger")
 BACKUP_VOLUME = Path("/Volumes/SyntheticBackups")
 
@@ -695,7 +699,10 @@ class TestRestore:
         ledger.card("jan.csv", CAFE)
         backup_folder = tmp_path / "backup"
         created(ledger, backup_folder)
-        change_ledger_copy(backup_folder, "DROP TABLE backup_record",
+        # The newest migration's tables, dropped, make the copy a ledger of the version before.
+        newest = load_migrations()[-1].path.read_text()
+        tables = reversed(re.findall(r"^CREATE TABLE (\w+)", newest, re.MULTILINE))
+        change_ledger_copy(backup_folder, *(f"DROP TABLE {table}" for table in tables),
                            f"PRAGMA user_version = {LATEST - 1}")
         rewrite_manifest(backup_folder, digest=True, schema_version=LATEST - 1)
         restored = tmp_path / "restored.db"
@@ -729,11 +736,11 @@ LISTS = [("documents",), ("transactions",), ("totals",), ("report", "monthly"),
          ("review", "list"), ("review", "merges"), ("review", "decisions"),
          ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
          ("review", "resolutions"), ("review", "coverage", "history"), ("balance", "list"),
-         ("storage",)]
+         ("storage",), ("category", "list"), ("review", "categorizations")]
 PER_ACCOUNT = [("totals",), ("report", "monthly"), ("review", "merges"), ("review", "decisions"),
                ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
                ("review", "resolutions"), ("review", "coverage", "history"),
-               ("balance", "list"), ("balance", "check")]
+               ("balance", "list"), ("balance", "check"), ("review", "categorizations")]
 PER_ID = [
     ("SELECT id FROM ledger_transaction", [("trace",), ("review", "transaction", "show"),
                                            ("review", "merge", "show")]),
@@ -745,6 +752,7 @@ PER_ID = [
     ("SELECT id FROM transfer_match UNION ALL SELECT id FROM one_sided_transfer",
      [("review", "transfer", "show")]),
     ("SELECT id FROM record_resolution", [("review", "resolution", "show")]),
+    ("SELECT id FROM category_assignment", [("review", "categorization", "show")]),
 ]
 
 
@@ -811,6 +819,11 @@ def build_rich_ledger(ledger, *, checking_rows, decision, match, one_sided, corr
             None, "purchase", "fee")[choice]
         if financial_type:
             ledger.classify_ok(transaction, financial_type)
+        if financial_type in ("purchase", "fee", "refund"):
+            code, _, err = ledger.run("review", "categorize", transaction, "--account", "A",
+                                      "--revision", ledger.transaction_revision(transaction),
+                                      "--category", "Food")
+            assert code == 0, err
     if correction:
         ledger.correct_ok(rows_of(ledger, "a.csv")[0], "description", "SYNTHETIC CORRECTED")
 

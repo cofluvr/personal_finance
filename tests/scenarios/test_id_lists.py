@@ -169,7 +169,7 @@ def test_writing_transfer_effects_for_more_bound_transactions_than_the_limit(con
         conn.execute(
             """INSERT INTO type_classification (id, account_id, financial_type,
                                                 target_transaction_id, target_revision)
-               VALUES (?, 'out', 'transfer', ?, 't7-0')""",
+               VALUES (?, 'out', 'transfer', ?, 't8-0')""",
             (classification_id, transaction_id))
         conn.execute("INSERT INTO type_classification_record VALUES (?, ?)",
                      (classification_id, record_id))
@@ -178,7 +178,7 @@ def test_writing_transfer_effects_for_more_bound_transactions_than_the_limit(con
         conn.execute(
             """INSERT INTO one_sided_transfer (id, account_id, counterpart_account_id,
                                                target_transaction_id, target_revision)
-               VALUES (?, 'out', 'in', ?, 't7-0')""",
+               VALUES (?, 'out', 'in', ?, 't8-0')""",
             (statement_id, transaction_id))
         conn.execute("INSERT INTO one_sided_transfer_record VALUES (?, ?)",
                      (statement_id, record_id))

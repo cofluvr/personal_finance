@@ -59,6 +59,12 @@ from personal_finance.reconcile.classification_effects import (
     TYPE_AGAINST_DIRECTION,
     UNCLASSIFIED,
 )
+from personal_finance.reconcile.categories import UNCATEGORIZED, add_category, list_categories
+from personal_finance.reconcile.categorizations import (
+    categorize_transaction,
+    undo_categorization,
+)
+from personal_finance.reconcile.category_effects import NOT_SPENDING
 from personal_finance.reconcile.classifications import classify_transaction, undo_classification
 from personal_finance.reconcile.correction_effects import (
     FIELD_APPLIED,
@@ -97,6 +103,11 @@ from personal_finance.reports.balances import (
     load_observation,
     observation_revision,
 )
+from personal_finance.reports.categorization_evidence import (
+    categorization_undo_outlook,
+    list_categorizations,
+    load_categorization,
+)
 from personal_finance.reports.classification_evidence import (
     classification_undo_outlook,
     list_classifications,
@@ -122,6 +133,7 @@ from personal_finance.reports.coverage_evidence import (
 )
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.report_text import (
+    CATEGORIZATION_STATE_EXPLANATIONS,
     CLASSIFICATION_STATE_EXPLANATIONS,
     FIELD_STATE_EXPLANATIONS,
     MATCH_STATE_EXPLANATIONS,
@@ -260,6 +272,17 @@ CLASSIFICATION_UNDO_NOTICE = (
     "superseded."
 )
 
+CATEGORIZE_NOTICE = (
+    "Totals list spending by category. Spending itself is unchanged, matching never reads "
+    "categories, and new records are not bound, but a re-export that joins this transaction keeps "
+    "the category applied."
+)
+
+CATEGORIZATION_UNDO_NOTICE = (
+    f"The transaction is {UNCATEGORIZED} again, or has the category of the categorization this one "
+    "superseded."
+)
+
 
 MATCH_NOTICE = (
     "Account movement and type totals are unchanged, matching never reads transfers, and new "
@@ -340,6 +363,15 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--type", required=True, choices=ACCOUNT_TYPES)
     add.add_argument("--institution")
     add.add_argument("--last4")
+
+    category = commands.add_parser("category", help="name the categories spending can take")
+    category_commands = category.add_subparsers(dest="category_command", required=True)
+    category_add = command("add", category_commands, handler=run_category_add,
+                           help="add a category, or a subcategory of a top-level one")
+    category_add.add_argument("name", help="the category's name, compared exactly")
+    category_add.add_argument("--parent", help="the top-level category this one is under")
+    command("list", category_commands, handler=run_category_list,
+            help="list the categories, each under its parent")
 
     importer = command("import", handler=run_import, help="import files")
     importer.add_argument("--account", required=True, help="account name or ID")
@@ -605,6 +637,56 @@ def build_parser() -> argparse.ArgumentParser:
     classification_undo.add_argument("--account", required=True, help="account name or ID")
     classification_undo.add_argument(
         "--revision", required=True, help="the revision from review classification show"
+    )
+
+    categorize = command(
+        "categorize", review_commands, handler=run_review_categorize,
+        help="state the category of a spending transaction",
+    )
+    categorize.add_argument("transaction_id", help="a transaction ID from transactions")
+    categorize.add_argument("--account", required=True, help="account name or ID")
+    categorize.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    categorize.add_argument("--category", required=True, help="a name from category list")
+    categorize.add_argument(
+        "--supersedes", metavar="CATEGORIZATION_ID",
+        help="the categorization applying to this transaction now, which this one replaces",
+    )
+    categorize.add_argument(
+        "--supersedes-revision", metavar="REVISION",
+        help="the revision from review categorization show for the categorization being replaced",
+    )
+
+    categorizations = command(
+        "categorizations", review_commands, handler=run_review_categorizations,
+        help="list stored categorizations",
+    )
+    categorizations.add_argument("--account", help="account name or ID")
+
+    categorization = review_commands.add_parser(
+        "categorization", help="inspect or undo one categorization"
+    )
+    categorization_commands = categorization.add_subparsers(
+        dest="categorization_command", required=True
+    )
+    categorization_show = command(
+        "show", categorization_commands, handler=run_review_categorization_show,
+        help="show what a categorization binds and what undoing it would do",
+    )
+    categorization_show.add_argument(
+        "categorization_id", help="a categorization ID from review categorizations"
+    )
+    categorization_undo = command(
+        "undo", categorization_commands, handler=run_review_categorization_undo,
+        help="stop a categorization applying, keeping it on record",
+    )
+    categorization_undo.add_argument(
+        "categorization_id", help="a categorization ID from review categorizations"
+    )
+    categorization_undo.add_argument("--account", required=True, help="account name or ID")
+    categorization_undo.add_argument(
+        "--revision", required=True, help="the revision from review categorization show"
     )
 
     transfers = command(
@@ -910,6 +992,24 @@ def run_account_add(args) -> int:
     except sqlite3.IntegrityError:
         raise CommandError("account name is already used, or last4 is not four digits") from None
     print(f"Added account {args.name}: {account_id}")
+    return 0
+
+
+def run_category_add(args) -> int:
+    conn = open_ledger(args.db)
+    category = add_category(conn, args.name, args.parent)
+    under = f", under {shown(args.parent)}" if category.parent_id is not None else ""
+    print(f"Added category {shown(category.name)}{under}")
+    return 0
+
+
+def run_category_list(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    categories = list_categories(conn)
+    for category in categories:
+        indent = "  " if category.parent_id is not None else ""
+        print(f"{indent}{shown(category.name)}")
+    print(f"Categories: {len(categories)}")
     return 0
 
 
@@ -1818,6 +1918,133 @@ def run_review_classification_show(args) -> int:
     return 0
 
 
+def run_review_categorize(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    result = categorize_transaction(
+        conn, account_id, args.transaction_id, args.revision, args.category,
+        supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
+    )
+
+    print(
+        f"Categorization {result.categorization_id} recorded: transaction {args.transaction_id} "
+        f"is in {shown(result.category_name)}, binding {result.bound_record_count} records."
+    )
+    if args.supersedes:
+        print(f"  Supersedes categorization {args.supersedes}. It stays on record.")
+    print(f"  {CATEGORIZE_NOTICE}")
+    return 0
+
+
+def run_review_categorizations(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_categorizations(conn, account_id)
+    for categorization_id, account, created_at, state, category, bound_count in rows:
+        print(
+            f"Categorization {categorization_id}: {state}, {shown(category)}, {bound_count} "
+            f"records, {shown(account)}, {created_at}"
+        )
+    print(f"Categorizations: {len(rows)}")
+    unsettled = conn.execute(
+        """SELECT derived.transaction_id, derived.state FROM transaction_category derived
+           JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+           WHERE derived.state <> 'applied' AND (:account IS NULL OR entry.account_id = :account)
+           ORDER BY derived.transaction_id""",
+        {"account": account_id},
+    ).fetchall()
+    for transaction_id, state in unsettled:
+        print(f"Transaction {transaction_id}: {CATEGORIZATION_STATE_EXPLANATIONS[state]}")
+    if rows:
+        print("To see what a categorization binds, run review categorization show.")
+    return 0
+
+
+# How a categorized transaction's outcome reads in an undo preview.
+CATEGORIZATION_PREVIEW_STATES = {
+    None: UNCATEGORIZED,
+    FIELD_APPLIED: "categorized",
+    FIELD_IN_CONFLICT: f"{UNCATEGORIZED}, categorizations disagree",
+    FIELD_BASIS_CHANGED: f"{UNCATEGORIZED}, basis changed",
+    NOT_SPENDING: f"{UNCATEGORIZED}, no longer spending",
+}
+
+
+def run_review_categorization_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    categorization = load_categorization(conn, args.categorization_id)
+    if categorization is None:
+        raise CommandError("categorization not found. Run review categorizations.")
+
+    print(f"Categorization {categorization.statement_id}")
+    print(f"  Account: {shown(categorization.account_name)} ({categorization.account_id})")
+    print(f"  Category: {shown(categorization.shown_value)}")
+    print(f"  Status: {categorization.state}")
+    print(f"  Made: {categorization.created_at}")
+    if categorization.undone_at:
+        print(f"  Undone: {categorization.undone_at}. It stays on record and no longer applies.")
+    if categorization.superseded_by:
+        print(
+            f"  Superseded by categorization {categorization.superseded_by}. It stays on record "
+            "and no longer applies, unless that categorization is undone."
+        )
+    if categorization.newest_of_chain != categorization.superseded_by:
+        print(
+            f"  Newest of its chain: categorization {categorization.newest_of_chain}, the only "
+            "one that can be undone. Each undo restores the categorization before it."
+        )
+    if categorization.supersedes_id:
+        print(f"  Supersedes categorization {categorization.supersedes_id}")
+    print(f"  From transaction: {categorization.target_transaction_id}")
+    print("Bound records:")
+    for record in categorization.bound_records:
+        where = record.transaction_id or "no transaction"
+        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
+
+    if categorization.state == STATE_ACTIVE:
+        outlook = categorization_undo_outlook(conn, categorization)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this categorization now:")
+        if categorization.supersedes_id:
+            print(
+                f"  Restores categorization {categorization.supersedes_id}, which it superseded"
+            )
+        for transaction_id, state_now, state_after in outlook.state_by_transaction:
+            print(
+                f"  Transaction {transaction_id}: {CATEGORIZATION_PREVIEW_STATES[state_now]} now, "
+                f"{CATEGORIZATION_PREVIEW_STATES[state_after]} after"
+            )
+        if stale_accounts(conn, DEFAULT_RULES, categorization.account_id):
+            print(
+                "This account has not been reconciled under the current matching rules, so "
+                "undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
+def run_review_categorization_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_categorization(conn, account_id, args.categorization_id, args.revision)
+
+    print(
+        f"Categorization {args.categorization_id} undone. It stays on record and no longer "
+        "applies."
+    )
+    if result.restored:
+        print(f"  Categorization {result.restored}, which it superseded, applies again.")
+    if result.newly_uncategorized_transactions:
+        print(
+            f"  Categorized transactions now {UNCATEGORIZED}, because categorizations disagree, "
+            f"lost their basis or are no longer on spending: "
+            f"{result.newly_uncategorized_transactions}. Run review categorizations."
+        )
+    print(f"  {CATEGORIZATION_UNDO_NOTICE}")
+    return 0
+
+
 def run_review_classification_undo(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
@@ -2073,8 +2300,8 @@ def run_review_resolution_show(args) -> int:
         print("Undoing this resolution now:")
         print(f"  Transactions: {outlook.transactions_now} now, {outlook.transactions_after} after")
         if resolution.kind == "completed":
-            decisions, corrections, classifications, matches, one_sided = binding_entries(
-                conn, record.record_id)
+            decisions, corrections, classifications, matches, one_sided, categorizations = (
+                binding_entries(conn, record.record_id))
             for decision in decisions:
                 print(f"  Refused while decision {decision} binds the record. Undo it first.")
             for correction in corrections:
@@ -2091,6 +2318,11 @@ def run_review_resolution_show(args) -> int:
             for statement in one_sided:
                 print(
                     f"  Refused while one-sided transfer {statement} binds the record. Undo it "
+                    "first."
+                )
+            for categorization in categorizations:
+                print(
+                    f"  Refused while categorization {categorization} binds the record. Undo it "
                     "first."
                 )
         print(f"  {RESOLUTION_UNDO_NOTICE}")

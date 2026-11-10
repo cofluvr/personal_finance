@@ -49,7 +49,7 @@ class CorrectionLedger(SeparationLedger):
         return out
 
     def transaction_revision(self, transaction):
-        return re.search(r"Revision: (t7-[0-9a-f]{16})", self.transaction_show(transaction))[1]
+        return re.search(r"Revision: (t8-[0-9a-f]{16})", self.transaction_show(transaction))[1]
 
     def correct(self, transaction, field, value, revision=None, account="A", supersedes=None,
                 supersedes_revision=None):
@@ -72,7 +72,7 @@ class CorrectionLedger(SeparationLedger):
         return out
 
     def correction_revision(self, correction):
-        return re.search(r"Revision: (c2-[0-9a-f]{16})", self.correction_show(correction))[1]
+        return re.search(r"Revision: (c3-[0-9a-f]{16})", self.correction_show(correction))[1]
 
     def correction_state(self, correction):
         return re.search(r"Status: (\S+)", self.correction_show(correction))[1]
@@ -225,14 +225,14 @@ class TestRefusals:  # V3
     def test_an_unknown_transaction(self, ledger):
         single(ledger)
         self.nothing_changes(
-            ledger, lambda: ledger.correct("nope", "amount", "-6.00", revision="t7-0"),
+            ledger, lambda: ledger.correct("nope", "amount", "-6.00", revision="t8-0"),
             TRANSACTION_NOT_FOUND,
         )
 
     def test_a_stale_token_and_one_of_the_last_version(self, ledger):
         transaction = single(ledger)
-        old_version = "t3-" + ledger.transaction_revision(transaction)[3:]
-        for token in ("t7-0000000000000000", old_version):
+        old_version = "t7-" + ledger.transaction_revision(transaction).split("-")[1]
+        for token in ("t8-0000000000000000", old_version):
             self.nothing_changes(
                 ledger, lambda: ledger.correct(transaction, "amount", "-6.00", revision=token),
                 STALE_TRANSACTION_REVISION,
@@ -316,8 +316,8 @@ class TestRefusals:  # V3
         correction = ledger.correct_ok(transaction, "amount", "-6.00")
         for attempt in (
             lambda: ledger.correct(transaction, "amount", "-5.00", supersedes=correction,
-                                   supersedes_revision="c2-0000000000000000"),
-            lambda: ledger.undo_correction(correction, "c2-0000000000000000"),
+                                   supersedes_revision="c3-0000000000000000"),
+            lambda: ledger.undo_correction(correction, "c3-0000000000000000"),
         ):
             self.nothing_changes(ledger, attempt, STALE_CORRECTION_REVISION)
 
@@ -582,13 +582,13 @@ class TestChains:  # V11
     def test_a_superseded_correction_names_the_newest(self, ledger):
         first, second, third = chain_of_three(ledger)
         before = ledger.dump()
-        code, _, err = ledger.undo_correction(first, "c2-0000000000000000")
+        code, _, err = ledger.undo_correction(first, "c3-0000000000000000")
         assert code == 2
         assert CORRECTION_SUPERSEDED_IN_CHAIN.format(newer=second, newest=third) in err
-        code, _, err = ledger.undo_correction(second, "c2-0000000000000000")
+        code, _, err = ledger.undo_correction(second, "c3-0000000000000000")
         assert code == 2 and CORRECTION_SUPERSEDED.format(newer=third) in err
         code, _, err = ledger.correct(holding(ledger, "a.csv"), "amount", "-3.00",
-                                      supersedes=first, supersedes_revision="c2-0")
+                                      supersedes=first, supersedes_revision="c3-0")
         assert code == 2 and f"newest correction of the chain, {third}" in err
         assert ledger.dump() == before
         shown = ledger.correction_show(first)
@@ -635,7 +635,7 @@ class TestUndo:  # V12
 
 class TestTokens:  # V13
     def test_the_versions_are_pinned(self):
-        assert correction_evidence.CORRECTION_REVISION_VERSION == 2
+        assert correction_evidence.CORRECTION_REVISION_VERSION == 3
 
     def test_the_correction_token_is_pinned(self, tmp_path, capsys):
         """Computed for this ledger when M2.6 was built, as a regression pin."""
@@ -658,7 +658,7 @@ class TestTokens:  # V13
 
     def test_last_version_tokens_of_the_same_digest_are_refused(self, ledger):
         item, one, two = pair_up(ledger)
-        code, _, _ = ledger.reject(item, (one, two), revision="r5-" + ledger.revision(item)[3:])
+        code, _, _ = ledger.reject(item, (one, two), revision="r5-" + ledger.revision(item).split("-")[1])
         assert code == 2
         decision = confirm_ok(ledger, item, (one, two))
         code, _, _ = ledger.undo(decision, "d4-" + ledger.decision_revision(decision)[3:])
@@ -703,7 +703,7 @@ class TestTokens:  # V13
         assert ledger.dump() == before
 
 # Set when M2.6 was built, after its immaterial inputs were removed (D-049).
-PINNED_CORRECTION_REVISION = "c2-e2235f95e29f164e"
+PINNED_CORRECTION_REVISION = "c3-e2235f95e29f164e"
 
 
 class TestPrivacy:  # V16
@@ -724,7 +724,7 @@ class TestPrivacy:  # V16
             outputs += [out, err]
         code, out, err = ledger.undo_correction(correction)
         outputs += [out, err]
-        code, out, err = ledger.correct(transaction, "amount", "-9.99", revision="t7-0")
+        code, out, err = ledger.correct(transaction, "amount", "-9.99", revision="t8-0")
         outputs += [out, err]
         text = "".join(outputs)
         for sentinel in ("6.51", "4.27", "9.99", "SENTINEL"):
@@ -732,9 +732,9 @@ class TestPrivacy:  # V16
 
     def test_displays_escape_a_corrected_description(self, ledger):
         transaction = single(ledger)
-        hostile = "CAFE\x1b[2J\nRevision: t7-0000000000000000"
+        hostile = "CAFE\x1b[2J\nRevision: t8-0000000000000000"
         ledger.correct_ok(transaction, "description", hostile)
         for out in (ledger.transaction_show(transaction), ledger.run("trace", transaction)[1],
                     ledger.run("transactions")[1]):
             assert "\x1b" not in out
-            assert "\nRevision: t7-0000000000000000" not in out
+            assert "\nRevision: t8-0000000000000000" not in out

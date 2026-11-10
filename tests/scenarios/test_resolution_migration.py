@@ -21,6 +21,7 @@ from test_decisions import (
     RESOLUTION_TABLES,
     TRANSFER_TABLES,
     pair_up,
+    drop_category_tables,
 )
 from test_resolutions import CAFE_NO_AMOUNT, ResolutionLedger, one_unresolved
 
@@ -41,6 +42,7 @@ def up_to_version_10(folder):
 
 def set_back_to_version_9(path) -> None:
     conn = connect(path)
+    drop_category_tables(conn)
     for table in (*BACKUP_TABLES, *REAL_LEDGER_TABLES, *BALANCE_TABLES, *ONE_SIDED_TABLES, *TRANSFER_TABLES, *CLASSIFICATION_TABLES, *DECLARATION_TABLES,
                   *RESOLUTION_TABLES):
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -141,7 +143,7 @@ class TestAppendOnly:
                                                   completed_description, target_issue_id,
                                                   target_revision)
                    VALUES ('x', (SELECT id FROM account), (SELECT id FROM source_record), ?, ?, ?,
-                           ?, 'i', 'r9-0')""",
+                           ?, 'i', 'r10-0')""",
                 (kind, amount, posting_date, description),
             )
         conn.close()

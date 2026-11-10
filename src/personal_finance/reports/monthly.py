@@ -44,6 +44,7 @@ class MonthReport:
     transactions_in_open_review_items: int = 0
     transactions_with_unsettled_correction: int = 0
     transactions_with_unsettled_classification: int = 0
+    transactions_with_unsettled_categorization: int = 0
     transactions_with_unsettled_match: int = 0
     transactions_with_unsettled_one_sided_transfer: int = 0
     # Sides here of applied matches whose other side is in another month (G6).
@@ -92,6 +93,8 @@ def _transactions_with_unsettled_effects(conn) -> dict[str, set[str]]:
                               WHERE state <> 'applied'"""),
             ("classification", """SELECT transaction_id FROM transaction_classification
                                   WHERE state <> 'applied'"""),
+            ("categorization", """SELECT transaction_id FROM transaction_category
+                                  WHERE state <> 'applied'"""),
             ("match", """SELECT link.transaction_id FROM transfer_match_effect effect
                          JOIN transfer_match_record bound ON bound.match_id = effect.match_id
                          JOIN transaction_source link
@@ -118,13 +121,13 @@ def monthly_report(conn: sqlite3.Connection, account_id: str | None = None,
     month_by_transaction = {}
     in_scope = []
     for (transaction_id, transaction_account_id, amount_cents, transaction_date, posting_date,
-         settlement_status, financial_type, confirmed_transfer) in conn.execute(
+         settlement_status, financial_type, confirmed_transfer, category_id) in conn.execute(
         f"""SELECT entry.id, entry.account_id,
                    COALESCE(amount_fix.corrected_amount_cents, entry.amount_cents),
                    COALESCE(date_fix.corrected_text, entry.transaction_date),
                    COALESCE(posting_fix.corrected_text, entry.posting_date),
                    entry.settlement_status, kind.financial_type,
-                   {CONFIRMED_TRANSFER_SQL}
+                   {CONFIRMED_TRANSFER_SQL}, categorized.category_id
             FROM ledger_transaction entry
             LEFT JOIN transaction_correction amount_fix
                 ON amount_fix.transaction_id = entry.id AND amount_fix.field = 'amount'
@@ -135,7 +138,9 @@ def monthly_report(conn: sqlite3.Connection, account_id: str | None = None,
             LEFT JOIN transaction_correction posting_fix
                 ON posting_fix.transaction_id = entry.id AND posting_fix.field = 'posting_date'
                AND posting_fix.state = 'applied'
-            LEFT JOIN transaction_classification kind ON kind.transaction_id = entry.id"""
+            LEFT JOIN transaction_classification kind ON kind.transaction_id = entry.id
+            LEFT JOIN transaction_category categorized
+                ON categorized.transaction_id = entry.id AND categorized.state = 'applied'"""
     ):
         # Every transaction's month, so a match's side in another account can be compared.
         reporting_date = transaction_date or posting_date
@@ -145,7 +150,7 @@ def monthly_report(conn: sqlite3.Connection, account_id: str | None = None,
         if account_id is None or transaction_account_id == account_id:
             dated_by = DATED_BY_TRANSACTION_DATE if transaction_date else DATED_BY_POSTING_DATE
             in_scope.append((transaction_id, amount_cents, settlement_status, financial_type,
-                             confirmed_transfer, dated_by))
+                             confirmed_transfer, category_id, dated_by))
 
     dated_months = sorted({month_by_transaction[transaction_id]
                            for transaction_id, *_ in in_scope})
@@ -187,7 +192,7 @@ def monthly_report(conn: sqlite3.Connection, account_id: str | None = None,
 
     outside_range = outside_range_cents = 0
     for (transaction_id, amount_cents, settlement_status, financial_type, confirmed_transfer,
-         dated_by) in in_scope:
+         category_id, dated_by) in in_scope:
         report = reports.get(month_by_transaction[transaction_id])
         if report is None:
             outside_range += 1
@@ -198,13 +203,15 @@ def monthly_report(conn: sqlite3.Connection, account_id: str | None = None,
         report.pending_transactions += settlement_status == "pending"
         report.dated_by_transaction_date += dated_by == DATED_BY_TRANSACTION_DATE
         report.dated_by_posting_date += dated_by == DATED_BY_POSTING_DATE
-        report.tally.add(amount_cents, financial_type, confirmed_transfer)
+        report.tally.add(amount_cents, financial_type, confirmed_transfer, category_id)
         if transaction_id in review_items_by_transaction:
             report.open_review_items |= review_items_by_transaction[transaction_id]
             report.transactions_in_open_review_items += 1
         report.transactions_with_unsettled_correction += transaction_id in unsettled["correction"]
         report.transactions_with_unsettled_classification += (
             transaction_id in unsettled["classification"])
+        report.transactions_with_unsettled_categorization += (
+            transaction_id in unsettled["categorization"])
         report.transactions_with_unsettled_match += transaction_id in unsettled["match"]
         report.transactions_with_unsettled_one_sided_transfer += (
             transaction_id in unsettled["one_sided"])

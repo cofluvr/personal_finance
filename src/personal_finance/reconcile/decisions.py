@@ -19,6 +19,7 @@ from personal_finance.reconcile.apply import (
     load_evidence,
     reconcile_account,
 )
+from personal_finance.reconcile.category_effects import unsettled_categorizations
 from personal_finance.reconcile.classification_effects import unsettled_classifications
 from personal_finance.reconcile.transfer_effects import unsettled_transfers
 from personal_finance.reconcile.correction_effects import unsettled_correction_fields
@@ -203,6 +204,11 @@ LEAVES_CLASSIFICATION_UNSETTLED = (
     "this decision would leave a classified transaction unclassified, because classifications "
     "would disagree, lose their basis or no longer fit its direction. It was not recorded and "
     "nothing was changed. Undo the classification first, then classify the result."
+)
+LEAVES_CATEGORIZATION_UNSETTLED = (
+    "this decision would leave a categorized transaction uncategorized, because categorizations "
+    "would disagree, lose their basis or no longer be on spending. It was not recorded and nothing "
+    "was changed. Undo the categorization first, then categorize the result."
 )
 # Shared by every command that refuses to leave a transfer match or one-sided transfer unsettled
 # (D-054, D-055).
@@ -471,6 +477,7 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
     before = _memberships(conn, account_id)
     unsettled_before = unsettled_correction_fields(conn, account_id)
     unclassified_before = unsettled_classifications(conn, account_id)
+    uncategorized_before = unsettled_categorizations(conn, account_id)
     unmatched_before = unsettled_transfers(conn)
     expected = {
         records for transaction_id, records in before.items()
@@ -501,6 +508,8 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
         raise DecisionRefused(JOINS_DISAGREEING_CORRECTIONS)
     if unsettled_classifications(conn, account_id) - unclassified_before:
         raise DecisionRefused(LEAVES_CLASSIFICATION_UNSETTLED)
+    if unsettled_categorizations(conn, account_id) - uncategorized_before:
+        raise DecisionRefused(LEAVES_CATEGORIZATION_UNSETTLED)
     if unsettled_transfers(conn) - unmatched_before:
         raise DecisionRefused(LEAVES_TRANSFER_UNSETTLED)
 
@@ -616,6 +625,7 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules, replaci
     before = _memberships(conn, account_id)
     unsettled_before = unsettled_correction_fields(conn, account_id)
     unclassified_before = unsettled_classifications(conn, account_id)
+    uncategorized_before = unsettled_categorizations(conn, account_id)
     unmatched_before = unsettled_transfers(conn)
     expected = {records for key, records in before.items() if key != transaction_id}
     expected.update(frozenset(group) for group in groups)
@@ -642,6 +652,8 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules, replaci
         raise DecisionRefused(SPLITS_CORRECTED_RECORDS)
     if unsettled_classifications(conn, account_id) - unclassified_before:
         raise DecisionRefused(LEAVES_CLASSIFICATION_UNSETTLED)
+    if unsettled_categorizations(conn, account_id) - uncategorized_before:
+        raise DecisionRefused(LEAVES_CATEGORIZATION_UNSETTLED)
     if unsettled_transfers(conn) - unmatched_before:
         raise DecisionRefused(LEAVES_TRANSFER_UNSETTLED)
     return Separation(

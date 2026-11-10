@@ -50,7 +50,10 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M8.3: import results, transactions, review queue and item pages | Complete (D-062) |
 | M8.4: decisions from the browser | Not built: the owner chose a read-only M8 |
 | **M8 overall** | **Complete,** verified by the owner in a browser on 2026-11-09 |
-| M9: spending categories | Planned in D-063, pending the owner's review. Nothing built |
+| M9.1: the category list | Accepted (D-063) |
+| M9.2: categorizing one spending transaction, types and categories on one model | Accepted (D-063) |
+| M9.3: spending by category in totals, monthly and the UI | Accepted (D-063) |
+| **M9 overall** | **Complete and accepted** on 2026-11-09, verified by the owner on the real ledger: migrated to version 20 after a verified backup, and categorizing confirmed in the CLI and the UI |
 
 ## What exists
 
@@ -76,7 +79,7 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
   `0011_coverage_declarations`, `0012_pending_posted_links`, `0013_type_classifications`,
   `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations`,
-  `0017_real_ledger` and `0018_backup_records`,
+  `0017_real_ledger`, `0018_backup_records`, `0019_categories` and `0020_categorizations`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts and five unverified institution layouts (D-059), explicit coverage, atomic
   per-file import.
@@ -96,9 +99,15 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   undoing that, under one write lock (D-050).
 - `personal_finance.reconcile.coverage_declarations`: declaring a document's coverage after import,
   and undoing that, under one write lock (D-051).
+- `personal_finance.reconcile.stated_fields`, `statements` and `reports.stated_evidence`: a value a
+  person states on one transaction, its chains, outcomes, commands and undo token, shared by types
+  and categories (D-053, D-063).
 - `personal_finance.reconcile.classification_effects` and `classifications`: which financial type
   applies to which transaction, sharing the corrections' effective-value rule, and classifying and
   undoing under one write lock (D-053).
+- `personal_finance.reconcile.categories`, `category_effects` and `categorizations`: the category
+  list, which category applies to which spending transaction, and categorizing and undoing under
+  one write lock (D-063). `reports.categorization_evidence` holds the `g1` undo token.
 - `personal_finance.reconcile.transfer_effects` and `transfers`: which transfer matches and one-sided
   transfers apply and which pairs are candidates, read after each account derives alone, and
   matching, stating and undoing under one write lock (D-054, D-055).
@@ -134,7 +143,9 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `review coverage declare`, `review coverage history`, `review coverage undo`, `review classify`,
   `review classifications`, `review classification show`, `review classification undo`,
   `review transfers`, `review transfer match`, `review transfer one-sided`, `review transfer show`,
-  `review transfer undo`, `totals`, `report monthly`, `balance record`, `balance list`,
+  `review transfer undo`, `category add`, `category list`, `review categorize`,
+  `review categorizations`, `review categorization show`, `review categorization undo`, `totals`,
+  `report monthly`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
   `backup verify`, `backup restore`, `pdf text`, run
   through the `bin/pf` launcher (D-038).
@@ -207,6 +218,14 @@ distinct spellings per block, and in the units of a group a decision touches. On
 rewriting 20,000 match outcomes (D-057).
 
 ## Known limitations
+
+- Categories cover spending only, one transaction at a time, by a person: no rules or bulk
+  categorizing (M10), no income categories, and no renaming, merging or deleting a category
+  (D-063). A ledger shows spending by category only while some categorization reaches a
+  transaction.
+- An undo, a classification or a transfer that leaves a categorization unsettled does not say so in
+  its own output, unlike `review confirm` and `review separate`, which refuse. `totals` and `review
+  categorizations` disclose it.
 
 - The local UI is read-only, and shows six commands' output only. It searches nothing, imports
   nothing, exports nothing and shows no `trace` or decision history, which carry creation
