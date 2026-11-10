@@ -1,4 +1,4 @@
-# Session Handoff: M10 Accepted
+# Session Handoff: M10 Accepted, M11 Planned
 
 For a fresh session. Written 2026-11-10. **M1 to M10 are complete and accepted,** M10,
 categorization rules (D-064), by the owner on 2026-11-10. `main` holds M1 to M9 at `19ee858`, and
@@ -7,8 +7,12 @@ stays at version 20 until the owner makes a verified backup and runs `pf migrate
 security control changed, no dependency was added, and the UI stays read-only. Every fixture is
 invented.
 
-**Next:** the owner's real-ledger migration to version 21, and planning M11. Point F with the owner
-on their already-imported files is still open.
+M11, household members, attribution and allocations, is planned in D-065, and D-066 proposes the
+milestones M12 to M21 to a finished backend. Both are plans only, awaiting the owner's review:
+nothing of M11 is built.
+
+**Next:** the owner's review of D-065 (decisions A to I) and D-066 (A to E), and the real-ledger
+migration to version 21. Point F with the owner on their already-imported files is still open.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -35,7 +39,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `main` holds everything through M9 at `19ee858`. The M10 plan is on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
-| Latest commit | Run `git log -1`. M9's acceptance is `19ee858`. On `feature/m10-rules`: the M10 plan `a294d64`, then one commit per slice. Earlier commits are in the archive |
+| Latest commit | Run `git log -1`. M9's acceptance is `19ee858`. On `feature/m10-rules`: the M10 plan `a294d64`, one commit per slice, M10's acceptance `871cdad`, then the M11 plan. Earlier commits are in the archive |
 | Latest gating run | Full suite, exit code 0, chained to the latest slice's commit: see its commit message. About 8 minutes |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
@@ -50,8 +54,9 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 ## Read first
 
 1. This file.
-2. [decisions.md](decisions.md): the index, the rules in brief, and D-064 in full. Every earlier
-   decision is accepted, and their full text is in [decisions-d001-d052.md](decisions-d001-d052.md).
+2. [decisions.md](decisions.md): the index, the rules in brief, and D-065 and D-066 in full, both
+   pending. Every earlier decision is accepted, and their full text is in
+   [decisions-d001-d052.md](decisions-d001-d052.md).
 3. [plan.md](plan.md): milestones, and each milestone's slices and acceptance criteria.
 4. [status.md](status.md): what exists, and the known limitations.
 
@@ -79,6 +84,9 @@ Then only what the task needs:
   `test_spending_by_category.py`. A change to types or categories changes both: run
   `test_classifications.py` too. A byte for byte comparison follows "How M9.3 was implemented":
   keep the suite's ledgers with `--basetemp` under `build/`, migrate copies, and cap per-ID shows.
+- For M11: D-065 and its criteria in [plan.md](plan.md), then what its points name: D-049, D-053,
+  D-063 and D-064 in the full text, `reconcile/stated_fields.py`, `reconcile/category_effects.py`,
+  `reports/totals.py` and `reports/report_text.py`. For a milestone after M11, D-066 first.
 - For changes to M10: D-064 and its "How M10.n was implemented", its criteria in
   [plan.md](plan.md), `reconcile/category_rule_effects.py`, `reconcile/category_rules.py`,
   `reports/category_rule_evidence.py`, migration 0021, the `category rule` handlers in `cli.py`,
@@ -243,6 +251,9 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
   throwaway ledger, with the owner, at the final review.
 - [real-data-readiness.md](real-data-readiness.md) names the backup volume `CommonCentsBackups`.
   The owner's is `/Volumes/CommonCentsBackup`. A doc fix, not made.
+- The review of D-065, decisions A to I, and its inputs: the household's members, each account's
+  default, and the share for `shared`.
+- The review of D-066, decisions A to E, and a delivery deadline, if any.
 - On the real ledger, a verified backup, then `pf migrate` to version 21 for M10.
 - Merging `feature/m10-rules` into `main`. Needs the owner's approval.
 - Pushing. Not authorized from here.

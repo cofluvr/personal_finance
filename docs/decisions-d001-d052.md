@@ -1,6 +1,6 @@
-# Decision Log: Full Text of D-001 to D-063
+# Decision Log: Full Text of D-001 to D-064
 
-Moved out of [decisions.md](decisions.md) on 2026-11-08, unchanged, D-053 once D-054 was written, D-058 once D-059 was, D-059 once D-060 was, D-060 once D-061 was, D-061 once D-062 was, D-062 once D-063 was, and D-063 once D-064 was. The index, the rules in brief and
+Moved out of [decisions.md](decisions.md) on 2026-11-08, unchanged, D-053 once D-054 was written, D-058 once D-059 was, D-059 once D-060 was, D-060 once D-061 was, D-061 once D-062 was, D-062 once D-063 was, D-063 once D-064 was, and D-064 once D-065 was. The index, the rules in brief and
 the newest decisions are in decisions.md. Status values are defined there. Read a decision here
 when a task touches it: search for its heading, such as `## D-049`.
 
@@ -3231,3 +3231,341 @@ M8.1 compared.
 **The owner's acceptance, on 2026-11-09.** M9 accepted. Verified on the real ledger: a verified
 backup, `pf migrate` to version 20, and categorizing confirmed in the CLI and the local UI. Merged
 into `main` by fast-forward the same day.
+
+## D-064 M10 plan: categorization rules — Approved with A to H, implemented and accepted in M10
+
+Proposed on 2026-11-10. M10 is the second Phase 1B milestone of D-063 point 2: **categorization
+rules**, meeting PRD §10's correction actions "apply a rule to future matches", "apply a rule to
+matching historical transactions", "preview affected records" and "undo changes", and its
+requirement that "explicit transaction corrections must take precedence over general rules". It
+makes categorizing a real ledger's history practical, which D-063 left one transaction at a time.
+Builds on D-063's categories and categorizations, and changes none of D-042 to D-063. **No
+security control changes,** no dependency is added, and the UI stays read-only. Plan only: nothing
+is built until it is approved, and then each slice separately. Acceptance tests, RA1 to RC4, are in
+[plan.md](plan.md).
+
+"Rule" alone already means D-033's matching rules (`reconcile/rules.py`, `MatchingRules`, the rules
+fingerprint). These are **category rules** everywhere, in names, tables, commands and messages, so
+the two never read as one.
+
+```sh
+pf category rule preview --db DB --category NAME --description-contains TEXT \
+   [--account A] [--type TYPE] [--from DATE]
+pf category rule add     --db DB --category NAME --description-contains TEXT \
+   [--account A] [--type TYPE] [--from DATE] --preview p1-…
+pf category rules        --db DB [--account A]
+pf category rule show    --db DB RULE_ID
+pf category rule undo    --db DB RULE_ID --revision q1-…
+```
+
+**Slices:**
+
+| Slice | Scope |
+|---|---|
+| M10.1 | Category rules: migration 0021, matching, `preview`, `add`, `rules` and `rule show`, the derived outcome on every write, precedence, and the token versions (points 1 to 7) |
+| M10.2 | Undoing a category rule with its `q1` token, and `rule show`'s undo outlook (point 4) |
+| M10.3 | Spending by category counting rules' outcomes, their disclosures, the source of a category in `review show` and `review transaction show`, the UI's parity, and the benchmark row (points 8 and 9) |
+
+**Recommendations, each with its alternatives:**
+
+1. **What a rule matches, deterministic and explainable.**
+   - **One required test: the effective description contains a text,** both normalized by a fixed
+     function: Unicode NFKC, `casefold()`, every run of whitespace made one space, trimmed. The
+     effective description is a corrected one where a description correction applies (D-049), else
+     the primary source's (D-030), so a rule sees what `transactions` shows. The text is stored as
+     typed, with its normalization's version, and code refuses a version it does not know rather
+     than reading an old rule a new way. A text that normalizes to nothing is refused.
+   - **Optional narrowing:** `--account` (else every account), `--type`, one of D-063's spending
+     types (`purchase`, `fee`, `interest`, `refund`), and `--from DATE`, on or after the effective
+     transaction date, else the effective posting date, as a month is chosen (D-057). Direction
+     follows from the type: only a refund is money in. All given tests must hold.
+   - **Deterministic:** a rule's outcome depends only on the rule and the transaction's effective
+     values now, never on import order, generated IDs or when the rule was added, so D-045's order
+     independence holds. It never reads `MatchingRules` or D-032's similarity, which are candidate
+     heuristics tied to the rules fingerprint: changing matching configuration never changes a
+     category. **Explainable:** every outcome names the rules that matched, each a sentence such as
+     "description contains 'trader joe', any account, purchase, from 2026-01-01".
+   - Alternatively **starts-with and exact match too,** each a flag: more precise, but three modes
+     where one covers both, and none is needed until a contains test proves too loose (principle
+     1). Or **an amount range,** for one merchant charging two kinds of things: left out until the
+     owner names a case. Or **regular expressions:** most expressive, least explainable, and a
+     pattern a person cannot predict. Or **D-032's normalized merchant:** ties categories to
+     matching configuration, and D-032 lists its known misses.
+
+2. **A rule assigns a category only, and only to spending a person has typed.** Types come first
+   (D-014), a type is stated by a person only (D-053 point 2), and a description alone never
+   establishes one (D-011, D-032). A rule reaches only D-056's spending group, through D-063's
+   `spending_transactions`, so a type change or a confirmed transfer takes a transaction out of
+   every rule's reach with nothing to disclose: no person's statement is lost. **The cost, stated
+   plainly:** on a real ledger rules reach only transactions already classified, so classifying
+   stays one transaction at a time. Alternatively **a rule that also states a type,** limited to
+   `purchase` and `fee`, never a transfer kind: removes that bottleneck, but breaks D-053's "stated
+   by a person only", lets text decide what counts as spending at all, and needs its own precedence
+   against classifications and its own `f` token inputs. If the owner wants it, it is better its
+   own decision after M10, on type rules, with M10's machinery reused.
+
+3. **Precedence, and disagreement.**
+   - **A person's categorization comes first, in every state.** If any active categorization
+     reaches a transaction, `applied`, `conflict`, `basis_changed` or `not_spending`, no rule
+     applies there. A rule never fills in an outcome a person left unsettled, which would choose
+     between statements on the person's behalf. Undoing the person's categorization lets the rules
+     apply again, and its `g` token says so (point 6).
+   - **Rules that agree apply. Rules that disagree leave the transaction uncategorized,** in a
+     state `rule_conflict`, disclosed with the rules' IDs, by D-049's reason: deterministic,
+     independent of order, and never choosing between two statements a person made. The person
+     settles it by narrowing or undoing a rule, or by categorizing that transaction, which comes
+     first.
+   - **Disclosed:** `totals` and `report monthly` give the count and amount categorized by rules and
+     in `rule_conflict` (point 8). `rule show` gives, per rule, the transactions it categorizes,
+     those where it disagrees and with which rules, and those where a person's categorization takes
+     precedence.
+   - Alternatively **an order stated by the person,** the higher rule winning: no conflicts, but a
+     mutable priority over an append-only list needs reordering events and tokens, and a new rule
+     can silently change transactions far from its own text. Or **the most specific wins:** no
+     agreed measure across text, account, type and date, and hard to explain. Either can be added
+     later over the same storage if conflicts prove common.
+
+4. **Historical application derives outcomes, never writes categorizations.**
+   - A rule is stored once, append-only, with `made` and `undone` events. Its outcome is **derived**
+     into `transaction_rule_category` wherever categories are already rewritten, at the end of
+     `write_transfer_effects` and by categorization commands, for every transaction a rule reaches,
+     historical or new. No categorization is written, so nothing binds records, and a person's
+     statements stay exactly the person's.
+   - **"Historical" and "future" are one rule and dates:** a rule applies to every matching
+     transaction by default, and `--from DATE` limits it to transactions dated on or after a day.
+     "Only future matches" is a rule from today.
+   - **Preview before anything is written:** `rule preview` opens the ledger read-only, derives the
+     outcome with and without the proposed rule, and lists every transaction whose effective
+     category would change, with its ID, date, amount and effective description, escaped as
+     D-040, the category before and after, and why (applies, `rule_conflict` with rule IDs, or
+     resolved). A person's categorization taking precedence is counted, not listed, since it does
+     not change. It prints a `p1` token over the rule's definition and that whole list. `rule add`
+     needs it: under one write lock, every account the rule can reach must be current (D-033), the
+     list is recomputed, and a token that no longer matches refuses, changing nothing (D-043, M2.1
+     qualification 2). An active rule with the same definition is refused.
+   - **Undo reverses only what the rule did:** `rule show` gives the undo outlook, the transactions
+     whose category undo would change, and a `q1` token over the rule's state and that list. `rule
+     undo` checks the accounts are current and the token, appends `undone`, and re-derives. Since
+     outcomes are derived, the result equals a ledger in which the rule was never added (D-043): its
+     transactions return to uncategorized or to the other rules' outcome, a conflict it caused
+     resolves, and no person's categorization changes. Undo never refuses for contradiction, as
+     rules constrain no identity (D-049), and the output says when the outcome differs from its
+     preview because evidence arrived since.
+   - **No superseding in M10:** changing a rule is undo then add, each previewed. Alternatively
+     D-048's chains for rules: one step instead of two, but a chain walk and its tokens for an
+     action that two previews already make safe.
+   - Alternatively **applying a rule writes categorizations,** one per matching transaction, bound
+     to its records: reuses M9's code, but new imports then need a hook writing statements on the
+     person's behalf, a person's precedence needs a source column on every statement, undo means
+     undoing thousands of statements one by one, and every categorized transaction's token changes.
+
+5. **New imports, repeat imports, merges, splits and chains.**
+   - **New imports:** an import already ends by rewriting categories, so rules reach new
+     transactions on that write, with no hook and no step for the person. A rule is general by
+     intent, so unlike a decision (D-048) reaching a record that did not exist when it was made is
+     its purpose, and the PRD's. A repeat import of identical bytes changes nothing (D-022), so no
+     outcome changes.
+   - **Merges and splits:** a rule binds no records, so it has no `basis_changed`. A merge evaluates
+     the one transaction on its effective values (D-030's primary source, or a correction), and a
+     split evaluates each part. `review confirm` and `review separate` never refuse for a rule's
+     outcome, because nothing a person stated is left unsettled, and `totals` discloses the result.
+   - **Chains:** only the newest of a categorization chain is active (D-048), so only it takes
+     precedence. Rules have no chains (point 4).
+
+6. **Tokens, left out while empty, and the byte-for-byte guarantee.**
+
+   | Token | Adds, while a rule's outcome reaches there | Version |
+   |---|---|---|
+   | Item | Each transaction's rule outcome: state, category name and the matching rules' IDs | `r10` to `r11` |
+   | Transaction | The same, for one transaction | `t8` to `t9` |
+   | Decision undo | Rule outcomes of the groups either side, since membership decides the effective description | `d7` to `d8` |
+   | Correction undo | Rule outcomes of its transactions with and without it, for every field, since description, dates and an amount's sign all change what a rule reaches | `c3` to `c4` |
+   | Categorization undo | The rule outcome its transaction takes once the categorization is undone | `g1` to `g2` |
+   | Rule preview, new | The definition and every change the rule would make | `p1` |
+   | Rule undo, new | The rule's state and every change undo would make | `q1` |
+
+   `f`, `m` and `o` stay as they are, as M9 left categories out of them: their effect on spending is
+   disclosed by `totals`. `p` and `q` are free: `b`, `c`, `d`, `f`, `g`, `k`, `m`, `o`, `r`, `t`,
+   `u` and `v` are taken. Every new input is left out while no rule's outcome reaches the
+   transaction, so a ledger without rules, or with every rule undone, keeps every digest, and the
+   tests pinning `r10`, `t8`, `d7`, `c3` and `g1` move to the new versions with each digest
+   unchanged, as M9.2 did. **Proved as CB5 and CC4 were:** the suite's ledgers before M10, kept with
+   `--basetemp` under `build/`, read by M9's code and, migrated to 21, by each M10 slice's code,
+   running the same per-ledger commands as M9.3 plus `review categorizations` and categorization
+   shows, capped at 50 per kind, all identical once versions move. On generated ledgers with rules,
+   removing the new lines leaves the reports with rules switched off, and undoing every rule leaves
+   them byte for byte as never having had one.
+
+7. **Storage, migration 0021 and the real ledger.**
+   - Migration 0021, with M10.1, adds append-only `category_rule` (ID, an optional account, the
+     category, the text as typed, its normalization version, an optional type and from date, and
+     when it was made) and `category_rule_event`, with update, delete and replace triggers as 0020,
+     and the derived `transaction_rule_category` (transaction, state `applied` or `rule_conflict`,
+     category, cascading with its transaction). Matching rule IDs are recomputed for display, not
+     stored. `transaction_category` is not widened, so M9's derived rows and their code stay as
+     they are, and reports read a person's outcome first, then a rule's.
+   - The tables are empty when made, so no account goes stale, and no digest, total or report
+     changes. Migration is explicit (D-035): a ledger at 20 is refused until `migrate`.
+   - **On the real ledger:** the owner runs `pf backup create` to a verified backup, then `pf
+     migrate` to version 21. The M5 gate is unchanged and checks the ledger on every open as now.
+     Backups and restore cover the new tables with no change, since the manifest's logical digest
+     hashes every table, and a restore test keeps rules as CB6 keeps categorizations.
+   - **Older migration tests:** 0021 is the newest migration, so `drop_category_tables` in
+     `test_decisions.py` drops its tables first, and `tests/unit/test_migrations.py`,
+     `test_review_show.py` and `test_backups.py` list them. `category rule` is a new command group
+     for the test `Ledger.run` helper.
+
+8. **Reports and explanations, with M10.3.** Spending by category counts a transaction's effective
+   category, a person's first and a rule's otherwise, and still adds exactly to D-056's Spending for
+   the ledger, one account and each month. Two disclosures, shown only while a rule's outcome
+   reaches a transaction: categorized by rules, and `rule_conflict`, each with count and amount.
+   `review show` and `review transaction show` say where a category comes from, the
+   categorization's ID or the rules' IDs and sentences. The UI's pages follow through the builders,
+   with M8's parity tests on ledgers with rules. Nothing else in either report changes.
+
+9. **Performance, and its own benchmark row.** Every write already rewrites every categorized
+   account's categories (M9.2), and rules add a test of each active rule against each spending
+   transaction not categorized by a person: linear in both, about 50,000 transactions times a few
+   hundred rules on the 100,000 shape, on every import, classification and categorization, and
+   twice for a preview. That cost is new and cannot be reached by the current shape, which holds no
+   rule, so **rules get their own row:** `measure_reconciliation.py --scale --category-rules 300`,
+   300 rules over descriptions the shape actually holds, asserting how many transactions they
+   categorize, how many conflict and how many a person's categorization takes first, so the shape
+   provably reaches the cost. Timed: `totals` and `report monthly` (target below two seconds, as
+   D-057), `rule preview`, `rule add`, `rule undo`, one classification and one import of one row
+   (no target). **If a rule preview or add costs more than twice an import of one row there, or a
+   report misses two seconds, the work stops and is reported** before any optimization, such as
+   rewriting only the accounts a write touched (principle 4).
+
+10. **What does not change, and the security boundaries.** No security control changes: W1, the UI,
+    the gate and D-037 are untouched. The UI stays read-only, so rules are terminal commands with
+    D-043's checks. A rule's text is the owner's label, escaped wherever printed, and `rule
+    preview` and `rule show` show descriptions and amounts only of the transactions they list, as
+    `transactions` and `review show` already do. No dependency, no network, synthetic fixtures
+    only.
+
+**Not in M10:** rules that state a type, amount ranges, starts-with, exact or regular-expression
+matching, rule priorities, editing or superseding a rule, rules made or undone from the UI, income
+categories, a normalized merchant, rules proposed by local AI or from existing categorizations
+(PRD §10), rules reaching only files imported after them, tags, fixed and discretionary classes,
+renaming, merging or deleting a category, household attribution and splits (M11), and budgets.
+
+**Inputs needed from the owner** (PRD §22):
+
+- Whether "future matches" means future dates, as point 4's `--from`, or files imported later,
+  which point 1 leaves out because it would make outcomes depend on import order.
+- About how many rules the owner expects, so that point 9's 300 is a fair shape.
+- How much of the real ledger's spending is classified, from the owner's own `pf totals`, to judge
+  point 2's bottleneck. Nothing here reads the real ledger.
+
+**For the owner's decision, with the lead engineer's recommendation first:**
+
+- **A. Rules derive their outcome, and never write categorizations** (point 4). Alternatively a
+  rule writes one categorization per match.
+- **B. A rule assigns a category only, to spending a person has typed** (point 2). Alternatively a
+  rule states `purchase` or `fee` too, then or as its own later decision.
+- **C. A rule matches a normalized "description contains", narrowed by account, type and from
+  date** (point 1). Alternatively starts-with and exact modes, an amount range, or regular
+  expressions.
+- **D. A person's categorization first in every state, agreeing rules apply, disagreeing ones leave
+  `rule_conflict`, disclosed** (point 3). Alternatively a person-ordered priority, or the most
+  specific rule.
+- **E. Preview with a `p1` token required by `add`, undo with `q1`, no superseding** (point 4).
+  Alternatively D-048's chains for rules.
+- **F. Migration 0021, and tokens `r11`, `t9`, `d8`, `c4` and `g2` keeping every digest,** proved by
+  a CB5 and CC4 comparison (points 6 and 7).
+- **G. Rules' own benchmark row on the 100,000 shape,** with point 9's stopping rule.
+- **H. The slices M10.1 to M10.3,** in that order.
+
+**The owner's review, on 2026-11-10.** Decisions A to H approved as written. On the inputs:
+"future matches" means files imported later, with every outcome deterministic and independent of
+import order. Point 4's derivation gives exactly that, since every import rewrites the rules'
+outcomes, so a rule reaches each matching transaction whenever it arrives, and no scope by import
+time is built: it would depend on import order. 20 to 50 active rules are expected, so point 9's
+300 is a stress test. The owner's real spending is already classified, so B stands. M10.1 to M10.3
+approved to build in order, each gated on the full suite and committed locally, with CB5 and CC4
+compared as M9 compared.
+
+**How M10.1 was implemented:**
+
+- Migration 0021 adds `category_rule` and `category_rule_event`, append-only by triggers as 0020's
+  tables are, and the derived `transaction_rule_category`. Checks refuse a blank text, a version
+  below 1, a type outside spending and a date that is not one.
+- `reconcile/category_rule_effects.py` matches and derives: each spending transaction's effective
+  description, type, account and date, D-063's spending group read from the derived types and
+  transfer effects, and whether a person's categorization reaches it. `write_rule_category_effects`
+  runs after a person's categories, at the end of `write_transfer_effects` and in every
+  categorization command, so every write rewrites the outcomes. With no active rule it deletes
+  nothing that exists and reads nothing else.
+- `reconcile/category_rules.py` adds a rule under one write lock: every account it can reach is
+  current, one account's or every account's, then the category, text and date, then an active rule
+  of the same meaning, texts compared normalized, then the `p1` token. An unknown account is the
+  CLI's refusal, and a type outside spending argparse's, both exiting with code 2.
+- `reports/category_rule_evidence.py` derives the outcome with and without one rule over the
+  evidence held now, for the preview and, in M10.2, for undo. A change is a change of state or
+  category: which rules disagree does not change a category, so it is not listed. `p1` covers the
+  definition by names and every change by its records' document hashes and rows.
+- **Tokens:** `r11` and `t9` add, on a transaction a rule's outcome reaches, the matching rules by
+  what they say, with the outcome. A rule's ID is immaterial, as every stored ID is. `d8` adds the
+  rules a description in scope can match, parsed or corrected, since groups, records, corrections
+  and types are already covered. `c4` adds, for any field, the rules its transactions' source or
+  corrected descriptions can match and the rules' outcome there now. `g2` adds the outcome its
+  transactions would take from rules with no person's categorization. All are left out while
+  empty, and tests pinning `r10`, `t8`, `d7`, `c3` and `g1` moved to the new versions with every
+  digest unchanged.
+- A confirmed transfer leaves a transaction out of every rule's reach through D-063's definition of
+  spending. No command reaches that state on spending, since a matched side is unclassified or of a
+  transfer kind (D-054), so it is kept as M9 keeps it, untested by a command.
+- **Compared as CB5:** the suite's 2,477 ledgers before M10, kept with `--basetemp` under `build/`,
+  read by the code at `19ee858` and, migrated to 21, by M10.1's: 51,379 runs, M9.3's list plus
+  `category list`, `review categorizations` and categorization shows. 51,344 are identical once
+  token versions move, every digest kept. 32 are two ledgers stamped schema 21 to mean newer than
+  the code, which reads them as current. 3 are the comparison's own rewriting of a stored
+  description holding "t8-", identical compared exactly.
+
+**How M10.2 was implemented:**
+
+- `category rule undo RULE_ID --revision q1-…` under one write lock: the rule is found first, since
+  its account says which accounts must be current, then those accounts, then that it is active, then
+  the token. It appends `undone` and rewrites the rules' outcomes, so the result is a ledger where
+  the rule was never added, compared with one in a test. A person's categorizations are untouched.
+- `category rule show` gives an active rule's `q1` and every change undo would make, before and
+  after, as a preview does. `q1` covers the definition and that list, so a later import, correction,
+  classification, categorization or rule that changes it refuses the token.
+- The changes adding a rule made are not stored, so undo's output always says it re-derives from the
+  evidence held now and can change other transactions than adding did, rather than comparing.
+- An undone rule stays on record, listed as `undone`, and the same rule can be added again as a new
+  rule. Backup and restore keep rules and their events: the backup tests' rich ledger now holds a
+  rule and an undone rule, and every list and show is compared after restore.
+- **Compared as CB5:** M10.2's code against M10.1's on the same 2,477 ledgers, every run identical:
+  51,379 runs, 51,379 identical.
+
+**How M10.3 was implemented:**
+
+- `totals` and `report monthly` take a transaction's category from a person's applied
+  categorization, else from the rules' applied outcome, whose row exists only where no person's
+  reaches. Spending by category still adds exactly to Spending, for the ledger, each account and
+  each month, on generated ledgers with rules that agree, disagree, are narrowed and are undone.
+- The "By category" block shows while a categorization or a rule's outcome reaches a transaction.
+  `totals` discloses spending categorized by rules and spending left `uncategorized` because rules
+  disagree, each with its count and amount, for the scope asked, and each month says how many of
+  each it holds. With every rule undone, the reports are byte for byte a ledger's that never had one.
+- `review show` and `review transaction show` give a "Category rules" section on a transaction a
+  rule's outcome reaches: each matching rule's ID and sentence, then the category by these rules, or
+  that they disagree. A rule's sentence is built once, in `reports/report_text.py`, for the CLI and
+  these shows. The UI's pages follow through the builders and equal the CLI on ledgers with rules,
+  a rule's text holding HTML shown as text.
+- **Compared as CC4:** M10.3's code against M10.2's on the suite's 2,477 ledgers, which hold no
+  rule: 51,379 runs, 51,363 identical. The other 16 are `totals` and `report monthly` on the two
+  ledgers a test stamped schema 21 to mean newer than the code, without 0021's tables: they now stop
+  with the fixed database error, where M10.1 read them. `migrate` makes the tables in the same
+  transaction as the version, so no ledger it brought to 21 lacks them. On generated ledgers with rules, a test clears the derived rule outcomes in a
+  copy and compares every report line but the new ones.
+- **The benchmark row,** `measure_reconciliation.py --scale --category-rules 300`, with figures in
+  [benchmarks.md](benchmarks.md): point 9's stopping rule is not met. `totals` stays below two
+  seconds, narrowly, with or without rules, so its margin is the owner's to watch.
+
+**The owner's acceptance, on 2026-11-10.** M10 accepted, M10.1 to M10.3 as built. **Not yet
+verified on the real ledger:** it stays at version 20 until the owner makes a verified backup with
+`pf backup create` and runs `pf migrate` to version 21. Not merged into `main`: merging and pushing
+each need the owner's approval.
