@@ -1,14 +1,12 @@
-# Session Handoff: M9 Accepted
+# Session Handoff: M10 in Progress
 
-For a fresh session. Written 2026-11-09. **M1 to M9 are complete and accepted.** M9, spending
-categories (D-063), was accepted by the owner and verified on the real ledger: a verified backup,
-`pf migrate` to version 20, and categorizing in the CLI and the UI. `feature/m2-review` was merged
-into `main` by fast-forward. No security control changed, no dependency was added, and the UI stays
-read-only. Every fixture is invented.
+For a fresh session. Written 2026-11-10. **M1 to M9 are complete and accepted,** and `main` holds
+them at `19ee858`. M10, categorization rules (D-064), was approved by the owner with A to H on
+2026-11-10 and is being built on `feature/m10-rules`: M10.1 is complete. No security control
+changed, no dependency was added, and the UI stays read-only. Every fixture is invented.
 
-**Next:** the owner's review of D-064, the M10 plan for categorization rules, written 2026-11-10 on
-`feature/m10-rules`. Nothing of M10 is built. Point F with the owner on their already-imported files
-is still open.
+**Next:** M10.2, undoing a rule, then M10.3, both approved. Point F with the owner on their
+already-imported files is still open.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -35,8 +33,8 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `main` holds everything through M9 at `19ee858`. The M10 plan is on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
-| Latest commit | Run `git log -1`. M9's acceptance is `19ee858`, and the M10 plan the commit after it on `feature/m10-rules`. Earlier commits are in the archive |
-| Latest gating run | Full suite, exit code 0, chained to the M10 plan's commit: see its commit message. About 8 minutes |
+| Latest commit | Run `git log -1`. M9's acceptance is `19ee858`. On `feature/m10-rules`: the M10 plan `a294d64`, then one commit per slice. Earlier commits are in the archive |
+| Latest gating run | Full suite, exit code 0, chained to the latest slice's commit: see its commit message. About 8 minutes |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -79,9 +77,16 @@ Then only what the task needs:
   `test_spending_by_category.py`. A change to types or categories changes both: run
   `test_classifications.py` too. A byte for byte comparison follows "How M9.3 was implemented":
   keep the suite's ledgers with `--basetemp` under `build/`, migrate copies, and cap per-ID shows.
+- For changes to M10: D-064 and its "How M10.n was implemented", its criteria in
+  [plan.md](plan.md), `reconcile/category_rule_effects.py`, `reconcile/category_rules.py`,
+  `reports/category_rule_evidence.py`, migration 0021, the `category rule` handlers in `cli.py`,
+  and `tests/scenarios/test_category_rules.py`. Rules read the derived types, transfers,
+  corrections and person's categories, so run `test_categorizations.py` too.
 - **A new migration** breaks every older migration test's set-back: `drop_category_tables` in
-  `test_decisions.py` drops 0019 and 0020, and grows with each later migration's tables. Also add
-  the tables to `tests/unit/test_migrations.py` and `test_review_show.py`'s `LEDGER_TABLES`.
+  `test_decisions.py` drops 0021, 0020 and 0019 through `drop_category_rule_tables`, and grows with
+  each later migration's tables. Also add the tables to `tests/unit/test_migrations.py`,
+  `test_review_show.py`'s and `test_backups.py`'s `LEDGER_TABLES`, and the hand-added migrations of
+  `test_pending_posted_migration.py`.
 - For changes to M8: D-062 in the full text and its criteria in [plan.md](plan.md), `ui/server.py`,
   `reports/report_text.py`, `run_ui`, `explained_error` and the six report handlers in `cli.py`,
   `tests/scenarios/local_ui_client.py`, `test_local_ui.py`, `test_local_ui_review.py`,
@@ -242,7 +247,7 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits | Approved on 2026-11-09 for the D-063 approval, M9.1 to M9.3, M9's acceptance and the merge into `main`, used for them. Approved on 2026-11-10 for the M10 plan and these handoff fixes on `feature/m10-rules`, used for them | **Must be renewed** for any change after the M10 review |
+| Local commits | Approved on 2026-11-10 for the M10 plan and its handoff fixes, used, and for M10.1 to M10.3 on `feature/m10-rules`, each gated on the full suite | **Must be renewed** for any change after M10's review |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |

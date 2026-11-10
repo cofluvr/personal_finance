@@ -15,6 +15,7 @@ from personal_finance.reconcile.category_effects import (
     spending_transactions,
     write_category_effects,
 )
+from personal_finance.reconcile.category_rule_effects import write_rule_category_effects
 from personal_finance.reconcile.decisions import DecisionRefused
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reconcile.statements import (
@@ -100,8 +101,14 @@ CATEGORIZATIONS = StatementKind(
         stale_revision=STALE_CATEGORIZATION_REVISION,
     ),
     lambda conn, categorization: categorization_undo_outlook(conn, categorization).revision,
-    lambda conn, _: write_category_effects(conn),
+    lambda conn, _: rewrite_categories(conn),
 )
+
+
+def rewrite_categories(conn: sqlite3.Connection) -> None:
+    """A person's categorizations, then the rules' outcomes, which a person's come before."""
+    write_category_effects(conn)
+    write_rule_category_effects(conn)
 
 
 def categorize_transaction(

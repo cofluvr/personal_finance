@@ -11,6 +11,7 @@ from test_decisions import (
     ALL_TABLES,
     CATEGORIZATION_TABLES,
     CATEGORY_TABLES,
+    drop_category_rule_tables,
     pair_up,
 )
 from test_separations import ID_ROW, merged_three, merged_two
@@ -78,7 +79,7 @@ class CategoryLedger(ClassificationLedger):
         return out
 
     def categorization_revision(self, categorization):
-        return re.search(r"Revision: (g1-[0-9a-f]{16})",
+        return re.search(r"Revision: (g2-[0-9a-f]{16})",
                          self.categorization_show(categorization))[1]
 
     def categorization_state(self, categorization):
@@ -187,15 +188,15 @@ class TestRefusals:  # CB1
     def test_an_unknown_transaction(self, ledger):
         purchase(ledger)
         self.refused(ledger, TRANSACTION_NOT_FOUND, "no-such-transaction", "Food",
-                     revision="t8-0000000000000000")
+                     revision="t9-0000000000000000")
 
     def test_a_stale_token_and_one_of_the_last_version(self, ledger):
         transaction = purchase(ledger)
         current = ledger.transaction_revision(transaction)
         self.refused(ledger, STALE_TRANSACTION_REVISION, transaction, "Food",
-                     revision="t8-0000000000000000")
+                     revision="t9-0000000000000000")
         self.refused(ledger, STALE_TRANSACTION_REVISION, transaction, "Food",
-                     revision="t7-" + current.split("-")[1])
+                     revision="t8-" + current.split("-")[1])
 
     def test_a_category_it_already_has(self, ledger):
         transaction = purchase(ledger)
@@ -229,12 +230,12 @@ class TestRefusals:  # CB1
         transaction = purchase(ledger)
         categorization = ledger.categorize_ok(transaction, "Food")
         self.refused(ledger, STALE_CATEGORIZATION_REVISION, transaction, "Travel",
-                     supersedes=categorization, supersedes_revision="g1-0000000000000000")
+                     supersedes=categorization, supersedes_revision="g2-0000000000000000")
 
     def test_an_unknown_categorization(self, ledger):
         transaction = purchase(ledger)
         self.refused(ledger, CATEGORIZATION_NOT_FOUND, transaction, "Travel",
-                     supersedes="no-such", supersedes_revision="g1-0000000000000000")
+                     supersedes="no-such", supersedes_revision="g2-0000000000000000")
 
     def test_another_account_s_categorization(self, ledger):
         ledger.add_account("B", "credit_card")
@@ -253,7 +254,7 @@ class TestRefusals:  # CB1
         conn.execute("UPDATE account_reconciliation SET rules_fingerprint = ?", ("0" * 64,))
         conn.close()
         self.refused(ledger, STALE_ACCOUNT, transaction, "No such category",
-                     revision="t8-0000000000000000")
+                     revision="t9-0000000000000000")
 
 
 class TestStaleAccount:  # CB1
@@ -476,13 +477,13 @@ class TestChains:  # CB3
         assert "Revision:" not in out
         before = ledger.everything()
         for code, _, err in (
-            ledger.undo_categorization(first, "g1-0000000000000000"),
+            ledger.undo_categorization(first, "g2-0000000000000000"),
             ledger.categorize(transaction, "Health", supersedes=first,
-                              supersedes_revision="g1-0000000000000000"),
+                              supersedes_revision="g2-0000000000000000"),
         ):
             assert code == 2 and err == "Error: " + CATEGORIZATION_SUPERSEDED_IN_CHAIN.format(
                 newer=second, newest=third) + "\n"
-        code, _, err = ledger.undo_categorization(second, "g1-0000000000000000")
+        code, _, err = ledger.undo_categorization(second, "g2-0000000000000000")
         assert code == 2 and CATEGORIZATION_SUPERSEDED.format(newer=third) in err
         assert ledger.everything() == before
 
@@ -568,11 +569,11 @@ class TestShown:  # CB4
 
 class TestTokens:  # CB5
     def test_the_versions_are_pinned(self):
-        assert review_evidence.REVISION_VERSION == 10
-        assert review_evidence.TRANSACTION_REVISION_VERSION == 8
-        assert decision_evidence.DECISION_REVISION_VERSION == 7
-        assert correction_evidence.CORRECTION_REVISION_VERSION == 3
-        assert categorization_evidence.CATEGORIZATION_REVISION_VERSION == 1
+        assert review_evidence.REVISION_VERSION == 11
+        assert review_evidence.TRANSACTION_REVISION_VERSION == 9
+        assert decision_evidence.DECISION_REVISION_VERSION == 8
+        assert correction_evidence.CORRECTION_REVISION_VERSION == 4
+        assert categorization_evidence.CATEGORIZATION_REVISION_VERSION == 2
 
     def test_categorizing_changes_its_tokens_and_undoing_restores_them(self, ledger):
         item, one, _ = pair_up(ledger)
@@ -591,7 +592,7 @@ class TestTokens:  # CB5
             built = CategoryLedger(tmp_path / name, capsys)
             tokens.append(built.categorization_revision(built.spend(single(built))))
         assert tokens[0] == tokens[1]
-        assert re.fullmatch(r"g1-[0-9a-f]{16}", tokens[0])
+        assert re.fullmatch(r"g2-[0-9a-f]{16}", tokens[0])
 
     def test_another_categorization_reaching_it_changes_it(self, ledger):
         _, records = merged_two(ledger)
@@ -625,6 +626,7 @@ def populated(tmp_path, capsys):
     purchase(ledger)
     assert ledger.run("category", "add", "Groceries", "--parent", "Food")[0] == 0
     conn = connect(ledger.path)
+    drop_category_rule_tables(conn)
     for table in CATEGORIZATION_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")

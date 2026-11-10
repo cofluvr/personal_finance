@@ -31,12 +31,12 @@ UI arrives later and calls the same core code. The data has three layers:
 | **M7** PDF parsing | Text PDFs and CSV-to-PDF matching | Same activity in both formats counts once |
 | **M8** Local review UI | Loopback-only import results, review queue, transactions | Host and CSRF checks; UI totals match the CLI |
 | **M9** Spending categories (D-063) | The first Phase 1B milestone: a category list and categorizing spending by a person | Categories add exactly to spending; types unchanged byte for byte |
-| **M10** Categorization rules (D-064, proposed) | Rules by description, account, type and date, with preview and undo, a person's category first | Rules' outcomes derived and reversible; ledgers without rules unchanged byte for byte |
+| **M10** Categorization rules (D-064) | Rules by description, account, type and date, with preview and undo, a person's category first | Rules' outcomes derived and reversible; ledgers without rules unchanged byte for byte |
 
 M5 is mandatory before any actual financial document is processed. Phase 1B
 planning, Phase 1C sync and iOS are planned once Phase 1A passes. D-063, approved, records that
 Phase 1A passes with M8, and proposes a Phase 1B sequence of M9 to M14, of which only M9 is approved.
-D-064 proposes M10's plan for the owner's review.
+D-064, approved, plans M10.
 
 ## Required financial test cases
 
@@ -489,13 +489,13 @@ the UI, a normalized merchant, local AI, and budgets.
 
 ## M10 plan
 
-Proposed on 2026-11-10 as D-064, pending the owner's review: decisions A to H, and the inputs it
-names. Nothing is built until it is approved, and then each slice separately. No security control
-changes.
+Approved by the owner on 2026-11-10 as D-064, with A to H. "Future matches" are files imported
+later, which every rule reaches, in any order. M10.1 to M10.3 approved to build in order. No
+security control changes.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M10.1 | Category rules: migration 0021, matching, preview, add, list and show, the derived outcome on every write, precedence, tokens | Proposed |
+| M10.1 | Category rules: migration 0021, matching, preview, add, list and show, the derived outcome on every write, precedence, tokens | Complete |
 | M10.2 | Undoing a category rule with its `q1` token | Proposed |
 | M10.3 | Spending by category counting rules, disclosures, the source of a category, UI parity, the benchmark row | Proposed |
 

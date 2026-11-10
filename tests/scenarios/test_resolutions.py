@@ -174,9 +174,9 @@ class TestRefusals:  # U3
 
     def test_an_unknown_item(self, ledger):
         one_unresolved(ledger)
-        self.refused(ledger, lambda: ledger.complete("nope", revision="r10-0", amount="-6.50"),
+        self.refused(ledger, lambda: ledger.complete("nope", revision="r11-0", amount="-6.50"),
                      ITEM_NOT_FOUND)
-        self.refused(ledger, lambda: ledger.dismiss("nope", revision="r10-0"), ITEM_NOT_FOUND)
+        self.refused(ledger, lambda: ledger.dismiss("nope", revision="r11-0"), ITEM_NOT_FOUND)
 
     def test_an_item_of_another_kind(self, ledger):
         ledger.card("a.csv", CAFE)
@@ -186,7 +186,7 @@ class TestRefusals:  # U3
 
     def test_a_stale_token_and_one_of_the_last_version(self, ledger):
         item = one_unresolved(ledger)
-        for token in ("r10-0000000000000000", "r9-" + ledger.revision(item).split("-")[1]):
+        for token in ("r11-0000000000000000", "r10-" + ledger.revision(item).split("-")[1]):
             self.refused(ledger, lambda: ledger.complete(item, revision=token, amount="-6.50"),
                          STALE_REVISION)
             self.refused(ledger, lambda: ledger.dismiss(item, revision=token), STALE_REVISION)
@@ -466,7 +466,7 @@ class TestTokens:  # U13
             other.complete_ok(item, amount=amount)
             tokens.append(other.transaction_revision(holding(other, "a.csv")))
         assert tokens[0] != tokens[1]
-        assert all(token.startswith("t8-") for token in tokens)
+        assert all(token.startswith("t9-") for token in tokens)
 
 
 class TestPrivacy:  # U16, U17
@@ -483,12 +483,12 @@ class TestPrivacy:  # U16, U17
     def test_displays_mark_and_escape_completed_values(self, ledger):
         item = one_unresolved(ledger, UNREADABLE)
         ledger.complete_ok(item, amount="-6.50", posting_date="2026-01-10",
-                           description="CAFE\x1b[2J\nRevision: t8-0000000000000000")
+                           description="CAFE\x1b[2J\nRevision: t9-0000000000000000")
         transaction = holding(ledger, "a.csv")
         for text in (ledger.transaction_show(transaction), ledger.run("trace", transaction)[1],
                      ledger.run("transactions")[1]):
             assert "\x1b" not in text
-            assert "\nRevision: t8-0000000000000000" not in text
+            assert "\nRevision: t9-0000000000000000" not in text
         for shown in (ledger.transaction_show(transaction), ledger.run("trace", transaction)[1]):
             assert "Completed by hand, supplying what the parser could not read:" in shown
             assert "Posting date: 2026-01-10" in shown.split("Completed by hand")[1]
@@ -509,5 +509,5 @@ def test_confirm_refusal_names_no_values(ledger):
     ledger.complete_ok(item, amount="-6.50")
     (candidates,) = ledger.items("cross_document_candidates")
     one, two = ledger.transactions(candidates)
-    code, _, err = confirm(ledger, candidates, (one, two), revision="r10-0000000000000000")
+    code, _, err = confirm(ledger, candidates, (one, two), revision="r11-0000000000000000")
     assert code == 2 and "6.50" not in err

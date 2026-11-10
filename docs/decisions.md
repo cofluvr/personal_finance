@@ -83,7 +83,7 @@ and keep its index line.
 | D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
 | D-062 | M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8, verified by the owner |
 | D-063 | M9 plan: spending categories — Approved with A to E, implemented and accepted in M9 |
-| D-064 | M10 plan: categorization rules — Pending, proposed for the owner's review |
+| D-064 | M10 plan: categorization rules — Approved with A to H, M10.1 built |
 
 ## Rules in brief
 
@@ -185,6 +185,9 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Categories | Append-only, one level of subcategories, PRD §10's twelve to start. Names exact, never `uncategorized` | D-063 |
 | Categorizations | D-053's model through one shared implementation. Spending only: an applied purchase, fee, interest or refund with no transfer confirmed. Otherwise `not_spending`, disclosed | D-063 |
 | Spending by category | Under Spending, adding to it exactly, while a categorization reaches a transaction. `g1` undo token, and `r10`, `t8`, `d7`, `c3` keeping digests | D-063 |
+| Category rules | Spending whose normalized effective description contains a text, narrowed by account, spending type and first date, takes a category. Derived wherever categories are, from the evidence held now, binding no records, so later imports are reached in any order | D-064 |
+| Rule precedence | A person's categorization first, in every state. Agreeing rules apply, disagreeing ones leave `rule_conflict`, disclosed | D-064 |
+| Rule tokens | `rule add` needs the `p1` preview of every change. `r11`, `t9`, `d8`, `c4` and `g2` add rules, keeping digests while none reaches | D-064 |
 | Backups | A new folder, on a mounted volume other than a real ledger's and gated as its folder is, holding the ledger, its referenced originals and a manifest of hashes, sizes, versions and a logical digest. Restore never overwrites, and checks every file, integrity, foreign keys, schema and digest first | D-058 |
 
 ## Not yet decided
@@ -193,7 +196,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-064 M10 plan: categorization rules — Pending, proposed for the owner's review
+## D-064 M10 plan: categorization rules — Approved with A to H, M10.1 built
 
 Proposed on 2026-11-10. M10 is the second Phase 1B milestone of D-063 point 2: **categorization
 rules**, meeting PRD §10's correction actions "apply a rule to future matches", "apply a rule to
@@ -437,3 +440,49 @@ renaming, merging or deleting a category, household attribution and splits (M11)
   a CB5 and CC4 comparison (points 6 and 7).
 - **G. Rules' own benchmark row on the 100,000 shape,** with point 9's stopping rule.
 - **H. The slices M10.1 to M10.3,** in that order.
+
+**The owner's review, on 2026-11-10.** Decisions A to H approved as written. On the inputs:
+"future matches" means files imported later, with every outcome deterministic and independent of
+import order. Point 4's derivation gives exactly that, since every import rewrites the rules'
+outcomes, so a rule reaches each matching transaction whenever it arrives, and no scope by import
+time is built: it would depend on import order. 20 to 50 active rules are expected, so point 9's
+300 is a stress test. The owner's real spending is already classified, so B stands. M10.1 to M10.3
+approved to build in order, each gated on the full suite and committed locally, with CB5 and CC4
+compared as M9 compared.
+
+**How M10.1 was implemented:**
+
+- Migration 0021 adds `category_rule` and `category_rule_event`, append-only by triggers as 0020's
+  tables are, and the derived `transaction_rule_category`. Checks refuse a blank text, a version
+  below 1, a type outside spending and a date that is not one.
+- `reconcile/category_rule_effects.py` matches and derives: each spending transaction's effective
+  description, type, account and date, D-063's spending group read from the derived types and
+  transfer effects, and whether a person's categorization reaches it. `write_rule_category_effects`
+  runs after a person's categories, at the end of `write_transfer_effects` and in every
+  categorization command, so every write rewrites the outcomes. With no active rule it deletes
+  nothing that exists and reads nothing else.
+- `reconcile/category_rules.py` adds a rule under one write lock: every account it can reach is
+  current, one account's or every account's, then the category, text and date, then an active rule
+  of the same meaning, texts compared normalized, then the `p1` token. An unknown account is the
+  CLI's refusal, and a type outside spending argparse's, both exiting with code 2.
+- `reports/category_rule_evidence.py` derives the outcome with and without one rule over the
+  evidence held now, for the preview and, in M10.2, for undo. A change is a change of state or
+  category: which rules disagree does not change a category, so it is not listed. `p1` covers the
+  definition by names and every change by its records' document hashes and rows.
+- **Tokens:** `r11` and `t9` add, on a transaction a rule's outcome reaches, the matching rules by
+  what they say, with the outcome. A rule's ID is immaterial, as every stored ID is. `d8` adds the
+  rules a description in scope can match, parsed or corrected, since groups, records, corrections
+  and types are already covered. `c4` adds, for any field, the rules its transactions' source or
+  corrected descriptions can match and the rules' outcome there now. `g2` adds the outcome its
+  transactions would take from rules with no person's categorization. All are left out while
+  empty, and tests pinning `r10`, `t8`, `d7`, `c3` and `g1` moved to the new versions with every
+  digest unchanged.
+- A confirmed transfer leaves a transaction out of every rule's reach through D-063's definition of
+  spending. No command reaches that state on spending, since a matched side is unclassified or of a
+  transfer kind (D-054), so it is kept as M9 keeps it, untested by a command.
+- **Compared as CB5:** the suite's 2,477 ledgers before M10, kept with `--basetemp` under `build/`,
+  read by the code at `19ee858` and, migrated to 21, by M10.1's: 51,379 runs, M9.3's list plus
+  `category list`, `review categorizations` and categorization shows. 51,344 are identical once
+  token versions move, every digest kept. 32 are two ledgers stamped schema 21 to mean newer than
+  the code, which reads them as current. 3 are the comparison's own rewriting of a stored
+  description holding "t8-", identical compared exactly.

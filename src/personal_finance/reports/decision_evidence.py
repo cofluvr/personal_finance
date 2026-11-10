@@ -18,6 +18,11 @@ from personal_finance.reconcile.category_effects import (
     effective_categorizations,
     load_active_categorizations,
 )
+from personal_finance.reconcile.category_rule_effects import (
+    load_active_rules,
+    rule_material,
+    rules_matching_texts,
+)
 from personal_finance.reconcile.classification_effects import (
     effective_classifications,
     load_active_classifications,
@@ -37,8 +42,9 @@ from personal_finance.reconcile.supersession import successor_and_newest
 # adds corrections binding records in scope, left out where there are none (D-049). Version 5
 # marks records in scope completed by hand, left out where they are not (D-050). Version 6 adds
 # classifications binding records in scope, left out where there are none (D-053). Version 7 adds
-# categorizations the same way (D-063).
-DECISION_REVISION_VERSION = 7
+# categorizations the same way (D-063). Version 8 adds the category rules a description in scope
+# can match, left out where there are none (D-064).
+DECISION_REVISION_VERSION = 8
 
 
 @dataclass(frozen=True)
@@ -382,6 +388,15 @@ def undo_outlook(
             "with_decision": categorization_view(now),
             "without_decision": categorization_view(after),
         }
+    # Which group a record joins decides the description a rule reads, and the groups, records,
+    # corrections and types are covered above, so the rules that could match are enough.
+    descriptions = [record.description for record in records if record.id in scope]
+    descriptions += [correction.corrected_value for correction in touching_corrections
+                     if correction.field == "description"]
+    category_rules = rules_matching_texts(load_active_rules(conn), decision.account_id,
+                                          descriptions)
+    if category_rules:
+        material["category_rules"] = rule_material(conn, category_rules)
     return UndoOutlook(decision_revision(material), len(now.groups), len(after.groups),
                        changes_corrected_values, changes_classifications)
 

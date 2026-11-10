@@ -126,7 +126,7 @@ class TestAfterMigration:  # N13
         assert ledger.run("migrate")[0] == 0
         assert "have not been reconciled" in ledger.totals()
         before = ledger.dump(VERSION_8_TABLES)
-        code, _, err = ledger.undo(newest, "d7-0000000000000000")
+        code, _, err = ledger.undo(newest, "d8-0000000000000000")
         assert code == 2 and STALE_ACCOUNT in err
         assert ledger.dump(VERSION_8_TABLES) == before
 
