@@ -186,7 +186,7 @@ class TestRefusals:  # O3
 
     def test_an_unknown_transaction_or_one_of_another_account(self, ledger):
         transaction = outflow(ledger)
-        self.nothing_changes(ledger, lambda: ledger.one_sided("nope", revision="t8-0"),
+        self.nothing_changes(ledger, lambda: ledger.one_sided("nope", revision="t9-0"),
                              TRANSACTION_NOT_FOUND.format(transaction="nope"))
         ledger.add_account("T", "savings")
         self.nothing_changes(ledger, lambda: ledger.one_sided(transaction, account="T"),
@@ -196,8 +196,8 @@ class TestRefusals:  # O3
         transaction = outflow(ledger, financial_type=None)
         token = ledger.transaction_revision(transaction)
         ledger.classify_ok(transaction, "transfer")
-        for stale in (token, "t8-0000000000000000",
-                      "t7-" + ledger.transaction_revision(transaction).split("-")[1]):
+        for stale in (token, "t9-0000000000000000",
+                      "t8-" + ledger.transaction_revision(transaction).split("-")[1]):
             self.nothing_changes(ledger, lambda: ledger.one_sided(transaction, revision=stale),
                                  STALE_TRANSACTION_REVISION.format(transaction=transaction))
 

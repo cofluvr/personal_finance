@@ -64,7 +64,9 @@ from personal_finance.reconcile.categorizations import (
     categorize_transaction,
     undo_categorization,
 )
-from personal_finance.reconcile.category_effects import NOT_SPENDING
+from personal_finance.reconcile.category_effects import NOT_SPENDING, SPENDING_TYPES
+from personal_finance.reconcile.category_rule_effects import RULE_APPLIED, RuleDefinition
+from personal_finance.reconcile.category_rules import add_rule, checked_definition, undo_rule
 from personal_finance.reconcile.classifications import classify_transaction, undo_classification
 from personal_finance.reconcile.correction_effects import (
     FIELD_APPLIED,
@@ -102,6 +104,16 @@ from personal_finance.reports.balances import (
     list_observations,
     load_observation,
     observation_revision,
+)
+from personal_finance.reports.category_rule_evidence import (
+    RuleOutlook,
+    StoredRule,
+    list_rules,
+    load_rule,
+    reach_of_rules,
+    rule_preview_outlook,
+    rule_undo_outlook,
+    shown_transactions,
 )
 from personal_finance.reports.categorization_evidence import (
     categorization_undo_outlook,
@@ -152,11 +164,13 @@ from personal_finance.reports.report_text import (
     describe_pending,
     describe_resolutions,
     describe_role,
+    describe_rule,
     document_list_lines,
     monthly_report_lines,
     review_item_report,
     review_queue_lines,
     shown,
+    shown_amount,
     totals_report_lines,
     transaction_list_lines,
 )
@@ -372,6 +386,40 @@ def build_parser() -> argparse.ArgumentParser:
     category_add.add_argument("--parent", help="the top-level category this one is under")
     command("list", category_commands, handler=run_category_list,
             help="list the categories, each under its parent")
+    rules_list = command("rules", category_commands, handler=run_category_rules,
+                         help="list category rules and where each reaches")
+    rules_list.add_argument("--account", help="only rules that can reach this account")
+    rule = category_commands.add_parser("rule", help="preview, add or inspect one category rule")
+    rule_commands = rule.add_subparsers(dest="rule_command", required=True)
+
+    def rule_definition_arguments(sub):
+        sub.add_argument("--category", required=True, help="a name from category list")
+        sub.add_argument(
+            "--description-contains", required=True,
+            help="text the description contains, compared ignoring case and repeated spaces",
+        )
+        sub.add_argument("--account", help="only this account's spending, else every account's")
+        sub.add_argument("--type", choices=SPENDING_TYPES, dest="financial_type",
+                         help="only spending of this type, else any spending type")
+        sub.add_argument("--from", dest="from_date",
+                         help="only transactions dated on or after this day, YYYY-MM-DD")
+
+    rule_preview = command("preview", rule_commands, handler=run_category_rule_preview,
+                           help="show every transaction a rule would change, writing nothing")
+    rule_definition_arguments(rule_preview)
+    rule_add = command("add", rule_commands, handler=run_category_rule_add,
+                       help="add a category rule whose preview is still current")
+    rule_definition_arguments(rule_add)
+    rule_add.add_argument("--preview", required=True, dest="preview_revision",
+                          help="the revision from category rule preview")
+    rule_show = command("show", rule_commands, handler=run_category_rule_show,
+                        help="show a rule and where it reaches")
+    rule_show.add_argument("rule_id", help="a rule ID from category rules")
+    rule_undo = command("undo", rule_commands, handler=run_category_rule_undo,
+                        help="stop a category rule applying, keeping it on record")
+    rule_undo.add_argument("rule_id", help="a rule ID from category rules")
+    rule_undo.add_argument("--revision", required=True,
+                           help="the revision from category rule show")
 
     importer = command("import", handler=run_import, help="import files")
     importer.add_argument("--account", required=True, help="account name or ID")
@@ -1915,6 +1963,163 @@ def run_review_classification_show(args) -> int:
                 "This account has not been reconciled under the current matching rules, so "
                 "undo will be refused until it is. Run reconcile."
             )
+    return 0
+
+
+RULE_UNDO_NOTICE = (
+    "This re-derives from the evidence held now, without this rule. It does not restore an "
+    "earlier snapshot, so it can change other transactions than adding the rule did. A person's "
+    "categorizations are unchanged."
+)
+
+RULE_NOTICE = (
+    "A person's categorization comes first wherever one reaches. The rule reaches transactions "
+    "imported later too, and never binds records."
+)
+
+
+def rule_sentence(definition: RuleDefinition, category_name: str,
+                  account_name: str | None) -> str:
+    """What a rule says, in words."""
+    account_words = f"in account {shown(account_name)}" if account_name else "in every account"
+    return describe_rule(category_name, definition.description_contains, account_words,
+                         definition.financial_type, definition.from_date)
+
+
+def rule_outcome_text(outcome, name_by_category) -> str:
+    if outcome is None:
+        return UNCATEGORIZED
+    if outcome.state == RULE_APPLIED:
+        return f"{shown(name_by_category[outcome.category_id])} by rules"
+    return f"{UNCATEGORIZED}, rules disagree: {', '.join(outcome.rule_ids)}"
+
+
+def print_rule_changes(conn, outlook: RuleOutlook) -> None:
+    name_by_category = dict(conn.execute("SELECT id, name FROM category"))
+    shown_by_id = shown_transactions(conn, [change.transaction_id for change in outlook.changes])
+    print(f"Changes: {len(outlook.changes)}")
+    for change in outlook.changes:
+        entry = shown_by_id[change.transaction_id]
+        print(
+            f"  Transaction {change.transaction_id}: {shown(entry.account_name)}, "
+            f"{entry.shown_date}, {shown_amount(entry.amount_cents)}, {shown(entry.description)}: "
+            f"{rule_outcome_text(change.before, name_by_category)} now, "
+            f"{rule_outcome_text(change.after, name_by_category)} after"
+        )
+
+
+def definition_of(conn, args) -> tuple[RuleDefinition, str, str | None]:
+    account_id = find_account(conn, args.account) if args.account else None
+    definition = checked_definition(conn, args.category, args.description_contains, account_id,
+                                    args.financial_type, args.from_date)
+    return definition, args.category, args.account and shown_account_name(conn, account_id)
+
+
+def shown_account_name(conn, account_id: str) -> str:
+    return conn.execute("SELECT display_name FROM account WHERE id = ?",
+                        (account_id,)).fetchone()[0]
+
+
+def run_category_rule_preview(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    definition, category_name, account_name = definition_of(conn, args)
+    outlook = rule_preview_outlook(conn, definition)
+    print(f"Category rule preview: {rule_sentence(definition, category_name, account_name)}")
+    print(
+        f"Matches: {outlook.matched} spending transactions. A person's categorization comes "
+        f"first on {outlook.categorized_by_person}. Unchanged by other rules: {outlook.unchanged}."
+    )
+    print_rule_changes(conn, outlook)
+    print(f"Revision: {outlook.revision}")
+    print("To add this rule, run category rule add with the same options and --preview.")
+    if stale_accounts(conn, DEFAULT_RULES, definition.account_id):
+        print(
+            "An account this rule can reach has not been reconciled under the current matching "
+            "rules, so adding it will be refused until it is. Run reconcile."
+        )
+    return 0
+
+
+def run_category_rule_add(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account) if args.account else None
+    result = add_rule(conn, args.category, args.description_contains, args.preview_revision,
+                      account_id, args.financial_type, args.from_date)
+    rule = load_rule(conn, result.rule_id)
+    print(f"Category rule {result.rule_id} recorded: "
+          f"{rule_sentence(rule.definition, rule.category_name, rule.account_name)}")
+    print(f"  Changed: {len(result.outlook.changes)} transactions, as previewed.")
+    print(f"  {RULE_NOTICE}")
+    return 0
+
+
+def run_category_rules(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rules = list_rules(conn, account_id)
+    reach = reach_of_rules(conn, account_id)
+    for rule in rules:
+        line = (f"Category rule {rule.rule_id}: {rule.state}, "
+                f"{rule_sentence(rule.definition, rule.category_name, rule.account_name)}, "
+                f"{rule.created_at}")
+        if rule.rule_id in reach:
+            found = reach[rule.rule_id]
+            line += (f". Categorizes {len(found.categorizes)}, disagrees on "
+                     f"{len(found.disagrees)}, a person first on "
+                     f"{len(found.categorized_by_person)}")
+        print(line)
+    print(f"Category rules: {len(rules)}")
+    if rules:
+        print("To see where a rule reaches, run category rule show.")
+    return 0
+
+
+def run_category_rule_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    rule = load_rule(conn, args.rule_id)
+    if rule is None:
+        raise CommandError("category rule not found. Run category rules.")
+    print(f"Category rule {rule.rule_id}")
+    print(f"  Says: {rule_sentence(rule.definition, rule.category_name, rule.account_name)}")
+    print(f"  Status: {rule.state}")
+    print(f"  Made: {rule.created_at}")
+    if rule.undone_at:
+        print(f"  Undone: {rule.undone_at}. It stays on record and no longer applies.")
+        return 0
+    found = reach_of_rules(conn)[rule.rule_id]
+    every = (*found.categorizes, *found.disagrees, *found.categorized_by_person)
+    shown_by_id = shown_transactions(conn, every)
+    for heading, transaction_ids in (
+        ("Categorizes", found.categorizes),
+        ("Disagrees with another rule, so none applies, on", found.disagrees),
+        ("A person's categorization comes first on", found.categorized_by_person),
+    ):
+        print(f"{heading}: {len(transaction_ids)}")
+        for transaction_id in transaction_ids:
+            entry = shown_by_id[transaction_id]
+            print(
+                f"  Transaction {transaction_id}: {shown(entry.account_name)}, "
+                f"{entry.shown_date}, {shown_amount(entry.amount_cents)}, "
+                f"{shown(entry.description)}"
+            )
+    outlook = rule_undo_outlook(conn, rule)
+    print(f"  Revision: {outlook.revision}")
+    print("Undoing this rule now:")
+    print_rule_changes(conn, outlook)
+    if stale_accounts(conn, DEFAULT_RULES, rule.definition.account_id):
+        print(
+            "An account this rule can reach has not been reconciled under the current matching "
+            "rules, so undo will be refused until it is. Run reconcile."
+        )
+    return 0
+
+
+def run_category_rule_undo(args) -> int:
+    conn = open_ledger(args.db)
+    outlook = undo_rule(conn, args.rule_id, args.revision)
+    print(f"Category rule {args.rule_id} undone: changed {len(outlook.changes)} transactions. "
+          "It stays on record.")
+    print(f"  {RULE_UNDO_NOTICE}")
     return 0
 
 

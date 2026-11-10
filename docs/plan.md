@@ -31,12 +31,26 @@ UI arrives later and calls the same core code. The data has three layers:
 | **M7** PDF parsing | Text PDFs and CSV-to-PDF matching | Same activity in both formats counts once |
 | **M8** Local review UI | Loopback-only import results, review queue, transactions | Host and CSRF checks; UI totals match the CLI |
 | **M9** Spending categories (D-063) | The first Phase 1B milestone: a category list and categorizing spending by a person | Categories add exactly to spending; types unchanged byte for byte |
-| **M10** Categorization rules (D-064, proposed) | Rules by description, account, type and date, with preview and undo, a person's category first | Rules' outcomes derived and reversible; ledgers without rules unchanged byte for byte |
+| **M10** Categorization rules (D-064) | Rules by description, account, type and date, with preview and undo, a person's category first | Rules' outcomes derived and reversible; ledgers without rules unchanged byte for byte |
+| **M11** Household attribution (D-065) | Members, attribution by account and transaction, allocations by amount or percentage | Allocations add exactly to each transaction and to the household; `totals` unchanged byte for byte |
+| **M12** Income and recurring obligations (D-068) | Income sources, expected against actual deposits, the three-paycheck rule, recurring obligations, fixed and discretionary | IA1 to IC4 |
+| **M13** Budgets (D-069) | Settings, budget plans, actual against target, pace and revised allowances | BA1 to BB6 |
+| **M14** Goals and reserves (D-070) | Funds of four kinds, assignments, consumption, the tax reserve | GA1 to GC4 |
+| **M15** Net worth and loans (D-071) | Net worth from observations, subaccounts, loan terms, projections, payoff orders, principal and interest | LA1 to LC4 |
+| **M16** Safe-to-spend (D-072) | Protected funds, the two constraints, the limiting constraint, provisional reasons, `pf dashboard` | SA1 to SB7 |
+| **M17** The local UI completed (D-073) | Browser writes (a security change), sections, search, tags, visuals, CSV export | WA1 to WD2 |
+| **M18** Scenarios (D-074) | Inputs, the projection, comparison, promotion | XA1 to XC2 |
+| **M19** Snapshots (D-075) | Canonical, versioned snapshot files and their compatibility policy | VA1 to VB4 |
+| **M20** Pairing and sync (D-076) | Pairing, TLS, local-network delivery, revocation (a security change) | YA1 to YC2 |
+| **M21** Backend acceptance (D-077) | PRD §21 closed, stress, crash and fuzz suites, the security audit, point F | ZA1 to ZD1 |
 
 M5 is mandatory before any actual financial document is processed. Phase 1B
 planning, Phase 1C sync and iOS are planned once Phase 1A passes. D-063, approved, records that
 Phase 1A passes with M8, and proposes a Phase 1B sequence of M9 to M14, of which only M9 is approved.
-D-064 proposes M10's plan for the owner's review.
+D-064, approved, plans M10. On 2026-11-10 the owner approved D-065, which plans M11, D-066, which
+sequences M12 to M21 to a finished backend, and D-067 to D-077 in
+[decisions-m12-m21.md](decisions-m12-m21.md), which plan each of M12 to M21 with its acceptance
+criteria. Each milestone's criteria move here when it starts.
 
 ## Required financial test cases
 
@@ -489,15 +503,16 @@ the UI, a normalized merchant, local AI, and budgets.
 
 ## M10 plan
 
-Proposed on 2026-11-10 as D-064, pending the owner's review: decisions A to H, and the inputs it
-names. Nothing is built until it is approved, and then each slice separately. No security control
-changes.
+Approved by the owner on 2026-11-10 as D-064, with A to H. "Future matches" are files imported
+later, which every rule reaches, in any order. M10.1 to M10.3 approved to build in order. No
+security control changes. **M10 is complete and accepted** on 2026-11-10. Not yet verified on the
+real ledger, which stays at version 20 until a verified backup and `pf migrate` to 21.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M10.1 | Category rules: migration 0021, matching, preview, add, list and show, the derived outcome on every write, precedence, tokens | Proposed |
-| M10.2 | Undoing a category rule with its `q1` token | Proposed |
-| M10.3 | Spending by category counting rules, disclosures, the source of a category, UI parity, the benchmark row | Proposed |
+| M10.1 | Category rules: migration 0021, matching, preview, add, list and show, the derived outcome on every write, precedence, tokens | Complete |
+| M10.2 | Undoing a category rule with its `q1` token | Complete |
+| M10.3 | Spending by category counting rules, disclosures, the source of a category, UI parity, the benchmark row | Complete |
 
 ### M10.1 acceptance criteria
 
@@ -534,6 +549,56 @@ priorities, editing or superseding a rule, rules from the UI, income categories,
 merchant, rules from local AI or from existing categorizations, rules for later imports only, tags,
 fixed and discretionary classes, renaming, merging or deleting a category, household attribution
 and splits (M11), and budgets.
+
+## M11 plan
+
+Approved by the owner on 2026-11-10 as D-065, with A to I, members `Michael` and `M`, a 50/50 share,
+the primary checking and savings accounts `shared` and personal accounts to their owner. Not yet
+built: each slice stops for review. "Split" keeps its meaning of records leaving a merged
+transaction, so PRD §6's splits are **allocations**.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M11.1 | Members, the household share and account attribution: migration 0022, `allocate_cents`, `household` commands, `h1` and `a1` | Approved, not built |
+| M11.2 | Allocating one transaction: migration 0023, the stated model extended, `review allocate`, chains, `s1`, `r12`, `t10`, `d9`, `c5` | Approved, not built |
+| M11.3 | `pf report household`: side-by-side, personal and shared views, its UI page, the benchmark row | Approved, not built |
+
+### M11.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| HA1 | Migration 0022 works on a populated ledger, synthetic and real: it adds the member, share and account attribution tables empty, makes no account stale, changes no token, total or report, and is atomic on failure. A ledger at 0021 is refused until `migrate`. Triggers refuse any update, delete or replace, each with a control insert that succeeds |
+| HA2 | `household member add` refuses a blank or repeated name, `shared` and `unattributed`, changing nothing. `household members` opens the ledger read-only and escapes names as D-040 |
+| HA3 | `household share set` takes two or more members, each above zero with at most two decimals, summing to exactly 100.00. An unknown member, one part, a sum off by 0.01 and a set while a share is active are refused, changing nothing. Set and undo need the current `h1`, and one made before a change of share, default or account currency refuses |
+| HA4 | `household account set` takes one member or `shared` on a current account with the current `a1`, and undo reverses it. An unknown account or member, `shared` with no active share, a second active default and a stale token are refused, changing nothing |
+| HA5 | `allocate_cents` gives parts summing exactly to the amount, each within one cent of its exact share, the negation for a negated amount, the leftover cents to the largest remainders with ties to the member added first, and the same parts whatever order they were typed, over generated amounts and weights including 1 cent and three members |
+| HA6 | `review show` and `review transaction show` give a transaction's attribution and parts where a default reaches it, escaped, and nothing where none does. `totals`, `report monthly` and every token are byte for byte as before, on the suite's ledgers before M11 compared as CB5, and on generated ledgers with members and defaults. Every earlier criterion still passes |
+
+### M11.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| HB1 | `review allocate` checks the account is current, then account, transaction ID and `t` token together, under one write lock (D-043). A stale token, another account's transaction, an unknown member, one percentage part, percentages not summing to 100.00, amounts not summing to the effective amount and `shared` with no active share are refused, changing nothing |
+| HB2 | A statement binds its transaction's records, and survives a repeat import, a reconcile and a re-export merging into the transaction. Agreeing statements apply. Disagreeing ones give `conflict`, records now in several transactions `basis_changed`, and an amount allocation an amount correction stops summing `amount_differs`, each leaving the transaction `unattributed`, disclosed, never the account's default. A percentage allocation follows a corrected amount |
+| HB3 | Superseding follows D-048. Undo needs the `s1` token and account, never refuses, and leaves the superseded statement or the account's default. `review confirm` and `review separate` refuse to leave a statement unsettled, and decision undo reports it |
+| HB4 | Every types and categories command's output, refusal and token is byte for byte as before the extension, compared as CB5. `r12`, `t10`, `d9` and `c5` keep every digest on a ledger with no statement, with a test pinning each definition and `s1`. Equivalent statements made at different valid points in the import sequence give the same outcome, exhaustively for four files |
+| HB5 | Migration 0023 works on a populated ledger and is atomic on failure, and backup and restore keep members, shares, defaults and statements, compared as M5.4's restore test compares. Every earlier criterion still passes |
+
+### M11.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| HC1 | In `report household`, each row's members and `unattributed` add exactly to the household, for the ledger, each account and each month range, on generated ledgers, and the household column equals `totals`' lines for the same scope |
+| HC2 | `--member` gives one member's parts, personal, shared and allocated counted apart, and `--shared` the transactions allocated to more than one member. A member's spending by category adds exactly to their spending, and a full refund nets to zero for each member |
+| HC3 | Disclosures give `unattributed` by reason, statements that do not apply by state, and the share and defaults in effect. `totals` and `report monthly` are byte for byte unchanged on ledgers with members, defaults and statements, compared as CC4 |
+| HC4 | The UI's household page equals `report household` line for line in each view, with a member's name holding HTML shown as text, under D-062's protections unchanged |
+| HC5 | `measure_reconciliation.py --scale --household` asserts how many transactions each member, `shared` and `unattributed` hold, and its figures are recorded in [benchmarks.md](benchmarks.md) under D-065 point 9's stopping rule. Every earlier criterion still passes |
+
+### Not in M11
+
+Categories or types per part, dated defaults or shares, account ownership and net worth by member,
+attribution rules by description, allocations from the UI, settling up, renaming or removing a
+member, separate logins, budgets and personal allowances, and members in sync snapshots.
 
 ## Backlog benchmarks
 

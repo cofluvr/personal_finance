@@ -9,6 +9,11 @@ import sqlite3
 from dataclasses import dataclass
 
 from personal_finance.reconcile.apply import load_evidence
+from personal_finance.reconcile.category_rule_effects import (
+    load_active_rules,
+    rule_material,
+    rules_matching_texts,
+)
 from personal_finance.reconcile.classification_effects import (
     effective_classifications,
     load_active_classifications,
@@ -27,8 +32,10 @@ from personal_finance.reports.decision_evidence import BoundRecord
 # Bump whenever the material below changes, so an old token can never appear current. Version 2
 # adds the classifications of an amount's transactions, left out where there are none (D-053).
 # Version 3 adds their categorizations' outcomes now the same way: an amount reaches a category
-# only through its type, which version 2 covers (D-063).
-CORRECTION_REVISION_VERSION = 3
+# only through its type, which version 2 covers (D-063). Version 4 adds, for any field, the category
+# rules its transactions' descriptions can match and the rules' outcome there now, left out where no
+# rule can match (D-064).
+CORRECTION_REVISION_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -216,6 +223,28 @@ def correction_undo_outlook(
         )
         if categorized:
             material["categorizations"] = categorized
+    category_rules = rules_matching_texts(
+        load_active_rules(conn), account_id,
+        [*(description for transaction, description in conn.execute(
+              "SELECT id, description FROM ledger_transaction WHERE account_id = ?", (account_id,))
+           if transaction in holding_transactions),
+         *(active.corrected_value for active in with_it
+           if active.field == "description"
+           and any(membership.get(record_id) in holding_transactions
+                   for record_id in active.bound_record_ids))],
+    )
+    if category_rules:
+        material["category_rules"] = {
+            "rules": rule_material(conn, category_rules),
+            "outcomes": sorted(
+                [keyed(records_by_transaction[transaction]), state, category_id]
+                for transaction, state, category_id in conn.execute(
+                    """SELECT transaction_id, state, category_id FROM transaction_rule_category
+                       WHERE transaction_id IN (SELECT value FROM json_each(?))""",
+                    (json.dumps(sorted(holding_transactions)),),
+                )
+            ),
+        }
     field_state_by_transaction = tuple(sorted(
         (transaction,
          *(None if view is None else view[0]

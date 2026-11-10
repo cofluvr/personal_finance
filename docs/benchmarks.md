@@ -415,3 +415,32 @@ stale-account check. An earlier run on the same shape gave 1.544s for `totals` a
 **Every write pays for every match.** About 0.9s of each write above is rewriting the 20,000 match
 outcomes, linear in matches, as recorded for M3.2. Writes have no PRD target yet. If one is set,
 this rewrite is the cost behind it, and changing it is its own decision (D-057, Z5).
+
+**Category rules on the 100,000-transaction shape (M10.3, RC4, D-064 point 9),** measured
+2026-11-10 with `measure_reconciliation.py --scale --category-rules 300`, nothing else running.
+Full output is in `build/m10/bench/`, which is ignored and may not survive.
+
+M4.4's shape, then 300 rules written directly over its spending descriptions, number prefixes so
+that shorter ones reach what longer ones do, their categories cycling so that some agree and some
+disagree, every fifth narrowed to an account, a type or a first date, and 500 person's
+categorizations on card purchases the rules reach. The shape asserts its counts: of 26,000 spending
+transactions, rules categorize 15,664 and leave 1,075 in `rule_conflict`, and a person's
+categorization comes first on 500, reached by 28 rules. The timed rule changes 2,002 transactions.
+
+| Operation | 300 rules | No rules, same session | Provisional target |
+|---|---|---|---|
+| `pf totals` | 1.906s | 1.951s | Below 2s: met, narrowly |
+| `pf report monthly` | 0.880s | 0.764s | Below 2s: met |
+| `pf category rule preview` | 0.796s | | None, stopping rule below |
+| `rule add`, under the write lock | 1.199s | | None, stopping rule below |
+| `rule undo`, under the write lock | 1.182s | | None |
+| One classification | 2.027s | 1.626s | None |
+| One import of one row | 3.077s | 2.528s | None |
+
+**Point 9's stopping rule is not met:** a preview and an add each cost less than twice the import of
+one row, and both reports run below two seconds. Rewriting 300 rules' outcomes on every write adds
+about 0.4s to a classification and 0.55s to an import, linear in rules and spending transactions.
+`totals` reads the derived outcome, so rules add nothing measurable to it, but its margin under two
+seconds is thin with or without rules: M4.4 recorded 1.389s on this shape, and the same machine gave
+1.951s with no rules in this session. A run made while the suite's deliberate breaks were running
+gave 2.219s for `totals`, which is why these figures were taken with nothing else running.

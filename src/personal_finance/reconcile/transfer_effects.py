@@ -17,6 +17,7 @@ from datetime import date, timedelta
 
 from personal_finance.db.id_lists import ids_as_json_array
 from personal_finance.reconcile.category_effects import write_category_effects
+from personal_finance.reconcile.category_rule_effects import write_rule_category_effects
 from personal_finance.reconcile.classification_effects import PAID_ACCOUNT_TYPES_BY_TYPE
 from personal_finance.reconcile.coverage_in_effect import (
     complete_coverage_by_basis,
@@ -392,7 +393,8 @@ def current_transfer_effects(
 
 def write_transfer_effects(conn: sqlite3.Connection) -> None:
     """Rewrite the ledger's derived rows from current memberships, corrections, classifications
-    and coverage, then categories, which read types and transfers (D-063). The caller holds the
+    and coverage, then categories, which read types and transfers (D-063), then the category
+    rules' outcomes, which read categories too (D-064). The caller holds the
     transaction, and all of them must already be final."""
     match_effects, one_sided_effects = current_transfer_effects(conn)
     conn.execute("DELETE FROM transfer_match_effect")
@@ -411,6 +413,7 @@ def write_transfer_effects(conn: sqlite3.Connection) -> None:
          for statement_id, effect in sorted(one_sided_effects.items())],
     )
     write_category_effects(conn)
+    write_rule_category_effects(conn)
 
 
 def unsettled_transfers(conn: sqlite3.Connection) -> frozenset:

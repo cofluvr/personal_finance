@@ -14,6 +14,11 @@ from dataclasses import asdict, dataclass
 from personal_finance.ingest.coverage import effective_end
 from personal_finance.reconcile.apply import declared_coverage, load_constraints, stale_accounts
 from personal_finance.reconcile.category_effects import load_active_categorizations
+from personal_finance.reconcile.category_rule_effects import (
+    load_active_rules,
+    load_spending_facts,
+    matching_rules,
+)
 from personal_finance.reconcile.classification_effects import load_active_classifications
 from personal_finance.reconcile.correction_effects import load_active_corrections
 from personal_finance.reconcile.rules import DEFAULT_RULES
@@ -22,12 +27,14 @@ from personal_finance.reconcile.transfer_effects import INFLOW, OUTFLOW
 # Bump whenever the material evidence changes, so an old token can never appear current. Version
 # 4 adds corrections (D-049), version 5 completed values (D-050), version 6 declared coverage
 # (D-051), version 7 classifications (D-053), version 8 transfer matches (D-054), version 9
-# one-sided transfers (D-055), and version 10 categorizations (D-063).
-REVISION_VERSION = 10
+# one-sided transfers (D-055), version 10 categorizations (D-063), and version 11 the category rules'
+# outcome (D-064).
+REVISION_VERSION = 11
 # The same, for one transaction's evidence, which a separation, correction, classification,
 # transfer match, one-sided transfer or categorization names (D-047, D-049, D-050, D-051, D-053,
-# D-054, D-055, D-063). Version 8 adds categorizations.
-TRANSACTION_REVISION_VERSION = 8
+# D-054, D-055, D-063). Version 8 adds categorizations, and version 9 the category rules' outcome
+# (D-064).
+TRANSACTION_REVISION_VERSION = 9
 
 # Fields left out of a revision. Random IDs and names say where evidence is stored or how
 # it is labelled, not what it says. Records are identified by document hash and row
@@ -36,12 +43,13 @@ TRANSACTION_REVISION_VERSION = 8
 IMMATERIAL_FIELDS = frozenset(
     {"issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
      "account_name", "decision_id", "correction_id", "classification_id", "match_id",
-     "counterpart_transaction_id", "one_sided_transfer_id", "categorization_id"}
+     "counterpart_transaction_id", "one_sided_transfer_id", "categorization_id", "rule_id"}
 )
 # Fields left out while empty, so that evidence holding none keeps the digest it had before they
 # existed (D-049).
 OMITTED_WHILE_EMPTY = frozenset({"corrections", "completion", "declared", "classifications",
-                                 "transfers", "one_sided_transfers", "categorizations"})
+                                 "transfers", "one_sided_transfers", "categorizations",
+                                 "category_rules"})
 
 
 @dataclass(frozen=True)
@@ -127,6 +135,23 @@ class CategorizationEvidence:
 
 
 @dataclass(frozen=True)
+class CategoryRuleEvidence:
+    """An active category rule matching a transaction no person's categorization reaches
+    (D-064)."""
+
+    rule_id: str
+    # What the rule says, by names, which are unique and never change.
+    category: str
+    description_contains: str
+    financial_type: str | None
+    from_date: str | None
+    # Whether it reaches every account, rather than only this transaction's.
+    every_account: bool
+    # The rules' outcome on this transaction: applied or rule_conflict.
+    state: str
+
+
+@dataclass(frozen=True)
 class TransferEvidence:
     """An active transfer match binding a record of one transaction (D-054)."""
 
@@ -177,6 +202,7 @@ class TransactionEvidence:
     transfers: tuple[TransferEvidence, ...] = ()
     one_sided_transfers: tuple[OneSidedTransferEvidence, ...] = ()
     categorizations: tuple[CategorizationEvidence, ...] = ()
+    category_rules: tuple[CategoryRuleEvidence, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -381,7 +407,8 @@ def load_review_evidence(conn: sqlite3.Connection, issue_id: str) -> ReviewEvide
         _transactions(conn, issue_id, linked, corrections_by_transaction,
                       classifications_by_transaction, _transfers_by_transaction(conn, linked),
                       _one_sided_by_transaction(conn, linked),
-                      _categorizations_by_transaction(conn, account_id, linked)),
+                      _categorizations_by_transaction(conn, account_id, linked),
+                      _category_rules_by_transaction(conn, linked)),
         tuple(sorted(unresolved, key=_record_key)),
         _documents(conn, account_id, documents),
         bool(accounts & set(stale_accounts(conn, DEFAULT_RULES))),
@@ -414,7 +441,8 @@ def load_merge_evidence(conn: sqlite3.Connection, transaction_id: str) -> MergeE
                            _transfers_by_transaction(conn, linked_by_transaction),
                            _one_sided_by_transaction(conn, linked_by_transaction),
                            _categorizations_by_transaction(conn, account_id,
-                                                           linked_by_transaction)),
+                                                           linked_by_transaction),
+                           _category_rules_by_transaction(conn, linked_by_transaction)),
         _documents(conn, account_id, documents),
         account_id in stale_accounts(conn, DEFAULT_RULES, account_id),
         account_id,
@@ -503,12 +531,12 @@ _TRANSACTION = """
 
 def _transactions(conn, issue_id, linked, corrections_by_transaction,
                   classifications_by_transaction, transfers_by_transaction,
-                  one_sided_by_transaction,
-                  categorizations_by_transaction) -> tuple[TransactionEvidence, ...]:
+                  one_sided_by_transaction, categorizations_by_transaction,
+                  category_rules_by_transaction) -> tuple[TransactionEvidence, ...]:
     entries = [
         _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
                            transfers_by_transaction, one_sided_by_transaction,
-                           categorizations_by_transaction)
+                           categorizations_by_transaction, category_rules_by_transaction)
         for row in conn.execute(
             _TRANSACTION + """
             JOIN review_issue_subject subject ON subject.transaction_id = entry.id
@@ -521,7 +549,8 @@ def _transactions(conn, issue_id, linked, corrections_by_transaction,
 
 def _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
                        transfers_by_transaction, one_sided_by_transaction,
-                       categorizations_by_transaction) -> TransactionEvidence:
+                       categorizations_by_transaction,
+                       category_rules_by_transaction) -> TransactionEvidence:
     transaction_id, *values, primary_id = row
     records = tuple(sorted(linked.get(transaction_id, ()), key=_record_key))
     primary = next(
@@ -532,7 +561,8 @@ def _transaction_entry(row, linked, corrections_by_transaction, classifications_
                                classifications_by_transaction.get(transaction_id, ()),
                                transfers_by_transaction.get(transaction_id, ()),
                                one_sided_by_transaction.get(transaction_id, ()),
-                               categorizations_by_transaction.get(transaction_id, ()))
+                               categorizations_by_transaction.get(transaction_id, ()),
+                               category_rules_by_transaction.get(transaction_id, ()))
 
 
 def _corrections_by_transaction(conn, account_id, linked) -> dict[str, tuple]:
@@ -630,6 +660,35 @@ def _categorizations_by_transaction(conn, account_id, linked) -> dict[str, tuple
                 ),
             ))
     return found
+
+
+def _category_rules_by_transaction(conn, linked) -> dict[str, tuple]:
+    """The active rules matching each transaction a rule's outcome reaches, with that outcome."""
+    state_by_transaction = dict(conn.execute(
+        """SELECT transaction_id, state FROM transaction_rule_category
+           WHERE transaction_id IN (SELECT value FROM json_each(?))""",
+        (json.dumps(sorted(linked)),),
+    ))
+    if not state_by_transaction:
+        return {}
+    rules = load_active_rules(conn)
+    rule_by_id = {rule.rule_id: rule for rule in rules}
+    name_by_category = dict(conn.execute("SELECT id, name FROM category"))
+    matched = matching_rules(load_spending_facts(conn, state_by_transaction), rules)
+    return {
+        transaction_id: tuple(sorted(
+            (CategoryRuleEvidence(
+                rule_id, name_by_category[rule_by_id[rule_id].definition.category_id],
+                rule_by_id[rule_id].definition.description_contains,
+                rule_by_id[rule_id].definition.financial_type,
+                rule_by_id[rule_id].definition.from_date,
+                rule_by_id[rule_id].definition.account_id is None, state)
+             for rule_id in matched[transaction_id]),
+            key=lambda rule: (rule.category, rule.description_contains, rule.financial_type or "",
+                              rule.from_date or "", rule.every_account),
+        ))
+        for transaction_id, state in state_by_transaction.items()
+    }
 
 
 def _transfers_by_transaction(conn, linked) -> dict[str, tuple]:

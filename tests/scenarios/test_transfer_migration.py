@@ -153,7 +153,7 @@ class TestAppendOnly:
         "UPDATE transfer_match SET created_at = created_at",
         "DELETE FROM transfer_match",
         "INSERT INTO transfer_match SELECT * FROM transfer_match",
-        "UPDATE transfer_match_side SET target_revision = 't8-0'",
+        "UPDATE transfer_match_side SET target_revision = 't9-0'",
         "DELETE FROM transfer_match_side",
         "INSERT INTO transfer_match_side SELECT * FROM transfer_match_side",
         "UPDATE transfer_match_record SET source_record_id = source_record_id",
@@ -176,11 +176,11 @@ class TestAppendOnly:
     def new_match(self, conn, accounts, records, inflow_account="S"):
         conn.execute("INSERT INTO transfer_match (id) VALUES ('new')")
         conn.execute(
-            """INSERT INTO transfer_match_side VALUES ('new', 'outflow', ?, 't', 't8-0')""",
+            """INSERT INTO transfer_match_side VALUES ('new', 'outflow', ?, 't', 't9-0')""",
             (accounts["A"],),
         )
         conn.execute(
-            """INSERT INTO transfer_match_side VALUES ('new', 'inflow', ?, 't', 't8-0')""",
+            """INSERT INTO transfer_match_side VALUES ('new', 'inflow', ?, 't', 't9-0')""",
             (accounts[inflow_account],),
         )
 
@@ -188,12 +188,12 @@ class TestAppendOnly:
         conn = history.conn()
         accounts, _ = ids(conn)
         conn.execute("INSERT INTO transfer_match (id) VALUES ('new')")
-        conn.execute("INSERT INTO transfer_match_side VALUES ('new', 'outflow', ?, 't', 't8-0')",
+        conn.execute("INSERT INTO transfer_match_side VALUES ('new', 'outflow', ?, 't', 't9-0')",
                      (accounts["A"],))
         with pytest.raises(sqlite3.IntegrityError, match="joins two accounts"):
-            conn.execute("INSERT INTO transfer_match_side VALUES ('new', 'inflow', ?, 't', 't8-0')",
+            conn.execute("INSERT INTO transfer_match_side VALUES ('new', 'inflow', ?, 't', 't9-0')",
                          (accounts["A"],))
-        conn.execute("INSERT INTO transfer_match_side VALUES ('new', 'inflow', ?, 't', 't8-0')",
+        conn.execute("INSERT INTO transfer_match_side VALUES ('new', 'inflow', ?, 't', 't9-0')",
                      (accounts["S"],))
         conn.close()
 
@@ -212,7 +212,7 @@ class TestAppendOnly:
         conn = history.conn()
         accounts, _ = ids(conn)
         conn.execute("INSERT INTO transfer_match (id) VALUES ('new')")
-        insert = "INSERT INTO transfer_match_side VALUES ('new', ?, ?, 't', 't8-0')"
+        insert = "INSERT INTO transfer_match_side VALUES ('new', ?, ?, 't', 't9-0')"
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(insert, (side, accounts["A"]))
         conn.execute(insert, ("outflow", accounts["A"]))

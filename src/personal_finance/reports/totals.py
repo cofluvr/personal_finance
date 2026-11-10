@@ -440,22 +440,51 @@ class IncomeAndSpendingTally:
 
 def income_and_spending(conn: sqlite3.Connection,
                         account_id: str | None = None) -> IncomeAndSpending:
-    """Groups each transaction by whether a transfer is confirmed there, then by its applied type."""
+    """Groups each transaction by whether a transfer is confirmed there, then by its applied type,
+    and spending by its category: a person's, else the category rules' (D-063, D-064)."""
     tally = IncomeAndSpendingTally()
     for amount_cents, financial_type, confirmed_transfer, category_id in conn.execute(
         f"""SELECT COALESCE(fix.corrected_amount_cents, entry.amount_cents), kind.financial_type,
-                   {CONFIRMED_TRANSFER_SQL}, categorized.category_id
+                   {CONFIRMED_TRANSFER_SQL},
+                   COALESCE(categorized.category_id, by_rules.category_id)
             FROM ledger_transaction entry
             LEFT JOIN transaction_correction fix
                 ON fix.transaction_id = entry.id AND fix.field = 'amount' AND fix.state = 'applied'
             LEFT JOIN transaction_classification kind ON kind.transaction_id = entry.id
             LEFT JOIN transaction_category categorized
                 ON categorized.transaction_id = entry.id AND categorized.state = 'applied'
+            LEFT JOIN transaction_rule_category by_rules
+                ON by_rules.transaction_id = entry.id AND by_rules.state = 'applied'
             WHERE :account IS NULL OR entry.account_id = :account""",
         {"account": account_id},
     ):
         tally.add(amount_cents, financial_type, confirmed_transfer, category_id)
     return tally.result()
+
+
+@dataclass(frozen=True)
+class CategoryRuleOutcomes:
+    """Spending the category rules categorize, and spending they leave uncategorized because they
+    disagree (D-064)."""
+
+    categorized: GroupTotal
+    disagreeing: GroupTotal
+
+
+def category_rule_outcomes(conn: sqlite3.Connection,
+                           account_id: str | None = None) -> CategoryRuleOutcomes:
+    by_state = {"applied": GroupTotal(), "rule_conflict": GroupTotal()}
+    for state, amount_cents in conn.execute(
+        """SELECT by_rules.state, COALESCE(fix.corrected_amount_cents, entry.amount_cents)
+           FROM transaction_rule_category by_rules
+           JOIN ledger_transaction entry ON entry.id = by_rules.transaction_id
+           LEFT JOIN transaction_correction fix
+               ON fix.transaction_id = entry.id AND fix.field = 'amount' AND fix.state = 'applied'
+           WHERE :account IS NULL OR entry.account_id = :account""",
+        {"account": account_id},
+    ):
+        by_state[state] = by_state[state].adding(amount_cents)
+    return CategoryRuleOutcomes(by_state["applied"], by_state["rule_conflict"])
 
 
 @dataclass(frozen=True)

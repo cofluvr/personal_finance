@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
+Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`, which holds everything through M9. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
 
 | Milestone | Status |
 |---|---|
@@ -54,6 +54,12 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
 | M9.2: categorizing one spending transaction, types and categories on one model | Accepted (D-063) |
 | M9.3: spending by category in totals, monthly and the UI | Accepted (D-063) |
 | **M9 overall** | **Complete and accepted** on 2026-11-09, verified by the owner on the real ledger: migrated to version 20 after a verified backup, and categorizing confirmed in the CLI and the UI |
+| M10.1: category rules, their preview, outcome and precedence | Accepted (D-064) |
+| M10.2: undoing a category rule | Accepted (D-064) |
+| M10.3: rules in the reports, the source of a category, the benchmark row | Accepted (D-064) |
+| **M10 overall** | **Complete and accepted** on 2026-11-10. Not yet verified on the real ledger, still at version 20 until a verified backup and `pf migrate` to 21 |
+| **M11** | **Approved** on 2026-11-10 (D-065), with the owner's members, share and defaults. Nothing built |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). Nothing built |
 
 ## What exists
 
@@ -79,7 +85,8 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
   `0011_coverage_declarations`, `0012_pending_posted_links`, `0013_type_classifications`,
   `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations`,
-  `0017_real_ledger`, `0018_backup_records`, `0019_categories` and `0020_categorizations`,
+  `0017_real_ledger`, `0018_backup_records`, `0019_categories`, `0020_categorizations` and
+  `0021_category_rules`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts and five unverified institution layouts (D-059), explicit coverage, atomic
   per-file import.
@@ -107,7 +114,11 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   undoing under one write lock (D-053).
 - `personal_finance.reconcile.categories`, `category_effects` and `categorizations`: the category
   list, which category applies to which spending transaction, and categorizing and undoing under
-  one write lock (D-063). `reports.categorization_evidence` holds the `g1` undo token.
+  one write lock (D-063). `reports.categorization_evidence` holds the `g2` undo token.
+- `personal_finance.reconcile.category_rule_effects` and `category_rules`: which category rules
+  reach which spending transaction and the category they give, derived on every write, and adding and
+  undoing a rule under one write lock (D-064). `reports.category_rule_evidence` holds the
+  preview and undo outlooks, and the `p1` and `q1` tokens.
 - `personal_finance.reconcile.transfer_effects` and `transfers`: which transfer matches and one-sided
   transfers apply and which pairs are candidates, read after each account derives alone, and
   matching, stating and undoing under one write lock (D-054, D-055).
@@ -143,7 +154,9 @@ Last updated: 2026-11-09. Branch: `feature/m2-review`, from `643e1b1`. The owner
   `review coverage declare`, `review coverage history`, `review coverage undo`, `review classify`,
   `review classifications`, `review classification show`, `review classification undo`,
   `review transfers`, `review transfer match`, `review transfer one-sided`, `review transfer show`,
-  `review transfer undo`, `category add`, `category list`, `review categorize`,
+  `review transfer undo`, `category add`, `category list`, `category rules`,
+  `category rule preview`, `category rule add`, `category rule show`, `category rule undo`,
+  `review categorize`,
   `review categorizations`, `review categorization show`, `review categorization undo`, `totals`,
   `report monthly`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
@@ -215,14 +228,17 @@ The security controls proposal is **not applied** and provides no protection
 In [benchmarks.md](benchmarks.md). Reconciliation is quadratic in fully overlapping files, in
 distinct spellings per block, and in the units of a group a decision touches. On the
 100,000-transaction shape every report runs below two seconds, and each write spends about 0.9s
-rewriting 20,000 match outcomes (D-057).
+rewriting 20,000 match outcomes (D-057). With 300 category rules each write spends about 0.5s more
+rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close to its target
+(D-064).
 
 ## Known limitations
 
-- Categories cover spending only, one transaction at a time, by a person: no rules or bulk
-  categorizing (M10), no income categories, and no renaming, merging or deleting a category
-  (D-063). A ledger shows spending by category only while some categorization reaches a
-  transaction.
+- Categories cover spending only, by a person one transaction at a time, or by category rules on
+  spending a person has typed (D-064): no income categories, and no renaming, merging or deleting a
+  category (D-063). A ledger shows spending by category only while some categorization reaches a
+  transaction or a rule's outcome does. A rule matches only "description contains": no amount
+  ranges, priorities or editing, and changing a rule is undo then add (D-064).
 - An undo, a classification or a transfer that leaves a categorization unsettled does not say so in
   its own output, unlike `review confirm` and `review separate`, which refuse. `totals` and `review
   categorizations` disclose it.

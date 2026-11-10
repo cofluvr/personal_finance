@@ -29,6 +29,7 @@ from test_decisions import (
     BACKUP_TABLES,
     CAFE,
     CATEGORIZATION_TABLES,
+    CATEGORY_RULE_TABLES,
     CATEGORY_TABLES,
     CHECKING_HEADER,
     FIRST_HALF,
@@ -50,7 +51,7 @@ from personal_finance.db.migrate import connect, load_migrations
 
 LATEST = len(load_migrations())
 LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", *REAL_LEDGER_TABLES, *BACKUP_TABLES,
-                 *CATEGORY_TABLES, *CATEGORIZATION_TABLES)
+                 *CATEGORY_TABLES, *CATEGORIZATION_TABLES, *CATEGORY_RULE_TABLES)
 LEDGER_VOLUME = Path("/Volumes/SyntheticLedger")
 BACKUP_VOLUME = Path("/Volumes/SyntheticBackups")
 
@@ -736,7 +737,7 @@ LISTS = [("documents",), ("transactions",), ("totals",), ("report", "monthly"),
          ("review", "list"), ("review", "merges"), ("review", "decisions"),
          ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
          ("review", "resolutions"), ("review", "coverage", "history"), ("balance", "list"),
-         ("storage",), ("category", "list"), ("review", "categorizations")]
+         ("storage",), ("category", "list"), ("review", "categorizations"), ("category", "rules")]
 PER_ACCOUNT = [("totals",), ("report", "monthly"), ("review", "merges"), ("review", "decisions"),
                ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
                ("review", "resolutions"), ("review", "coverage", "history"),
@@ -753,6 +754,7 @@ PER_ID = [
      [("review", "transfer", "show")]),
     ("SELECT id FROM record_resolution", [("review", "resolution", "show")]),
     ("SELECT id FROM category_assignment", [("review", "categorization", "show")]),
+    ("SELECT id FROM category_rule", [("category", "rule", "show")]),
 ]
 
 
@@ -826,6 +828,20 @@ def build_rich_ledger(ledger, *, checking_rows, decision, match, one_sided, corr
             assert code == 0, err
     if correction:
         ledger.correct_ok(rows_of(ledger, "a.csv")[0], "description", "SYNTHETIC CORRECTED")
+    # A rule over some of those rows, and another added and undone (D-064).
+    for category, contains, undone in (("Food", "synthetic row 1", False),
+                                       ("Travel", "synthetic row", True)):
+        rule_words = ["--category", category, "--description-contains", contains]
+        preview = ledger.run("category", "rule", "preview", *rule_words)[1]
+        code, out, err = ledger.run("category", "rule", "add", *rule_words, "--preview",
+                                    re.search(r"Revision: (p1-[0-9a-f]{16})", preview)[1])
+        assert code == 0, err
+        if undone:
+            rule = re.search(r"Category rule (\S+) recorded", out)[1]
+            shown = ledger.run("category", "rule", "show", rule)[1]
+            code, _, err = ledger.run("category", "rule", "undo", rule, "--revision",
+                                      re.search(r"Revision: (q1-[0-9a-f]{16})", shown)[1])
+            assert code == 0, err
 
     items_before = set(ledger.items())
     ledger.card("p1.csv", CAFE, extra=FIRST_HALF, account="S")

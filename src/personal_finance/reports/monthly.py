@@ -47,6 +47,9 @@ class MonthReport:
     transactions_with_unsettled_categorization: int = 0
     transactions_with_unsettled_match: int = 0
     transactions_with_unsettled_one_sided_transfer: int = 0
+    # Spending the category rules categorize, and spending they leave uncategorized (D-064).
+    transactions_categorized_by_rules: int = 0
+    transactions_where_rules_disagree: int = 0
     # Sides here of applied matches whose other side is in another month (G6).
     matched_sides_with_other_side_in_another_month: int = 0
 
@@ -84,8 +87,9 @@ def months_between(first_month: str, last_month: str) -> list[str]:
 
 def _transactions_with_unsettled_effects(conn) -> dict[str, set[str]]:
     """The transactions now holding each kind of unsettled correction, classification, match or
-    one-sided transfer. A match or one-sided transfer that does not apply names no transaction, so
-    it is placed through the current transactions of the records it binds."""
+    one-sided transfer, and those the category rules categorize or leave uncategorized (D-064). A
+    match or one-sided transfer that does not apply names no transaction, so it is placed through
+    the current transactions of the records it binds."""
     return {
         kind: {row[0] for row in conn.execute(query)}
         for kind, query in (
@@ -95,6 +99,10 @@ def _transactions_with_unsettled_effects(conn) -> dict[str, set[str]]:
                                   WHERE state <> 'applied'"""),
             ("categorization", """SELECT transaction_id FROM transaction_category
                                   WHERE state <> 'applied'"""),
+            ("categorized_by_rules", """SELECT transaction_id FROM transaction_rule_category
+                                        WHERE state = 'applied'"""),
+            ("rules_disagree", """SELECT transaction_id FROM transaction_rule_category
+                                  WHERE state = 'rule_conflict'"""),
             ("match", """SELECT link.transaction_id FROM transfer_match_effect effect
                          JOIN transfer_match_record bound ON bound.match_id = effect.match_id
                          JOIN transaction_source link
@@ -127,7 +135,8 @@ def monthly_report(conn: sqlite3.Connection, account_id: str | None = None,
                    COALESCE(date_fix.corrected_text, entry.transaction_date),
                    COALESCE(posting_fix.corrected_text, entry.posting_date),
                    entry.settlement_status, kind.financial_type,
-                   {CONFIRMED_TRANSFER_SQL}, categorized.category_id
+                   {CONFIRMED_TRANSFER_SQL},
+                   COALESCE(categorized.category_id, by_rules.category_id)
             FROM ledger_transaction entry
             LEFT JOIN transaction_correction amount_fix
                 ON amount_fix.transaction_id = entry.id AND amount_fix.field = 'amount'
@@ -140,7 +149,9 @@ def monthly_report(conn: sqlite3.Connection, account_id: str | None = None,
                AND posting_fix.state = 'applied'
             LEFT JOIN transaction_classification kind ON kind.transaction_id = entry.id
             LEFT JOIN transaction_category categorized
-                ON categorized.transaction_id = entry.id AND categorized.state = 'applied'"""
+                ON categorized.transaction_id = entry.id AND categorized.state = 'applied'
+            LEFT JOIN transaction_rule_category by_rules
+                ON by_rules.transaction_id = entry.id AND by_rules.state = 'applied'"""
     ):
         # Every transaction's month, so a match's side in another account can be compared.
         reporting_date = transaction_date or posting_date
@@ -215,6 +226,9 @@ def monthly_report(conn: sqlite3.Connection, account_id: str | None = None,
         report.transactions_with_unsettled_match += transaction_id in unsettled["match"]
         report.transactions_with_unsettled_one_sided_transfer += (
             transaction_id in unsettled["one_sided"])
+        report.transactions_categorized_by_rules += (
+            transaction_id in unsettled["categorized_by_rules"])
+        report.transactions_where_rules_disagree += transaction_id in unsettled["rules_disagree"]
 
     scope = {transaction_id for transaction_id, *_ in in_scope}
     for sides in conn.execute(
