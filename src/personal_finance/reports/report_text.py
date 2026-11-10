@@ -16,6 +16,12 @@ from personal_finance.money import format_cents
 from personal_finance.reconcile.apply import stale_accounts
 from personal_finance.reconcile.categories import UNCATEGORIZED, list_categories
 from personal_finance.reconcile.category_effects import NOT_SPENDING
+from personal_finance.reconcile.household_effects import (
+    NO_DEFAULT,
+    NO_SHARE,
+    SHARED,
+    UNATTRIBUTED,
+)
 from personal_finance.reconcile.classification_effects import (
     TYPE_AGAINST_DIRECTION,
     UNCLASSIFIED,
@@ -169,6 +175,13 @@ CLASSIFICATION_STATE_EXPLANATIONS = {
         "its amount now runs against the stated type, as after a correction, so it is "
         "unclassified. Undo the classification, or the correction"
     ),
+}
+
+# Why a transaction is unattributed (D-065).
+ATTRIBUTION_EXPLANATIONS = {
+    NO_DEFAULT: "its account has no default. Set one with household account set",
+    NO_SHARE: (f"its account's default is {SHARED} and no household share is active. Set one with "
+               "household share set"),
 }
 
 # What each outcome on a categorized transaction means (D-063).
@@ -522,6 +535,7 @@ def add_transaction_evidence(out, entry, shared) -> None:
     add_classifications(out, entry)
     add_categorizations(out, entry)
     add_category_rules(out, entry)
+    add_household(out, entry)
     add_transfers(out, entry)
 
 
@@ -608,6 +622,22 @@ def add_category_rules(out, entry) -> None:
     else:
         out.add(f"    Category: the rules disagree, so it is {UNCATEGORIZED}. Undo or narrow one "
                 "with category rule, or categorize it")
+
+
+def add_household(out, entry) -> None:
+    """Who the transaction's effective amount belongs to, where an account's default reaches it
+    (D-065). A transaction none reaches shows nothing here."""
+    household = entry.household
+    if household is None:
+        return
+    if household.kind == UNATTRIBUTED:
+        out.add(f"  Household: {UNATTRIBUTED}: {ATTRIBUTION_EXPLANATIONS[household.reason]}")
+    elif household.kind == SHARED:
+        parts = ", ".join(f"{shown(name)} {format_cents(cents)}" for name, cents in household.parts)
+        out.add(f"  Household: {SHARED}, by the account's default and the household share: "
+                f"{parts}")
+    else:
+        out.add(f"  Household: {shown(household.kind)}, by the account's default")
 
 
 def add_transfers(out, entry) -> None:

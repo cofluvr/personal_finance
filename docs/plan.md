@@ -553,13 +553,14 @@ and splits (M11), and budgets.
 ## M11 plan
 
 Approved by the owner on 2026-11-10 as D-065, with A to I, members `Michael` and `M`, a 50/50 share,
-the primary checking and savings accounts `shared` and personal accounts to their owner. Not yet
-built: each slice stops for review. "Split" keeps its meaning of records leaving a merged
+the primary checking and savings accounts `shared` and personal accounts to their owner. On
+2026-11-10 the owner asked for the three slices built in order in one session, each committed on its
+own gate, with one review at the end. "Split" keeps its meaning of records leaving a merged
 transaction, so PRD §6's splits are **allocations**.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M11.1 | Members, the household share and account attribution: migration 0022, `allocate_cents`, `household` commands, `h1` and `a1` | Approved, not built |
+| M11.1 | Members, the household share and account attribution: migration 0022, `allocate_cents`, `household` commands, `h1` and `a1` | Complete |
 | M11.2 | Allocating one transaction: migration 0023, the stated model extended, `review allocate`, chains, `s1`, `r12`, `t10`, `d9`, `c5` | Approved, not built |
 | M11.3 | `pf report household`: side-by-side, personal and shared views, its UI page, the benchmark row | Approved, not built |
 

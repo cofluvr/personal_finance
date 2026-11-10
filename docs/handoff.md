@@ -1,4 +1,4 @@
-# Session Handoff: M10 Accepted, M11 to M21 Approved
+# Session Handoff: M11 Being Built
 
 For a fresh session. Written 2026-11-10. **M1 to M10 are complete and accepted,** M10,
 categorization rules (D-064), by the owner on 2026-11-10. `main` holds M1 to M9 at `19ee858`, and
@@ -13,9 +13,11 @@ each milestone M12 to M21 in [decisions-m12-m21.md](decisions-m12-m21.md), as wr
 M17's and M20's security changes and `segno` for M20. All are plans: nothing of M11 or later is
 built. **The owner builds M11 and M12 locally.**
 
-**Next:** M11.1, then each slice in order, each stopping for review. The real-ledger migration to
-version 21 comes first, verified on its own (D-065 point 7). Point F with the owner on their
-already-imported files is still open.
+**M11.1 is built** on `feature/m10-rules` (migration 0022, `allocate_cents`, the `household`
+commands, `h1` and `a1`), at the owner's request of 2026-11-10 to build M11.1 to M11.3 in order in
+one session, each slice committed on its own gate, with one review at the end. **Next:** M11.2, then
+M11.3. The real-ledger migration to version 21 still comes first, verified on its own, before 22
+and 23 (D-065 point 7). Point F with the owner on their already-imported files is still open.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -267,7 +269,7 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits | Approved on 2026-11-10 for M10's acceptance record, the M11 plan, and the M11 to M21 approvals on `feature/m10-rules`, gated on the full suite | **Must be renewed** for any later change |
+| Local commits | Approved on 2026-11-10 for M10's acceptance record, the M11 plan, the M11 to M21 approvals, and M11.1 to M11.3 slice by slice, on `feature/m10-rules`, gated on the full suite | **Must be renewed** for any change after M11.3 |
 | M11 to M21 | Plans approved on 2026-11-10 (D-065 to D-077), including M17's and M20's security changes | Each slice built in order and reviewed. Installing `segno` still needs its pinned version and hash, and W1's check, at M20 |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |

@@ -537,6 +537,40 @@ these go.
 - **H. Its own benchmark row on the 100,000 shape,** with point 9's stopping rule.
 - **I. The slices M11.1 to M11.3,** in that order.
 
+**How M11.1 was implemented:**
+
+- Migration 0022 adds `household_member`, `household_share` with `household_share_part` and
+  `household_share_event`, and `account_attribution` with `account_attribution_event`, each
+  append-only by triggers as 0021's tables are. The schema itself refuses a blank member name,
+  `shared` and `unattributed`, a part outside 1 to 9,999 basis points, a share made with fewer than
+  two parts or parts not summing to 10,000, a part added once made, a second active share, and a
+  second active default on one account. Nothing is derived: the share and defaults are resolved
+  when read.
+- `reconcile/household_effects.py` holds `allocate_cents`, percentage parsing and the resolution of
+  each transaction's attribution from its effective amount (D-049): the account's default, a
+  member's whole amount or the share's parts, else `unattributed` by reason, `no_default` or
+  `no_share`. `reconcile/household.py` holds the commands, each under one write lock in D-043's
+  order: every account reached is current, then the statement is valid, then its token.
+- **Tokens:** `h1` covers the active share by member names, every account's default by names, the
+  names of stale accounts the share reaches, and every transaction an account attributed `shared`
+  holds, by its records' document hashes and rows and its effective amount, so a change of share,
+  default, currency, evidence or amount refuses it. `a1` covers the same for one account, its
+  default, and the share, since what `shared` moves depends on it. Both are digested as `p1` is.
+  The share reaches only accounts attributed `shared`, so a stale account attributed to a member
+  does not block it.
+- `review show` and `review transaction show` print `Household:` where an account's default
+  reaches a transaction, with the parts in cents. It is kept out of every `r` and `t` digest as an
+  immaterial field, since a default is the same for every transaction of its account (point 6).
+- Output gives amounts as `totals` does, a count with out and in, by member, and a set or undo
+  says what moved between members and `unattributed`. A set needs nothing active and an undo leaves
+  nothing active, so one side of every move is `unattributed`.
+- **Compared as CB5:** the suite's 2,574 ledgers before M11, kept with `--basetemp` under `build/`,
+  read by the code at `b61d85d` and, migrated to 22, by M11.1's: 59,583 runs, M10.3's list plus
+  `category rules` and rule shows. 59,547 are identical. 36 are two ledgers stamped schema 22 to
+  mean newer than the code, which reads them as current. Another 8,816 runs of `household
+  members`, `household share show` and `household account show` show no member, share or default
+  on every ledger that opens.
+
 ## D-066 Roadmap to a finished backend: M12 to M21 — Approved
 
 Proposed on 2026-11-10, at the owner's request, after D-065, and **approved by the owner the same

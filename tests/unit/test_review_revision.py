@@ -169,6 +169,9 @@ def test_exempt_fields_are_identifiers_names_and_the_stale_warning_only():
         "issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
         "account_name", "decision_id", "correction_id", "classification_id", "match_id",
         "counterpart_transaction_id", "one_sided_transfer_id", "categorization_id", "rule_id",
+        # The attribution an account's default gives, the same for every transaction of the
+        # account, so no decision or correction changes it (D-065 point 6).
+        "household",
     }
 
 

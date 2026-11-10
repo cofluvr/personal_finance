@@ -80,6 +80,21 @@ from personal_finance.reconcile.record_resolutions import (
     dismiss_record,
     undo_resolution,
 )
+from personal_finance.reconcile.household import (
+    add_member,
+    set_account_default,
+    set_share,
+    undo_account_default,
+    undo_share,
+)
+from personal_finance.reconcile.household_effects import (
+    NO_DEFAULT,
+    NO_SHARE,
+    SHARED,
+    UNATTRIBUTED,
+    format_percent,
+    load_household,
+)
 from personal_finance.reconcile.decisions import (
     DecisionRefused,
     confirm_groups,
@@ -143,8 +158,15 @@ from personal_finance.reports.coverage_evidence import (
     load_declaration,
     load_document_coverage,
 )
+from personal_finance.reports.household_evidence import (
+    account_names,
+    account_reach,
+    default_words,
+    share_reach,
+)
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.report_text import (
+    ATTRIBUTION_EXPLANATIONS,
     CATEGORIZATION_STATE_EXPLANATIONS,
     CLASSIFICATION_STATE_EXPLANATIONS,
     FIELD_STATE_EXPLANATIONS,
@@ -167,6 +189,7 @@ from personal_finance.reports.report_text import (
     describe_rule,
     document_list_lines,
     monthly_report_lines,
+    out_and_in,
     review_item_report,
     review_queue_lines,
     shown,
@@ -420,6 +443,51 @@ def build_parser() -> argparse.ArgumentParser:
     rule_undo.add_argument("rule_id", help="a rule ID from category rules")
     rule_undo.add_argument("--revision", required=True,
                            help="the revision from category rule show")
+
+    household = commands.add_parser(
+        "household", help="name household members, the household share and account defaults")
+    household_commands = household.add_subparsers(dest="household_command", required=True)
+    member = household_commands.add_parser("member", help="add a household member")
+    member_commands = member.add_subparsers(dest="member_command", required=True)
+    member_add = command("add", member_commands, handler=run_household_member_add,
+                         help="add a member, kept as typed and never renamed or removed")
+    member_add.add_argument("name", help="the member's name or initial, compared exactly")
+    command("members", household_commands, handler=run_household_members,
+            help="list household members in the order added")
+    share = household_commands.add_parser("share", help="show, set or undo the household share")
+    share_commands = share.add_subparsers(dest="share_command", required=True)
+    command("show", share_commands, handler=run_household_share_show,
+            help="show the household share and what it reaches")
+    share_set = command("set", share_commands, handler=run_household_share_set,
+                        help="say how shared divides among members")
+    share_set.add_argument("--part", action="append", required=True, metavar="NAME=PERCENT",
+                           help="a member and their percent, at most two decimals; repeat")
+    share_set.add_argument("--revision", required=True,
+                           help="the revision from household share show")
+    share_undo = command("undo", share_commands, handler=run_household_share_undo,
+                         help="stop the household share applying, keeping it on record")
+    share_undo.add_argument("--revision", required=True,
+                            help="the revision from household share show")
+    attribution = household_commands.add_parser(
+        "account", help="show, set or undo an account's default attribution")
+    attribution_commands = attribution.add_subparsers(dest="attribution_command", required=True)
+    attribution_show = command("show", attribution_commands, handler=run_household_account_show,
+                               help="show an account's default and what it reaches")
+    attribution_show.add_argument("--account", required=True, help="account name or ID")
+    attribution_set = command("set", attribution_commands, handler=run_household_account_set,
+                              help="attribute an account's transactions to a member or shared")
+    attribution_set.add_argument("--account", required=True, help="account name or ID")
+    attributed_to = attribution_set.add_mutually_exclusive_group(required=True)
+    attributed_to.add_argument("--member", help="a name from household members")
+    attributed_to.add_argument("--shared", action="store_true",
+                               help="divided by the household share")
+    attribution_set.add_argument("--revision", required=True,
+                                 help="the revision from household account show")
+    attribution_undo = command("undo", attribution_commands, handler=run_household_account_undo,
+                               help="stop an account's default applying, keeping it on record")
+    attribution_undo.add_argument("--account", required=True, help="account name or ID")
+    attribution_undo.add_argument("--revision", required=True,
+                                  help="the revision from household account show")
 
     importer = command("import", handler=run_import, help="import files")
     importer.add_argument("--account", required=True, help="account name or ID")
@@ -1058,6 +1126,132 @@ def run_category_list(args) -> int:
         indent = "  " if category.parent_id is not None else ""
         print(f"{indent}{shown(category.name)}")
     print(f"Categories: {len(categories)}")
+    return 0
+
+
+def run_household_member_add(args) -> int:
+    conn = open_ledger(args.db)
+    member = add_member(conn, args.name)
+    print(f"Added household member {shown(member.name)}")
+    return 0
+
+
+def run_household_members(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    members = load_household(conn).members
+    for member in members:
+        print(shown(member.name))
+    print(f"Household members: {len(members)}")
+    return 0
+
+
+def describe_share(household, share) -> str:
+    return ", ".join(f"{shown(household.name_of(member_id))} {format_percent(weight)}"
+                     for member_id, weight in share.parts)
+
+
+def describe_by_member(by_member) -> str:
+    return "; ".join(f"{shown(name)}, {out_and_in(group)}" for name, group in by_member) or "none"
+
+
+def print_moved(changed) -> None:
+    """What a set or undo moved. A set needs nothing active and an undo leaves nothing active, so
+    what moves goes between unattributed and members."""
+    before, after = changed.before.by_member, changed.after.by_member
+    print(f"  Moved: {out_and_in(changed.after.reached)}")
+    if not changed.after.reached.transactions:
+        return
+    print(f"    From: {describe_by_member(before) if before else UNATTRIBUTED}")
+    print(f"    To: {describe_by_member(after) if after else UNATTRIBUTED}")
+
+
+def print_reach(reach, unattributed_reason) -> None:
+    if reach.by_member:
+        print(f"  By member now: {describe_by_member(reach.by_member)}")
+    elif reach.reached.transactions:
+        print(f"  Now {UNATTRIBUTED}: {unattributed_reason}")
+    print(f"Revision: {reach.revision}")
+    if reach.stale_accounts:
+        print("An account reached has not been reconciled under the current matching rules, so "
+              "a change will be refused until it is. Run reconcile.")
+
+
+def run_household_share_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    household = load_household(conn)
+    if household.share is None:
+        print("Household share: none active")
+    else:
+        print(f"Household share: {describe_share(household, household.share)}")
+        print(f"  Share {household.share.share_id}, made {household.share.created_at}")
+        print("  To change it, undo it with household share undo, then set the new one.")
+    names = account_names(conn)
+    shared_accounts = sorted(names[account_id] for account_id, default
+                             in household.defaults.items() if default.member_id is None)
+    print(f"Accounts attributed {SHARED}: "
+          f"{', '.join(shown(name) for name in shared_accounts) or 'none'}")
+    reach = share_reach(conn, household)
+    print(f"The share reaches: {out_and_in(reach.reached)}")
+    print_reach(reach, "no household share is active")
+    return 0
+
+
+def run_household_share_set(args) -> int:
+    conn = open_ledger(args.db)
+    changed = set_share(conn, args.part, args.revision)
+    household = load_household(conn)
+    print(f"Household share {changed.statement_id} set: "
+          f"{describe_share(household, household.share)}")
+    print_moved(changed)
+    return 0
+
+
+def run_household_share_undo(args) -> int:
+    conn = open_ledger(args.db)
+    changed = undo_share(conn, args.revision)
+    print(f"Household share {changed.statement_id} undone. It stays on record.")
+    print_moved(changed)
+    print(f"  Accounts attributed {SHARED} leave their transactions {UNATTRIBUTED} until a new "
+          "share is set.")
+    return 0
+
+
+def run_household_account_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account)
+    household = load_household(conn)
+    default = household.defaults.get(account_id)
+    print(f"Account {shown(account_names(conn)[account_id])}: default "
+          f"{shown(default_words(household, default) or 'none')}")
+    if default is not None:
+        print(f"  Attribution {default.attribution_id}, made {default.created_at}")
+        print("  To change it, undo it with household account undo, then set the new one.")
+    reach = account_reach(conn, household, account_id)
+    print(f"The default reaches: {out_and_in(reach.reached)}")
+    print_reach(reach, ATTRIBUTION_EXPLANATIONS[NO_DEFAULT if default is None else NO_SHARE])
+    return 0
+
+
+def run_household_account_set(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    changed = set_account_default(conn, account_id, None if args.shared else args.member,
+                                  args.revision)
+    household = load_household(conn)
+    print(f"Account {shown(account_names(conn)[account_id])} attributed to "
+          f"{shown(default_words(household, household.defaults[account_id]))}: attribution "
+          f"{changed.statement_id}")
+    print_moved(changed)
+    return 0
+
+
+def run_household_account_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    changed = undo_account_default(conn, account_id, args.revision)
+    print(f"Attribution {changed.statement_id} of account "
+          f"{shown(account_names(conn)[account_id])} undone. It stays on record.")
+    print_moved(changed)
     return 0
 
 

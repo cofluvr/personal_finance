@@ -36,7 +36,8 @@ LEDGER_TABLES = (
     "balance_observation_event", "real_ledger", "backup_record",
     "category", "category_assignment", "category_assignment_record",
     "category_assignment_event", "transaction_category", "category_rule", "category_rule_event",
-    "transaction_rule_category",
+    "transaction_rule_category", "household_member", "household_share", "household_share_part",
+    "household_share_event", "account_attribution", "account_attribution_event",
 )
 
 

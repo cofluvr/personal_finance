@@ -81,15 +81,28 @@ CATEGORIZATION_TABLES = ("transaction_category", "category_assignment_event",
 CATEGORY_RULE_TABLES = ("transaction_rule_category", "category_rule_event", "category_rule")
 
 
+# Created by 0022, and empty until a member is added, so set-backs check that first (D-065).
+HOUSEHOLD_TABLES = ("account_attribution_event", "account_attribution", "household_share_event",
+                    "household_share_part", "household_share", "household_member")
+
+
+def drop_household_tables(conn) -> None:
+    """Undo 0022 on a ledger at the latest version, before setting it back further."""
+    for table in HOUSEHOLD_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
 def drop_category_rule_tables(conn) -> None:
-    """Undo 0021 on a ledger at the latest version, before setting it back further."""
+    """Undo 0022 and 0021 on a ledger at the latest version, before setting it back further."""
+    drop_household_tables(conn)
     for table in CATEGORY_RULE_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
 
 
 def drop_category_tables(conn) -> None:
-    """Undo 0021, 0020 and 0019 on a ledger at the latest version, before setting it back
+    """Undo 0022, 0021, 0020 and 0019 on a ledger at the latest version, before setting it back
     further."""
     drop_category_rule_tables(conn)
     for table in CATEGORIZATION_TABLES:
@@ -131,6 +144,8 @@ class Ledger:
                                     "report", "category") else 1
         if words[:2] == ["category", "rule"]:
             position = 3
+        if words[0] == "household":
+            position = 2 if words[1] == "members" else 3
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
                          ["review", "correction"], ["review", "resolution"],
                          ["review", "coverage"], ["review", "classification"],

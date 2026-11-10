@@ -36,6 +36,8 @@ def test_new_database_is_at_the_latest_version(conn):
 def test_new_database_has_the_expected_tables(conn):
     assert table_names(conn) == {
         "account",
+        "account_attribution",
+        "account_attribution_event",
         "account_reconciliation",
         "backup_record",
         "balance_observation",
@@ -53,6 +55,10 @@ def test_new_database_has_the_expected_tables(conn):
         "decision_event",
         "document_coverage",
         "document_interpretation",
+        "household_member",
+        "household_share",
+        "household_share_event",
+        "household_share_part",
         "import_attempt",
         "import_run",
         "ledger_transaction",

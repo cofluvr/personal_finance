@@ -15,6 +15,7 @@ from test_decisions import (
     CATEGORIZATION_TABLES,
     CATEGORY_RULE_TABLES,
     CATEGORY_TABLES,
+    drop_household_tables,
     pair_up,
 )
 from test_local_ui import UiClient, account_ids, assert_pages_equal_the_cli, parsed_page
@@ -555,6 +556,7 @@ def populated(tmp_path, capsys):
     ledger.spend(single(ledger))
     ledger.shown_before = shown_now(ledger)
     conn = connect(ledger.path)
+    drop_household_tables(conn)
     for table in CATEGORY_RULE_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
@@ -574,7 +576,7 @@ class TestMigration:  # RA1
         conn.close()
         assert populated.run("migrate")[0] == 0
         conn = connect(populated.path)
-        assert schema_version(conn) == 21
+        assert schema_version(conn) == len(load_migrations())
         for table in CATEGORY_RULE_TABLES:
             assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.close()
