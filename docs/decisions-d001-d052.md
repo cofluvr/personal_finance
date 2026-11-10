@@ -1,6 +1,6 @@
-# Decision Log: Full Text of D-001 to D-062
+# Decision Log: Full Text of D-001 to D-063
 
-Moved out of [decisions.md](decisions.md) on 2026-11-08, unchanged, D-053 once D-054 was written, D-058 once D-059 was, D-059 once D-060 was, D-060 once D-061 was, D-061 once D-062 was, and D-062 once D-063 was. The index, the rules in brief and
+Moved out of [decisions.md](decisions.md) on 2026-11-08, unchanged, D-053 once D-054 was written, D-058 once D-059 was, D-059 once D-060 was, D-060 once D-061 was, D-061 once D-062 was, D-062 once D-063 was, and D-063 once D-064 was. The index, the rules in brief and
 the newest decisions are in decisions.md. Status values are defined there. Read a decision here
 when a task touches it: search for its heading, such as `## D-049`.
 
@@ -3025,3 +3025,209 @@ approved to build in order, each gated on the full suite and committed locally.
 **The owner's verification, on 2026-11-09.** The owner ran `pf ui` on a throwaway synthetic ledger:
 it launched, exchanged the one-use launch key for the session cookie, showed reports matching the
 CLI line for line, and stopped as expected. M8 is complete.
+
+## D-063 M9 plan: spending categories — Approved with A to E, implemented and accepted in M9
+
+Proposed on 2026-11-09. **M1 to M8 deliver every Phase 1A item** of PRD-backend §3, so M9 opens
+Phase 1B, which plan.md leaves to be planned once Phase 1A passes (point 1). M9 is the first of its
+features, and the one the rest stand on: **categories** (PRD §10), stated by a person and totalled
+within spending, so that budgets, goals and reserves later have something to count. Builds on D-053's
+financial types and D-056's spending group, as D-014 ordered: type before category. Changes none of
+D-042 to D-062. **No security control changes,** no dependency is added, and the UI stays read-only.
+Plan only: nothing is built until it is approved, and then each slice separately. Acceptance tests,
+CA1 to CC5, are in [plan.md](plan.md).
+
+```sh
+pf category add  --db DB NAME [--parent NAME]
+pf category list --db DB
+pf review categorize --db DB --account A TRANSACTION_ID --revision t…  --category NAME \
+   [--supersedes CATEGORIZATION_ID --supersedes-revision g1-…]
+pf review categorizations      --db DB [--account A]
+pf review categorization show  --db DB CATEGORIZATION_ID
+pf review categorization undo  --db DB --account A CATEGORIZATION_ID --revision g1-…
+pf totals / pf report monthly       # gain "Spending by category"
+```
+
+**Slices:**
+
+| Slice | Scope |
+|---|---|
+| M9.1 | The category list: migration 0019, PRD §10's starting set, `pf category add` and `list` |
+| M9.2 | Categorizing one transaction: D-053's model, extracted to serve types and categories alike (point 4), migration 0020, tokens, `review show` |
+| M9.3 | Spending by category in `totals` and `report monthly`, and so on the UI's pages |
+
+**Recommendations, each with its alternatives:**
+
+1. **Phase 1A passes, and M9 starts Phase 1B.** CSV and PDF ingestion, account identification,
+   normalization, deduplication, transfers and card payments, the review interface, and balances and
+   reports are M1 to M8. Of §21's criteria, five are Phase 1B's (splits, annual reserves, third
+   paychecks, goal allocations and graduated payments), and "backups restore records, rules,
+   corrections, and goals" holds for all but goals, which do not exist yet. The rest pass. Still open, and not blocking categories: point F
+   on one real file of each layout (D-059), which only the owner can run. Alternatively **an M9 of
+   Phase 1A hardening** (point F for every layout first, and any correction it finds) before any
+   Phase 1B work: recommended only if the owner wants real-file confidence before new features.
+
+2. **Phase 1B, in the order each needs the last,** as a proposed sequence, each milestone planned
+   on its own as M9 is here:
+
+   | Milestone | Scope | Needs first |
+   |---|---|---|
+   | M9 | Spending categories, by a person | Financial types (D-053) |
+   | M10 | Categorization rules: future and historical matches, preview, undo, a person's category first (PRD §10) | M9 |
+   | M11 | Household members, attribution by account and transaction, splits by amount or percentage summing exactly (PRD §6, §21) | M9, and the owner's household and account assignments (§22) |
+   | M12 | Budgets, spending allowances and safe-to-spend (PRD §12) | M9 to M11, and shared-contract §6's safe-to-spend decision |
+   | M13 | Goals, the emergency fund, annual and irregular reserves (PRD §13) | M12 |
+   | M14 | Graduated loans, scenarios and the tax reserve (PRD §14 to §16) | M12, M13, and the owner's loan documents (§22) |
+
+   Only M9 is proposed for approval now. Alternatively **household first** (M11 as M9), if
+   attribution matters more to the owner than categories: it needs the owner's household and
+   account assignments before it can start.
+
+3. **A category list, stored, starting from PRD §10.**
+   - Migration 0019 adds `category`: an internal ID, a unique name, an optional parent, and when it
+     was made. Append-only: no rename, merge or delete in M9, so every assignment keeps meaning what
+     it meant (principle 1: those wait until needed, each with its own rules for history).
+   - It starts with PRD §10's list: Housing, Utilities and communications, Food, Transportation,
+     Health, Shopping and household, Entertainment, Travel, Gifts and donations, Insurance, Interest
+     and financial fees, and Other. "Uncategorized" is never stored: it is the absence of a category
+     that applies, as `unclassified` is (D-053).
+   - `pf category add NAME [--parent NAME]` adds one, one level deep: a subcategory's parent is a
+     top-level category. Names are compared exactly, shown as typed and escaped as D-040.
+   - Alternatively **an empty list,** every category added by the owner: no assumed names, but a
+     ledger with no categories until set up. Or **a fixed list in code,** with no `category` table:
+     less schema, but PRD §10 asks for configurable subcategories.
+
+4. **A categorization is D-053's classification of a second field,** and its code is extracted, not
+   copied (principle 2: this is the second use).
+   - It binds the records of its transaction when made, applies after derivation, is never read by
+     matching, and follows D-049's rules: agreeing categorizations apply, disagreeing ones or one
+     whose records split leave the transaction uncategorized and disclosed, chains follow D-048,
+     undo never refuses, and `review confirm` and `review separate` refuse to leave one unsettled.
+   - **Only spending is categorized:** a transaction whose applied type is `purchase`, `fee`,
+     `interest` or `refund` and that is in D-056's spending group. Anything else is refused,
+     changing nothing. If its type later changes, or it becomes a confirmed transfer, the
+     categorization stays on record and does not apply, in a fifth state, `not_spending`, disclosed
+     like D-053's `against_direction`. Income categories, such as salary and side income, belong to
+     PRD §11's later work.
+   - **Stored apart:** migration 0020, with M9.2, adds append-only `category_assignment`,
+     `category_assignment_record` and `category_assignment_event`, and a derived
+     `transaction_category`, mirroring 0013's tables. M9.1's 0019 adds only `category`, so no table
+     waits unused for a slice not yet approved.
+     `type_classification` is not widened, since changing its checks means rebuilding tables others
+     reference (D-053 point 4).
+   - **The extraction:** `reconcile/classifications.py`, `classification_effects.py` and
+     `reports/classification_evidence.py` become one implementation taking a description of the
+     field (its tables, its values, its fit rule), used for types and categories. Every types
+     command's output, token and refusal must stay byte for byte as now, compared on every ledger the
+     suite builds, as M8.1 did.
+   - **Tokens:** `r`, `t`, `d` and `c` add each transaction's categorizations, left out while empty
+     so existing digests are kept, with their versions bumped. `g1` is the new categorization undo
+     token: `b`, `c`, `d`, `f`, `k`, `m`, `o`, `r`, `t`, `u` and `v` are taken.
+   - Alternatively **one assignment to a category per transaction, overwritten:** far less code, but
+     no history, no undo and no protection against stale evidence, which D-043 and D-049 require of
+     every decision.
+
+5. **Spending by category, adding exactly to spending.** `totals` and `report monthly` gain, under
+   Spending, one line per category with a categorized transaction, subcategories indented under
+   their parent and included in its line, then an `uncategorized` line. Their sum is D-056's
+   Spending exactly, for the ledger, one account and each month, tested as M3.4's and M4.3's
+   invariants are, on generated ledgers. A disclosure gives the count and amount of uncategorized
+   spending, and the categorizations that do not apply, by reason. Nothing else in either report
+   changes. The UI's pages show them with no UI change, through the builders, and M8's parity tests
+   are run on categorized ledgers too.
+
+6. **What does not change, and the security boundaries.**
+   - No security control changes: W1, the UI, the gate and D-037 are untouched. The UI stays
+     read-only, so categorizing is a terminal command, with D-043's checks.
+   - A category name is the owner's label, like an account name: routine output may show it, and
+     amounts by category are aggregates, as `totals` already shows (D-037). Names are escaped
+     wherever printed.
+   - Migrations 0019 and 0020 are explicit (D-035). On the real ledger the owner runs `pf backup
+     create`, then `pf migrate`. Backups and restore cover the new tables with no change, since the manifest's
+     logical digest hashes every table.
+   - No dependency, no network, synthetic fixtures only.
+
+**Not in M9:** rules and bulk categorization (M10), household attribution and splits (M11), tags,
+fixed and discretionary classes, income categories, renaming, merging or deleting a category,
+categorizing from the UI, a normalized merchant, local AI (PRD §10), and budgets. Categorizing is
+one transaction at a time, which is slow for a real ledger's history until M10's rules.
+
+**Inputs needed from the owner** (PRD §22): whether PRD §10's starting list stands as named in
+point 3, and any subcategories wanted at the start.
+
+**For the owner's decision, with the lead engineer's recommendation first:**
+
+- **A. Phase 1A passes, and M9 is spending categories** (points 1 and 2). Alternatively Phase 1A
+  hardening first, or household first.
+- **B. A stored list starting from PRD §10,** append-only, one level of subcategories (point 3).
+- **C. Categorizations as D-053's model, extracted for both fields,** only on spending (point 4).
+- **D. Spending by category in `totals` and `report monthly`** (point 5).
+- **E. The slices M9.1 to M9.3,** in that order.
+
+**The owner's review, on 2026-11-09.** Decisions A to E approved as written. PRD §10's starting
+categories stand as named in point 3, with no subcategories at the start. M9.1 to M9.3 approved to
+build in order, each gated on the full suite and committed locally, with CB5 and CC4 compared as
+M8.1 compared.
+
+**How M9.1 was implemented:**
+
+- Migration 0019 adds `category` with an `INTEGER PRIMARY KEY`, so categories list in the order
+  made, PRD §10's twelve first. Its checks refuse a blank name and `uncategorized`, a trigger
+  refuses a parent that is missing or is itself a subcategory, and three more refuse any update,
+  delete or replace, by ID or by name, since `INSERT OR REPLACE` on a unique name would otherwise
+  delete a row without a delete trigger firing.
+- `reconcile/categories.py` checks the same under one write lock first, so a refusal says why.
+  `pf category add` and `list` escape names as D-040 does.
+- **Older migration tests:** 0019's table is not empty, so every set-back now drops it first
+  through `drop_category_tables`, and the backup test faking an older schema drops the newest
+  migration's tables, read from its file, instead of naming 0018's.
+
+**How M9.2 was implemented:**
+
+- **The extraction.** `reconcile/stated_fields.py` holds what types and categories share: chain
+  states, active statements, effective values with a field's misfit state, the derived rows and
+  what is unsettled, over a `StatedField` naming one field's tables. `reconcile/statements.py`
+  makes and undoes a statement with D-043's checks in their order, and `reports/stated_evidence.py`
+  loads, lists and gives the undo material. `classification_effects.py`, `classifications.py` and
+  `classification_evidence.py` keep every public name and message, now over the shared code.
+- **Categories** are `category_effects.py`, `categorizations.py` and `categorization_evidence.py`
+  over the same code, with migration 0020's tables mirroring 0013's. Spending is read from the
+  derived types and transfer effects, so `write_transfer_effects` ends by rewriting every
+  categorized account's categories, wherever types or transfers are rewritten. `SPENDING_TYPES` and
+  `CONFIRMED_TRANSFER_SQL` moved there from `reports/totals.py`, which imports them.
+- **Tokens:** `r10`, `t8`, `d7` and `c3`. `r` and `t` add each transaction's categorizations by
+  category name, left out while empty. `d` adds the categorizations of the groups either side, by
+  agreement alone, since whether a supposed group is spending follows from the types it already
+  covers. `c` adds, for an amount, the outcome now of categorizations on its transactions. `g1` is
+  the categorization undo token. Tests pinning `r9`, `t7`, `d6` and `c2` were moved to the new
+  versions with every pinned digest unchanged, and the stale "last version" tokens now name the
+  version before.
+- `review confirm` and `review separate` refuse with `LEAVES_CATEGORIZATION_UNSETTLED`, after the
+  types check, and a completion's undo waits for a categorization binding its record. Other
+  commands that can leave a categorization unsettled, such as an undo or a classification, do not
+  say so in their own output: `totals` and `review categorizations` disclose it.
+
+**How M9.3 was implemented:**
+
+- The income and spending tally takes each transaction's applied category, and refuses one outside
+  spending as a broken invariant. `totals` and `report monthly` list spending by category under
+  Spending's types, a subcategory under its parent and in its line, then `uncategorized`.
+- **Shown only while a categorization reaches a transaction,** so a ledger never categorized, or
+  with every categorization undone, reports byte for byte as before. Disclosures give uncategorized
+  spending's count and amount, and categorizations that do not apply by reason, for the scope
+  asked. A month adds "With an unsettled categorization" as it does for types.
+- **CB5 and CC4, compared as M8.1:** the suite's ledgers before M9, 2,364 of them, read by the code
+  before M9 and, migrated, by M9.2's and M9.3's. 41,101 runs: per ledger `totals`, `report
+  monthly` for the ledger and each account over four month ranges, `documents`, `transactions`,
+  `review list`, `review classifications`, and review, classification, decision, correction and
+  transaction shows, capped at 50 per kind, since a few stress ledgers hold 32,768 decisions.
+  41,072 are identical once token versions move up, every digest kept. 26 are two ledgers stamped
+  schema 19 to mean newer than the code, which reads them as older at 20. 3 were the comparison's
+  own rewriting of a stored description holding "t7-", identical compared exactly. M9.3 against
+  M9.2 is identical in all 41,101. Those ledgers hold no categorization, so on categorized
+  generated ledgers a test removes the new lines and compares every other line with the reports
+  as they are with categories switched off.
+
+**The owner's acceptance, on 2026-11-09.** M9 accepted. Verified on the real ledger: a verified
+backup, `pf migrate` to version 20, and categorizing confirmed in the CLI and the local UI. Merged
+into `main` by fast-forward the same day.
