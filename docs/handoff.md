@@ -1,4 +1,4 @@
-# Session Handoff: M10 Accepted, M11 Planned
+# Session Handoff: M10 Accepted, M11 to M21 Approved
 
 For a fresh session. Written 2026-11-10. **M1 to M10 are complete and accepted,** M10,
 categorization rules (D-064), by the owner on 2026-11-10. `main` holds M1 to M9 at `19ee858`, and
@@ -7,12 +7,15 @@ stays at version 20 until the owner makes a verified backup and runs `pf migrate
 security control changed, no dependency was added, and the UI stays read-only. Every fixture is
 invented.
 
-M11, household members, attribution and allocations, is planned in D-065, and D-066 proposes the
-milestones M12 to M21 to a finished backend. Both are plans only, awaiting the owner's review:
-nothing of M11 is built.
+On 2026-11-10 the owner approved D-065 (M11, household members, attribution and allocations) with
+A to I and its inputs, D-066 (the sequence M12 to M21) with A to E, and D-067 to D-077, the plan of
+each milestone M12 to M21 in [decisions-m12-m21.md](decisions-m12-m21.md), as written. That includes
+M17's and M20's security changes and `segno` for M20. All are plans: nothing of M11 or later is
+built. **The owner builds M11 and M12 locally.**
 
-**Next:** the owner's review of D-065 (decisions A to I) and D-066 (A to E), and the real-ledger
-migration to version 21. Point F with the owner on their already-imported files is still open.
+**Next:** M11.1, then each slice in order, each stopping for review. The real-ledger migration to
+version 21 comes first, verified on its own (D-065 point 7). Point F with the owner on their
+already-imported files is still open.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -86,7 +89,10 @@ Then only what the task needs:
   keep the suite's ledgers with `--basetemp` under `build/`, migrate copies, and cap per-ID shows.
 - For M11: D-065 and its criteria in [plan.md](plan.md), then what its points name: D-049, D-053,
   D-063 and D-064 in the full text, `reconcile/stated_fields.py`, `reconcile/category_effects.py`,
-  `reports/totals.py` and `reports/report_text.py`. For a milestone after M11, D-066 first.
+  `reports/totals.py` and `reports/report_text.py`.
+- For M12 to M21: D-067's guardrails G1 to G13 in [decisions-m12-m21.md](decisions-m12-m21.md)
+  first, then the milestone's own decision, D-068 to D-077, and the decisions it names. Each
+  milestone's criteria move into [plan.md](plan.md) when it starts.
 - For changes to M10: D-064 and its "How M10.n was implemented", its criteria in
   [plan.md](plan.md), `reconcile/category_rule_effects.py`, `reconcile/category_rules.py`,
   `reports/category_rule_evidence.py`, migration 0021, the `category rule` handlers in `cli.py`,
@@ -251,9 +257,8 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
   throwaway ledger, with the owner, at the final review.
 - [real-data-readiness.md](real-data-readiness.md) names the backup volume `CommonCentsBackups`.
   The owner's is `/Volumes/CommonCentsBackup`. A doc fix, not made.
-- The review of D-065, decisions A to I, and its inputs: the household's members, each account's
-  default, and the share for `shared`.
-- The review of D-066, decisions A to E, and a delivery deadline, if any.
+- A delivery deadline, if any (D-066).
+- Each milestone's own inputs, listed in its decision, when it starts.
 - On the real ledger, a verified backup, then `pf migrate` to version 21 for M10.
 - Merging `feature/m10-rules` into `main`. Needs the owner's approval.
 - Pushing. Not authorized from here.
@@ -262,7 +267,8 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits | Approved on 2026-11-10 for M10's acceptance record and the M11 plan on `feature/m10-rules`, gated on the full suite | **Must be renewed** for any change after the M11 plan's review |
+| Local commits | Approved on 2026-11-10 for M10's acceptance record, the M11 plan, and the M11 to M21 approvals on `feature/m10-rules`, gated on the full suite | **Must be renewed** for any later change |
+| M11 to M21 | Plans approved on 2026-11-10 (D-065 to D-077), including M17's and M20's security changes | Each slice built in order and reviewed. Installing `segno` still needs its pinned version and hash, and W1's check, at M20 |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |

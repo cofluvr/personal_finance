@@ -12,7 +12,8 @@ Status values:
 Status of the code behind each decision is in [status.md](status.md).
 
 The full text of D-001 to D-064 is in [decisions-d001-d052.md](decisions-d001-d052.md). This file
-holds the index, the rules in brief, and the newest decisions in full, once there are any. When a
+holds the index, the rules in brief, and the newest decisions in full, once there are any. D-067 to
+D-077, the plans for M12 to M21, are in full in [decisions-m12-m21.md](decisions-m12-m21.md). When a
 decision here is accepted and the next one is written, move its full text to the end of that file
 and keep its index line.
 
@@ -84,8 +85,19 @@ and keep its index line.
 | D-062 | M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8, verified by the owner |
 | D-063 | M9 plan: spending categories — Approved with A to E, implemented and accepted in M9 |
 | D-064 | M10 plan: categorization rules — Approved with A to H, implemented and accepted in M10. Real ledger not yet migrated |
-| D-065 | M11 plan: household members, attribution and allocations — Pending, proposed for the owner's review |
-| D-066 | Roadmap to a finished backend: M12 to M21 — Pending, proposed for the owner's review |
+| D-065 | M11 plan: household members, attribution and allocations — Approved with A to I and the owner's inputs, not yet built |
+| D-066 | Roadmap to a finished backend: M12 to M21 — Approved with A to E |
+| D-067 | Cross-milestone guardrails for M12 to M21 — Approved, in [decisions-m12-m21.md](decisions-m12-m21.md) |
+| D-068 | M12 plan: income and recurring obligations — Approved, not yet built |
+| D-069 | M13 plan: budgets and spending allowances — Approved, not yet built |
+| D-070 | M14 plan: goals, reserves and the tax reserve — Approved, not yet built |
+| D-071 | M15 plan: net worth and loans — Approved, not yet built |
+| D-072 | M16 plan: safe-to-spend and the cash-flow constraint — Approved, not yet built |
+| D-073 | M17 plan: the local UI completed, with browser writes — Approved as a security change, not yet built |
+| D-074 | M18 plan: financial scenarios — Approved, not yet built |
+| D-075 | M19 plan: snapshots — Approved, not yet built |
+| D-076 | M20 plan: pairing and local-network sync — Approved as a security change, with `segno`, not yet built |
+| D-077 | M21 plan: backend acceptance, stress testing and the security audit — Approved, not yet built |
 
 ## Rules in brief
 
@@ -197,13 +209,24 @@ One line per approved rule, moved from the handoff. The decision named in the la
 
 From `shared-contract.md` §6: safe-to-spend details and loan projection assumptions
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
-was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058. D-066,
-proposed, places the four still open: safe-to-spend in M16, loan projections in M15, snapshot
-compatibility in M19 and pairing in M20.
+was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058. The four
+still open are approved as plans on 2026-11-10: safe-to-spend in D-072, loan projection assumptions
+in D-071 point 5, snapshot compatibility in D-075 point 5 and pairing in D-076. Each is decided once
+its milestone is built and accepted, and M21 empties this section (D-077, ZA2).
 
-## D-065 M11 plan: household members, attribution and allocations — Pending, proposed for the owner's review
+## D-065 M11 plan: household members, attribution and allocations — Approved
 
-Proposed on 2026-11-10. M11 is the third Phase 1B milestone of D-063 point 2: **household members,
+Proposed on 2026-11-10, and **approved by the owner the same day with A to I as recommended.**
+The owner's inputs:
+
+- **Members:** `Michael` and `M`.
+- **Account defaults:** the primary checking and savings accounts `shared`, and each personal
+  account its owner.
+- **The share for `shared`:** 50/50.
+- **History:** the arrangement has not changed within the ledger's history, so point 2's dated
+  alternative is not needed.
+
+M11 is the third Phase 1B milestone of D-063 point 2: **household members,
 attribution by account and by transaction, and allocations by amount or percentage summing
 exactly**, meeting PRD §6's "Household Attribution", §7's "accounts and household members",
 "transactions and transaction splits" and "household allocations", and §21's "all transaction
@@ -514,9 +537,11 @@ these go.
 - **H. Its own benchmark row on the 100,000 shape,** with point 9's stopping rule.
 - **I. The slices M11.1 to M11.3,** in that order.
 
-## D-066 Roadmap to a finished backend: M12 to M21 — Pending, proposed for the owner's review
+## D-066 Roadmap to a finished backend: M12 to M21 — Approved
 
-Proposed on 2026-11-10, at the owner's request, after D-065. **A sequence, not a plan:** approving
+Proposed on 2026-11-10, at the owner's request, after D-065, and **approved by the owner the same
+day with A to E as recommended.** Each milestone's own plan, D-067 to D-077, is in
+[decisions-m12-m21.md](decisions-m12-m21.md), approved the same day. **A sequence, not a plan:** approving
 it approves the order and the definition of done below, and no milestone. Each milestone still gets
 its own decision in D-063 to D-065's shape (slices, recommendations with alternatives, inputs,
 lettered decisions and acceptance criteria) and the owner's approval before anything is built.

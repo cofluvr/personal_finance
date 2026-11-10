@@ -58,7 +58,8 @@ Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M10.2: undoing a category rule | Accepted (D-064) |
 | M10.3: rules in the reports, the source of a category, the benchmark row | Accepted (D-064) |
 | **M10 overall** | **Complete and accepted** on 2026-11-10. Not yet verified on the real ledger, still at version 20 until a verified backup and `pf migrate` to 21 |
-| **M11** | **Planned** in D-065, awaiting the owner's review. Nothing built. D-066 proposes M12 to M21 |
+| **M11** | **Approved** on 2026-11-10 (D-065), with the owner's members, share and defaults. Nothing built |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). Nothing built |
 
 ## What exists
 

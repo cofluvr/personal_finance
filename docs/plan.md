@@ -32,13 +32,25 @@ UI arrives later and calls the same core code. The data has three layers:
 | **M8** Local review UI | Loopback-only import results, review queue, transactions | Host and CSRF checks; UI totals match the CLI |
 | **M9** Spending categories (D-063) | The first Phase 1B milestone: a category list and categorizing spending by a person | Categories add exactly to spending; types unchanged byte for byte |
 | **M10** Categorization rules (D-064) | Rules by description, account, type and date, with preview and undo, a person's category first | Rules' outcomes derived and reversible; ledgers without rules unchanged byte for byte |
-| **M11** Household attribution (D-065, proposed) | Members, attribution by account and transaction, allocations by amount or percentage | Allocations add exactly to each transaction and to the household; `totals` unchanged byte for byte |
+| **M11** Household attribution (D-065) | Members, attribution by account and transaction, allocations by amount or percentage | Allocations add exactly to each transaction and to the household; `totals` unchanged byte for byte |
+| **M12** Income and recurring obligations (D-068) | Income sources, expected against actual deposits, the three-paycheck rule, recurring obligations, fixed and discretionary | IA1 to IC4 |
+| **M13** Budgets (D-069) | Settings, budget plans, actual against target, pace and revised allowances | BA1 to BB6 |
+| **M14** Goals and reserves (D-070) | Funds of four kinds, assignments, consumption, the tax reserve | GA1 to GC4 |
+| **M15** Net worth and loans (D-071) | Net worth from observations, subaccounts, loan terms, projections, payoff orders, principal and interest | LA1 to LC4 |
+| **M16** Safe-to-spend (D-072) | Protected funds, the two constraints, the limiting constraint, provisional reasons, `pf dashboard` | SA1 to SB7 |
+| **M17** The local UI completed (D-073) | Browser writes (a security change), sections, search, tags, visuals, CSV export | WA1 to WD2 |
+| **M18** Scenarios (D-074) | Inputs, the projection, comparison, promotion | XA1 to XC2 |
+| **M19** Snapshots (D-075) | Canonical, versioned snapshot files and their compatibility policy | VA1 to VB4 |
+| **M20** Pairing and sync (D-076) | Pairing, TLS, local-network delivery, revocation (a security change) | YA1 to YC2 |
+| **M21** Backend acceptance (D-077) | PRD §21 closed, stress, crash and fuzz suites, the security audit, point F | ZA1 to ZD1 |
 
 M5 is mandatory before any actual financial document is processed. Phase 1B
 planning, Phase 1C sync and iOS are planned once Phase 1A passes. D-063, approved, records that
 Phase 1A passes with M8, and proposes a Phase 1B sequence of M9 to M14, of which only M9 is approved.
-D-064, approved, plans M10. D-065, proposed, plans M11, and D-066, proposed, sequences M12 to M21
-to a finished backend, each milestone to be planned on its own.
+D-064, approved, plans M10. On 2026-11-10 the owner approved D-065, which plans M11, D-066, which
+sequences M12 to M21 to a finished backend, and D-067 to D-077 in
+[decisions-m12-m21.md](decisions-m12-m21.md), which plan each of M12 to M21 with its acceptance
+criteria. Each milestone's criteria move here when it starts.
 
 ## Required financial test cases
 
@@ -540,15 +552,16 @@ and splits (M11), and budgets.
 
 ## M11 plan
 
-Proposed on 2026-11-10 as D-065, for the owner's review. Plan only: nothing is built until it is
-approved, and then each slice separately. "Split" keeps its meaning of records leaving a merged
+Approved by the owner on 2026-11-10 as D-065, with A to I, members `Michael` and `M`, a 50/50 share,
+the primary checking and savings accounts `shared` and personal accounts to their owner. Not yet
+built: each slice stops for review. "Split" keeps its meaning of records leaving a merged
 transaction, so PRD §6's splits are **allocations**.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M11.1 | Members, the household share and account attribution: migration 0022, `allocate_cents`, `household` commands, `h1` and `a1` | Proposed |
-| M11.2 | Allocating one transaction: migration 0023, the stated model extended, `review allocate`, chains, `s1`, `r12`, `t10`, `d9`, `c5` | Proposed |
-| M11.3 | `pf report household`: side-by-side, personal and shared views, its UI page, the benchmark row | Proposed |
+| M11.1 | Members, the household share and account attribution: migration 0022, `allocate_cents`, `household` commands, `h1` and `a1` | Approved, not built |
+| M11.2 | Allocating one transaction: migration 0023, the stated model extended, `review allocate`, chains, `s1`, `r12`, `t10`, `d9`, `c5` | Approved, not built |
+| M11.3 | `pf report household`: side-by-side, personal and shared views, its UI page, the benchmark row | Approved, not built |
 
 ### M11.1 acceptance criteria
 
