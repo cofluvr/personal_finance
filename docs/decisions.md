@@ -83,7 +83,7 @@ and keep its index line.
 | D-061 | Capital One bank format confirmed, and its rows' account number checked — Approved, implemented |
 | D-062 | M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8, verified by the owner |
 | D-063 | M9 plan: spending categories — Approved with A to E, implemented and accepted in M9 |
-| D-064 | M10 plan: categorization rules — Approved with A to H, built in M10, awaiting the owner's acceptance |
+| D-064 | M10 plan: categorization rules — Approved with A to H, implemented and accepted in M10. Real ledger not yet migrated |
 
 ## Rules in brief
 
@@ -197,7 +197,7 @@ From `shared-contract.md` §6: safe-to-spend details and loan projection assumpt
 (Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
 was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058.
 
-## D-064 M10 plan: categorization rules — Approved with A to H, built in M10, awaiting the owner's acceptance
+## D-064 M10 plan: categorization rules — Approved with A to H, implemented and accepted in M10
 
 Proposed on 2026-11-10. M10 is the second Phase 1B milestone of D-063 point 2: **categorization
 rules**, meeting PRD §10's correction actions "apply a rule to future matches", "apply a rule to
@@ -530,3 +530,7 @@ compared as M9 compared.
   [benchmarks.md](benchmarks.md): point 9's stopping rule is not met. `totals` stays below two
   seconds, narrowly, with or without rules, so its margin is the owner's to watch.
 
+**The owner's acceptance, on 2026-11-10.** M10 accepted, M10.1 to M10.3 as built. **Not yet
+verified on the real ledger:** it stays at version 20 until the owner makes a verified backup with
+`pf backup create` and runs `pf migrate` to version 21. Not merged into `main`: merging and pushing
+each need the owner's approval.

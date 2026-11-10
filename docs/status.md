@@ -54,10 +54,10 @@ Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M9.2: categorizing one spending transaction, types and categories on one model | Accepted (D-063) |
 | M9.3: spending by category in totals, monthly and the UI | Accepted (D-063) |
 | **M9 overall** | **Complete and accepted** on 2026-11-09, verified by the owner on the real ledger: migrated to version 20 after a verified backup, and categorizing confirmed in the CLI and the UI |
-| M10.1: category rules, their preview, outcome and precedence | Complete (D-064) |
-| M10.2: undoing a category rule | Complete (D-064) |
-| M10.3: rules in the reports, the source of a category, the benchmark row | Complete (D-064) |
-| **M10 overall** | **Built,** awaiting the owner's acceptance. The real ledger is still at version 20 |
+| M10.1: category rules, their preview, outcome and precedence | Accepted (D-064) |
+| M10.2: undoing a category rule | Accepted (D-064) |
+| M10.3: rules in the reports, the source of a category, the benchmark row | Accepted (D-064) |
+| **M10 overall** | **Complete and accepted** on 2026-11-10. Not yet verified on the real ledger, still at version 20 until a verified backup and `pf migrate` to 21 |
 
 ## What exists
 

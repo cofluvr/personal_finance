@@ -1,14 +1,14 @@
-# Session Handoff: M10 Built
+# Session Handoff: M10 Accepted
 
-For a fresh session. Written 2026-11-10. **M1 to M9 are complete and accepted,** and `main` holds
-them at `19ee858`. M10, categorization rules (D-064), was approved by the owner with A to H on
-2026-11-10 and built on `feature/m10-rules`: M10.1 to M10.3 are complete, awaiting the owner's
-acceptance. The real ledger is still at version 20. No security control
-changed, no dependency was added, and the UI stays read-only. Every fixture is invented.
+For a fresh session. Written 2026-11-10. **M1 to M10 are complete and accepted,** M10,
+categorization rules (D-064), by the owner on 2026-11-10. `main` holds M1 to M9 at `19ee858`, and
+M10 is on `feature/m10-rules`, not merged. **M10 is not yet verified on the real ledger,** which
+stays at version 20 until the owner makes a verified backup and runs `pf migrate` to version 21. No
+security control changed, no dependency was added, and the UI stays read-only. Every fixture is
+invented.
 
-**Next:** the owner's review and acceptance of M10. On the real ledger that means a verified
-backup, then `pf migrate` to version 21. Point F with the owner on their
-already-imported files is still open.
+**Next:** the owner's real-ledger migration to version 21, and planning M11. Point F with the owner
+on their already-imported files is still open.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -243,19 +243,21 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
   throwaway ledger, with the owner, at the final review.
 - [real-data-readiness.md](real-data-readiness.md) names the backup volume `CommonCentsBackups`.
   The owner's is `/Volumes/CommonCentsBackup`. A doc fix, not made.
-- M10's acceptance, and on the real ledger a verified backup, then `pf migrate` to version 21.
+- On the real ledger, a verified backup, then `pf migrate` to version 21 for M10.
+- Merging `feature/m10-rules` into `main`. Needs the owner's approval.
 - Pushing. Not authorized from here.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits | Approved on 2026-11-10 for the M10 plan and its handoff fixes, used, and for M10.1 to M10.3 on `feature/m10-rules`, each gated on the full suite | **Must be renewed** for any change after M10's review |
+| Local commits | Approved on 2026-11-10 for M10's acceptance record and the M11 plan on `feature/m10-rules`, gated on the full suite | **Must be renewed** for any change after the M11 plan's review |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |
 | M8 | Complete, verified by the owner in a browser on 2026-11-09 | Decisions from the browser (M8.4) need a new approval, as a security change |
 | M9 | Accepted on 2026-11-09, verified on the real ledger | None |
+| M10 | Accepted on 2026-11-10. Not yet verified on the real ledger | The owner's backup and `pf migrate` to 21. Merging into `main` needs approval |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Approved for the declared dependencies and build requirements, and on 2026-11-09 for pypdf 6.21.2 | Ask for anything new, an upgrade of pypdf included |
 | Network access | Approved for the clean-install dependencies, and on 2026-11-09 for pypdf's release list and install. Used, and now closed | Ask for any use |

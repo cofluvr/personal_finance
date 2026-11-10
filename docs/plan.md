@@ -491,7 +491,8 @@ the UI, a normalized merchant, local AI, and budgets.
 
 Approved by the owner on 2026-11-10 as D-064, with A to H. "Future matches" are files imported
 later, which every rule reaches, in any order. M10.1 to M10.3 approved to build in order. No
-security control changes. **M10 is built,** awaiting the owner's acceptance.
+security control changes. **M10 is complete and accepted** on 2026-11-10. Not yet verified on the
+real ledger, which stays at version 20 until a verified backup and `pf migrate` to 21.
 
 | Slice | Scope | Status |
 |---|---|---|
