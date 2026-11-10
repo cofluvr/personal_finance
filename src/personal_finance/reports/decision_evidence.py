@@ -14,6 +14,10 @@ from personal_finance.reconcile.apply import (
     load_evidence,
     superseded_by,
 )
+from personal_finance.reconcile.category_effects import (
+    effective_categorizations,
+    load_active_categorizations,
+)
 from personal_finance.reconcile.classification_effects import (
     effective_classifications,
     load_active_classifications,
@@ -32,8 +36,9 @@ from personal_finance.reconcile.supersession import successor_and_newest
 # restores only the decision just before this one, so a chain reads differently (D-048). Version 4
 # adds corrections binding records in scope, left out where there are none (D-049). Version 5
 # marks records in scope completed by hand, left out where they are not (D-050). Version 6 adds
-# classifications binding records in scope, left out where there are none (D-053).
-DECISION_REVISION_VERSION = 6
+# classifications binding records in scope, left out where there are none (D-053). Version 7 adds
+# categorizations the same way (D-063).
+DECISION_REVISION_VERSION = 7
 
 
 @dataclass(frozen=True)
@@ -349,6 +354,34 @@ def undo_outlook(
             material["classifications"]["with_decision"]
             != material["classifications"]["without_decision"]
         )
+    active_categorizations = load_active_categorizations(conn, decision.account_id)
+    touching_categorizations = [
+        categorization for categorization in active_categorizations
+        if categorization.bound_record_ids & scope
+    ]
+    if touching_categorizations:
+        categorized_record_ids = set().union(
+            *(categorization.bound_record_ids for categorization in touching_categorizations)
+        )
+
+        def categorization_view(result):
+            group_by_record_id = {
+                record_id: index
+                for index, group in enumerate(result.groups) for record_id in group.record_ids
+            }
+            # Agreement alone, for a supposed grouping: whether each group is spending follows
+            # from the classifications above, which are covered.
+            effects = effective_categorizations(active_categorizations, group_by_record_id, None)
+            return sorted(
+                [keyed(result.groups[index].record_ids), effect.state, effect.applied_value]
+                for index, effect in effects.items()
+                if categorized_record_ids.intersection(result.groups[index].record_ids)
+            )
+
+        material["categorizations"] = {
+            "with_decision": categorization_view(now),
+            "without_decision": categorization_view(after),
+        }
     return UndoOutlook(decision_revision(material), len(now.groups), len(after.groups),
                        changes_corrected_values, changes_classifications)
 

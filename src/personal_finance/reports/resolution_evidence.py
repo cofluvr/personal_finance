@@ -93,10 +93,10 @@ def load_resolution(conn: sqlite3.Connection, resolution_id: str) -> StoredResol
 
 def binding_entries(
     conn: sqlite3.Connection, record_id: str
-) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
-    """Decisions, corrections, classifications, transfer matches and one-sided transfers binding a
-    record that are not undone, active or superseded, which a completion's undo must wait for
-    (D-050, D-053, D-054, D-055)."""
+) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """Decisions, corrections, classifications, transfer matches, one-sided transfers and
+    categorizations binding a record that are not undone, active or superseded, which a
+    completion's undo must wait for (D-050, D-053, D-054, D-055, D-063)."""
     decisions = [row[0] for row in conn.execute(
         """SELECT DISTINCT pair.decision_id FROM decision_constraint pair
            WHERE ? IN (pair.left_record_id, pair.right_record_id)
@@ -141,7 +141,16 @@ def binding_entries(
            ORDER BY bound.one_sided_transfer_id""",
         (record_id,),
     )]
-    return decisions, corrections, classifications, matches, one_sided
+    categorizations = [row[0] for row in conn.execute(
+        """SELECT DISTINCT bound.assignment_id FROM category_assignment_record bound
+           WHERE bound.source_record_id = ?
+             AND NOT EXISTS (SELECT 1 FROM category_assignment_event undone
+                             WHERE undone.assignment_id = bound.assignment_id
+                               AND undone.event = 'undone')
+           ORDER BY bound.assignment_id""",
+        (record_id,),
+    )]
+    return decisions, corrections, classifications, matches, one_sided, categorizations
 
 
 def resolution_undo_outlook(

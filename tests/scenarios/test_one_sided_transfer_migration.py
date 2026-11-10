@@ -102,14 +102,14 @@ def new_statement(conn, account, counterpart):
     conn.execute(
         """INSERT INTO one_sided_transfer (id, account_id, counterpart_account_id,
                                            target_transaction_id, target_revision)
-           VALUES ('new', ?, ?, 't', 't7-0')""",
+           VALUES ('new', ?, ?, 't', 't8-0')""",
         (account, counterpart),
     )
 
 
 class TestAppendOnly:
     @pytest.mark.parametrize("statement", [
-        "UPDATE one_sided_transfer SET target_revision = 't7-0'",
+        "UPDATE one_sided_transfer SET target_revision = 't8-0'",
         "DELETE FROM one_sided_transfer",
         "INSERT INTO one_sided_transfer SELECT * FROM one_sided_transfer",
         "UPDATE one_sided_transfer_record SET source_record_id = source_record_id",

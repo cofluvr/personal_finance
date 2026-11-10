@@ -28,6 +28,8 @@ from test_decisions import (
     ALL_TABLES,
     BACKUP_TABLES,
     CAFE,
+    CATEGORIZATION_TABLES,
+    CATEGORY_TABLES,
     CHECKING_HEADER,
     FIRST_HALF,
     OTHER,
@@ -47,7 +49,8 @@ from personal_finance.db.backups import logical_digest
 from personal_finance.db.migrate import connect, load_migrations
 
 LATEST = len(load_migrations())
-LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", *REAL_LEDGER_TABLES, *BACKUP_TABLES)
+LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", *REAL_LEDGER_TABLES, *BACKUP_TABLES,
+                 *CATEGORY_TABLES, *CATEGORIZATION_TABLES)
 LEDGER_VOLUME = Path("/Volumes/SyntheticLedger")
 BACKUP_VOLUME = Path("/Volumes/SyntheticBackups")
 
@@ -733,11 +736,11 @@ LISTS = [("documents",), ("transactions",), ("totals",), ("report", "monthly"),
          ("review", "list"), ("review", "merges"), ("review", "decisions"),
          ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
          ("review", "resolutions"), ("review", "coverage", "history"), ("balance", "list"),
-         ("storage",)]
+         ("storage",), ("category", "list"), ("review", "categorizations")]
 PER_ACCOUNT = [("totals",), ("report", "monthly"), ("review", "merges"), ("review", "decisions"),
                ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
                ("review", "resolutions"), ("review", "coverage", "history"),
-               ("balance", "list"), ("balance", "check")]
+               ("balance", "list"), ("balance", "check"), ("review", "categorizations")]
 PER_ID = [
     ("SELECT id FROM ledger_transaction", [("trace",), ("review", "transaction", "show"),
                                            ("review", "merge", "show")]),
@@ -749,6 +752,7 @@ PER_ID = [
     ("SELECT id FROM transfer_match UNION ALL SELECT id FROM one_sided_transfer",
      [("review", "transfer", "show")]),
     ("SELECT id FROM record_resolution", [("review", "resolution", "show")]),
+    ("SELECT id FROM category_assignment", [("review", "categorization", "show")]),
 ]
 
 
@@ -815,6 +819,11 @@ def build_rich_ledger(ledger, *, checking_rows, decision, match, one_sided, corr
             None, "purchase", "fee")[choice]
         if financial_type:
             ledger.classify_ok(transaction, financial_type)
+        if financial_type in ("purchase", "fee", "refund"):
+            code, _, err = ledger.run("review", "categorize", transaction, "--account", "A",
+                                      "--revision", ledger.transaction_revision(transaction),
+                                      "--category", "Food")
+            assert code == 0, err
     if correction:
         ledger.correct_ok(rows_of(ledger, "a.csv")[0], "description", "SYNTHETIC CORRECTED")
 

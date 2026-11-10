@@ -14,6 +14,7 @@ from typing import NamedTuple
 
 from personal_finance.money import format_cents
 from personal_finance.reconcile.apply import stale_accounts
+from personal_finance.reconcile.category_effects import NOT_SPENDING
 from personal_finance.reconcile.classification_effects import (
     TYPE_AGAINST_DIRECTION,
     UNCLASSIFIED,
@@ -162,6 +163,22 @@ CLASSIFICATION_STATE_EXPLANATIONS = {
     TYPE_AGAINST_DIRECTION: (
         "its amount now runs against the stated type, as after a correction, so it is "
         "unclassified. Undo the classification, or the correction"
+    ),
+}
+
+# What each outcome on a categorized transaction means (D-063).
+CATEGORIZATION_STATE_EXPLANATIONS = {
+    FIELD_APPLIED: "the stated category applies",
+    FIELD_IN_CONFLICT: (
+        "categorizations disagree, so it is uncategorized. Undo all but one to settle it"
+    ),
+    FIELD_BASIS_CHANGED: (
+        "a categorization binds records now in several transactions, so it is uncategorized. Undo "
+        "it, then categorize each transaction"
+    ),
+    NOT_SPENDING: (
+        "it is no longer spending, as after its type changed or a transfer was confirmed, so it is "
+        "uncategorized. Undo the categorization, or what changed"
     ),
 }
 
@@ -498,6 +515,7 @@ def add_transaction_evidence(out, entry, shared) -> None:
         add_record_evidence(out, record, describe_role(record.record_id, primary_id, ranks), shared)
     add_corrections(out, entry)
     add_classifications(out, entry)
+    add_categorizations(out, entry)
     add_transfers(out, entry)
 
 
@@ -540,6 +558,22 @@ def add_classifications(out, entry) -> None:
         )
     state = entry.classifications[0].state
     out.add(f"    Financial type: {CLASSIFICATION_STATE_EXPLANATIONS[state]}")
+
+
+def add_categorizations(out, entry) -> None:
+    """Categorizations stay apart from the source values, like classifications (D-063). A
+    transaction none reaches shows nothing here."""
+    if not entry.categorizations:
+        return
+    out.add("  Categorizations:")
+    for categorization in entry.categorizations:
+        out.add(
+            f"    Categorization {categorization.categorization_id}: "
+            f"{shown(categorization.category)}, binding "
+            f"{describe_side(categorization.bound_records)}"
+        )
+    state = entry.categorizations[0].state
+    out.add(f"    Category: {CATEGORIZATION_STATE_EXPLANATIONS[state]}")
 
 
 def add_transfers(out, entry) -> None:

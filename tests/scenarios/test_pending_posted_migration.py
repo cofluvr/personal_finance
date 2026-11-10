@@ -32,7 +32,8 @@ def at_version_11(tmp_path):
     path = tmp_path / "ledger.db"
     create_database(path, migrations_up_to(tmp_path / "eleven", 11))
     conn = connect(path)
-    for migration in load_migrations()[12:15]:
+    # The tables today's import code reads, and 0012 does not touch.
+    for migration in (*load_migrations()[12:15], *load_migrations()[18:20]):
         conn.executescript(migration.path.read_text())
     conn.execute("INSERT INTO account (id, display_name, account_type) VALUES ('acct', 'A', 'checking')")
     month = declare_complete("2026-01-01", "2026-01-31", "posting")

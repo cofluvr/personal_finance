@@ -344,3 +344,28 @@ M8.1 compared.
 - **Older migration tests:** 0019's table is not empty, so every set-back now drops it first
   through `drop_category_tables`, and the backup test faking an older schema drops the newest
   migration's tables, read from its file, instead of naming 0018's.
+
+**How M9.2 was implemented:**
+
+- **The extraction.** `reconcile/stated_fields.py` holds what types and categories share: chain
+  states, active statements, effective values with a field's misfit state, the derived rows and
+  what is unsettled, over a `StatedField` naming one field's tables. `reconcile/statements.py`
+  makes and undoes a statement with D-043's checks in their order, and `reports/stated_evidence.py`
+  loads, lists and gives the undo material. `classification_effects.py`, `classifications.py` and
+  `classification_evidence.py` keep every public name and message, now over the shared code.
+- **Categories** are `category_effects.py`, `categorizations.py` and `categorization_evidence.py`
+  over the same code, with migration 0020's tables mirroring 0013's. Spending is read from the
+  derived types and transfer effects, so `write_transfer_effects` ends by rewriting every
+  categorized account's categories, wherever types or transfers are rewritten. `SPENDING_TYPES` and
+  `CONFIRMED_TRANSFER_SQL` moved there from `reports/totals.py`, which imports them.
+- **Tokens:** `r10`, `t8`, `d7` and `c3`. `r` and `t` add each transaction's categorizations by
+  category name, left out while empty. `d` adds the categorizations of the groups either side, by
+  agreement alone, since whether a supposed group is spending follows from the types it already
+  covers. `c` adds, for an amount, the outcome now of categorizations on its transactions. `g1` is
+  the categorization undo token. Tests pinning `r9`, `t7`, `d6` and `c2` were moved to the new
+  versions with every pinned digest unchanged, and the stale "last version" tokens now name the
+  version before.
+- `review confirm` and `review separate` refuse with `LEAVES_CATEGORIZATION_UNSETTLED`, after the
+  types check, and a completion's undo waits for a categorization binding its record. Other
+  commands that can leave a categorization unsettled, such as an undo or a classification, do not
+  say so in their own output: `totals` and `review categorizations` disclose it.

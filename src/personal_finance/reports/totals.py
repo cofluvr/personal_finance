@@ -9,11 +9,9 @@ from dataclasses import dataclass
 
 from personal_finance.db.id_lists import ids_as_json_array
 from personal_finance.reconcile.apply import STATE_ACTIVE, decision_states, declared_coverage
+from personal_finance.reconcile.category_effects import CONFIRMED_TRANSFER_SQL, SPENDING_TYPES
 from personal_finance.reconcile.classification_effects import FINANCIAL_TYPES, UNCLASSIFIED
 from personal_finance.reconcile.transfer_effects import TRANSFER_TYPES, transfer_candidates
-
-# Applied types counted as spending, a refund reducing it (PRD §9, D-056).
-SPENDING_TYPES = ("purchase", "fee", "interest", "refund")
 
 
 @dataclass(frozen=True)
@@ -384,17 +382,6 @@ class IncomeAndSpending:
     @property
     def confirmed_transfers(self) -> GroupTotal:
         return combined(group for _, group in self.confirmed_transfers_by_type)
-
-
-# Whether a transfer is confirmed on the transaction `entry`. An effect row names its transactions
-# only while it applies, so naming one confirms it.
-CONFIRMED_TRANSFER_SQL = """
-    EXISTS (SELECT 1 FROM transfer_match_effect matched
-            WHERE matched.outflow_transaction_id = entry.id)
-    OR EXISTS (SELECT 1 FROM transfer_match_effect matched
-               WHERE matched.inflow_transaction_id = entry.id)
-    OR EXISTS (SELECT 1 FROM one_sided_transfer_effect one_sided
-               WHERE one_sided.transaction_id = entry.id)"""
 
 
 class IncomeAndSpendingTally:
