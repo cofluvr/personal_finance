@@ -24,6 +24,7 @@ from personal_finance.reconcile.classifications import (
     TRANSACTION_NOT_FOUND,
     TRANSACTION_WRONG_ACCOUNT,
     TYPE_AGAINST_DIRECTION,
+    TYPE_ALONE_UNSETTLED,
     TYPE_UNCHANGED,
     TYPE_UNKNOWN,
     TYPE_UNSETTLED,
@@ -336,7 +337,8 @@ class TestRefusals:  # F4
         assert "its amount now runs against the stated type" in ledger.transaction_show(transaction)
         for attempt in (lambda: ledger.classify(transaction, "purchase", supersedes=refund),
                         lambda: ledger.classify(transaction, "purchase")):
-            self.nothing_changes(ledger, attempt, TYPE_UNSETTLED.split("{")[0])
+            self.nothing_changes(ledger, attempt,
+                                 TYPE_ALONE_UNSETTLED.format(classifications=refund))
 
     def test_supersedes_needs_its_revision(self, ledger):
         transaction = single(ledger)
@@ -512,6 +514,11 @@ class TestSplits:  # F8
         assert "binds records now in several transactions: 2" in ledger.totals()
         out = ledger.classification_show(classification)
         assert out.count("unclassified, basis changed now, unclassified after") == 2
+        before = ledger.dump()
+        code, _, err = ledger.classify(holding(ledger, "a.csv"), "fee")
+        assert (code, err) == (2, "Error: " + TYPE_ALONE_UNSETTLED.format(
+            classifications=classification) + "\n")
+        assert ledger.dump() == before
 
     def test_undoing_it_leaves_them_plainly_unclassified(self, ledger):
         classification = classified_by_id_then_split(ledger)

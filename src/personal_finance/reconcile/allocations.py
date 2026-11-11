@@ -53,7 +53,11 @@ AMOUNTS_NOT_WHOLE = (
     "the amounts must sum to exactly the transaction's effective amount, as review transaction "
     "show gives it, ignoring its sign. Nothing was changed."
 )
-ALLOCATION_UNCHANGED = "this transaction already has this allocation. Nothing was changed."
+PERCENT_ONE_PART = (
+    "an allocation by percent needs two or more members. To allocate all of it to one member, use "
+    "--member. Nothing was changed."
+)
+ALLOCATION_UNCHANGED ="this transaction already has this allocation. Nothing was changed."
 ALREADY_ALLOCATED = (
     "allocation {allocation} already applies to this transaction. Nothing was changed. To replace "
     "it, inspect it with review allocation show, then allocate again naming it with --supersedes."
@@ -62,6 +66,12 @@ ALLOCATION_UNSETTLED = (
     "allocations {allocations} bind this transaction, and they disagree, lost their basis, no "
     "longer sum to its amount or are several, so it is unattributed. Nothing was changed. Undo all "
     "but one of them first, one at a time."
+)
+# One allocation alone cannot disagree, so it lost its basis or no longer sums to the amount.
+ALLOCATION_ALONE_UNSETTLED = (
+    "allocation {allocations} binds this transaction, but lost its basis or no longer sums to its "
+    "amount, so it is unattributed. Nothing was changed. Undo it, or what changed the amount, "
+    "first."
 )
 ALLOCATION_NOT_FOUND = "allocation not found. Run review allocations."
 ALLOCATION_WRONG_ACCOUNT = "this allocation belongs to another account. Nothing was changed."
@@ -113,7 +123,8 @@ def write_parts(conn: sqlite3.Connection, allocation_id: str, value: str) -> Non
 ALLOCATIONS = StatementKind(
     ALLOCATION_STATEMENTS,
     StatementRefusals(
-        unsettled=lambda ids: ALLOCATION_UNSETTLED.format(allocations=ids),
+        unsettled=lambda ids: (ALLOCATION_UNSETTLED if ", " in ids
+                               else ALLOCATION_ALONE_UNSETTLED).format(allocations=ids),
         already_applies=lambda applying: ALREADY_ALLOCATED.format(allocation=applying),
         unchanged=ALLOCATION_UNCHANGED,
         supersedes_not_here=ALLOCATION_SUPERSEDES_NOT_HERE,
@@ -155,7 +166,8 @@ def checked_value(conn: sqlite3.Connection, stated: Stated) -> str:
             raise DecisionRefused(ATTRIBUTION_WITHOUT_SHARE)
         return canonical(BY_SHARE, [])
     if stated.percents:
-        return canonical(BY_PERCENT, checked_parts(household, list(stated.percents)))
+        return canonical(BY_PERCENT, checked_parts(household, list(stated.percents),
+                                                   one_part_refusal=PERCENT_ONE_PART))
     parts = {}
     for typed in stated.amounts:
         name, separator, amount = typed.rpartition("=")

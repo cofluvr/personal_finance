@@ -28,6 +28,7 @@ from personal_finance.reconcile.categorizations import (
     CATEGORIZATION_SUPERSEDED_IN_CHAIN,
     CATEGORIZATION_SUPERSEDES_NOT_HERE,
     CATEGORIZATION_WRONG_ACCOUNT,
+    CATEGORY_ALONE_UNSETTLED,
     CATEGORY_UNCHANGED,
     CATEGORY_UNKNOWN,
     CATEGORY_UNSETTLED,
@@ -360,6 +361,11 @@ class TestSeveral:  # CB2
                                               (("b.csv",), "basis_changed", None)]
         out = ledger.categorization_show(categorization)
         assert out.count("uncategorized, basis changed now, uncategorized after") == 2
+        before = ledger.everything()
+        code, _, err = ledger.categorize(holding(ledger, "a.csv"), "Travel")
+        assert (code, err) == (2, "Error: " + CATEGORY_ALONE_UNSETTLED.format(
+            categorizations=categorization) + "\n")
+        assert ledger.everything() == before
 
 
 class TestNotSpending:  # CB2
@@ -381,7 +387,7 @@ class TestNotSpending:  # CB2
         ledger.classify_ok(transaction, "transfer", supersedes=classification)
         before = ledger.everything()
         code, _, err = ledger.categorize(transaction, "Travel")
-        assert (code, err) == (2, "Error: " + CATEGORY_UNSETTLED.format(
+        assert (code, err) == (2, "Error: " + CATEGORY_ALONE_UNSETTLED.format(
             categorizations=categorization) + "\n")
         assert ledger.everything() == before
 

@@ -45,6 +45,12 @@ CATEGORY_UNSETTLED = (
     "basis, are no longer on spending or are several, so it is uncategorized. Nothing was "
     "changed. Undo all but one of them first, one at a time."
 )
+# One categorization alone cannot disagree, so it lost its basis or is no longer on spending.
+CATEGORY_ALONE_UNSETTLED = (
+    "categorization {categorizations} binds this transaction, but lost its basis or is no longer "
+    "on spending, so it is uncategorized. Nothing was changed. Undo it, or what made it no longer "
+    "spending, first."
+)
 CATEGORIZATION_NOT_FOUND = "categorization not found. Run review categorizations."
 CATEGORIZATION_WRONG_ACCOUNT = (
     "this categorization belongs to another account. Nothing was changed."
@@ -88,7 +94,8 @@ class CategorizationUndone:
 CATEGORIZATIONS = StatementKind(
     CATEGORY_STATEMENTS,
     StatementRefusals(
-        unsettled=lambda ids: CATEGORY_UNSETTLED.format(categorizations=ids),
+        unsettled=lambda ids: (CATEGORY_UNSETTLED if ", " in ids
+                               else CATEGORY_ALONE_UNSETTLED).format(categorizations=ids),
         already_applies=lambda applying: ALREADY_CATEGORIZED.format(categorization=applying),
         unchanged=CATEGORY_UNCHANGED,
         supersedes_not_here=CATEGORIZATION_SUPERSEDES_NOT_HERE,
