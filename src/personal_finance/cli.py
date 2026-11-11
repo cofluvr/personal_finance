@@ -197,6 +197,7 @@ from personal_finance.reports.report_text import (
     describe_role,
     describe_rule,
     document_list_lines,
+    household_report_lines,
     monthly_report_lines,
     out_and_in,
     review_item_report,
@@ -1027,6 +1028,17 @@ def build_parser() -> argparse.ArgumentParser:
     monthly.add_argument("--account", help="account name or ID")
     monthly.add_argument("--from", dest="first_month", help="the first month, YYYY-MM, inclusive")
     monthly.add_argument("--to", dest="last_month", help="the last month, YYYY-MM, inclusive")
+    household = command(
+        "household", report_commands, handler=run_report_household,
+        help="income and spending by household member, side by side, for one member or shared",
+    )
+    household.add_argument("--account", help="account name or ID")
+    household.add_argument("--from", dest="first_month", help="the first month, YYYY-MM, inclusive")
+    household.add_argument("--to", dest="last_month", help="the last month, YYYY-MM, inclusive")
+    household_view = household.add_mutually_exclusive_group()
+    household_view.add_argument("--member", help="one member's parts, a name from household members")
+    household_view.add_argument("--shared", action="store_true",
+                                help="only transactions divided among more than one member")
 
     command(
         "ui", handler=run_ui,
@@ -3188,6 +3200,24 @@ def run_report_monthly(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
     print_report(monthly_report_lines(conn, account_id, first_month, last_month))
+    return 0
+
+
+def run_report_household(args) -> int:
+    first_month = validated_month("--from", args.first_month)
+    last_month = validated_month("--to", args.last_month)
+    if first_month and last_month and first_month > last_month:
+        raise CommandError("--from is after --to. Nothing was changed.")
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    member_id = None
+    if args.member is not None:
+        member = load_household(conn).find_member(args.member)
+        if member is None:
+            raise CommandError("household member not found. Run household members.")
+        member_id = member.member_id
+    print_report(household_report_lines(conn, account_id, first_month, last_month, member_id,
+                                        args.shared))
     return 0
 
 

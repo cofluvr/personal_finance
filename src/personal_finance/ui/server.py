@@ -24,6 +24,8 @@ from personal_finance.cli import (
 from personal_finance.reports.report_text import (
     account_choices,
     document_list_lines,
+    household_report_lines,
+    member_choices,
     monthly_report_lines,
     review_item_report,
     review_queue_lines,
@@ -68,6 +70,7 @@ form { margin: 0 0 16px; }
 NAVIGATION = (
     ("/", "Totals"),
     ("/monthly", "Monthly"),
+    ("/household", "Household"),
     ("/documents", "Import results"),
     ("/transactions", "Transactions"),
     ("/review", "Review queue"),
@@ -78,6 +81,7 @@ NAVIGATION = (
 PAGE_PARAMETERS = {
     "/": {"account"},
     "/monthly": {"account", "from", "to"},
+    "/household": {"account", "from", "to", "member", "view"},
     "/documents": set(),
     "/transactions": set(),
     "/review": set(),
@@ -240,9 +244,25 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         last_month = validated_month("to", parameters.get("to") or None)
         if first_month and last_month and first_month > last_month:
             raise CommandError("from is after to. Nothing was changed.")
+        if path == "/household":
+            return self.answer_household(conn, parameters, account_id, first_month, last_month)
         form = account_form(conn, "/monthly", account_id, first_month, last_month)
         lines = monthly_report_lines(conn, account_id, first_month, last_month)
         self.send_page(200, "Monthly report", lines, form=form)
+
+    def answer_household(self, conn, parameters, account_id, first_month, last_month):
+        """The household report in one view: side by side, one member's by ID, or shared."""
+        member = parameters.get("member") or None
+        view = parameters.get("view") or None
+        members = {member_id for member_id, _ in member_choices(conn)}
+        if (member is not None and (not member.isdigit() or int(member) not in members)) or (
+                view not in (None, "shared")) or (member is not None and view is not None):
+            return self.send_page(400, "Bad address", notice=BAD_ADDRESS)
+        member_id = None if member is None else int(member)
+        form = household_form(conn, account_id, first_month, last_month, member_id, view)
+        lines = household_report_lines(conn, account_id, first_month, last_month, member_id,
+                                       view == "shared")
+        self.send_page(200, "Household report", lines, form=form)
 
     def send_page(self, status, heading, lines=(), *, notice="", form="", after="",
                   extra_headers=()):
@@ -315,7 +335,7 @@ def account_form(conn, action, account_id, first_month=None, last_month=None) ->
         selected = " selected" if choice_id == account_id else ""
         options.append(f'<option value="{escaped(choice_id)}"{selected}>{escaped(name)}</option>')
     months = ""
-    if action == "/monthly":
+    if action in ("/monthly", "/household"):
         months = (
             '<label> From <input name="from" placeholder="YYYY-MM" size="8" '
             f'value="{escaped(first_month or "")}"></label>'
@@ -324,6 +344,21 @@ def account_form(conn, action, account_id, first_month=None, last_month=None) ->
         )
     return (f'<form method="get" action="{action}"><label>Account <select name="account">'
             f'{"".join(options)}</select></label>{months} <button>Show</button></form>')
+
+
+def household_form(conn, account_id, first_month, last_month, member_id, view) -> str:
+    """The monthly form, then a choice of view: side by side, one member, or shared."""
+    form = account_form(conn, "/household", account_id, first_month, last_month)
+    choices = ['<option value="">Side by side</option>']
+    selected = " selected" if view == "shared" else ""
+    choices.append(f'<option value="shared"{selected}>Shared</option>')
+    members = ['<option value="">Every member</option>']
+    for choice_id, name in member_choices(conn):
+        selected = " selected" if choice_id == member_id else ""
+        members.append(f'<option value="{choice_id}"{selected}>{escaped(name)}</option>')
+    views = (f'<label> View <select name="view">{"".join(choices)}</select></label>'
+             f'<label> Member <select name="member">{"".join(members)}</select></label>')
+    return form.replace(" <button>Show</button>", f"{views} <button>Show</button>")
 
 
 def decision_hint(ledger_path, report) -> str:

@@ -444,3 +444,39 @@ about 0.4s to a classification and 0.55s to an import, linear in rules and spend
 seconds is thin with or without rules: M4.4 recorded 1.389s on this shape, and the same machine gave
 1.951s with no rules in this session. A run made while the suite's deliberate breaks were running
 gave 2.219s for `totals`, which is why these figures were taken with nothing else running.
+
+**Household allocations on the 100,000-transaction shape (M11.3, HC5, D-065 point 9),** measured
+2026-11-10 with `measure_reconciliation.py --scale --household`, then `--scale` in the same
+session for the column without, nothing else running. Full output is in `build/m11/bench/`, which
+is ignored and may not survive.
+
+M4.4's shape, then written directly: members Michael and M, a 50/50 share, checking and the card
+attributed `shared`, savings to Michael and the loan to M, and 5,000 allocations on the loan's
+transactions in no transfer: 4,800 of the four kinds in turn, a second, disagreeing one on 100 of
+them, and 100 by amount summing to a cent more than their transaction. The shape asserts its
+counts: 4,700 allocations apply, 100 transactions are in `conflict` and 100 in `amount_differs`,
+and the household holds 25,000 transactions for Michael alone, 21,275 for M alone, 53,525 divided
+between them and 200 unattributed.
+
+| Operation | 5,000 allocations | No household, same session | Provisional target |
+|---|---|---|---|
+| `pf totals` | 1.790s | 1.520s | Below 2s: met |
+| `pf report monthly` | 0.736s | 0.719s | Below 2s: met |
+| `pf report household`, side by side | 1.296s | | Below 2s: met |
+| `pf report household --member M` | 1.132s | | Below 2s: met |
+| `pf report household --shared` | 1.155s | | Below 2s: met |
+| `review allocate`, under the write lock | 0.600s | | None, stopping rule below |
+| `review allocation undo`, under the write lock | 0.518s | | None, stopping rule below |
+| `household account undo`, then `set` | 1.779s | | None |
+| `household share undo`, then `set` | 6.091s | | None |
+| One classification | 2.014s | 1.381s | None |
+| One import of one row | 2.782s | 2.164s | None |
+
+**Point 9's stopping rule is not met:** every view of `report household` runs below two seconds,
+and an allocation and its undo each cost less than twice the import of one row. Rewriting 4,900
+allocation outcomes on every write adds about 0.6s to a classification and an import, linear in
+the allocated account's transactions. `totals` reads no household table, so its 0.27s difference
+is run-to-run variance, as M10 recorded. A share set or undo computes `h1` over every transaction
+the share reaches, here 53,525, by their records' document hashes and rows, once to check the
+token and once to report what moved, about 1.5s each time, so an undo and a set take about 6s.
+

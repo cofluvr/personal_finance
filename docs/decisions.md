@@ -621,6 +621,40 @@ these go.
   Every types and categories command is among them. Another 15,058 runs of the household commands
   and `review allocations` show no member, default or allocation on every ledger that opens.
 
+**How M11.3 was implemented:**
+
+- `reports/household.py` builds the report from one read of every transaction's month, applied
+  type, confirmed transfer and category, as `report monthly` reads them, and each transaction's
+  attribution from `household_effects`. Each column is an `IncomeAndSpendingTally`, the class
+  `totals` and `report monthly` count with, so every column follows D-056's groups and D-063's
+  categories with no rule of its own. A member's column adds that member's parts.
+- **Views:** side by side gives each member, then `unattributed`, then the household, whose
+  column adds every transaction whole, so it equals `totals`' groups for the ledger and an account,
+  and the sum of `report monthly`'s months for a range, tested on generated ledgers. `--member`
+  gives that member's personal, shared and allocated parts apart, then all of them. `--shared`
+  gives the transactions divided among more than one member, each member's part, then whole.
+  Parts sum to their transaction exactly and carry its sign, so in every view each row's columns
+  add exactly to the last, out and in apart. A divided transaction counts in each member's column,
+  so the Transactions row adds across only where none is divided, which the report says.
+- `pf report household` prints a table, one row per group and direction, then spending by type and,
+  while a category reaches spending, by category, with disclosures: `unattributed` by reason (no
+  default, `shared` with no share, allocations disagreeing, a changed basis, amounts no longer
+  summing), transactions outside the months asked for, the share, and every account's default in
+  scope. `totals` and `report monthly` are unchanged, compared on generated ledgers before and
+  after members, defaults and allocations are added.
+- **Its UI page,** `/household`, renders the same builder's lines, and equals the command line for
+  line in every view, account and month range on generated ledgers, a member's name holding HTML
+  shown as text. Its address takes `account`, `from`, `to`, `member` (an ID, since an address value
+  is only `[A-Za-z0-9_-]`) and `view=shared`, refusing an unknown member, any other view or both at
+  once. The server still imports only the CLI and `report_text`, through a new `member_choices`.
+  No security control changed.
+- **Benchmark:** `measure_reconciliation.py --scale --household` on M4.4's shape, with two members,
+  a 50/50 share, checking and the card `shared`, savings and the loan personal, and 5,000
+  allocations of every kind, 100 in `conflict` and 100 in `amount_differs`, asserting what each
+  member, `shared` and `unattributed` hold. `report household` runs in 1.30s side by side, 1.13s
+  for one member and 1.16s for shared, and an allocation in 0.60s against 2.78s for an import of one
+  row, so point 9's stopping rule is not met. Figures are in [benchmarks.md](benchmarks.md).
+
 ## D-066 Roadmap to a finished backend: M12 to M21 — Approved
 
 Proposed on 2026-11-10, at the owner's request, after D-065, and **approved by the owner the same
