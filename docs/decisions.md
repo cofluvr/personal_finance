@@ -662,8 +662,9 @@ these go.
   not the share's. `checked_parts` takes the one-part refusal as a parameter.
 - Allocating where one allocation alone is in `basis_changed` or `amount_differs` names it and says
   to undo it, or what changed the amount, rather than "all but one". The message for several is
-  unchanged. Types' and categories' messages share the old wording and are unchanged: a separate
-  change, if wanted.
+  unchanged. Types' and categories' messages got the same fix in a separate commit, at the owner's
+  word on 2026-11-10, as the condition of accepting M11: one classification alone names its basis
+  or direction, one categorization alone its basis or leaving spending.
 - Kept as built: the report's layout, one row per group and direction, a member with nothing still
   given a column; counts printed as "1 records", as everywhere else; a refund attributed by its own
   statement or default, not its purchase's, so it nets to zero for each member only when both are

@@ -55,6 +55,12 @@ TYPE_UNSETTLED = (
     "no longer fit its direction or are several, so it is unclassified. Nothing was changed. Undo "
     "all but one of them first, one at a time."
 )
+# One classification alone cannot disagree, so it lost its basis or no longer fits the direction.
+TYPE_ALONE_UNSETTLED = (
+    "classification {classifications} binds this transaction, but lost its basis or no longer "
+    "fits its direction, so it is unclassified. Nothing was changed. Undo it, or what changed the "
+    "direction, first."
+)
 CLASSIFICATION_NOT_FOUND = "classification not found. Run review classifications."
 CLASSIFICATION_WRONG_ACCOUNT = (
     "this classification belongs to another account. Nothing was changed."
@@ -105,7 +111,8 @@ def _rewrite_effects(conn, account_id) -> None:
 CLASSIFICATIONS = StatementKind(
     TYPE_STATEMENTS,
     StatementRefusals(
-        unsettled=lambda ids: TYPE_UNSETTLED.format(classifications=ids),
+        unsettled=lambda ids: (TYPE_UNSETTLED if ", " in ids
+                               else TYPE_ALONE_UNSETTLED).format(classifications=ids),
         already_applies=lambda applying: ALREADY_CLASSIFIED.format(classification=applying),
         unchanged=TYPE_UNCHANGED,
         supersedes_not_here=SUPERSEDES_NOT_HERE,
