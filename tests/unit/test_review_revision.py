@@ -169,13 +169,16 @@ def test_exempt_fields_are_identifiers_names_and_the_stale_warning_only():
         "issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
         "account_name", "decision_id", "correction_id", "classification_id", "match_id",
         "counterpart_transaction_id", "one_sided_transfer_id", "categorization_id", "rule_id",
+        # The attribution an account's default gives, the same for every transaction of the
+        # account, so no decision or correction changes it (D-065 point 6).
+        "household", "allocation_id",
     }
 
 
 def test_only_statements_completions_declarations_and_transfers_are_left_out_while_empty():
     assert OMITTED_WHILE_EMPTY == {"corrections", "completion", "declared", "classifications",
                                    "transfers", "one_sided_transfers", "categorizations",
-                                   "category_rules"}
+                                   "category_rules", "allocations"}
 
 
 @pytest.mark.parametrize("field", ["transactions", "unresolved", "documents", "decided"])
@@ -193,16 +196,16 @@ def test_moving_a_record_between_transactions_changes_the_revision():
 
 
 def test_the_definition_is_pinned_so_a_change_must_bump_the_version():
-    assert REVISION_VERSION == 11
+    assert REVISION_VERSION == 12
     # Versions 8 to 11 add transfer matches, one-sided transfers, categorizations and the category
     # rules' outcome, each left out while empty, so digests are kept (D-054, D-055, D-063, D-064).
-    assert review_revision(item()) == "r11-8f8c8b328e5b7256"
-    assert review_revision(with_transfer()) == "r11-ba0201407a1df723"
-    assert review_revision(with_one_sided()) == "r11-97445dff40cef780"
+    assert review_revision(item()) == "r12-8f8c8b328e5b7256"
+    assert review_revision(with_transfer()) == "r12-ba0201407a1df723"
+    assert review_revision(with_one_sided()) == "r12-97445dff40cef780"
 
 
 def test_the_token_has_the_documented_form():
-    assert re.fullmatch(r"r11-[0-9a-f]{16}", review_revision(item()))
+    assert re.fullmatch(r"r12-[0-9a-f]{16}", review_revision(item()))
 
 
 def test_rows_sharing_a_document_ignores_documents_with_one_record():

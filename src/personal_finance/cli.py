@@ -80,6 +80,23 @@ from personal_finance.reconcile.record_resolutions import (
     dismiss_record,
     undo_resolution,
 )
+from personal_finance.reconcile.allocation_effects import AMOUNT_DIFFERS
+from personal_finance.reconcile.allocations import Stated, allocate_transaction, undo_allocation
+from personal_finance.reconcile.household import (
+    add_member,
+    set_account_default,
+    set_share,
+    undo_account_default,
+    undo_share,
+)
+from personal_finance.reconcile.household_effects import (
+    NO_DEFAULT,
+    NO_SHARE,
+    SHARED,
+    UNATTRIBUTED,
+    format_percent,
+    load_household,
+)
 from personal_finance.reconcile.decisions import (
     DecisionRefused,
     confirm_groups,
@@ -143,8 +160,21 @@ from personal_finance.reports.coverage_evidence import (
     load_declaration,
     load_document_coverage,
 )
+from personal_finance.reports.allocation_evidence import (
+    allocation_undo_outlook,
+    list_allocations,
+    load_allocation,
+    member_names,
+)
+from personal_finance.reports.household_evidence import (
+    account_names,
+    account_reach,
+    default_words,
+    share_reach,
+)
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.report_text import (
+    ATTRIBUTION_EXPLANATIONS,
     CATEGORIZATION_STATE_EXPLANATIONS,
     CLASSIFICATION_STATE_EXPLANATIONS,
     FIELD_STATE_EXPLANATIONS,
@@ -155,6 +185,7 @@ from personal_finance.reports.report_text import (
     add_decided_pairs,
     add_document_evidence,
     add_transaction_evidence,
+    describe_allocation,
     describe_classifications,
     describe_conflicts,
     describe_corrections,
@@ -166,7 +197,9 @@ from personal_finance.reports.report_text import (
     describe_role,
     describe_rule,
     document_list_lines,
+    household_report_lines,
     monthly_report_lines,
+    out_and_in,
     review_item_report,
     review_queue_lines,
     shown,
@@ -290,6 +323,16 @@ CATEGORIZE_NOTICE = (
     "Totals list spending by category. Spending itself is unchanged, matching never reads "
     "categories, and new records are not bound, but a re-export that joins this transaction keeps "
     "the category applied."
+)
+
+ALLOCATE_NOTICE = (
+    "Totals and report monthly are unchanged, and report household counts each member's part. "
+    "Matching never reads allocations, and new records are not bound, but a re-export that joins "
+    "this transaction keeps the allocation applied."
+)
+
+ALLOCATION_UNDO_NOTICE = (
+    "The transaction takes the allocation this one superseded, else its account's default."
 )
 
 CATEGORIZATION_UNDO_NOTICE = (
@@ -420,6 +463,51 @@ def build_parser() -> argparse.ArgumentParser:
     rule_undo.add_argument("rule_id", help="a rule ID from category rules")
     rule_undo.add_argument("--revision", required=True,
                            help="the revision from category rule show")
+
+    household = commands.add_parser(
+        "household", help="name household members, the household share and account defaults")
+    household_commands = household.add_subparsers(dest="household_command", required=True)
+    member = household_commands.add_parser("member", help="add a household member")
+    member_commands = member.add_subparsers(dest="member_command", required=True)
+    member_add = command("add", member_commands, handler=run_household_member_add,
+                         help="add a member, kept as typed and never renamed or removed")
+    member_add.add_argument("name", help="the member's name or initial, compared exactly")
+    command("members", household_commands, handler=run_household_members,
+            help="list household members in the order added")
+    share = household_commands.add_parser("share", help="show, set or undo the household share")
+    share_commands = share.add_subparsers(dest="share_command", required=True)
+    command("show", share_commands, handler=run_household_share_show,
+            help="show the household share and what it reaches")
+    share_set = command("set", share_commands, handler=run_household_share_set,
+                        help="say how shared divides among members")
+    share_set.add_argument("--part", action="append", required=True, metavar="NAME=PERCENT",
+                           help="a member and their percent, at most two decimals; repeat")
+    share_set.add_argument("--revision", required=True,
+                           help="the revision from household share show")
+    share_undo = command("undo", share_commands, handler=run_household_share_undo,
+                         help="stop the household share applying, keeping it on record")
+    share_undo.add_argument("--revision", required=True,
+                            help="the revision from household share show")
+    attribution = household_commands.add_parser(
+        "account", help="show, set or undo an account's default attribution")
+    attribution_commands = attribution.add_subparsers(dest="attribution_command", required=True)
+    attribution_show = command("show", attribution_commands, handler=run_household_account_show,
+                               help="show an account's default and what it reaches")
+    attribution_show.add_argument("--account", required=True, help="account name or ID")
+    attribution_set = command("set", attribution_commands, handler=run_household_account_set,
+                              help="attribute an account's transactions to a member or shared")
+    attribution_set.add_argument("--account", required=True, help="account name or ID")
+    attributed_to = attribution_set.add_mutually_exclusive_group(required=True)
+    attributed_to.add_argument("--member", help="a name from household members")
+    attributed_to.add_argument("--shared", action="store_true",
+                               help="divided by the household share")
+    attribution_set.add_argument("--revision", required=True,
+                                 help="the revision from household account show")
+    attribution_undo = command("undo", attribution_commands, handler=run_household_account_undo,
+                               help="stop an account's default applying, keeping it on record")
+    attribution_undo.add_argument("--account", required=True, help="account name or ID")
+    attribution_undo.add_argument("--revision", required=True,
+                                  help="the revision from household account show")
 
     importer = command("import", handler=run_import, help="import files")
     importer.add_argument("--account", required=True, help="account name or ID")
@@ -743,6 +831,56 @@ def build_parser() -> argparse.ArgumentParser:
     )
     transfers.add_argument("--account", help="account name or ID")
 
+    allocate = command(
+        "allocate", review_commands, handler=run_review_allocate,
+        help="state who a transaction's effective amount belongs to",
+    )
+    allocate.add_argument("transaction_id", help="a transaction ID from transactions")
+    allocate.add_argument("--account", required=True, help="account name or ID")
+    allocate.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    allocated_to = allocate.add_mutually_exclusive_group(required=True)
+    allocated_to.add_argument("--member", help="a name from household members, for all of it")
+    allocated_to.add_argument("--shared", action="store_true",
+                              help="divided by the household share active when read")
+    allocated_to.add_argument("--percent", action="append", metavar="NAME=PERCENT",
+                              help="a member and their percent, at most two decimals; repeat")
+    allocated_to.add_argument("--amount", action="append", metavar="NAME=AMOUNT",
+                              help="a member and their part, as 12.50, summing to the amount; "
+                                   "repeat")
+    allocate.add_argument(
+        "--supersedes", metavar="ALLOCATION_ID",
+        help="the allocation applying to this transaction now, which this one replaces",
+    )
+    allocate.add_argument(
+        "--supersedes-revision", metavar="REVISION",
+        help="the revision from review allocation show for the allocation being replaced",
+    )
+
+    allocations = command(
+        "allocations", review_commands, handler=run_review_allocations,
+        help="list stored allocations",
+    )
+    allocations.add_argument("--account", help="account name or ID")
+
+    allocation = review_commands.add_parser("allocation", help="inspect or undo one allocation")
+    allocation_commands = allocation.add_subparsers(dest="allocation_command", required=True)
+    allocation_show = command(
+        "show", allocation_commands, handler=run_review_allocation_show,
+        help="show what an allocation binds and what undoing it would do",
+    )
+    allocation_show.add_argument("allocation_id", help="an allocation ID from review allocations")
+    allocation_undo = command(
+        "undo", allocation_commands, handler=run_review_allocation_undo,
+        help="stop an allocation applying, keeping it on record",
+    )
+    allocation_undo.add_argument("allocation_id", help="an allocation ID from review allocations")
+    allocation_undo.add_argument("--account", required=True, help="account name or ID")
+    allocation_undo.add_argument(
+        "--revision", required=True, help="the revision from review allocation show"
+    )
+
     transfer = review_commands.add_parser(
         "transfer", help="match, inspect or undo a transfer between two accounts"
     )
@@ -890,6 +1028,17 @@ def build_parser() -> argparse.ArgumentParser:
     monthly.add_argument("--account", help="account name or ID")
     monthly.add_argument("--from", dest="first_month", help="the first month, YYYY-MM, inclusive")
     monthly.add_argument("--to", dest="last_month", help="the last month, YYYY-MM, inclusive")
+    household = command(
+        "household", report_commands, handler=run_report_household,
+        help="income and spending by household member, side by side, for one member or shared",
+    )
+    household.add_argument("--account", help="account name or ID")
+    household.add_argument("--from", dest="first_month", help="the first month, YYYY-MM, inclusive")
+    household.add_argument("--to", dest="last_month", help="the last month, YYYY-MM, inclusive")
+    household_view = household.add_mutually_exclusive_group()
+    household_view.add_argument("--member", help="one member's parts, a name from household members")
+    household_view.add_argument("--shared", action="store_true",
+                                help="only transactions divided among more than one member")
 
     command(
         "ui", handler=run_ui,
@@ -1058,6 +1207,132 @@ def run_category_list(args) -> int:
         indent = "  " if category.parent_id is not None else ""
         print(f"{indent}{shown(category.name)}")
     print(f"Categories: {len(categories)}")
+    return 0
+
+
+def run_household_member_add(args) -> int:
+    conn = open_ledger(args.db)
+    member = add_member(conn, args.name)
+    print(f"Added household member {shown(member.name)}")
+    return 0
+
+
+def run_household_members(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    members = load_household(conn).members
+    for member in members:
+        print(shown(member.name))
+    print(f"Household members: {len(members)}")
+    return 0
+
+
+def describe_share(household, share) -> str:
+    return ", ".join(f"{shown(household.name_of(member_id))} {format_percent(weight)}"
+                     for member_id, weight in share.parts)
+
+
+def describe_by_member(by_member) -> str:
+    return "; ".join(f"{shown(name)}, {out_and_in(group)}" for name, group in by_member) or "none"
+
+
+def print_moved(changed) -> None:
+    """What a set or undo moved. A set needs nothing active and an undo leaves nothing active, so
+    what moves goes between unattributed and members."""
+    before, after = changed.before.by_member, changed.after.by_member
+    print(f"  Moved: {out_and_in(changed.after.reached)}")
+    if not changed.after.reached.transactions:
+        return
+    print(f"    From: {describe_by_member(before) if before else UNATTRIBUTED}")
+    print(f"    To: {describe_by_member(after) if after else UNATTRIBUTED}")
+
+
+def print_reach(reach, unattributed_reason) -> None:
+    if reach.by_member:
+        print(f"  By member now: {describe_by_member(reach.by_member)}")
+    elif reach.reached.transactions:
+        print(f"  Now {UNATTRIBUTED}: {unattributed_reason}")
+    print(f"Revision: {reach.revision}")
+    if reach.stale_accounts:
+        print("An account reached has not been reconciled under the current matching rules, so "
+              "a change will be refused until it is. Run reconcile.")
+
+
+def run_household_share_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    household = load_household(conn)
+    if household.share is None:
+        print("Household share: none active")
+    else:
+        print(f"Household share: {describe_share(household, household.share)}")
+        print(f"  Share {household.share.share_id}, made {household.share.created_at}")
+        print("  To change it, undo it with household share undo, then set the new one.")
+    names = account_names(conn)
+    shared_accounts = sorted(names[account_id] for account_id, default
+                             in household.defaults.items() if default.member_id is None)
+    print(f"Accounts attributed {SHARED}: "
+          f"{', '.join(shown(name) for name in shared_accounts) or 'none'}")
+    reach = share_reach(conn, household)
+    print(f"The share reaches: {out_and_in(reach.reached)}")
+    print_reach(reach, "no household share is active")
+    return 0
+
+
+def run_household_share_set(args) -> int:
+    conn = open_ledger(args.db)
+    changed = set_share(conn, args.part, args.revision)
+    household = load_household(conn)
+    print(f"Household share {changed.statement_id} set: "
+          f"{describe_share(household, household.share)}")
+    print_moved(changed)
+    return 0
+
+
+def run_household_share_undo(args) -> int:
+    conn = open_ledger(args.db)
+    changed = undo_share(conn, args.revision)
+    print(f"Household share {changed.statement_id} undone. It stays on record.")
+    print_moved(changed)
+    print(f"  Accounts attributed {SHARED} leave their transactions {UNATTRIBUTED} until a new "
+          "share is set.")
+    return 0
+
+
+def run_household_account_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account)
+    household = load_household(conn)
+    default = household.defaults.get(account_id)
+    print(f"Account {shown(account_names(conn)[account_id])}: default "
+          f"{shown(default_words(household, default) or 'none')}")
+    if default is not None:
+        print(f"  Attribution {default.attribution_id}, made {default.created_at}")
+        print("  To change it, undo it with household account undo, then set the new one.")
+    reach = account_reach(conn, household, account_id)
+    print(f"The default reaches: {out_and_in(reach.reached)}")
+    print_reach(reach, ATTRIBUTION_EXPLANATIONS[NO_DEFAULT if default is None else NO_SHARE])
+    return 0
+
+
+def run_household_account_set(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    changed = set_account_default(conn, account_id, None if args.shared else args.member,
+                                  args.revision)
+    household = load_household(conn)
+    print(f"Account {shown(account_names(conn)[account_id])} attributed to "
+          f"{shown(default_words(household, household.defaults[account_id]))}: attribution "
+          f"{changed.statement_id}")
+    print_moved(changed)
+    return 0
+
+
+def run_household_account_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    changed = undo_account_default(conn, account_id, args.revision)
+    print(f"Attribution {changed.statement_id} of account "
+          f"{shown(account_names(conn)[account_id])} undone. It stays on record.")
+    print_moved(changed)
     return 0
 
 
@@ -1710,6 +1985,7 @@ def run_review_undo(args) -> int:
     print_newly_unsettled(result.newly_unsettled_correction_fields)
     print_newly_unclassified(result.newly_unclassified_transactions)
     print_newly_unmatched(result.newly_unsettled_matches)
+    print_newly_unattributed(result.newly_unattributed_transactions)
     print(f"  {UNDO_NOTICE}")
     return 0
 
@@ -2248,6 +2524,134 @@ def run_review_categorization_undo(args) -> int:
         )
     print(f"  {CATEGORIZATION_UNDO_NOTICE}")
     return 0
+
+
+def run_review_allocate(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    stated = Stated(args.member, args.shared, tuple(args.percent or ()), tuple(args.amount or ()))
+    result = allocate_transaction(
+        conn, account_id, args.transaction_id, args.revision, stated,
+        supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
+    )
+    names = member_names(conn)
+    print(
+        f"Allocation {result.allocation_id} recorded: transaction {args.transaction_id} is "
+        f"allocated {describe_allocation(names, result.allocation)}, binding "
+        f"{result.bound_record_count} records."
+    )
+    if args.supersedes:
+        print(f"  Supersedes allocation {args.supersedes}. It stays on record.")
+    print(f"  {ALLOCATE_NOTICE}")
+    return 0
+
+
+def run_review_allocations(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_allocations(conn, account_id)
+    names = member_names(conn)
+    for allocation_id, account, created_at, state, value, bound_count in rows:
+        print(
+            f"Allocation {allocation_id}: {state}, {describe_allocation(names, value)}, "
+            f"{bound_count} records, {shown(account)}, {created_at}"
+        )
+    print(f"Allocations: {len(rows)}")
+    unsettled = conn.execute(
+        """SELECT derived.transaction_id, derived.state FROM transaction_allocation derived
+           JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+           WHERE derived.state <> 'applied' AND (:account IS NULL OR entry.account_id = :account)
+           ORDER BY derived.transaction_id""",
+        {"account": account_id},
+    ).fetchall()
+    for transaction_id, state in unsettled:
+        print(f"Transaction {transaction_id}: {ATTRIBUTION_EXPLANATIONS[state]}")
+    if rows:
+        print("To see what an allocation binds, run review allocation show.")
+    return 0
+
+
+# How an allocated transaction's outcome reads in an undo preview.
+ALLOCATION_PREVIEW_STATES = {
+    None: "by the account's default",
+    FIELD_APPLIED: "allocated",
+    FIELD_IN_CONFLICT: f"{UNATTRIBUTED}, allocations disagree",
+    FIELD_BASIS_CHANGED: f"{UNATTRIBUTED}, basis changed",
+    AMOUNT_DIFFERS: f"{UNATTRIBUTED}, amounts no longer sum",
+}
+
+
+def run_review_allocation_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    allocation = load_allocation(conn, args.allocation_id)
+    if allocation is None:
+        raise CommandError("allocation not found. Run review allocations.")
+
+    print(f"Allocation {allocation.statement_id}")
+    print(f"  Account: {shown(allocation.account_name)} ({allocation.account_id})")
+    print(f"  Allocation: {describe_allocation(member_names(conn), allocation.shown_value)}")
+    print(f"  Status: {allocation.state}")
+    print(f"  Made: {allocation.created_at}")
+    if allocation.undone_at:
+        print(f"  Undone: {allocation.undone_at}. It stays on record and no longer applies.")
+    if allocation.superseded_by:
+        print(
+            f"  Superseded by allocation {allocation.superseded_by}. It stays on record and no "
+            "longer applies, unless that allocation is undone."
+        )
+    if allocation.newest_of_chain != allocation.superseded_by:
+        print(
+            f"  Newest of its chain: allocation {allocation.newest_of_chain}, the only one that "
+            "can be undone. Each undo restores the allocation before it."
+        )
+    if allocation.supersedes_id:
+        print(f"  Supersedes allocation {allocation.supersedes_id}")
+    print(f"  From transaction: {allocation.target_transaction_id}")
+    print("Bound records:")
+    for record in allocation.bound_records:
+        where = record.transaction_id or "no transaction"
+        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
+
+    if allocation.state == STATE_ACTIVE:
+        outlook = allocation_undo_outlook(conn, allocation)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this allocation now:")
+        if allocation.supersedes_id:
+            print(f"  Restores allocation {allocation.supersedes_id}, which it superseded")
+        for transaction_id, state_now, state_after in outlook.state_by_transaction:
+            print(
+                f"  Transaction {transaction_id}: {ALLOCATION_PREVIEW_STATES[state_now]} now, "
+                f"{ALLOCATION_PREVIEW_STATES[state_after]} after"
+            )
+        if stale_accounts(conn, DEFAULT_RULES, allocation.account_id):
+            print(
+                "This account has not been reconciled under the current matching rules, so "
+                "undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
+def run_review_allocation_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_allocation(conn, account_id, args.allocation_id, args.revision)
+
+    print(f"Allocation {args.allocation_id} undone. It stays on record and no longer applies.")
+    if result.restored:
+        print(f"  Allocation {result.restored}, which it superseded, applies again.")
+    print_newly_unattributed(result.newly_unattributed_transactions)
+    print(f"  {ALLOCATION_UNDO_NOTICE}")
+    return 0
+
+
+def print_newly_unattributed(count) -> None:
+    if count:
+        print(
+            f"  Transactions now {UNATTRIBUTED}, because allocations disagree, lost their basis or "
+            f"no longer sum to their amount: {count}. Run review allocations."
+        )
 
 
 def run_review_classification_undo(args) -> int:
@@ -2796,6 +3200,24 @@ def run_report_monthly(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
     print_report(monthly_report_lines(conn, account_id, first_month, last_month))
+    return 0
+
+
+def run_report_household(args) -> int:
+    first_month = validated_month("--from", args.first_month)
+    last_month = validated_month("--to", args.last_month)
+    if first_month and last_month and first_month > last_month:
+        raise CommandError("--from is after --to. Nothing was changed.")
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    member_id = None
+    if args.member is not None:
+        member = load_household(conn).find_member(args.member)
+        if member is None:
+            raise CommandError("household member not found. Run household members.")
+        member_id = member.member_id
+    print_report(household_report_lines(conn, account_id, first_month, last_month, member_id,
+                                        args.shared))
     return 0
 
 

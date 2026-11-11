@@ -58,7 +58,10 @@ Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M10.2: undoing a category rule | Accepted (D-064) |
 | M10.3: rules in the reports, the source of a category, the benchmark row | Accepted (D-064) |
 | **M10 overall** | **Complete and accepted** on 2026-11-10. Not yet verified on the real ledger, still at version 20 until a verified backup and `pf migrate` to 21 |
-| **M11** | **Approved** on 2026-11-10 (D-065), with the owner's members, share and defaults. Nothing built |
+| M11.1: members, the household share and account attribution | Complete (D-065), awaiting the owner's review |
+| M11.2: allocating one transaction | Complete (D-065), awaiting the owner's review |
+| M11.3: the household report, its UI page, the benchmark row | Complete (D-065), awaiting the owner's review |
+| **M11 overall** | **Built** on 2026-11-10 (D-065), awaiting the owner's review. Not on the real ledger, which stays at version 20 until 21, then 22 and 23, each after a verified backup |
 | **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). Nothing built |
 
 ## What exists
@@ -85,8 +88,8 @@ Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `0008_supersession_chains`, `0009_value_corrections`, `0010_record_resolutions`,
   `0011_coverage_declarations`, `0012_pending_posted_links`, `0013_type_classifications`,
   `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations`,
-  `0017_real_ledger`, `0018_backup_records`, `0019_categories`, `0020_categorizations` and
-  `0021_category_rules`,
+  `0017_real_ledger`, `0018_backup_records`, `0019_categories`, `0020_categorizations`,
+  `0021_category_rules`, `0022_household` and `0023_allocations`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts and five unverified institution layouts (D-059), explicit coverage, atomic
   per-file import.
@@ -119,6 +122,15 @@ Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   reach which spending transaction and the category they give, derived on every write, and adding and
   undoing a rule under one write lock (D-064). `reports.category_rule_evidence` holds the
   preview and undo outlooks, and the `p1` and `q1` tokens.
+- `personal_finance.reconcile.household_effects` and `household`: household members, the share and
+  each account's default, `allocate_cents`, each transaction's attribution resolved when read, and
+  the `household` commands under one write lock (D-065). `reports.household_evidence` holds the
+  `h1` and `a1` tokens.
+- `personal_finance.reports.household`: `pf report household`'s side-by-side, one-member and
+  shared views, counted by the same tally as `totals` (D-065).
+- `personal_finance.reconcile.allocation_effects` and `allocations`: which allocation applies to
+  which transaction, on the stated model shared with types and categories, and allocating and
+  undoing under one write lock (D-065). `reports.allocation_evidence` holds the `s1` undo token.
 - `personal_finance.reconcile.transfer_effects` and `transfers`: which transfer matches and one-sided
   transfers apply and which pairs are candidates, read after each account derives alone, and
   matching, stating and undoing under one write lock (D-054, D-055).
@@ -157,8 +169,12 @@ Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `review transfer undo`, `category add`, `category list`, `category rules`,
   `category rule preview`, `category rule add`, `category rule show`, `category rule undo`,
   `review categorize`,
-  `review categorizations`, `review categorization show`, `review categorization undo`, `totals`,
-  `report monthly`, `balance record`, `balance list`,
+  `review categorizations`, `review categorization show`, `review categorization undo`,
+  `household member add`, `household members`, `household share show`, `household share set`,
+  `household share undo`, `household account show`, `household account set`,
+  `household account undo`, `review allocate`, `review allocations`, `review allocation show`,
+  `review allocation undo`, `totals`,
+  `report monthly`, `report household`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
   `backup verify`, `backup restore`, `pdf text`, run
   through the `bin/pf` launcher (D-038).
@@ -230,7 +246,8 @@ distinct spellings per block, and in the units of a group a decision touches. On
 100,000-transaction shape every report runs below two seconds, and each write spends about 0.9s
 rewriting 20,000 match outcomes (D-057). With 300 category rules each write spends about 0.5s more
 rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close to its target
-(D-064).
+(D-064). With 5,000 allocations each write spends about 0.6s more, `report household` runs in about
+1.3s, and setting the share again about 3s, since `h1` covers every shared transaction (D-065).
 
 ## Known limitations
 
@@ -239,11 +256,20 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
   category (D-063). A ledger shows spending by category only while some categorization reaches a
   transaction or a rule's outcome does. A rule matches only "description contains": no amount
   ranges, priorities or editing, and changing a rule is undo then add (D-064).
+- Household attribution is by a person's allocation on a transaction, else the account's default,
+  one member or `shared`, with one active share applying to every month of the ledger (D-065
+  points 2 and 3). No dated defaults or shares, renaming or removing a member, parts with their own
+  categories or types, or account ownership. With 50/50, every odd-cent shared transaction gives its
+  cent to the member added first.
+- Allocations are made one transaction at a time in the terminal. Disagreeing allocations, one
+  whose records end up in several transactions, or one by amount a correction stops summing, leave
+  the transaction unattributed, never the account's default, until one is undone.
 - An undo, a classification or a transfer that leaves a categorization unsettled does not say so in
   its own output, unlike `review confirm` and `review separate`, which refuse. `totals` and `review
   categorizations` disclose it.
 
-- The local UI is read-only, and shows six commands' output only. It searches nothing, imports
+- The local UI is read-only, and shows seven commands' output only, `report household` the
+  seventh. It searches nothing, imports
   nothing, exports nothing and shows no `trace` or decision history, which carry creation
   timestamps (F2). Decisions are made with `pf review` in the terminal (D-062).
 - `pf ui` cannot stop what the browser keeps: history (addresses with IDs and months, a fixed

@@ -1,4 +1,5 @@
-"""Making and undoing a statement of a type or a category on one transaction (D-053, D-063).
+"""Making and undoing a statement of a type, a category or an allocation on one transaction (D-053,
+D-063, D-065).
 
 The caller holds the write lock and commits or rolls back. Every check runs before anything is
 written, in D-043's order: the account is current, then the value is known, then account,
@@ -58,6 +59,9 @@ class StatementKind:
     undo_revision: Callable[[sqlite3.Connection, StoredStatement], str]
     # Rewrites the derived outcomes once the statement or its undo is written.
     rewrite_effects: Callable[[sqlite3.Connection, str], None]
+    # Writes what the stored value names beyond its own column, given the new statement's ID and
+    # the value, before its 'made' event: an allocation's parts (D-065).
+    write_value: Callable[[sqlite3.Connection, str, object], None] | None = None
 
 
 def make_statement(
@@ -118,6 +122,8 @@ def make_statement(
             VALUES (?, ?)""",
         [(statement_id, record_id) for record_id in sorted(record_ids)],
     )
+    if kind.write_value is not None:
+        kind.write_value(conn, statement_id, value)
     _record_event(conn, stated, statement_id, "made")
     kind.rewrite_effects(conn, account_id)
     return statement_id, len(record_ids)

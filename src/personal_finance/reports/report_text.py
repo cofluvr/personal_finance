@@ -15,7 +15,21 @@ from typing import NamedTuple
 from personal_finance.money import format_cents
 from personal_finance.reconcile.apply import stale_accounts
 from personal_finance.reconcile.categories import UNCATEGORIZED, list_categories
-from personal_finance.reconcile.category_effects import NOT_SPENDING
+from personal_finance.reconcile.category_effects import NOT_SPENDING, SPENDING_TYPES
+from personal_finance.reconcile.allocation_effects import AMOUNT_DIFFERS
+from personal_finance.reconcile.household_effects import (
+    ALLOCATED,
+    BY_MEMBER,
+    BY_PERCENT,
+    BY_SHARE,
+    NO_DEFAULT,
+    NO_SHARE,
+    SHARED,
+    UNATTRIBUTED,
+    format_percent,
+    load_household,
+    parsed,
+)
 from personal_finance.reconcile.classification_effects import (
     TYPE_AGAINST_DIRECTION,
     UNCLASSIFIED,
@@ -43,6 +57,12 @@ from personal_finance.reconcile.transfer_effects import (
     TRANSFER_DATE_WINDOW_DAYS,
 )
 from personal_finance.reports.coverage_evidence import load_document_coverage
+from personal_finance.reports.household import (
+    ONE_MEMBER,
+    SHARED_ONLY,
+    SIDE_BY_SIDE,
+    household_report,
+)
 from personal_finance.reports.monthly import monthly_report
 from personal_finance.reports.review_evidence import (
     alike_decided_records,
@@ -170,6 +190,47 @@ CLASSIFICATION_STATE_EXPLANATIONS = {
         "unclassified. Undo the classification, or the correction"
     ),
 }
+
+# Why a transaction is unattributed (D-065).
+ATTRIBUTION_EXPLANATIONS = {
+    NO_DEFAULT: "its account has no default. Set one with household account set",
+    NO_SHARE: (f"its account's default or its allocation is {SHARED} and no household share is "
+               "active. Set one with household share set"),
+    FIELD_IN_CONFLICT: "allocations disagree. Undo all but one to settle it",
+    FIELD_BASIS_CHANGED: (
+        "an allocation binds records now in several transactions. Undo it, then allocate each "
+        "transaction"
+    ),
+    AMOUNT_DIFFERS: (
+        "an allocation by amount no longer sums to its amount. Undo it, or what changed the amount"
+    ),
+}
+
+# What each outcome on an allocated transaction means (D-065).
+ALLOCATION_STATE_EXPLANATIONS = {
+    FIELD_APPLIED: "the stated allocation applies",
+    **{state: f"{UNATTRIBUTED}: {why}" for state, why in ATTRIBUTION_EXPLANATIONS.items()
+       if state not in (NO_DEFAULT, NO_SHARE)},
+}
+
+
+def describe_allocation(names, value) -> str:
+    """A stored allocation in words, given each member's name by ID."""
+    kind, parts = parsed(value)
+    return describe_named_allocation(kind, [(names[member_id], part) for member_id, part in parts])
+
+
+def describe_named_allocation(kind, parts) -> str:
+    """An allocation in words, its parts by member name in member order. Parts by amount are never
+    printed here, since routine lists show no amounts (D-037)."""
+    if kind == BY_MEMBER:
+        return f"to {shown(parts[0][0])}"
+    if kind == BY_SHARE:
+        return f"as {SHARED}, by the household share"
+    if kind == BY_PERCENT:
+        return "by percent: " + ", ".join(f"{shown(name)} {format_percent(weight)}"
+                                          for name, weight in parts)
+    return "by amount: " + ", ".join(shown(name) for name, _ in parts)
 
 # What each outcome on a categorized transaction means (D-063).
 CATEGORIZATION_STATE_EXPLANATIONS = {
@@ -522,6 +583,8 @@ def add_transaction_evidence(out, entry, shared) -> None:
     add_classifications(out, entry)
     add_categorizations(out, entry)
     add_category_rules(out, entry)
+    add_allocations(out, entry)
+    add_household(out, entry)
     add_transfers(out, entry)
 
 
@@ -608,6 +671,38 @@ def add_category_rules(out, entry) -> None:
     else:
         out.add(f"    Category: the rules disagree, so it is {UNCATEGORIZED}. Undo or narrow one "
                 "with category rule, or categorize it")
+
+
+def add_household(out, entry) -> None:
+    """Who the transaction's effective amount belongs to, where an allocation or an account's
+    default reaches it (D-065). A transaction neither reaches shows nothing here."""
+    household = entry.household
+    if household is None:
+        return
+    by_whom = "an allocation" if household.by_allocation else "the account's default"
+    parts = ", ".join(f"{shown(name)} {format_cents(cents)}" for name, cents in household.parts)
+    if household.kind == UNATTRIBUTED:
+        out.add(f"  Household: {UNATTRIBUTED}: {ATTRIBUTION_EXPLANATIONS[household.reason]}")
+    elif household.kind == SHARED:
+        out.add(f"  Household: {SHARED}, by {by_whom} and the household share: {parts}")
+    elif household.kind == ALLOCATED:
+        out.add(f"  Household: {ALLOCATED}, by {by_whom}: {parts}")
+    else:
+        ((name, _),) = household.parts
+        out.add(f"  Household: {shown(name)}, by {by_whom}")
+
+
+def add_allocations(out, entry) -> None:
+    """Allocations stay apart from the source values, like categorizations (D-065). A transaction
+    none reaches shows nothing here."""
+    if not entry.allocations:
+        return
+    out.add("  Allocations:")
+    for allocation in entry.allocations:
+        out.add(f"    Allocation {allocation.allocation_id}: "
+                f"{describe_named_allocation(*allocation.allocation)}, "
+                f"binding {describe_side(allocation.bound_records)}")
+    out.add(f"    Allocation: {ALLOCATION_STATE_EXPLANATIONS[entry.allocations[0].state]}")
 
 
 def add_transfers(out, entry) -> None:
@@ -901,6 +996,11 @@ def account_choices(conn) -> list[tuple[str, str]]:
     ).fetchall()
 
 
+def member_choices(conn) -> list[tuple[int, str]]:
+    """Each household member's ID and name in the order added, for choosing one."""
+    return [(member.member_id, member.name) for member in load_household(conn).members]
+
+
 def totals_report_lines(conn, account_id) -> ReportLines:
     movement = account_movement(conn, account_id)
     groups = income_and_spending(conn, account_id)
@@ -1180,3 +1280,129 @@ def review_item_report(conn, item_id) -> ReviewItemReport | None:
             "evidence may be out of date. Run reconcile."
         )
     return ReviewItemReport(item.issue_id, item.kind, item.account_id, revision, out)
+
+
+# Why a transaction is unattributed, as the household report discloses it (D-065).
+UNATTRIBUTED_DISCLOSURES = {
+    NO_DEFAULT: "its account has no default",
+    NO_SHARE: f"attributed {SHARED} while no household share is active",
+    FIELD_IN_CONFLICT: "allocations disagree",
+    FIELD_BASIS_CHANGED: "an allocation binds records now in several transactions",
+    AMOUNT_DIFFERS: "an allocation by amount no longer sums to its amount",
+}
+
+HOUSEHOLD_VIEW_WORDS = {
+    SIDE_BY_SIDE: "side by side, each member, then unattributed, then the household",
+    ONE_MEMBER: "one member's parts: personal, shared and allocated apart, then all of them",
+    SHARED_ONLY: "transactions divided among more than one member: each member's part, then whole",
+}
+
+
+def household_report_lines(conn, account_id, first_month, last_month, member_id=None,
+                           shared_only=False) -> ReportLines:
+    """pf report household's lines, which its UI page renders (D-065 point 8)."""
+    report = household_report(conn, account_id, first_month, last_month, member_id, shared_only)
+    out = ReportLines()
+    scope = "every account"
+    if account_id is not None:
+        (name,) = conn.execute("SELECT display_name FROM account WHERE id = ?",
+                               (account_id,)).fetchone()
+        scope = f"account {shown(name)}"
+    months = (f"{first_month or 'the first month'} to {last_month or 'the last month'}"
+              if first_month or last_month else "every month")
+    out.add(f"Household report: {scope}, {months}")
+    out.add(f"View: {HOUSEHOLD_VIEW_WORDS[report.view]}")
+    _add_household_table(out, report.columns, categories_in_use(conn))
+    out.add("Disclosures:")
+    for line in describe_household(report):
+        out.add(f"- {line}")
+    return out
+
+
+def _add_household_table(out, columns, categories) -> None:
+    """One row per group and direction, one column per heading, each cell an amount. Amounts add
+    across a row exactly where the view's columns divide a whole."""
+    rows = []
+
+    def row(label, groups_to_cells):
+        rows.append((label, [groups_to_cells(column.groups) for column in columns]))
+
+    def flows(label, choose):
+        row(f"{label}, out", lambda groups: format_cents(choose(groups).out_cents))
+        row(f"{label}, in", lambda groups: format_cents(choose(groups).in_cents))
+
+    def by_type(groups, financial_type):
+        return dict(groups.spending_by_type).get(financial_type, GroupTotal())
+
+    def by_category(groups, category_id):
+        return dict(groups.spending_by_category).get(category_id, GroupTotal())
+
+    def net(groups):
+        parts = (groups.income, groups.spending, groups.confirmed_transfers,
+                 groups.unconfirmed_transfer_kinds, groups.unclassified)
+        return format_cents(sum(part.in_cents - part.out_cents for part in parts))
+
+    row("Net account movement", net)
+    flows("Income", lambda groups: groups.income)
+    flows("Spending", lambda groups: groups.spending)
+    types = [financial_type for financial_type in SPENDING_TYPES
+             if any(by_type(column.groups, financial_type).transactions for column in columns)]
+    for financial_type in types:
+        flows(f"  {financial_type}", lambda groups, kind=financial_type: by_type(groups, kind))
+    if categories is not None and any(column.groups.spending.transactions for column in columns):
+        for category in categories:
+            if any(by_category(column.groups, category.category_id).transactions
+                   for column in columns):
+                indent = "    " if category.parent_id is not None else "  "
+                flows(f"{indent}{shown(category.name)}",
+                      lambda groups, chosen=category.category_id: by_category(groups, chosen))
+        flows(f"  {UNCATEGORIZED}", lambda groups: by_category(groups, None))
+    flows("Confirmed transfers", lambda groups: groups.confirmed_transfers)
+    flows("Of a transfer kind, not confirmed", lambda groups: groups.unconfirmed_transfer_kinds)
+    flows("Unclassified", lambda groups: groups.unclassified)
+    row("Transactions", lambda groups: str(sum(
+        part.transactions for part in (groups.income, groups.spending, groups.confirmed_transfers,
+                                       groups.unconfirmed_transfer_kinds, groups.unclassified))))
+
+    headings = [shown(column.heading) for column in columns]
+    label_width = max(len(label) for label, _ in rows)
+    widths = [max(len(heading), *(len(cells[index]) for _, cells in rows))
+              for index, heading in enumerate(headings)]
+    out.add(" " * label_width + "".join(f"  {heading:>{width}}"
+                                       for heading, width in zip(headings, widths, strict=True)))
+    for label, cells in rows:
+        out.add(f"{label:<{label_width}}" + "".join(
+            f"  {cell:>{width}}" for cell, width in zip(cells, widths, strict=True)))
+
+
+def describe_household(report) -> list[str]:
+    household = report.household
+    found = []
+    if report.view == SIDE_BY_SIDE:
+        found.append("Each row's members and unattributed add exactly to the household. A "
+                     "transaction divided among members counts in each of their columns, so the "
+                     "Transactions row adds across only where none is divided.")
+    elif report.view == SHARED_ONLY:
+        found.append(f"Transactions divided among more than one member: "
+                     f"{report.transactions_shown}. Each row's members add exactly to whole.")
+    else:
+        found.append("Personal is the member's whole amount, by an account's default or an "
+                     "allocation to them alone. Shared is their part by the household share, and "
+                     "allocated their part of an allocation by percent or amount.")
+    for reason, group in report.unattributed_by_reason:
+        found.append(f"Unattributed, {UNATTRIBUTED_DISCLOSURES[reason]}: {out_and_in(group)}")
+    if report.transactions_outside_range:
+        found.append(f"Transactions dated outside these months, not counted: "
+                     f"{report.transactions_outside_range}")
+    share = household.share
+    found.append("Household share: " + (", ".join(
+        f"{shown(household.name_of(member_id))} {format_percent(weight)}"
+        for member_id, weight in share.parts) if share else "none active"))
+    defaults = [f"{shown(name)} {SHARED if member is None else shown(household.name_of(member))}"
+                for name, member in report.defaults]
+    defaults += [f"{shown(name)} none" for name in report.accounts_without_default]
+    found.append(f"Account defaults: {', '.join(defaults) or 'no account'}")
+    if share:
+        found.append("Cents the share cannot divide evenly go by largest remainder, ties to the "
+                     "member added first.")
+    return found

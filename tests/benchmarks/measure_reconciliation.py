@@ -11,7 +11,8 @@ Not part of the test suite. Run from the repository root:
     pending rows posted at another amount, --classified for financial types, --transfers for
     transfer matches across two accounts, --one-sided for one-sided transfers, --income for income
     and spending in totals, --scale for the 100,000-transaction shape of M4.4, --scale
-    --category-rules N for it with N category rules (D-064), or rows per month
+    --category-rules N for it with N category rules (D-064), --scale --household for it with
+    household members, defaults and 5,000 allocations (D-065), or rows per month
     such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
@@ -50,7 +51,15 @@ from personal_finance.reconcile.classification_effects import (
     load_active_classifications,
     write_classification_effects,
 )
+from personal_finance.reconcile.allocations import Stated, allocate_transaction, undo_allocation
 from personal_finance.reconcile.category_rules import add_rule, checked_definition, undo_rule
+from personal_finance.reconcile.household import (
+    set_account_default,
+    set_share,
+    undo_account_default,
+    undo_share,
+)
+from personal_finance.reconcile.household_effects import attributed_transactions, load_household
 from personal_finance.reconcile.classifications import classify_transaction, undo_classification
 from personal_finance.reconcile.correction_effects import (
     correction_chain_states,
@@ -99,7 +108,9 @@ from personal_finance.reconcile.transfers import (
     undo_one_sided,
     undo_transfer,
 )
+from personal_finance.reports.allocation_evidence import allocation_undo_outlook, load_allocation
 from personal_finance.reports.balances import check_balances
+from personal_finance.reports.household_evidence import account_reach, share_reach
 from personal_finance.reports.monthly import monthly_report
 from personal_finance.reports.totals import (
     account_movement,
@@ -2023,9 +2034,195 @@ def measure_category_rules(count: int) -> None:
               flush=True)
 
 
+# Account defaults on the scale shape: the card and checking shared, savings and the loan personal.
+SCALE_DEFAULTS = (("checking", None), ("card", None), ("savings", 1), ("loan", 2))
+SCALE_ALLOCATIONS = 5_000
+
+
+def scale_allocations(conn) -> dict[str, int]:
+    """5,000 allocations on the shape, written directly: 4,800 of every kind in turn on the loan's
+    and savings' transactions in no transfer, a second, disagreeing one on 100 of those, and 100 by
+    amount whose parts sum to one cent more than their transaction. Returns how many of each were
+    written."""
+    targets = conn.execute(
+        """SELECT entry.id, entry.account_id, entry.primary_source_record_id, entry.amount_cents
+           FROM ledger_transaction entry
+           WHERE entry.account_id IN ('savings', 'loan') AND entry.external_id LIKE 'X%'
+           ORDER BY entry.account_id, entry.external_id""").fetchall()
+    written = {"member": 0, "shared": 0, "percent": 0, "amount": 0, "conflict": 0,
+               "amount_differs": 0}
+
+    def allocate(number, transaction, account, record, value, parts):
+        allocation_id = f"a{number:06}"
+        conn.execute(
+            """INSERT INTO allocation_statement (id, account_id, allocation,
+                                                 target_transaction_id, target_revision)
+               VALUES (?, ?, ?, ?, 't10-0')""", (allocation_id, account, value, transaction))
+        conn.executemany("INSERT INTO allocation_statement_part VALUES (?, ?, ?)",
+                         [(allocation_id, member, part) for member, part in parts])
+        conn.execute("INSERT INTO allocation_statement_record VALUES (?, ?)",
+                     (allocation_id, record))
+        conn.execute("INSERT INTO allocation_statement_event (allocation_id, event) "
+                     "VALUES (?, 'made')", (allocation_id,))
+
+    number = 0
+    kinds = ("member", "shared", "percent", "amount")
+    for transaction, account, record, cents in targets[:SCALE_ALLOCATIONS - 200]:
+        kind = kinds[number % 4]
+        magnitude = abs(cents)
+        parts = {"member": [(2, 10_000)], "shared": [], "percent": [(1, 3_000), (2, 7_000)],
+                 "amount": [(1, magnitude // 3), (2, magnitude - magnitude // 3)]}[kind]
+        # A third of one or two cents is none, so that part is left out.
+        parts = [(member, part) for member, part in parts if part > 0]
+        allocate(number, transaction, account, record,
+                 f"{kind}:" + ",".join(f"{member}={part}" for member, part in parts), parts)
+        written[kind] += 1
+        number += 1
+    for transaction, account, record, _ in targets[:100]:
+        allocate(number, transaction, account, record, "member:1=10000", [(1, 10_000)])
+        written["conflict"] += 1
+        number += 1
+    for transaction, account, record, cents in targets[SCALE_ALLOCATIONS - 200:
+                                                       SCALE_ALLOCATIONS - 100]:
+        allocate(number, transaction, account, record, f"amount:1={abs(cents) + 1}",
+                 [(1, abs(cents) + 1)])
+        written["amount_differs"] += 1
+        number += 1
+    return written
+
+
+def measure_household() -> None:
+    """Household allocations on the 100,000-transaction shape (D-065 point 9, HC5): totals and
+    report monthly, report household in each view, one allocation and its undo, a default and a
+    share set again, one classification and one import, with how many transactions each member,
+    shared and unattributed hold. Stops, as point 9 says, if report household misses two seconds
+    or an allocation costs more than twice the import of one row."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path = scale_ledger(root)
+        conn.execute("BEGIN")
+        for name in ("Michael", "M"):
+            conn.execute("INSERT INTO household_member (name) VALUES (?)", (name,))
+        conn.execute("INSERT INTO household_share (id) VALUES ('h0')")
+        conn.execute("INSERT INTO household_share_part VALUES ('h0', 1, 5000), ('h0', 2, 5000)")
+        conn.execute("INSERT INTO household_share_event (share_id, event) VALUES ('h0', 'made')")
+        for account, member in SCALE_DEFAULTS:
+            conn.execute("INSERT INTO account_attribution (id, account_id, member_id) "
+                         "VALUES (?, ?, ?)", (f"d-{account}", account, member))
+            conn.execute("INSERT INTO account_attribution_event (attribution_id, event) "
+                         "VALUES (?, 'made')", (f"d-{account}",))
+        written = scale_allocations(conn)
+        rewrite_started = time.perf_counter()
+        write_transfer_effects(conn)
+        rewrite_seconds = time.perf_counter() - rewrite_started
+        conn.execute("COMMIT")
+        build_seconds = time.perf_counter() - started
+
+        household = load_household(conn)
+        held = {"Michael": 0, "M": 0, "shared": 0, "unattributed": 0}
+        states = dict(conn.execute(
+            "SELECT state, COUNT(*) FROM transaction_allocation GROUP BY state").fetchall())
+        for entry in attributed_transactions(conn, household):
+            attribution = entry.attribution
+            if attribution.kind == "unattributed":
+                held["unattributed"] += 1
+            elif len(attribution.parts) > 1:
+                held["shared"] += 1
+            else:
+                held[household.name_of(attribution.parts[0][0])] += 1
+        print(f"shape allocations={sum(written.values())} written={written} "
+              f"outcomes={states} held={held} first_rewrite={rewrite_seconds:.3f}s "
+              f"build={build_seconds:.1f}s", flush=True)
+        # The shape reaches the cost it claims: allocations of every kind apply, some disagree and
+        # some no longer sum, and the share divides tens of thousands of transactions.
+        assert sum(written.values()) == SCALE_ALLOCATIONS
+        assert states == {"applied": 4_700, "conflict": 100, "amount_differs": 100}, states
+        assert held["shared"] > 40_000 and held["Michael"] > 1_000 and held["M"] > 10_000
+        assert held["unattributed"] == 200, held
+        conn.close()
+
+        database = str(path)
+        totals_seconds = timed_command("totals", "--db", database)
+        monthly_seconds = timed_command("report", "monthly", "--db", database)
+        side_seconds = timed_command("report", "household", "--db", database)
+        member_seconds = timed_command("report", "household", "--db", database, "--member", "M")
+        shared_seconds = timed_command("report", "household", "--db", database, "--shared")
+
+        conn = connect(path)
+        (target,) = conn.execute(
+            """SELECT entry.id FROM ledger_transaction entry
+               WHERE entry.account_id = 'checking' AND entry.external_id = 'X0-0'""").fetchone()
+        started = time.perf_counter()
+        made = allocate_transaction(
+            conn, "checking", target, transaction_revision(load_merge_evidence(conn, target)),
+            Stated(percents=("Michael=40", "M=60")))
+        allocate_seconds = time.perf_counter() - started
+        undo_revision = allocation_undo_outlook(
+            conn, load_allocation(conn, made.allocation_id)).revision
+        started = time.perf_counter()
+        undo_allocation(conn, "checking", made.allocation_id, undo_revision)
+        undo_seconds = time.perf_counter() - started
+
+        household = load_household(conn)
+        started = time.perf_counter()
+        undo_account_default(conn, "loan", account_reach(conn, household, "loan").revision)
+        set_account_default(conn, "loan", "M",
+                            account_reach(conn, load_household(conn), "loan").revision)
+        default_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        undo_share(conn, share_reach(conn, load_household(conn)).revision)
+        set_share(conn, ["Michael=50", "M=50"], share_reach(conn, load_household(conn)).revision)
+        share_seconds = time.perf_counter() - started
+
+        (unclassified,) = conn.execute(
+            """SELECT entry.id FROM ledger_transaction entry
+               WHERE entry.account_id = 'savings' AND entry.external_id = 'X1-0' AND NOT EXISTS (
+                   SELECT 1 FROM transaction_classification kind
+                   WHERE kind.transaction_id = entry.id)""").fetchone()
+        started = time.perf_counter()
+        classify_transaction(conn, "savings", unclassified,
+                             transaction_revision(load_merge_evidence(conn, unclassified)),
+                             "income")
+        classify_seconds = time.perf_counter() - started
+        later = root / "later.csv"
+        later.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+                         "LATER,2026-12-30,2026-12-30,SYNTHETIC LATER,-9.00,POSTED\n")
+        started = time.perf_counter()
+        (result,) = import_files(conn, [later], account_id="savings",
+                                 layout=SYNTHETIC_CHECKING_V1)
+        import_seconds = time.perf_counter() - started
+        assert result.outcome == "imported"
+        conn.close()
+        print(
+            f"totals={totals_seconds:7.3f}s report_monthly={monthly_seconds:7.3f}s "
+            f"household={side_seconds:7.3f}s household_member={member_seconds:7.3f}s "
+            f"household_shared={shared_seconds:7.3f}s",
+            flush=True,
+        )
+        print(
+            f"allocate={allocate_seconds:7.3f}s allocation_undo={undo_seconds:7.3f}s "
+            f"account_undo_and_set={default_seconds:7.3f}s share_undo_and_set={share_seconds:7.3f}s "
+            f"one_classification={classify_seconds:7.3f}s one_import={import_seconds:7.3f}s",
+            flush=True,
+        )
+        stops = [name for name, seconds in (("allocate", allocate_seconds),
+                                            ("allocation undo", undo_seconds))
+                 if seconds > 2 * import_seconds]
+        stops += [name for name, seconds in (("report household", side_seconds),
+                                             ("report household --member", member_seconds),
+                                             ("report household --shared", shared_seconds))
+                  if seconds > 2]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--scale"]:
         measure_scale()
+        return
+    if sys.argv[1:] == ["--scale", "--household"]:
+        measure_household()
         return
     if sys.argv[1:2] == ["--scale"] and sys.argv[2:3] == ["--category-rules"]:
         measure_category_rules(int(sys.argv[3]))

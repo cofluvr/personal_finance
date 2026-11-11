@@ -1,4 +1,4 @@
-# Session Handoff: M10 Accepted, M11 to M21 Approved
+# Session Handoff: M11 Built, Awaiting the Owner's Review
 
 For a fresh session. Written 2026-11-10. **M1 to M10 are complete and accepted,** M10,
 categorization rules (D-064), by the owner on 2026-11-10. `main` holds M1 to M9 at `19ee858`, and
@@ -10,12 +10,18 @@ invented.
 On 2026-11-10 the owner approved D-065 (M11, household members, attribution and allocations) with
 A to I and its inputs, D-066 (the sequence M12 to M21) with A to E, and D-067 to D-077, the plan of
 each milestone M12 to M21 in [decisions-m12-m21.md](decisions-m12-m21.md), as written. That includes
-M17's and M20's security changes and `segno` for M20. All are plans: nothing of M11 or later is
-built. **The owner builds M11 and M12 locally.**
+M17's and M20's security changes and `segno` for M20. **The owner builds M11 and M12 locally.**
 
-**Next:** M11.1, then each slice in order, each stopping for review. The real-ledger migration to
-version 21 comes first, verified on its own (D-065 point 7). Point F with the owner on their
-already-imported files is still open.
+**M11 is built** on `feature/m10-rules`, at the owner's request of 2026-11-10 to build M11.1 to
+M11.3 in order in one session, each slice committed on its own full-suite gate, with one review at
+the end: M11.1 `a075c7d` (migration 0022, `allocate_cents`, the `household` commands, `h1`, `a1`),
+M11.2 `181bad3` (migration 0023, `review allocate` and its chains, `s1`, `r12`, `t10`, `d9`, `c5`)
+and M11.3 (`pf report household`, its UI page, the benchmark row). How each was built is under
+D-065 in [decisions.md](decisions.md). **Next:** the owner's review of M11. On the real ledger,
+21 still comes first, verified on its own, then 22 and 23, each after a verified backup (D-065
+point 7); the owner's members, share and defaults are then entered with the `household` commands,
+which nothing here has run on real data. Point F with the owner on their already-imported files is
+still open.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -41,9 +47,9 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `main` holds everything through M9 at `19ee858`. The M10 plan is on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
-| Latest commit | Run `git log -1`. M9's acceptance is `19ee858`. On `feature/m10-rules`: the M10 plan `a294d64`, one commit per slice, M10's acceptance `871cdad`, then the M11 plan. Earlier commits are in the archive |
-| Latest gating run | Full suite, exit code 0, chained to the latest slice's commit: see its commit message. About 8 minutes |
+| Branch | `main` holds everything through M9 at `19ee858`. M10 and M11 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
+| Latest commit | Run `git log -1`. M9's acceptance is `19ee858`. On `feature/m10-rules`: M10 `a294d64` to `871cdad`, the M11 plan and approvals to `b61d85d`, then one commit per M11 slice. Earlier commits are in the archive |
+| Latest gating run | Full suite, exit code 0, chained to the latest slice's commit: see its commit message. About 11 minutes |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -87,9 +93,14 @@ Then only what the task needs:
   `test_spending_by_category.py`. A change to types or categories changes both: run
   `test_classifications.py` too. A byte for byte comparison follows "How M9.3 was implemented":
   keep the suite's ledgers with `--basetemp` under `build/`, migrate copies, and cap per-ID shows.
-- For M11: D-065 and its criteria in [plan.md](plan.md), then what its points name: D-049, D-053,
-  D-063 and D-064 in the full text, `reconcile/stated_fields.py`, `reconcile/category_effects.py`,
-  `reports/totals.py` and `reports/report_text.py`.
+- For changes to M11: D-065 and its "How M11.n was implemented", its criteria in
+  [plan.md](plan.md), `reconcile/household_effects.py` (`allocate_cents` and every attribution),
+  `reconcile/household.py`, `reconcile/allocation_effects.py`, `reconcile/allocations.py`, the
+  `write_value` hook in `reconcile/statements.py`, `reports/household_evidence.py`,
+  `reports/allocation_evidence.py`, `reports/household.py`, migrations 0022 and 0023, and
+  `tests/scenarios/test_household.py`, `test_allocations.py` and `test_household_report.py`.
+  Allocations share the stated model with types and categories, so run `test_categorizations.py`
+  and `test_classifications.py` too.
 - For M12 to M21: D-067's guardrails G1 to G13 in [decisions-m12-m21.md](decisions-m12-m21.md)
   first, then the milestone's own decision, D-068 to D-077, and the decisions it names. Each
   milestone's criteria move into [plan.md](plan.md) when it starts.
@@ -99,8 +110,9 @@ Then only what the task needs:
   and `tests/scenarios/test_category_rules.py`. Rules read the derived types, transfers,
   corrections and person's categories, so run `test_categorizations.py` too.
 - **A new migration** breaks every older migration test's set-back: `drop_category_tables` in
-  `test_decisions.py` drops 0021, 0020 and 0019 through `drop_category_rule_tables`, and grows with
-  each later migration's tables. Also add the tables to `tests/unit/test_migrations.py`,
+  `test_decisions.py` drops 0023 to 0019 through `drop_category_rule_tables`,
+  `drop_household_tables` and `drop_allocation_tables`, and grows with each later migration's
+  tables. Also add the tables to `tests/unit/test_migrations.py`,
   `test_review_show.py`'s and `test_backups.py`'s `LEDGER_TABLES`, and the hand-added migrations of
   `test_pending_posted_migration.py`.
 - For changes to M8: D-062 in the full text and its criteria in [plan.md](plan.md), `ui/server.py`,
@@ -178,6 +190,13 @@ Pitfalls that recurred across M1 to M3.4:
   gate: redirect to a file and chain the commit to pytest itself. An unquoted `--include=*.py` fails, and
   `echo ====` is read as a command. `mktemp -d` ignores
   `TMPDIR` here. The harness refuses `rm -rf` of a `build/` folder, so use a new folder.
+- **Long runs read the source live.** A baseline suite or a capture reads `src/` and the
+  migrations folder while it runs, so new work made it read half-new code in M11. Run a baseline
+  from `git archive HEAD` under `build/`, and an after-capture from a copy of `src/`. The export is
+  no git checkout and has no `.venv`, so `test_ignore_rules.py`, `test_entry_point.py` and one
+  `test_pdf_reader.py` test fail there by design, 16 in all.
+- **A break that renames a key** of token material keeps the data in the digest: drop it instead.
+  A schema test must refuse on the trigger under test alone: in M11.2 one passed on the primary key.
 
 ## Open follow-ups
 
@@ -259,7 +278,10 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
   The owner's is `/Volumes/CommonCentsBackup`. A doc fix, not made.
 - A delivery deadline, if any (D-066).
 - Each milestone's own inputs, listed in its decision, when it starts.
-- On the real ledger, a verified backup, then `pf migrate` to version 21 for M10.
+- The review of M11, built in one session at the owner's request.
+- On the real ledger, a verified backup, then `pf migrate` to version 21 for M10, verified, then
+  22 and 23 for M11, then the owner's members `Michael` and `M`, the 50/50 share and each
+  account's default, entered by the owner.
 - Merging `feature/m10-rules` into `main`. Needs the owner's approval.
 - Pushing. Not authorized from here.
 
@@ -267,8 +289,9 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits | Approved on 2026-11-10 for M10's acceptance record, the M11 plan, and the M11 to M21 approvals on `feature/m10-rules`, gated on the full suite | **Must be renewed** for any later change |
-| M11 to M21 | Plans approved on 2026-11-10 (D-065 to D-077), including M17's and M20's security changes | Each slice built in order and reviewed. Installing `segno` still needs its pinned version and hash, and W1's check, at M20 |
+| Local commits | Approved on 2026-11-10 for M10's acceptance record, the M11 plan, the M11 to M21 approvals, and M11.1 to M11.3 slice by slice, on `feature/m10-rules`, gated on the full suite. Used for all three slices | **Must be renewed** for any later change |
+| M11 | Built on 2026-11-10, all three slices in one session at the owner's request | The owner's review, and the real-ledger migrations |
+| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes | Each slice built in order and reviewed. Installing `segno` still needs its pinned version and hash, and W1's check, at M20 |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |
@@ -302,7 +325,7 @@ branch is feature/m10-rules, the working tree is clean, and run the test suite w
 code before changing anything. Do not contact GitHub.
 
 Next task, from the owner:
-[PASTE IT HERE: for example, plan M10, categorization rules, as the next free decision number]
+[PASTE IT HERE: for example, review M11, or build M12.1 under D-067 and D-068]
 
 Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as the next
 free decision number, and approval before any of it is built. Each slice of it then needs its own

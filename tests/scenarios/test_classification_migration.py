@@ -132,7 +132,7 @@ class TestAppendOnly:
     INSERT_CLASSIFICATION = """
         INSERT INTO type_classification (id, account_id, financial_type, target_transaction_id,
                                          target_revision, supersedes_classification_id)
-        VALUES (?, ?, ?, 't', 't9-0', (SELECT id FROM type_classification ORDER BY id LIMIT 1))"""
+        VALUES (?, ?, ?, 't', 't10-0', (SELECT id FROM type_classification ORDER BY id LIMIT 1))"""
 
     def own_account(self, conn):
         return conn.execute("SELECT id FROM account").fetchone()[0]

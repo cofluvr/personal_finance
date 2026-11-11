@@ -143,7 +143,7 @@ class TestAppendOnly:
                                                   completed_description, target_issue_id,
                                                   target_revision)
                    VALUES ('x', (SELECT id FROM account), (SELECT id FROM source_record), ?, ?, ?,
-                           ?, 'i', 'r11-0')""",
+                           ?, 'i', 'r12-0')""",
                 (kind, amount, posting_date, description),
             )
         conn.close()

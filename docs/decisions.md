@@ -537,6 +537,124 @@ these go.
 - **H. Its own benchmark row on the 100,000 shape,** with point 9's stopping rule.
 - **I. The slices M11.1 to M11.3,** in that order.
 
+**How M11.1 was implemented:**
+
+- Migration 0022 adds `household_member`, `household_share` with `household_share_part` and
+  `household_share_event`, and `account_attribution` with `account_attribution_event`, each
+  append-only by triggers as 0021's tables are. The schema itself refuses a blank member name,
+  `shared` and `unattributed`, a part outside 1 to 9,999 basis points, a share made with fewer than
+  two parts or parts not summing to 10,000, a part added once made, a second active share, and a
+  second active default on one account. Nothing is derived: the share and defaults are resolved
+  when read.
+- `reconcile/household_effects.py` holds `allocate_cents`, percentage parsing and the resolution of
+  each transaction's attribution from its effective amount (D-049): the account's default, a
+  member's whole amount or the share's parts, else `unattributed` by reason, `no_default` or
+  `no_share`. `reconcile/household.py` holds the commands, each under one write lock in D-043's
+  order: every account reached is current, then the statement is valid, then its token.
+- **Tokens:** `h1` covers the active share by member names, every account's default by names, the
+  names of stale accounts the share reaches, and every transaction an account attributed `shared`
+  holds, by its records' document hashes and rows and its effective amount, so a change of share,
+  default, currency, evidence or amount refuses it. `a1` covers the same for one account, its
+  default, and the share, since what `shared` moves depends on it. Both are digested as `p1` is.
+  The share reaches only accounts attributed `shared`, so a stale account attributed to a member
+  does not block it.
+- `review show` and `review transaction show` print `Household:` where an account's default
+  reaches a transaction, with the parts in cents. It is kept out of every `r` and `t` digest as an
+  immaterial field, since a default is the same for every transaction of its account (point 6).
+- Output gives amounts as `totals` does, a count with out and in, by member, and a set or undo
+  says what moved between members and `unattributed`. A set needs nothing active and an undo leaves
+  nothing active, so one side of every move is `unattributed`.
+- **Compared as CB5:** the suite's 2,574 ledgers before M11, kept with `--basetemp` under `build/`,
+  read by the code at `b61d85d` and, migrated to 22, by M11.1's: 59,583 runs, M10.3's list plus
+  `category rules` and rule shows. 59,547 are identical. 36 are two ledgers stamped schema 22 to
+  mean newer than the code, which reads them as current. Another 8,816 runs of `household
+  members`, `household share show` and `household account show` show no member, share or default
+  on every ledger that opens.
+
+**How M11.2 was implemented:**
+
+- Migration 0023 adds `allocation_statement`, `allocation_statement_part`,
+  `allocation_statement_record` and `allocation_statement_event`, mirroring 0020's tables and
+  append-only by triggers, and the derived `transaction_allocation`. An allocation's value is one
+  canonical text, its kind, a colon, then `member=value` parts sorted by member ID, so D-063's
+  shared code compares it as it compares a category, by equality: kind and parts equal, or not.
+  When an allocation is made, the schema checks that its parts say exactly what its value says and
+  fit its kind: one member at 10,000 basis points, none for `shared`, two or more percentages
+  summing to 10,000, or one or more amounts, each above zero.
+- **The extension of the shared code** is one optional hook on `StatementKind`, `write_value`,
+  which `make_statement` calls after binding records and before the `made` event, to write the
+  parts. Types and categories pass none, so every command of theirs runs as before, compared as CB5
+  below. `stated_fields` itself is unchanged: the canonical text is the value.
+- `reconcile/allocation_effects.py` holds the `StatedField` and the outcome, rewritten for the
+  ledger at the end of `write_transfer_effects`, after categories, so every write rewrites it with
+  corrections final. Its misfit state is `amount_differs`: an allocation by amount fits only while
+  its parts sum to the magnitude of the transaction's effective amount. Percentages, a member and
+  `shared` always fit.
+- `household_effects.attributed_transactions` reads the derived outcome first: applied, it gives the
+  member's whole amount, the share's parts, `allocate_cents` of the percentages, or the amounts
+  signed by the transaction's direction; not applied, `unattributed` by its state, never the
+  account's default; no row, the default as in M11.1. The share reaches what an account default or
+  an allocation attributes `shared`, and a default only what no allocation reaches, so `h1` and `a1`
+  keep their definitions and every digest on a ledger with no allocation.
+- `reconcile/allocations.py`: `review allocate` checks, in D-043's order, the account is current,
+  then the value (an unknown member, malformed or repeated parts, one percentage, percentages not
+  summing to 100.00, `shared` with no active share), then account, transaction and `t10` together,
+  then a chain, then that amounts sum to the effective amount. `review allocation undo` and chains
+  are `statements.py`'s, unchanged. `review confirm` and `review separate` refuse with
+  `LEAVES_ALLOCATION_UNSETTLED` after the types and categories checks, and decision undo reports the
+  transactions it leaves unattributed.
+- `review allocations` and `review allocation show` name members and percentages, never the cents of
+  an allocation by amount, as `review correction show` prints no corrected value (point 10).
+  `review transaction show` prints the allocations apart from the source values, and its
+  `Household:` line says whether an allocation or the account's default decides it.
+- **Tokens:** `r12` and `t10` add the allocations binding a transaction's records, by member names,
+  with the outcome there. `d9` adds the allocations binding records in scope, by agreement, as `d7`
+  added categorizations. `c5` adds, for an amount, the allocations' outcomes on its transactions
+  with and without it. `s1` covers the allocation by member names, the transactions holding its
+  bound records, and the outcome there with and without it, effective amounts included. All are
+  left out while empty, and the 70 places tests pinned `r11`, `t9`, `d8` and `c4` moved to the new
+  versions with every digest unchanged.
+- **Compared as CB5:** the same 2,574 ledgers, read by the code at `b61d85d` and, migrated to 23,
+  by M11.2's: of 59,583 runs, 59,544 are identical once `r11`, `t9`, `d8` and `c4` move, every
+  digest kept. 36 are the two ledgers stamped 22 to mean newer than the code, and 3 the
+  comparison's own rewriting of a stored description holding `t9-`, identical compared exactly.
+  Every types and categories command is among them. Another 15,058 runs of the household commands
+  and `review allocations` show no member, default or allocation on every ledger that opens.
+
+**How M11.3 was implemented:**
+
+- `reports/household.py` builds the report from one read of every transaction's month, applied
+  type, confirmed transfer and category, as `report monthly` reads them, and each transaction's
+  attribution from `household_effects`. Each column is an `IncomeAndSpendingTally`, the class
+  `totals` and `report monthly` count with, so every column follows D-056's groups and D-063's
+  categories with no rule of its own. A member's column adds that member's parts.
+- **Views:** side by side gives each member, then `unattributed`, then the household, whose
+  column adds every transaction whole, so it equals `totals`' groups for the ledger and an account,
+  and the sum of `report monthly`'s months for a range, tested on generated ledgers. `--member`
+  gives that member's personal, shared and allocated parts apart, then all of them. `--shared`
+  gives the transactions divided among more than one member, each member's part, then whole.
+  Parts sum to their transaction exactly and carry its sign, so in every view each row's columns
+  add exactly to the last, out and in apart. A divided transaction counts in each member's column,
+  so the Transactions row adds across only where none is divided, which the report says.
+- `pf report household` prints a table, one row per group and direction, then spending by type and,
+  while a category reaches spending, by category, with disclosures: `unattributed` by reason (no
+  default, `shared` with no share, allocations disagreeing, a changed basis, amounts no longer
+  summing), transactions outside the months asked for, the share, and every account's default in
+  scope. `totals` and `report monthly` are unchanged, compared on generated ledgers before and
+  after members, defaults and allocations are added.
+- **Its UI page,** `/household`, renders the same builder's lines, and equals the command line for
+  line in every view, account and month range on generated ledgers, a member's name holding HTML
+  shown as text. Its address takes `account`, `from`, `to`, `member` (an ID, since an address value
+  is only `[A-Za-z0-9_-]`) and `view=shared`, refusing an unknown member, any other view or both at
+  once. The server still imports only the CLI and `report_text`, through a new `member_choices`.
+  No security control changed.
+- **Benchmark:** `measure_reconciliation.py --scale --household` on M4.4's shape, with two members,
+  a 50/50 share, checking and the card `shared`, savings and the loan personal, and 5,000
+  allocations of every kind, 100 in `conflict` and 100 in `amount_differs`, asserting what each
+  member, `shared` and `unattributed` hold. `report household` runs in 1.30s side by side, 1.13s
+  for one member and 1.16s for shared, and an allocation in 0.60s against 2.78s for an import of one
+  row, so point 9's stopping rule is not met. Figures are in [benchmarks.md](benchmarks.md).
+
 ## D-066 Roadmap to a finished backend: M12 to M21 — Approved
 
 Proposed on 2026-11-10, at the owner's request, after D-065, and **approved by the owner the same

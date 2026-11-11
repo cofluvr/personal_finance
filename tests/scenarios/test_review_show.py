@@ -36,7 +36,10 @@ LEDGER_TABLES = (
     "balance_observation_event", "real_ledger", "backup_record",
     "category", "category_assignment", "category_assignment_record",
     "category_assignment_event", "transaction_category", "category_rule", "category_rule_event",
-    "transaction_rule_category",
+    "transaction_rule_category", "household_member", "household_share", "household_share_part",
+    "household_share_event", "account_attribution", "account_attribution_event",
+    "allocation_statement", "allocation_statement_part", "allocation_statement_record",
+    "allocation_statement_event", "transaction_allocation",
 )
 
 
@@ -104,7 +107,7 @@ def show(db, capsys):
 
 
 def revision_of(text):
-    return re.search(r"Revision: (r11-[0-9a-f]{16})", text)[1]
+    return re.search(r"Revision: (r12-[0-9a-f]{16})", text)[1]
 
 
 def section_order(text, *labels):
