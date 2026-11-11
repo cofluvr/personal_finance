@@ -85,7 +85,7 @@ and keep its index line.
 | D-062 | M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8, verified by the owner |
 | D-063 | M9 plan: spending categories — Approved with A to E, implemented and accepted in M9 |
 | D-064 | M10 plan: categorization rules — Approved with A to H, implemented and accepted in M10. Real ledger not yet migrated |
-| D-065 | M11 plan: household members, attribution and allocations — Approved with A to I and the owner's inputs, built, reviewed by the owner on 2026-11-10 |
+| D-065 | M11 plan: household members, attribution and allocations — Approved with A to I and the owner's inputs, implemented and accepted in M11. Real ledger not yet migrated |
 | D-066 | Roadmap to a finished backend: M12 to M21 — Approved with A to E |
 | D-067 | Cross-milestone guardrails for M12 to M21 — Approved, in [decisions-m12-m21.md](decisions-m12-m21.md) |
 | D-068 | M12 plan: income and recurring obligations — Approved, not yet built |
