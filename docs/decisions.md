@@ -85,7 +85,7 @@ and keep its index line.
 | D-062 | M8 plan: the local review UI — Approved with A to E, read-only, implemented in M8, verified by the owner |
 | D-063 | M9 plan: spending categories — Approved with A to E, implemented and accepted in M9 |
 | D-064 | M10 plan: categorization rules — Approved with A to H, implemented and accepted in M10. Real ledger not yet migrated |
-| D-065 | M11 plan: household members, attribution and allocations — Approved with A to I and the owner's inputs, not yet built |
+| D-065 | M11 plan: household members, attribution and allocations — Approved with A to I and the owner's inputs, built, reviewed by the owner on 2026-11-10 |
 | D-066 | Roadmap to a finished backend: M12 to M21 — Approved with A to E |
 | D-067 | Cross-milestone guardrails for M12 to M21 — Approved, in [decisions-m12-m21.md](decisions-m12-m21.md) |
 | D-068 | M12 plan: income and recurring obligations — Approved, not yet built |
@@ -654,6 +654,22 @@ these go.
   member, `shared` and `unattributed` hold. `report household` runs in 1.30s side by side, 1.13s
   for one member and 1.16s for shared, and an allocation in 0.60s against 2.78s for an import of one
   row, so point 9's stopping rule is not met. Figures are in [benchmarks.md](benchmarks.md).
+
+**The owner's review of M11,** on 2026-11-10, walked every command on a synthetic ledger and
+`/household` by curl, and approved the lead engineer's recommendations:
+
+- `review allocate --percent` with one part refuses with its own message, pointing to `--member`,
+  not the share's. `checked_parts` takes the one-part refusal as a parameter.
+- Allocating where one allocation alone is in `basis_changed` or `amount_differs` names it and says
+  to undo it, or what changed the amount, rather than "all but one". The message for several is
+  unchanged. Types' and categories' messages share the old wording and are unchanged: a separate
+  change, if wanted.
+- Kept as built: the report's layout, one row per group and direction, a member with nothing still
+  given a column; counts printed as "1 records", as everywhere else; a refund attributed by its own
+  statement or default, not its purchase's, so it nets to zero for each member only when both are
+  attributed alike (A and C). A share undo then set costs about 6s at 53,525 shared transactions,
+  accepted with no target: digesting per account would be a new `h` version. Writes cost about
+  0.6s more with 5,000 allocations, accepted, as point 9's rule is not met.
 
 ## D-066 Roadmap to a finished backend: M12 to M21 — Approved
 

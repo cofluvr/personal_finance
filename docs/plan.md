@@ -555,8 +555,8 @@ and splits (M11), and budgets.
 Approved by the owner on 2026-11-10 as D-065, with A to I, members `Michael` and `M`, a 50/50 share,
 the primary checking and savings accounts `shared` and personal accounts to their owner. On
 2026-11-10 the owner asked for the three slices built in order in one session, each committed on its
-own gate, with one review at the end. **M11 is built,** awaiting that review, and not yet on the
-real ledger. "Split" keeps its meaning of records leaving a merged
+own gate, with one review at the end. **M11 is built and was reviewed by the owner on 2026-11-10**
+(see D-065), its acceptance not yet recorded, and it is not yet on the real ledger. "Split" keeps its meaning of records leaving a merged
 transaction, so PRD §6's splits are **allocations**.
 
 | Slice | Scope | Status |

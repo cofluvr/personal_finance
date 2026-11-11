@@ -26,6 +26,7 @@ from test_transfer_migration import markers, migrations_up_to
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 from personal_finance.reconcile.allocations import (
+    ALLOCATION_ALONE_UNSETTLED,
     ALLOCATION_NOT_ACTIVE,
     ALLOCATION_NOT_FOUND,
     ALLOCATION_SUPERSEDED,
@@ -37,6 +38,7 @@ from personal_finance.reconcile.allocations import (
     ALREADY_ALLOCATED,
     AMOUNT_PART_MALFORMED,
     AMOUNTS_NOT_WHOLE,
+    PERCENT_ONE_PART,
     STALE_ALLOCATION_REVISION,
 )
 from personal_finance.reconcile.decisions import (
@@ -49,7 +51,6 @@ from personal_finance.reconcile.household import (
     MEMBER_UNKNOWN,
     SHARE_MEMBER_REPEATED,
     SHARE_NOT_WHOLE,
-    SHARE_ONE_PART,
     SHARE_PART_MALFORMED,
 )
 from personal_finance.reconcile.statements import (
@@ -230,7 +231,7 @@ class TestRefusals:  # HB1
 
     @pytest.mark.parametrize(("how", "message"), [
         (("--member", "Nobody"), MEMBER_UNKNOWN),
-        (("--percent", "Michael=100"), SHARE_ONE_PART),
+        (("--percent", "Michael=100"), PERCENT_ONE_PART),
         (("--percent", "Michael=50", "--percent", "M=49.99"), SHARE_NOT_WHOLE),
         (("--percent", "Michael=50", "--percent", "Nobody=50"), MEMBER_UNKNOWN),
         (("--percent", "Michael=50.005", "--percent", "M=49.995"), SHARE_PART_MALFORMED),
@@ -329,6 +330,16 @@ def disagreeing_after_undo(ledger):
     return first, second, out
 
 
+def refused_alone(ledger, allocation, transaction):
+    """Allocating where one allocation alone leaves the transaction unattributed names it, and
+    says to undo it rather than all but one."""
+    before = ledger.everything()
+    code, _, err = ledger.allocate(transaction, "--member", "Michael")
+    assert (code, err) == (2, "Error: " + ALLOCATION_ALONE_UNSETTLED.format(
+        allocations=allocation) + "\n")
+    assert ledger.everything() == before
+
+
 class TestSeveral:  # HB2, HB3
     def test_agreeing_allocations_apply_once(self, ledger):
         item, one, two = pair_up(ledger)
@@ -381,6 +392,7 @@ class TestSeveral:  # HB2, HB3
         out = ledger.allocation_show(allocation)
         assert out.count("unattributed, basis changed now, unattributed after") == 0
         assert out.count("basis changed now") == 2
+        refused_alone(ledger, allocation, holding(ledger, "a.csv"))
 
     def test_an_amount_correction_leaves_an_amount_allocation_unattributed(self, ledger):
         ledger.set_default_ok(member="Michael")
@@ -392,6 +404,7 @@ class TestSeveral:  # HB2, HB3
             "unattributed: an allocation by amount no longer sums to its amount. Undo it, or what "
             "changed the amount")
         assert ledger.allocation_state(allocation) == "active"
+        refused_alone(ledger, allocation, transaction)
         assert ledger.undo_correction(correction)[0] == 0
         assert ledger.allocation_outcomes() == [(("a.csv",), "applied", "amount:M=650")]
 

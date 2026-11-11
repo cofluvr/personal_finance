@@ -97,9 +97,11 @@ def _add_member(conn, name) -> Member:
     return Member(member_id, name)
 
 
-def checked_parts(household, typed_parts: list[str]) -> list[tuple[int, int]]:
+def checked_parts(household, typed_parts: list[str],
+                  one_part_refusal: str = SHARE_ONE_PART) -> list[tuple[int, int]]:
     """Typed NAME=PERCENT parts as (member ID, basis points) in member order, refused unless they
-    name two or more known members once each, each above zero, summing to exactly 100.00."""
+    name two or more known members once each, each above zero, summing to exactly 100.00.
+    one_part_refusal is the message for a single part, which differs for an allocation."""
     parts = {}
     for typed in typed_parts:
         name, separator, percent = typed.rpartition("=")
@@ -113,7 +115,7 @@ def checked_parts(household, typed_parts: list[str]) -> list[tuple[int, int]]:
             raise DecisionRefused(SHARE_MEMBER_REPEATED)
         parts[member.member_id] = basis_points
     if len(parts) < 2:
-        raise DecisionRefused(SHARE_ONE_PART)
+        raise DecisionRefused(one_part_refusal)
     if sum(parts.values()) != WHOLE_IN_BASIS_POINTS:
         raise DecisionRefused(SHARE_NOT_WHOLE)
     return sorted(parts.items())

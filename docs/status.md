@@ -58,10 +58,10 @@ Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M10.2: undoing a category rule | Accepted (D-064) |
 | M10.3: rules in the reports, the source of a category, the benchmark row | Accepted (D-064) |
 | **M10 overall** | **Complete and accepted** on 2026-11-10. Not yet verified on the real ledger, still at version 20 until a verified backup and `pf migrate` to 21 |
-| M11.1: members, the household share and account attribution | Complete (D-065), awaiting the owner's review |
-| M11.2: allocating one transaction | Complete (D-065), awaiting the owner's review |
-| M11.3: the household report, its UI page, the benchmark row | Complete (D-065), awaiting the owner's review |
-| **M11 overall** | **Built** on 2026-11-10 (D-065), awaiting the owner's review. Not on the real ledger, which stays at version 20 until 21, then 22 and 23, each after a verified backup |
+| M11.1: members, the household share and account attribution | Complete (D-065), reviewed by the owner on 2026-11-10, acceptance not yet recorded |
+| M11.2: allocating one transaction | Complete (D-065), reviewed by the owner on 2026-11-10, acceptance not yet recorded, two refusal messages changed |
+| M11.3: the household report, its UI page, the benchmark row | Complete (D-065), reviewed by the owner on 2026-11-10, acceptance not yet recorded |
+| **M11 overall** | **Built** on 2026-11-10 (D-065), reviewed by the owner on 2026-11-10, acceptance not yet recorded. Not on the real ledger, which stays at version 20 until 21, then 22 and 23, each after a verified backup |
 | **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). Nothing built |
 
 ## What exists
