@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`, which holds everything through M9. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
+Last updated: 2026-11-13. Branch: `feature/m10-rules`, from `main` at `19ee858`, which holds everything through M9. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
 
 | Milestone | Status |
 |---|---|
@@ -62,6 +62,7 @@ Last updated: 2026-11-10. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M11.2: allocating one transaction | Accepted (D-065), two refusal messages changed at review |
 | M11.3: the household report, its UI page, the benchmark row | Accepted (D-065) |
 | **M11 overall** | **Complete and accepted** on 2026-11-10 (D-065). Not on the real ledger, which stays at version 20 until 21, then 22 and 23, each after a verified backup |
+| M12.1: income sources | Slice plan approved on 2026-11-13 under D-068, with I to M as recommended. Being built. Criteria IA1 to IC4 moved to [plan.md](plan.md). Nothing built |
 | **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). Nothing built |
 
 ## What exists

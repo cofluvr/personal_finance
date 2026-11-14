@@ -603,6 +603,57 @@ Categories or types per part, dated defaults or shares, account ownership and ne
 attribution rules by description, allocations from the UI, settling up, renaming or removing a
 member, separate logins, budgets and personal allowances, and members in sync snapshots.
 
+## M12 plan
+
+Approved by the owner on 2026-11-10 as D-068, with A to H, in
+[decisions-m12-m21.md](decisions-m12-m21.md), under D-067's guardrails G1 to G13. M12.1 to M12.3
+are to be built in order, each stopping for review. No security control changes. M12 started on
+2026-11-13 with M12.1's slice plan, under D-068, approved by the owner the same day with I to M
+as recommended.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M12.1 | Income sources: migration 0024, schedules, proposals, preview, add, supersede, terms, undo, expected against actual, `in1` | Approved, being built |
+| M12.2 | Recurring obligations: migration 0025, `planning/entries.py` and `planning/schedules.py` extracted, proposals, dismissal, fixed and discretionary, `ob1` | Not started |
+| M12.3 | `pf report income`: baseline, extra and side income by month, obligations due and paid, its UI page, the `--recurring` benchmark row | Not started |
+
+### M12.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| IA1 | Migration 0024 meets G10: populated ledgers, empty tables, nothing stale, nothing changed, atomic, the previous version refused. Each append-only trigger refuses, with a control insert that succeeds |
+| IA2 | Nominal dates for every cadence: month-end clamping, a leap-year February, and a biweekly anchor crossing a year, each computed by hand in the test |
+| IA3 | A source reaches only income-typed money in, in its account, whose effective description contains its text, a corrected description included. An unclassified match is listed as a possible paycheck and never counted. Two sources on one deposit give `source_conflict` on both |
+| IA4 | One-to-one pairing within the tolerance, ties as point 2. The states `received`, `amount_changed`, `missed` (only after the tolerance passes `as_of`), `expected` and `unscheduled` are each produced, and pairing is the same in every import order, exhaustively for four files |
+| IA5 | `income proposals` is deterministic, stable across repeat imports, and omits groups below the thresholds and those a source reaches. `--from-proposal` with a token made before an import that changes the group refuses, changing nothing |
+| IA6 | `income add`, `terms` and `undo` follow G3: stale token, stale account, unknown account, blank text, `salary` on a longer cadence, a tolerance out of range and an `effective_from` in a closed month are each refused, changing nothing. `evidence_digest` is unchanged by every income write |
+| IA7 | A later terms row changes only nominal dates on or after its `effective_from`. Undo steps back by G4 |
+
+### M12.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| IB1 | Migration 0025 meets G10. Every M12.1 output is byte for byte the same after the extraction, compared as CB5 |
+| IB2 | Obligations reach spending by text and optional effective category. A range's planned amount is its HIGH. The states are produced as IA4. `obligation_conflict` leaves the transaction discretionary, disclosed |
+| IB3 | Fixed spending plus discretionary spending equals D-056's Spending exactly, for the ledger, each account and each month, on generated ledgers |
+| IB4 | A dismissal keeps a proposal withdrawn across imports, and its undo brings it back. A dismissal or add with a stale `ob1` refuses |
+| IB5 | `review show` and `review transaction show` gain "Recurring" only where something reaches the transaction. Every other command is byte for byte as before, compared as G6 |
+
+### M12.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| IC1 | Three-paycheck rule: two ledgers differing only by a third biweekly occurrence have byte-identical baseline lines in every month, and the extra shows once, labelled. An early and a late payment across a month boundary never make a third |
+| IC2 | Side income is never baseline, and shows as extra in the month received |
+| IC3 | `report income` opens read-only and changes no logical digest. Every figure is labelled actual, expected or planned (G1). Its UI page equals the command line for line, with source names holding HTML shown as text |
+| IC4 | `--recurring` asserts its counts, its figures are recorded in [benchmarks.md](benchmarks.md) under G9's stopping rule, and `totals` and `report monthly` are byte for byte unchanged. Every earlier criterion still passes |
+
+### Not in M12
+
+Per-deposit assignment statements, sources or obligations that set a type, a normalized merchant,
+gross income and payroll deductions, income categories, tax reserves (M14), budgets (M13), and
+ending a source on a date (D-068, and its M12.1 slice plan).
+
 ## Backlog benchmarks
 
 Not scheduled, and not part of A39 acceptance.

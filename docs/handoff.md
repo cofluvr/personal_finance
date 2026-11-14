@@ -1,25 +1,29 @@
-# Session Handoff: M11 Accepted, M12.1 Next
+# Session Handoff: M12.1 Planned, Awaiting Approval
 
-For a fresh session. Written 2026-11-10. **M1 to M11 are complete and accepted,** M11, household
-attribution (D-065), by the owner on 2026-11-10. `main` holds M1 to M9 at `19ee858`, and M10 and
-M11 are on `feature/m10-rules`, not merged. **M10 and M11 are not yet on the real ledger,** which
-stays at version 20 until the owner makes a verified backup and runs `pf migrate` to version 21. No security control changed, no dependency was added, and the UI stays read-only. Every fixture
-is invented.
+For a fresh session. Written 2026-11-13. **M1 to M11 are complete and accepted.** M11 is household
+attribution (D-065), accepted by the owner on 2026-11-10. `main` holds M1 to M9 at `19ee858`. M10
+and M11 are on `feature/m10-rules` at `aacbe47`, not merged.
 
-On 2026-11-10 the owner approved D-065 (M11), D-066 (the sequence M12 to M21) and D-067 to D-077,
-the plan of each milestone M12 to M21 in [decisions-m12-m21.md](decisions-m12-m21.md), as written,
-including M17's and M20's security changes and `segno` for M20. **The owner builds M11 and M12
-locally.**
+**M12.1's slice plan was approved on 2026-11-13, with I to M as recommended.** It sits under D-068 in
+[decisions-m12-m21.md](decisions-m12-m21.md), as "M12.1 slice plan", with points 1 to 15 and
+decisions I to M. **Nothing of M12 is built,** and nothing is committed for it. M12's criteria, IA1
+to IC4, moved from D-068 to [plan.md](plan.md) on 2026-11-13. Its four amendments to D-068, approved:
 
-**M11 is accepted.** Its slices are M11.1 `a075c7d`, M11.2 `181bad3` and M11.3 `53243cb`, each
-described under D-065 in [decisions.md](decisions.md). The owner's review changed two `review
-allocate` refusals (`e9745ec`), and the owner accepted M11 on condition that types' and categories'
-"Undo all but one" refusal get the same fix for one statement alone: made in `b47b308`, then the
-acceptance recorded in the next commit. **Next:** M12.1 under D-067 and D-068, plan first. On the real
-ledger, 21 still comes first, verified on its own, then 22 and 23, each after a verified backup
-(D-065 point 7); the owner's members, share and defaults are then entered with the `household`
-commands, which nothing here has run on real data. Point F with the owner on their already-imported
-files is still open.
+- `--as-of` is required where today matters, until M13.1 (I).
+- Schedules start at an on-cadence anchor, and proposals give the earliest date (J).
+- `income add --supersedes`, with terms belonging to the chain (K).
+- A new `pf income preview` (L).
+
+**M10 and M11 are not yet on the real ledger.** It stays at version 20 until the owner makes a
+verified backup and runs `pf migrate`:
+
+1. 21 first, verified on its own;
+2. then 22 and 23, each after a verified backup (D-065 point 7);
+3. then the owner enters their members, share and defaults with the `household` commands, which
+   nothing here has run on real data.
+
+No security control changed, no dependency was added, and the UI stays read-only. Every fixture is
+invented. Point F with the owner on their already-imported files is still open.
 
 Earlier history (what each slice built, every test run, the "as built" limits of M2, and session
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
@@ -47,7 +51,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `main` holds everything through M9 at `19ee858`. M10 and M11 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
 | Latest commit | Run `git log -1`. M9's acceptance is `19ee858`. On `feature/m10-rules`: M10 `a294d64` to `871cdad`, the M11 plan and approvals to `b61d85d`, one commit per M11 slice, the review's changes `e9745ec`, the types and categories refusal fix `b47b308`, and M11's acceptance record. Earlier commits are in the archive |
-| Latest gating run | Full suite, exit code 0, chained to M11's acceptance commit: see its commit message. About 11 minutes, 2,872 tests |
+| Latest gating run | Full suite at `aacbe47` on 2026-11-13, before planning M12.1: exit code 0, 2,872 passed in 13m34s. M11's acceptance commit was gated the same way |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -103,6 +107,13 @@ Then only what the task needs:
 - For M12 to M21: D-067's guardrails G1 to G13 in [decisions-m12-m21.md](decisions-m12-m21.md)
   first, then the milestone's own decision, D-068 to D-077, and the decisions it names. Each
   milestone's criteria move into [plan.md](plan.md) when it starts.
+- For building M12.1: D-068 with its "M12.1 slice plan" as approved, IA1 to IA7 in
+  [plan.md](plan.md), `reconcile/category_rule_effects.py` (normalization, the derived write),
+  `reconcile/category_rules.py`, `reports/category_rule_evidence.py` (`p1`, record keys),
+  `write_transfer_effects` in `reconcile/transfer_effects.py`, `db/backups.py` (`tagged`,
+  `logical_digest`), migration 0021, the `category rule` handlers in `cli.py`, the `Ledger` helper
+  and `drop_*_tables` in `tests/scenarios/test_decisions.py`, and `build/m11/capture.py` and
+  `compare.py` for G6.
 - For changes to M10: D-064 and its "How M10.n was implemented", its criteria in
   [plan.md](plan.md), `reconcile/category_rule_effects.py`, `reconcile/category_rules.py`,
   `reports/category_rule_evidence.py`, migration 0021, the `category rule` handlers in `cli.py`,
@@ -275,6 +286,8 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
   throwaway ledger, with the owner, at the final review.
 - [real-data-readiness.md](real-data-readiness.md) names the backup volume `CommonCentsBackups`.
   The owner's is `/Volumes/CommonCentsBackup`. A doc fix, not made.
+- **Approval of M12.1's slice plan,** decisions I to M under D-068, and renewed commit permission
+  to record it and build.
 - A delivery deadline, if any (D-066).
 - Each milestone's own inputs, listed in its decision, when it starts.
 - On the real ledger, a verified backup, then `pf migrate` to version 21 for M10, verified, then
@@ -289,7 +302,7 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 |---|---|---|
 | Local commits | Approved on 2026-11-10 through the M11 review's changes, then for the types and categories refusal fix and M11's acceptance record, on `feature/m10-rules`. All used | **Must be renewed** for any later change |
 | M11 | Accepted on 2026-11-10. Not yet on the real ledger | The real-ledger migrations 21, 22 and 23, each after a verified backup |
-| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes | Each slice built in order and reviewed. Installing `segno` still needs its pinned version and hash, and W1's check, at M20 |
+| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes. M12.1's slice plan proposed on 2026-11-13, not approved | M12.1 built only once I to M are approved. Each slice built in order and reviewed. Installing `segno` still needs its pinned version and hash, and W1's check, at M20 |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |
@@ -323,9 +336,11 @@ branch is feature/m10-rules, the working tree is clean, and run the test suite w
 code before changing anything. Do not contact GitHub.
 
 Next task, from the owner:
-Plan M12.1 under D-067 and D-068. Read D-067's guardrails G1 to G13 and D-068 in
-docs/decisions-m12-m21.md, move M12's criteria into plan.md, and propose the slice's plan with a
-recommendation for each open point. Wait for approval before building.
+Build M12.1 under D-068 and its "M12.1 slice plan", with decisions I to M as I approved them
+(state any I changed here). Read D-067's G1 to G13 and the slice plan first. Before changing
+anything, keep the suite's ledgers with --basetemp from a git archive export of aacbe47 for G6.
+Write migration 0024 first with its G10 checklist, then IA1 to IA7. Gate every commit on pytest's
+own exit code, and run 20 to 25 breaks by G12. Stop for review when M12.1 is built.
 
 Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as the next
 free decision number, and approval before any of it is built. Each slice of it then needs its own

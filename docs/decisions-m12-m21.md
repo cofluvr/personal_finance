@@ -602,36 +602,169 @@ the amount tolerance); the bills to confirm first.
 - **G.** `pf report income` and its page, and the `--recurring` benchmark row (points 8 and 9).
 - **H.** The slices M12.1 to M12.3, in that order.
 
-### M12.1 acceptance criteria
+**Acceptance criteria:** IA1 to IC4, moved to [plan.md](plan.md) on 2026-11-13 as M12 started.
 
-| ID | Test |
-|---|---|
-| IA1 | Migration 0024 meets G10: populated ledgers, empty tables, nothing stale, nothing changed, atomic, the previous version refused. Each append-only trigger refuses, with a control insert that succeeds |
-| IA2 | Nominal dates for every cadence: month-end clamping, a leap-year February, and a biweekly anchor crossing a year, each computed by hand in the test |
-| IA3 | A source reaches only income-typed money in, in its account, whose effective description contains its text, a corrected description included. An unclassified match is listed as a possible paycheck and never counted. Two sources on one deposit give `source_conflict` on both |
-| IA4 | One-to-one pairing within the tolerance, ties as point 2. The states `received`, `amount_changed`, `missed` (only after the tolerance passes `as_of`), `expected` and `unscheduled` are each produced, and pairing is the same in every import order, exhaustively for four files |
-| IA5 | `income proposals` is deterministic, stable across repeat imports, and omits groups below the thresholds and those a source reaches. `--from-proposal` with a token made before an import that changes the group refuses, changing nothing |
-| IA6 | `income add`, `terms` and `undo` follow G3: stale token, stale account, unknown account, blank text, `salary` on a longer cadence, a tolerance out of range and an `effective_from` in a closed month are each refused, changing nothing. `evidence_digest` is unchanged by every income write |
-| IA7 | A later terms row changes only nominal dates on or after its `effective_from`. Undo steps back by G4 |
+### M12.1 slice plan — Approved
 
-### M12.2 acceptance criteria
+Proposed on 2026-11-13 and **approved by the owner the same day, with I to M as recommended.** It
+settles what D-067 and points 1 to 4 and 7 leave open for income sources, and where the texts
+disagree. Each point gives the lead engineer's recommendation, then its alternatives. The criteria
+are IA1 to IA7 in [plan.md](plan.md), unchanged.
 
-| ID | Test |
-|---|---|
-| IB1 | Migration 0025 meets G10. Every M12.1 output is byte for byte the same after the extraction, compared as CB5 |
-| IB2 | Obligations reach spending by text and optional effective category. A range's planned amount is its HIGH. The states are produced as IA4. `obligation_conflict` leaves the transaction discretionary, disclosed |
-| IB3 | Fixed spending plus discretionary spending equals D-056's Spending exactly, for the ledger, each account and each month, on generated ledgers |
-| IB4 | A dismissal keeps a proposal withdrawn across imports, and its undo brings it back. A dismissal or add with a stale `ob1` refuses |
-| IB5 | `review show` and `review transaction show` gain "Recurring" only where something reaches the transaction. Every other command is byte for byte as before, compared as G6 |
+1. **"Today" before the household timezone exists.** G7's `household_timezone` arrives with M13.1's
+   settings (0026), so M12.1 has no zone and must not assume one.
+   - **Recommended:** nothing stored or hashed depends on today. The derived outcome holds only
+     `received`, `amount_changed`, `unscheduled` and `source_conflict`, and `in1` covers only
+     those. `missed` and `expected` are worked out where they are shown. Until M13.1, the two
+     commands that need today, `income source show` and `income terms` (for its closed-month
+     refusal), take `--as-of` as required. M13.1 then makes it optional, read from the setting.
+   - Alternatively: move `household_timezone` into 0024, which pulls part of M13.1 forward and
+     shifts its migration. Or read the Mac's zone, which G7 forbids.
 
-### M12.3 acceptance criteria
+2. **Where a schedule starts.** Point 2's dates run for every whole k, so a source added today would
+   read `missed` in every month before the job began.
+   - **Recommended:** a source's occurrences start at its anchor, and an anchor that is not itself
+     a nominal date of its cadence is refused. Deposits before the anchor, less the date tolerance,
+     are not reached, and `income source show` counts them as "before the first pay date".
+     Proposals therefore give the group's **earliest** date as the anchor, and show the latest as
+     "last seen". This amends point 4, which says the latest.
+   - The terms row made by `income add` takes the anchor as its `effective_from`, and is exempt from
+     the closed-month refusal: it is the definition, not a change. A later terms row must fall after
+     every earlier one, and not in a closed month (IA6).
+   - Alternatively: an explicit `--from` on `income add`, one more option for the same fact. Or
+     unbounded schedules, which give the `missed` noise described above.
+   - **Not in M12:** an end date. A source whose pay stops reads `missed` from then on, until it is
+     undone. Raised as its own decision if the owner needs it (principle 1).
 
-| ID | Test |
-|---|---|
-| IC1 | Three-paycheck rule: two ledgers differing only by a third biweekly occurrence have byte-identical baseline lines in every month, and the extra shows once, labelled. An early and a late payment across a month boundary never make a third |
-| IC2 | Side income is never baseline, and shows as extra in the month received |
-| IC3 | `report income` opens read-only and changes no logical digest. Every figure is labelled actual, expected or planned (G1). Its UI page equals the command line for line, with source names holding HTML shown as text |
-| IC4 | `--recurring` asserts its counts, its figures are recorded in [benchmarks.md](benchmarks.md) under G9's stopping rule, and `totals` and `report monthly` are byte for byte unchanged. Every earlier criterion still passes |
+3. **Changing a matcher, and chains.** Point 1 resolves a conflict by narrowing "by a new terms row
+   or a supersession". G2 says terms rows are never undone one by one. G4 and IA7 say undo steps
+   back one link. And G5 lists `supersede` for `in`, though D-068's command list has none.
+   - **Recommended:** the definition (account, name, kind, matcher, both tolerances, member and the
+     tax flag) never changes. Changing it is `income add --supersedes SOURCE_ID --revision in1-…`,
+     whose token covers the superseded source as `income source show` gives it. The new source
+     keeps the chain's terms: terms rows belong to the chain's first source. So `--amount`,
+     `--cadence` and `--anchor` are refused alongside `--supersedes`, since those belong in
+     `income terms`.
+   - Only the newest source in a chain applies. Undoing it steps back one link (G4, IA7), and
+     undoing a source that supersedes nothing undoes it and every terms row (G2). A superseded
+     source is refused, and the refusal names the newest.
+   - Alternatively: a dated matcher on terms rows, under which which deposit counts would change
+     partway through its history. Or undo then add only, which loses the terms history and
+     contradicts IA7 and G5.
+
+4. **The token for a manual add.** `--from-proposal` takes the token that `income proposals`
+   prints. D-068 gives no command that shows a token for an add without a proposal, yet point 7
+   needs one over "every deposit the matcher would reach now".
+   - **Recommended:** a new command, `pf income preview`, with `income add`'s options. It opens the
+     ledger read-only and lists every deposit the source would reach, with its state, the possible
+     paychecks and the conflicts it would cause, then prints `in1`. This mirrors
+     `category rule preview` and `p1`.
+   - Alternatively: `income add` without `--revision` acts as its own preview. That gives one
+     command two behaviours.
+
+5. **What counts as income.** Point 1 says "its applied type is `income` (D-056)".
+   - **Recommended:** D-056's income group exactly: applied `income` and not a confirmed transfer,
+     the same way spending excludes confirmed transfers. "Possible paychecks, unclassified" lists
+     only unclassified money in. A deposit a person typed as something else is their decision and
+     is not listed.
+
+6. **Pairing.** Point 2 orders the ties but does not say how they are chosen.
+   - **Recommended:** greedy over every deposit and nominal date within the tolerance, sorted by
+     distance, then nominal date, then transaction date, then transaction ID. Each pair is taken
+     unless either side is already paired. It is deterministic and independent of import order
+     (IA4).
+   - In a rare crowding case it can leave a deposit `unscheduled` that a maximum matching would have
+     paired. That deposit is disclosed, never miscounted.
+   - Alternatively: a maximum bipartite matching with the same tie order. That is more code, and
+     harder to explain on a page.
+
+7. **Cadences in M12.1.** IA2 asks for "every cadence" and IA6 refuses "`salary` on a longer
+   cadence", yet D-068's `income add` lists only four.
+   - **Recommended:** the schedules generate all six cadences of point 2, which M12.2 reuses.
+     `income add` accepts them all, and refuses the longer ones for `salary`.
+   - Proposals detect weekly, biweekly, semimonthly, monthly, quarterly and annual.
+     `every:N-months` is never proposed, since nothing in history fixes N reliably.
+
+8. **Refusals beyond IA6** (principle 3). Each refusal changes nothing:
+   - a blank name, or a name already used by an active source;
+   - an active source on the same account whose normalized text is the same. It would conflict on
+     every deposit, so the refusal names the existing source;
+   - an amount of zero or less, or a negative amount tolerance;
+   - semimonthly days that are not in ascending order, and a day outside 1 to 31;
+   - an anchor off its cadence (point 2);
+   - an unknown member.
+
+9. **Baseline and extra in M12.1.** Point 3 is in M12.1's scope, but IC1 tests it in M12.3.
+   - **Recommended:** the rule is built with the schedules, as a pure function, and
+     `income source show` marks each occurrence `baseline` or `extra` within its month, by nominal
+     date. M12.3 adds the report and IC1's two-ledger comparison.
+   - Alternatively: all of point 3 in M12.3. That is less in M12.1, but the schedules would be built
+     without the one rule they exist to serve.
+
+10. **No existing output changes in M12.1.** Point 7's "Recurring" section in the two review shows
+    waits for M12.2, where IB5 tests it once both kinds exist. G6 then holds every existing command
+    byte for byte in M12.1, and `review confirm` and `review separate` never refuse for a source.
+
+11. **Tokens and their registry.** No token parser exists: tokens are compared whole, as strings,
+    so G5's change to "the parser" has nothing to change.
+    - `in1` lives in `reports/income_evidence.py`. It names reached deposits by record keys
+      (document hash and row) and never by generated IDs, as `p1` does. Its material includes the
+      operation.
+    - A new `tests/unit/test_token_registry.py` finds every token prefix in `src/` by AST: an
+      f-string of one or two lowercase letters, then a `*_VERSION`. It pins the 17 kinds in use and
+      `in`, and fails on a reused or unregistered kind. Each later slice adds its own kind.
+
+12. **Where the outcome is rewritten.** `write_income_source_effects` runs at the end of
+    `write_transfer_effects`, after allocations. Every import, reconcile, decision, correction and
+    classification rewrites it there, with its inputs final.
+    - Categorizations and category rules change nothing a source reads, so they do not call it.
+    - Income writes call it alone, so they leave every pre-M12 table unchanged. `evidence_digest`,
+      a test helper over `backups.tagged` and the tables at version 23, checks that (G1).
+    - A ledger with no source pays one `DELETE`.
+
+13. **Migration 0024 and the tests that list tables:**
+    - `income_source`: the definition, with `supersedes_id`, and `normalization_version` from
+      D-064.
+    - `income_source_terms`: `effective_from`, cadence, cadence days, anchor and amount, keyed to
+      the chain's first source.
+    - `income_source_event`: `made` and `undone`.
+    - Derived `transaction_income_source`: transaction, source, nominal date and state, cascading
+      with its transaction.
+    - Every table has G2's three triggers. The handoff's "A new migration" list gains them:
+      `drop_income_tables` in front of `drop_household_tables`, `test_migrations.py`, both
+      `LEDGER_TABLES`, and `test_pending_posted_migration.py`. G10's backup tests gain sources and
+      terms on their rich ledger.
+
+14. **Module layout:**
+    - `planning/income_effects.py` holds the schedules, matching, pairing, baseline and extra, and
+      the derived write.
+    - `planning/income_sources.py` holds add, supersede, terms and undo, under one write lock.
+    - `planning/income_proposals.py` holds the proposals.
+    - `reports/income_evidence.py` holds the preview, the show and `in1`.
+
+    This follows the existing split of effects, commands and evidence rather than G13's single
+    `income.py`. G7's clock test and G8's `float` test over `planning/` start now. The test
+    `Ledger.run` helper learns the `income` group.
+
+15. **Testing for review:**
+    - The G6 capture uses M11's `capture.py` and `compare.py`, over the suite's ledgers kept with
+      `--basetemp` from a `git archive` export of `aacbe47`. The after-capture runs from a copy of
+      `src/`.
+    - About 20 to 25 breaks, by G12.
+    - No benchmark row: `--recurring` is M12.3's (point 9).
+
+**For the owner's decision, with the lead engineer's recommendation first:**
+
+- **I.** `missed` and `expected` are never stored or hashed, and `--as-of` is required where today
+  matters until M13.1 (point 1). Alternatively the timezone setting moved into 0024.
+- **J.** Schedules start at an on-cadence anchor, and proposals give the earliest date (point 2).
+  Alternatively `--from`.
+- **K.** The definition changes only by `income add --supersedes`, and terms belong to the chain
+  (point 3). Alternatively dated matchers, or undo then add only.
+- **L.** A new read-only `pf income preview` prints `in1` for a manual add (point 4). Alternatively
+  `income add` without a token as its own preview.
+- **M.** Points 5 to 14 as written, including the refusals of point 8, baseline and extra shown in
+  M12.1, and no existing output changing.
 
 ---
 
