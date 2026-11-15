@@ -39,7 +39,8 @@ LEDGER_TABLES = (
     "transaction_rule_category", "household_member", "household_share", "household_share_part",
     "household_share_event", "account_attribution", "account_attribution_event",
     "allocation_statement", "allocation_statement_part", "allocation_statement_record",
-    "allocation_statement_event", "transaction_allocation",
+    "allocation_statement_event", "transaction_allocation", "income_source",
+    "income_source_terms", "income_source_event", "transaction_income_source",
 )
 
 

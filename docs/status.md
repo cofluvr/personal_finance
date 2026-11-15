@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-11-13. Branch: `feature/m10-rules`, from `main` at `19ee858`, which holds everything through M9. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
+Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`, which holds everything through M9. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
 
 | Milestone | Status |
 |---|---|
@@ -62,8 +62,8 @@ Last updated: 2026-11-13. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M11.2: allocating one transaction | Accepted (D-065), two refusal messages changed at review |
 | M11.3: the household report, its UI page, the benchmark row | Accepted (D-065) |
 | **M11 overall** | **Complete and accepted** on 2026-11-10 (D-065). Not on the real ledger, which stays at version 20 until 21, then 22 and 23, each after a verified backup |
-| M12.1: income sources | Slice plan approved on 2026-11-13 under D-068, with I to M as recommended. Being built. Criteria IA1 to IC4 moved to [plan.md](plan.md). Nothing built |
-| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). Nothing built |
+| M12.1: income sources | Built on 2026-11-15 (D-068 and its M12.1 slice plan), awaiting the owner's review |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12.1 built, nothing later |
 
 ## What exists
 
@@ -90,7 +90,7 @@ Last updated: 2026-11-13. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `0011_coverage_declarations`, `0012_pending_posted_links`, `0013_type_classifications`,
   `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations`,
   `0017_real_ledger`, `0018_backup_records`, `0019_categories`, `0020_categorizations`,
-  `0021_category_rules`, `0022_household` and `0023_allocations`,
+  `0021_category_rules`, `0022_household`, `0023_allocations` and `0024_income_sources`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts and five unverified institution layouts (D-059), explicit coverage, atomic
   per-file import.
@@ -132,6 +132,10 @@ Last updated: 2026-11-13. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 - `personal_finance.reconcile.allocation_effects` and `allocations`: which allocation applies to
   which transaction, on the stated model shared with types and categories, and allocating and
   undoing under one write lock (D-065). `reports.allocation_evidence` holds the `s1` undo token.
+- `personal_finance.planning.income_effects`, `income_sources` and `income_proposals`: income
+  sources' nominal pay dates, the deposits each reaches and their states, derived on every write;
+  adding, superseding, re-terming and undoing a source under one write lock; and proposals from
+  history, never stored (D-068). `reports.income_evidence` holds the preview and the `in1` token.
 - `personal_finance.reconcile.transfer_effects` and `transfers`: which transfer matches and one-sided
   transfers apply and which pairs are candidates, read after each account derives alone, and
   matching, stating and undoing under one write lock (D-054, D-055).
@@ -174,7 +178,8 @@ Last updated: 2026-11-13. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `household member add`, `household members`, `household share show`, `household share set`,
   `household share undo`, `household account show`, `household account set`,
   `household account undo`, `review allocate`, `review allocations`, `review allocation show`,
-  `review allocation undo`, `totals`,
+  `review allocation undo`, `income proposals`, `income preview`, `income add`, `income terms`,
+  `income sources`, `income source show`, `income undo`, `totals`,
   `report monthly`, `report household`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
   `backup verify`, `backup restore`, `pdf text`, run
@@ -269,6 +274,19 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
   its own output, unlike `review confirm` and `review separate`, which refuse. `totals` and `review
   categorizations` disclose it.
 
+- Income sources count only deposits typed `income`, in one account, whose description contains
+  a text: an unclassified match is listed as a possible paycheck and never counted. Two sources
+  reaching one deposit leave it to neither. A source has no end date, so pay that stops reads
+  `missed` until the source is undone. Pay dates come from the cadence alone, with no weekends or
+  holidays, which the date tolerance absorbs (D-068).
+- `missed` and `expected` need `--as-of` on `income source show`, and `income terms` needs it for
+  its closed-month refusal, until M13.1's household timezone. No income command reads the clock.
+- Proposals group deposits by exactly equal normalized descriptions, so a payee whose text varies
+  (a date or number in it) is never proposed, and a group with a missed paycheck in it fits no
+  cadence. Proposals print no token: `income preview --from-proposal` does, over the options
+  chosen.
+- The review shows do not mention income sources until M12.2's "Recurring" section, and no report
+  counts baseline or extra income until M12.3.
 - The local UI is read-only, and shows seven commands' output only, `report household` the
   seventh. It searches nothing, imports
   nothing, exports nothing and shows no `trace` or decision history, which carry creation

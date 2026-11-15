@@ -766,6 +766,65 @@ are IA1 to IA7 in [plan.md](plan.md), unchanged.
 - **M.** Points 5 to 14 as written, including the refusals of point 8, baseline and extra shown in
   M12.1, and no existing output changing.
 
+**How M12.1 was implemented** (built on 2026-11-15, for the owner's review):
+
+- **Migration 0024** adds `income_source`, `income_source_terms`, `income_source_event` and the
+  derived `transaction_income_source`. All three stated tables have G2's three triggers, each tested
+  with a control insert that succeeds. A source's `chain_id` names its chain's first source, and
+  terms hang from it (point 3). Each terms row's day columns are checked against its cadence. A
+  test caught SQLite passing a semimonthly row with no second day: a CHECK that is NULL passes, so
+  the second day is required explicitly.
+- `planning/income_effects.py` holds the pay dates of all six cadences, from each terms row's
+  `effective_from` to the next row's. It also holds reach, greedy pairing, the four stored states,
+  and the occurrences of `income source show`, with baseline and extra. `write_income_source_effects`
+  runs last in `write_transfer_effects`. Deposits are D-056's income group or unclassified, money in,
+  with no transfer confirmed, read with corrections applied.
+- `planning/income_sources.py` holds `income add` (and `--supersedes`), `income terms` and
+  `income undo`. Each runs under one write lock, checking in D-043's order and comparing `in1` with
+  `hmac.compare_digest`. A failure rolls back, and a test injects one after the first insert.
+- `reports/income_evidence.py` builds `in1`. It covers the operation, the source by what it says
+  (names standing for IDs), and every deposit reached with its state, by record keys. With a
+  proposal it covers the proposal's whole content, and with `--supersedes` the superseded source's
+  own token. `missed` and `expected` are never in it (point 1).
+- **Two departures from the slice plan's wording, for the owner's review:**
+  - `income proposals` prints no token. `income preview --from-proposal KEY` prints it, over the
+    options the person chose, because the token covers the name, kind and every other field typed,
+    which a proposal cannot know. `income proposals` takes no `--as-of`, since nothing in it needs
+    today.
+  - A proposal's anchor is the nominal date its earliest deposit pairs with. For a month-based
+    cadence the days are the days of the month seen most often, so a first paycheck paid a day
+    early still anchors on its pay date.
+- `income add --supersedes` still takes `--account`, and refuses another account. A name is refused
+  while any source outside the superseded chain is active with it.
+- **Tests:**
+  - `tests/unit/test_income_schedules.py` covers IA2 and the pure rules, every date by hand.
+  - `tests/scenarios/test_income_sources.py` covers IA1 and IA3 to IA7, including G3's stale-token
+    refusal for each field typed, a race and a fault after the first insert. It also checks that
+    `evidence_digest` (`tests/scenarios/planning_digest.py`) is unchanged by every income write.
+  - IA4's import orders are exhaustive for four files.
+  - `tests/unit/test_token_registry.py` pins the 18 kinds (G5).
+  - `tests/unit/test_planning_rules.py` refuses a clock read (G7) and a float or `/` (G8) in
+    `planning/`.
+  - The backup tests' rich ledger gains two sources, a terms row and an undo, compared after
+    restore (G10).
+- **Breaks (G12):** 26 applied. 23 were caught on the first run, each by a relevant test. Two
+  survived as test gaps, now closed:
+  - another account's deposits, reachable only once sources sit on two accounts;
+  - `in1` without the proposal, where an earlier deposit changes the proposal but not what the
+    source reaches.
+
+  One break errored in a fixture, its category name repeating, and was rewritten. All three were
+  caught on the rerun.
+- **Compared as G6:** the suite's 2,824 ledgers, kept with `--basetemp` from a `git archive`
+  export, read by the code at `181c8cf` and, with copies migrated to 24, by a frozen copy of M12.1's
+  `src/`.
+  - Of 80,760 runs, 80,714 are identical with no token version moved. All 46 others are the two
+    ledgers a test stamps 24 to mean newer than the code, which reads them as current, as in M11.
+  - Another 5,648 runs of `income sources` and `income proposals` show no source and no proposal
+    on any ledger that opens. The same two stamped ledgers, which have no income tables, give
+    `database error`.
+- **Full suite** on the final tree: 3,005 passed, the 2,872 before and 133 new.
+
 ---
 
 ## D-069 M13 plan: budgets and spending allowances — Approved

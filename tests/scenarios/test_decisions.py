@@ -92,15 +92,29 @@ ALLOCATION_TABLES = ("transaction_allocation", "allocation_statement_event",
                      "allocation_statement")
 
 
+# Created by 0024, and empty until an income source is added, so set-backs check that first
+# (D-068).
+INCOME_TABLES = ("transaction_income_source", "income_source_event", "income_source_terms",
+                 "income_source")
+
+
+def drop_income_tables(conn) -> None:
+    """Undo 0024 on a ledger at the latest version, before setting it back further."""
+    for table in INCOME_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
 def drop_allocation_tables(conn) -> None:
-    """Undo 0023 on a ledger at the latest version, before setting it back further."""
+    """Undo 0024 and 0023 on a ledger at the latest version, before setting it back further."""
+    drop_income_tables(conn)
     for table in ALLOCATION_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
 
 
 def drop_household_tables(conn) -> None:
-    """Undo 0023 and 0022 on a ledger at the latest version, before setting it back further."""
+    """Undo 0024 to 0022 on a ledger at the latest version, before setting it back further."""
     drop_allocation_tables(conn)
     for table in HOUSEHOLD_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -108,8 +122,7 @@ def drop_household_tables(conn) -> None:
 
 
 def drop_category_rule_tables(conn) -> None:
-    """Undo 0023, 0022 and 0021 on a ledger at the latest version, before setting it back
-    further."""
+    """Undo 0024 to 0021 on a ledger at the latest version, before setting it back further."""
     drop_household_tables(conn)
     for table in CATEGORY_RULE_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -117,7 +130,7 @@ def drop_category_rule_tables(conn) -> None:
 
 
 def drop_category_tables(conn) -> None:
-    """Undo 0023 to 0019 on a ledger at the latest version, before setting it back further."""
+    """Undo 0024 to 0019 on a ledger at the latest version, before setting it back further."""
     drop_category_rule_tables(conn)
     for table in CATEGORIZATION_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -158,6 +171,8 @@ class Ledger:
                                     "report", "category") else 1
         if words[:2] == ["category", "rule"]:
             position = 3
+        if words[0] == "income":
+            position = 3 if words[1] == "source" else 2
         if words[0] == "household":
             position = 2 if words[1] == "members" else 3
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],

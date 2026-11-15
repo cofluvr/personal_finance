@@ -609,11 +609,11 @@ Approved by the owner on 2026-11-10 as D-068, with A to H, in
 [decisions-m12-m21.md](decisions-m12-m21.md), under D-067's guardrails G1 to G13. M12.1 to M12.3
 are to be built in order, each stopping for review. No security control changes. M12 started on
 2026-11-13 with M12.1's slice plan, under D-068, approved by the owner the same day with I to M
-as recommended.
+as recommended, and M12.1 built on 2026-11-15 for the owner's review.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M12.1 | Income sources: migration 0024, schedules, proposals, preview, add, supersede, terms, undo, expected against actual, `in1` | Approved, being built |
+| M12.1 | Income sources: migration 0024, schedules, proposals, preview, add, supersede, terms, undo, expected against actual, `in1` | Built, awaiting review |
 | M12.2 | Recurring obligations: migration 0025, `planning/entries.py` and `planning/schedules.py` extracted, proposals, dismissal, fixed and discretionary, `ob1` | Not started |
 | M12.3 | `pf report income`: baseline, extra and side income by month, obligations due and paid, its UI page, the `--recurring` benchmark row | Not started |
 

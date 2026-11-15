@@ -11,6 +11,7 @@ import re
 import sqlite3
 import sys
 import uuid
+from datetime import date
 from pathlib import Path
 
 from personal_finance.db.backups import (
@@ -48,6 +49,21 @@ from personal_finance.ingest.layouts import LAYOUTS
 from personal_finance.ingest.pdf_reader import read_pdf_lines
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.money import format_cents
+from personal_finance.planning.income_effects import AMOUNT_CHANGED as INCOME_AMOUNT_CHANGED
+from personal_finance.planning.income_effects import RECEIVED as INCOME_RECEIVED
+from personal_finance.planning.income_effects import SOURCE_CONFLICT, occurrences
+from personal_finance.planning.income_effects import load_sources as load_income_sources
+from personal_finance.planning.income_proposals import cadence_spec, income_proposals
+from personal_finance.planning.income_sources import (
+    DEFAULT_TOLERANCE_DAYS,
+    SourceRequest,
+    add_source,
+    change_terms,
+    checked_source,
+    parsed_date,
+    undo_source,
+)
+from personal_finance.planning.income_sources import KINDS as SOURCE_KINDS
 from personal_finance.reconcile.apply import STATE_ACTIVE, reconcile_account, stale_accounts
 from personal_finance.reconcile.balance_observations import record_observation, undo_observation
 from personal_finance.reconcile.cross_document import (
@@ -122,6 +138,9 @@ from personal_finance.reports.balances import (
     load_observation,
     observation_revision,
 )
+from personal_finance.reports.income_evidence import TERMS as INCOME_TERMS
+from personal_finance.reports.income_evidence import UNDO as INCOME_UNDO
+from personal_finance.reports.income_evidence import preview_outlook, source_outlook
 from personal_finance.reports.category_rule_evidence import (
     RuleOutlook,
     StoredRule,
@@ -463,6 +482,72 @@ def build_parser() -> argparse.ArgumentParser:
     rule_undo.add_argument("rule_id", help="a rule ID from category rules")
     rule_undo.add_argument("--revision", required=True,
                            help="the revision from category rule show")
+
+    income = commands.add_parser(
+        "income", help="state income sources and see their paychecks against their schedules")
+    income_commands = income.add_subparsers(dest="income_command", required=True)
+    income_proposals_command = command(
+        "proposals", income_commands, handler=run_income_proposals,
+        help="list income sources proposed from history, writing nothing")
+    income_proposals_command.add_argument("--account", help="only this account's deposits")
+
+    def source_arguments(sub):
+        sub.add_argument("--account", required=True, help="the account the pay lands in")
+        sub.add_argument("--name", required=True, help="what to call the source")
+        sub.add_argument("--kind", required=True, choices=SOURCE_KINDS)
+        sub.add_argument("--match", required=True,
+                         help="text the deposit's description contains, compared ignoring case "
+                              "and repeated spaces")
+        sub.add_argument("--cadence",
+                         help="weekly, biweekly, semimonthly:D1,D2, monthly:D, quarterly:D, "
+                              "annual:MM-DD or every:N-months:D")
+        sub.add_argument("--anchor", help="one real pay date, YYYY-MM-DD, the first counted")
+        sub.add_argument("--amount", help="the expected take-home amount, such as 2500.00")
+        sub.add_argument("--tolerance-days", type=int, default=DEFAULT_TOLERANCE_DAYS,
+                         help="days a deposit may fall either side of its pay date, 0 to 7")
+        sub.add_argument("--amount-tolerance",
+                         help="how far a deposit may differ from the expected amount, else 0")
+        sub.add_argument("--member", help="the household member it is paid to")
+        sub.add_argument("--tax-eligible", action="store_true",
+                         help="income a tax reserve is taken from (M14)")
+        sub.add_argument("--from-proposal", help="a proposal key from income proposals")
+        sub.add_argument("--supersedes",
+                         help="the source this one replaces, keeping its chain's terms")
+
+    income_preview = command("preview", income_commands, handler=run_income_preview,
+                             help="show every deposit a source would reach, writing nothing")
+    source_arguments(income_preview)
+    income_add = command("add", income_commands, handler=run_income_add,
+                         help="add an income source whose preview is still current")
+    source_arguments(income_add)
+    income_add.add_argument("--revision", required=True, help="the revision from income preview")
+    income_terms = command("terms", income_commands, handler=run_income_terms,
+                           help="change a source's amount or cadence from a date on")
+    income_terms.add_argument("source_id", help="a source ID from income sources")
+    income_terms.add_argument("--effective-from", required=True,
+                              help="the first day the new terms apply, YYYY-MM-DD")
+    income_terms.add_argument("--amount", required=True, help="the expected take-home amount")
+    income_terms.add_argument("--cadence", help="a new cadence, given with --anchor")
+    income_terms.add_argument("--anchor", help="a real pay date of the new cadence")
+    income_terms.add_argument("--as-of", required=True,
+                              help="today, YYYY-MM-DD: a month before it is closed")
+    income_terms.add_argument("--revision", required=True,
+                              help="the terms revision from income source show")
+    income_sources_command = command("sources", income_commands, handler=run_income_sources,
+                                     help="list income sources and what each reaches")
+    income_sources_command.add_argument("--account", help="only this account's sources")
+    income_source = income_commands.add_parser("source", help="inspect one income source")
+    income_source_commands = income_source.add_subparsers(dest="source_command", required=True)
+    income_source_show = command("show", income_source_commands, handler=run_income_source_show,
+                                 help="show a source's pay dates and deposits as of a date")
+    income_source_show.add_argument("source_id", help="a source ID from income sources")
+    income_source_show.add_argument("--as-of", required=True,
+                                    help="today, YYYY-MM-DD: missed only once it has passed")
+    income_undo = command("undo", income_commands, handler=run_income_undo,
+                          help="stop an income source applying, keeping it on record")
+    income_undo.add_argument("source_id", help="a source ID from income sources")
+    income_undo.add_argument("--revision", required=True,
+                             help="the undo revision from income source show")
 
     household = commands.add_parser(
         "household", help="name household members, the household share and account defaults")
@@ -2396,6 +2481,234 @@ def run_category_rule_undo(args) -> int:
     print(f"Category rule {args.rule_id} undone: changed {len(outlook.changes)} transactions. "
           "It stays on record.")
     print(f"  {RULE_UNDO_NOTICE}")
+    return 0
+
+
+INCOME_NOTICE = (
+    "Only deposits typed income count. The source reaches deposits imported later too, in any "
+    "order, and never binds records."
+)
+
+
+def source_request(conn, args) -> SourceRequest:
+    return SourceRequest(
+        find_account(conn, args.account), args.name, args.kind, args.match, args.cadence,
+        args.anchor, args.amount, args.tolerance_days, args.amount_tolerance, args.member,
+        args.tax_eligible, args.from_proposal, args.supersedes)
+
+
+def source_sentence(conn, source) -> str:
+    definition = source.definition
+    words = (f"{shown(definition.name)}, {definition.kind}, account "
+             f"{shown(shown_account_name(conn, definition.account_id))}, description contains "
+             f"{shown(definition.description_contains)}, dates within "
+             f"{definition.tolerance_days} days, amounts within "
+             f"{shown_amount(definition.amount_tolerance_cents)}")
+    if definition.member_id is not None:
+        words += f", paid to {shown(load_household(conn).name_of(definition.member_id))}"
+    if definition.tax_eligible:
+        words += ", tax eligible"
+    return words
+
+
+def terms_sentence(terms) -> str:
+    return (f"from {terms.effective_from}: {cadence_spec(terms.cadence, terms.anchor)}, anchor "
+            f"{terms.anchor}, expected {shown_amount(terms.amount_cents)}")
+
+
+def deposit_words(entry) -> str:
+    return (f"{shown(entry.account_name)}, {entry.shown_date}, {shown_amount(entry.amount_cents)}, "
+            f"{shown(entry.description)}")
+
+
+def outcome_words(outcome, outlook, terms_on) -> str:
+    if outcome.state in (INCOME_RECEIVED, INCOME_AMOUNT_CHANGED):
+        expected = terms_on(outcome.nominal_date).amount_cents
+        words = (f"{outcome.state} for the pay date {outcome.nominal_date}, expected "
+                 f"{shown_amount(expected)}")
+        if outcome.state == INCOME_AMOUNT_CHANGED:
+            actual = outlook.facts[outcome.transaction_id].amount_cents
+            words += f", differs by {shown_amount(actual - expected)}"
+        return words
+    if outcome.state == SOURCE_CONFLICT:
+        others = ", ".join(outlook.conflicting[outcome.transaction_id])
+        return f"{SOURCE_CONFLICT} with {others or 'the source previewed'}, counted toward neither"
+    return f"{outcome.state}, no pay date within the tolerance"
+
+
+def terms_lookup(source):
+    def terms_on(nominal_date):
+        return [terms for terms in source.terms if terms.effective_from <= nominal_date][-1]
+    return terms_on
+
+
+def print_deposit_lists(conn, outlook, terms_on) -> None:
+    every = [*(outcome.transaction_id for outcome in outlook.reached),
+             *(facts.transaction_id for facts in outlook.possible_paychecks),
+             *(facts.transaction_id for facts in outlook.before_first_pay_date)]
+    shown_by_id = shown_transactions(conn, every)
+    print(f"Reaches: {len(outlook.reached)} deposits, actual amounts")
+    for outcome in outlook.reached:
+        print(f"  Transaction {outcome.transaction_id}: "
+              f"{deposit_words(shown_by_id[outcome.transaction_id])}: "
+              f"{outcome_words(outcome, outlook, terms_on)}")
+    print(f"Possible paychecks, unclassified, never counted: {len(outlook.possible_paychecks)}")
+    for facts in outlook.possible_paychecks:
+        print(f"  Transaction {facts.transaction_id}: "
+              f"{deposit_words(shown_by_id[facts.transaction_id])}")
+    print(f"Before the first pay date, not reached: {len(outlook.before_first_pay_date)}")
+    for facts in outlook.before_first_pay_date:
+        print(f"  Transaction {facts.transaction_id}: "
+              f"{deposit_words(shown_by_id[facts.transaction_id])}")
+
+
+def warn_if_stale(conn, account_id, what) -> None:
+    if stale_accounts(conn, DEFAULT_RULES, account_id):
+        print(f"The source's account has not been reconciled under the current matching rules, so "
+              f"{what} will be refused until it is. Run reconcile.")
+
+
+def run_income_proposals(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    proposals = income_proposals(conn, account_id)
+    for proposal in proposals:
+        spec = cadence_spec(proposal.cadence, proposal.anchor)
+        print(f"Proposal {proposal.proposal_key}: account "
+              f"{shown(shown_account_name(conn, proposal.account_id))}, description "
+              f"{shown(proposal.normalized_text)}, {spec}")
+        print(f"  Deposits: {len(proposal.deposits)}, from {proposal.anchor} to "
+              f"{proposal.last_seen}, actual amounts {shown_amount(proposal.lowest_cents)} to "
+              f"{shown_amount(proposal.highest_cents)}")
+        print(f"  Suggested: --cadence {spec} --anchor {proposal.anchor} --amount "
+              f"{shown_amount(proposal.suggested_amount_cents)}, expected next "
+              f"{proposal.next_expected}")
+    print(f"Income proposals: {len(proposals)}")
+    if proposals:
+        print("To confirm one, run income preview with --from-proposal and the options you "
+              "choose, then income add with its revision.")
+    return 0
+
+
+def run_income_preview(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    request = source_request(conn, args)
+    checked = checked_source(conn, request)
+    outlook = preview_outlook(conn, checked.source, checked.proposal, checked.superseded)
+    print(f"Income source preview: {source_sentence(conn, checked.source)}")
+    if checked.superseded is not None:
+        print(f"  Supersedes {checked.superseded.source_id}, keeping its terms")
+    if checked.proposal is not None:
+        print(f"  From proposal {checked.proposal.proposal_key}")
+    for terms in checked.source.terms:
+        print(f"  Terms {terms_sentence(terms)}")
+    print_deposit_lists(conn, outlook, terms_lookup(checked.source))
+    print(f"Revision: {outlook.revision}")
+    print("To add this source, run income add with the same options and --revision.")
+    warn_if_stale(conn, request.account_id, "adding it")
+    return 0
+
+
+def run_income_add(args) -> int:
+    conn = open_ledger(args.db)
+    added = add_source(conn, source_request(conn, args), args.revision)
+    source = next(source for source in load_income_sources(conn)
+                  if source.source_id == added.source_id)
+    print(f"Income source {added.source_id} recorded: {source_sentence(conn, source)}")
+    if source.supersedes_id:
+        print(f"  Supersedes {source.supersedes_id}. It stays on record.")
+    print(f"  Reaches: {len(added.outlook.reached)} deposits, as previewed.")
+    print(f"  {INCOME_NOTICE}")
+    return 0
+
+
+def run_income_terms(args) -> int:
+    conn = open_ledger(args.db)
+    terms = change_terms(conn, args.source_id, args.effective_from, args.amount, args.as_of,
+                         args.revision, args.cadence, args.anchor)
+    print(f"Income source {args.source_id} terms recorded: {terms_sentence(terms)}")
+    print("  Pay dates before it keep their terms.")
+    return 0
+
+
+def run_income_sources(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    sources = [source for source in load_income_sources(conn)
+               if account_id in (None, source.definition.account_id)]
+    states = {}
+    for source_id, state, count in conn.execute(
+        "SELECT source_id, state, COUNT(*) FROM transaction_income_source "
+        "GROUP BY source_id, state"
+    ):
+        states.setdefault(source_id, []).append(f"{state} {count}")
+    for source in sources:
+        print(f"Income source {source.source_id}: {source.state}, "
+              f"{source_sentence(conn, source)}, latest terms {terms_sentence(source.terms[-1])}, "
+              f"made {source.created_at}")
+        if source.applies:
+            print(f"  Reaches: {', '.join(sorted(states.get(source.source_id, []))) or 'none'}")
+    print(f"Income sources: {len(sources)}")
+    if sources:
+        print("To see a source's pay dates, run income source show with --as-of.")
+    return 0
+
+
+def run_income_source_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    as_of = date.fromisoformat(checked_as_of(args.as_of))
+    sources = load_income_sources(conn)
+    source = next((source for source in sources if source.source_id == args.source_id), None)
+    if source is None:
+        raise CommandError("income source not found. Run income sources.")
+    print(f"Income source {source.source_id}")
+    print(f"  Says: {source_sentence(conn, source)}")
+    print(f"  Status: {source.state}")
+    print(f"  Made: {source.created_at}")
+    if source.supersedes_id:
+        print(f"  Supersedes: {source.supersedes_id}")
+    for terms in source.terms:
+        print(f"  Terms {terms_sentence(terms)}")
+    if source.undone_at:
+        print(f"  Undone: {source.undone_at}. It stays on record and no longer applies.")
+        return 0
+    if source.superseded_by:
+        print(f"  Superseded by {source.superseded_by}, which applies instead.")
+        return 0
+    outlook = source_outlook(conn, source, INCOME_UNDO)
+    facts_list = tuple(outlook.facts.values())
+    outcomes = {(outcome.transaction_id, outcome.source_id): outcome
+                for outcome in outlook.reached}
+    print(f"Pay dates as of {as_of.isoformat()}, amounts expected unless received:")
+    for occurrence in occurrences(source, facts_list, outcomes, as_of):
+        line = (f"  {occurrence.nominal_date} ({occurrence.part}): {occurrence.state}, expected "
+                f"{shown_amount(occurrence.terms.amount_cents)}")
+        if occurrence.deposit is not None:
+            line += (f", received {shown_amount(occurrence.deposit.amount_cents)} on "
+                     f"{occurrence.deposit.reporting_date}, transaction "
+                     f"{occurrence.deposit.transaction_id}")
+        print(line)
+    print_deposit_lists(conn, outlook, terms_lookup(source))
+    print(f"  Terms revision: {source_outlook(conn, source, INCOME_TERMS).revision}")
+    print(f"  Undo revision: {outlook.revision}")
+    print("To change its definition, run income preview with --supersedes.")
+    warn_if_stale(conn, source.definition.account_id, "a change")
+    return 0
+
+
+def checked_as_of(text) -> str:
+    try:
+        return parsed_date(text, "--as-of")
+    except DecisionRefused as refused:
+        raise CommandError(str(refused).replace(" Nothing was changed.", "")) from None
+
+
+def run_income_undo(args) -> int:
+    conn = open_ledger(args.db)
+    source = undo_source(conn, args.source_id, args.revision)
+    print(f"Income source {args.source_id} undone. It stays on record.")
+    if source.supersedes_id:
+        print(f"  Source {source.supersedes_id}, which it superseded, applies again.")
     return 0
 
 
