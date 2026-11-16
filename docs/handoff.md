@@ -46,20 +46,27 @@ Earlier history (what each slice built, every test run, the "as built" limits of
 boundary notes) is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when a
 task needs a specific section.
 
-## Working principles
+Standing rules (session rules, working principles, commit hygiene, testing for review, lessons,
+keeping the docs small) are in [CLAUDE.md](../CLAUDE.md), loaded automatically. Do not restate
+them here.
 
-Given by the owner on 2026-11-08, for the entirety of the project:
+## Next task
 
-1. Don't build it until you need it.
-2. Extract patterns after the second duplication, not before.
-3. Explicit errors beat silent failures: fail fast.
-4. Write the obvious solution, and optimize only if needed.
-5. Delete aggressively: less code means fewer bugs.
-6. Name variables, parameters and API endpoints semantically, with verbose, self-documenting names
-   that optimize for comprehension by both humans and LLMs, not brevity.
+Rewritten by each session for the next. The kickoff prompt carries only the owner's notes.
 
-Much existing code uses short names such as `held`, `bound` and `rows`. Principle 6 applies to new
-and changed code. Renaming existing code wholesale is a separate change for the owner to approve.
+- **Task:** finish M13.1 under D-069 (BA1 to BA4): the setting and budget commands, `st1`, `bp1`,
+  today read from the household timezone, and `--as-of` made optional on the M12 commands that
+  require it (`income source show`, `income terms`, `obligation show`, `obligation terms`,
+  `report income` and the `/income` page; M12.1 slice plan point 1).
+- **Read first:** D-067's G1 to G13 and D-069 points 1, 2 and 6 in
+  [decisions-m12-m21.md](decisions-m12-m21.md); BA1 to BA4 in [plan.md](plan.md); "How M12.2 was
+  implemented" and "How M12.3 was implemented" under D-068; then the M13.1 bullet under "Read
+  first" below.
+- **Warnings:** migration 0026 is committed. The drafts in `build/m13/draft/` are unreviewed and
+  untested: finish from them or from scratch. Before changing `src/`, keep the suite's ledgers with
+  `--basetemp` from a `git archive` export of the latest commit, for G6.
+- **Done when:** M13.1 is built, gated on the full suite, with 20 to 25 breaks by G12 reported.
+  Unless the owner's notes extend the scope, stop for review there.
 
 ## Current state
 
@@ -189,69 +196,6 @@ Then only what the task needs:
   when it touches performance. [archive/plan-m1-m2.md](archive/plan-m1-m2.md) for the M1 and M2
   acceptance criteria.
 
-## Lessons for new work
-
-Pitfalls that recurred across M1 to M3.4:
-
-- **Migration tests** that build a ledger at the latest version and set it back break when a newer
-  migration adds tables. Each migration's tests stop at their own version or drop newer tables.
-- **Order dependence.** `pair_up`'s first transaction follows content hashes, and generated IDs are
-  random, so tests name files rather than assume an order. A test that failed at random once took the
-  credit for four surviving breaks.
-- **Deliberate breaks,** run as in "Testing for review". Check which test caught each break, not
-  only that one did. Removing a loop's only line is a syntax error, not a catch: use `pass`. A
-  replacement that renames a function is a bad break. A break that matches nothing must stop the
-  script, not run on unchanged code. Give every break run a fresh bytecode cache
-  (`PYTHONPYCACHEPREFIX`): in M4.2 a break of the same size, written in the same second as the one
-  before, ran that one's stale `.pyc` and credited a catch to the wrong break.
-- **Closed review items.** D-045 closes an item by removing it. Only D-052's same-document
-  pending and posted items stay as `resolved` rows, so a test about resolved items needs that shape.
-- **A broader refusal can stand in for the one under test.** In M5.1 the trigger refusing a mark
-  on a ledger with an account refused `INSERT OR REPLACE` first, hiding a missing no-replace
-  trigger. Test each refusal on a state where it alone applies.
-- **Tests that pass for the wrong reason.** Give each schema refusal a control insert that succeeds.
-  Pass test helper arguments by keyword. Count the tests actually run: a nested function or a test
-  class imported by name changes the count.
-- **Renaming a test** breaks `docs/m1-acceptance.md` if a criterion names it. Gate such a commit on
-  `tests/unit/test_acceptance_matrix.py` too: `7a07bf4` missed it in M3.4.
-- **Check the schema before planning a case.** D-057 planned a `no date` line for transactions
-  that migration 0001 already refuses. Read the table's CHECKs before designing for a state.
-- **New command groups** need adding to the test `Ledger.run` helper, which inserts `--db` after
-  the group's words (`report` was added in M4.3).
-- **Name benchmark rows by stable keys.** M4.4's first runs bound records of the wrong account
-  through an external ID repeated across accounts, then classified a randomly chosen matched side,
-  which the product rightly refused. Key by account and external ID, never by generated ID order.
-- **Benchmarks** must be able to reach the cost they claim to measure. Three documents, not two, are
-  needed for a confirmation to link anything.
-- **Privacy checks against an amount** must leave timestamps out: in M5.4 a gate failed when
-  `16.502Z` held `6.50`. Three tests now strip ISO timestamps first.
-- **Learn an outside tool's output from a real run before designing on it.** In M5.2 diskutil
-  refused a folder, had no `VirtualOrPhysical` key, and reported an image encrypted only as a file
-  as not encrypted: all three would have been built wrong from memory.
-- **Shell.** zsh has no `PIPESTATUS`, so `pytest | tail && git commit` gates on `tail`: it
-  happened in M3.2 at `1d1267d` and again in M3.3 at `ebc2ab4`, both on passing suites. Never pipe a
-  gate: redirect to a file and chain the commit to pytest itself. An unquoted `--include=*.py` fails, and
-  `echo ====` is read as a command. `mktemp -d` ignores
-  `TMPDIR` here. The harness refuses `rm -rf` of a `build/` folder, so use a new folder.
-- **Long runs read the source live.** A baseline suite or a capture reads `src/` and the
-  migrations folder while it runs, so new work made it read half-new code in M11. Run a baseline
-  from `git archive HEAD` under `build/`, and an after-capture from a copy of `src/`. The export is
-  no git checkout and has no `.venv`, so `test_ignore_rules.py`, `test_entry_point.py` and one
-  `test_pdf_reader.py` test fail there by design, 16 in all.
-- **A break that renames a key** of token material keeps the data in the digest: drop it instead.
-  A schema test must refuse on the trigger under test alone: in M11.2 one passed on the primary key.
-
-- **Import cycles in `planning/`.** Effects modules load while `reconcile/apply` is still
-  importing, so they may import `planning/schedules.py` (pure) but never `planning/entries.py`,
-  `reconcile.decisions` or `reports.totals`. Report figures go in `reports/`.
-- **A G1 test must assert before it reassigns.** M12.2's evidence test reassigned `before` without
-  asserting the first writes, and a break inserting a category survived it.
-- **A benchmark's first command after a long build runs slow.** M12.3's first `totals` and import
-  were about 1.2s slower than every later run on the same ledger. Attribute a cost on one ledger in
-  one session before calling the stopping rule.
-- **The suite's ledgers and a suite gate compete.** A G6 capture running beside a full-suite gate
-  stretched the gate to an hour. Run them apart when time matters.
-
 ## Open follow-ups
 
 **F2. Legacy identity timestamps. Partly done.** An ID retired before migration 0004 has no stored
@@ -262,64 +206,6 @@ a prerequisite before any UI or export presents legacy creation timestamps.**
 **F3. Merge-heavy benchmark. Backlog.** See "Backlog benchmarks" in [plan.md](plan.md).
 
 F1 and F4 are fixed, and recorded in the archive.
-
-## Qualifications on M2.1, binding later slices
-
-1. **Revision tokens:** decision commands must validate account, item ID and revision token
-   together. A matching token alone does not identify a decision target.
-2. **Stale accounts:** before accepting a decision, the workflow must ensure the displayed evidence
-   is current. Never silently reconcile changed evidence and then accept an old token.
-3. **Output escaping:** keep the escaping, and the tests for embedded newlines and terminal control
-   characters.
-
-## Commit hygiene
-
-- Gate every commit on pytest's own exit code, chained as in `pytest -q && git commit`. A pipe such
-  as `pytest | tail` hides that exit code. `bd095bf` is a broken commit made when they were not
-  chained, and history is not rewritten to remove it.
-- While a slice is in progress, gate each commit on the test files for the code it changes and the
-  scenario files that exercise it. Gate the last commit before stopping for review on the full
-  suite, about 3.5 minutes. If a gate fails, rerun only the failing tests with `pytest --lf` while
-  fixing, then rerun the gate itself before committing.
-
-## Testing for review
-
-Set by the owner on 2026-11-08 to cut test time, which reached about two hours a milestone in M3.1
-(62 breaks of about 50s each, then all 62 again on the final code). The bar is unchanged: every break
-must be caught by a relevant test, or be shown to be a test gap, closed, or equivalent code.
-
-1. **Fewer, targeted breaks.** About 20 to 25 a slice, aimed at refusals, money and direction rules,
-   token inputs, and the new invariants and migrations. Skip wording, messages and paths that only
-   save work.
-2. **Narrow first.** Run each break against the one or two test files that cover the broken code,
-   with the most relevant file first. Widen to the slice's wider set only for a break that survives
-   there, before calling it a gap.
-3. **Stop at the first failure.** Run breaks with `pytest -x -q --tb=no`. One relevant failure is a
-   catch. Record which test failed, and treat a catch by an unrelated test as a survivor.
-4. **Rerun only what needs it.** On the final code, rerun only the breaks that survived, those whose
-   target code changed since, and those that did not apply. A caught break on unchanged code stays
-   caught.
-5. **The unbroken control** still runs once, on the same narrow files, before any break.
-6. **No repeat runs** of a test file to look for flakiness, unless the work touches random or
-   order-dependent tests.
-7. **Parallel worktrees** only if a break run still takes more than about 15 minutes: run breaks in
-   two to four worktrees under `build/`, each with its own `TMPDIR`. No new dependency for it.
-
-Report the counts: applied, caught, survived and why, and rerun.
-
-## Keeping these docs small
-
-Every session reads the "Read first" list, so its cost grows with them. At the end of a task:
-
-- Replace this file's state, rather than appending to it. Move the finished milestone's "as built"
-  section and anything only historical to [archive/handoff-history.md](archive/handoff-history.md).
-- Record each fact in one place: rules in decisions, current limits in status, measurements in
-  benchmarks, history in git and the archive. Link rather than restate.
-- When a decision is accepted and a newer one is written, move its full text to
-  [decisions-d001-d052.md](decisions-d001-d052.md) and keep its index line.
-- Report test runs and break results in the commit message or the session report, and here only the
-  latest gating run.
-- Write session boundary notes only when something went wrong.
 
 ## Awaiting the owner
 
@@ -360,46 +246,18 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 | Installing dependencies | Approved for the declared dependencies and build requirements, and on 2026-11-09 for pypdf 6.21.2 | Ask for anything new, an upgrade of pypdf included |
 | Network access | Approved for the clean-install dependencies, and on 2026-11-09 for pypdf's release list and install. Used, and now closed | Ask for any use |
 
-Never approved, and not to be assumed:
-
-- Rewriting history.
-- Modifying the parent repository.
-- Reading parent or sibling directories, unrelated project memory, or any file
-  outside `personal_finance/`, including user-level configuration.
-- Reading real statements, databases, backups or credentials.
-- Applying the security proposal.
+Never approved, and not to be assumed: see [CLAUDE.md](../CLAUDE.md).
 
 ## Kickoff prompt
 
+Start the session inside `personal_finance/`. Standing rules load from CLAUDE.md, and the task is
+under "Next task" above, so the prompt carries only what changed since this file was written:
+
 ```text
-You are the lead engineer on personal_finance. Work only inside this repository, and start
-every command from it. Do not read external memory, list or search parent or sibling
-directories, or write external scratchpad files. Synthetic pytest temporary artifacts are the
-only exception.
+Do the next task in docs/handoff.md.
 
-Read docs/handoff.md first, then only the files and sections its "Read first" list names for
-this task. Open the archive and other decisions only when the task needs them. Confirm the
-branch is feature/m10-rules, the working tree is clean, and run the test suite with a real exit
-code before changing anything. Do not contact GitHub.
-
-Next task, from the owner:
-Finish M13.1 under D-069 (BA1 to BA4), after my review of M12.2 and M12.3 (state its outcome
-here). Read D-067's G1 to G13, D-069 points 1, 2 and 6, and "How M12.2 was implemented" and "How
-M12.3 was implemented" first. Migration 0026 is committed; the drafts in build/m13/draft/ are
-unreviewed. Before changing src/, keep the suite's ledgers with --basetemp from a git archive
-export of the latest commit for G6. Build settings and budget plans, and make --as-of optional
-where M12 requires it, reading today from the household timezone. Gate every commit on pytest's
-own exit code, and run 20 to 25 breaks by G12. Stop for review when M13.1 is built.
-
-Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as the next
-free decision number, and approval before any of it is built. Each slice of it then needs its own
-approval. Do not reopen D-042 to D-061 unless you find a concrete contradiction.
-
-Follow the working principles in docs/handoff.md, and its "Keeping these docs small" rules when
-you update the docs. Pushing needs my explicit approval each time. No network, no new
-dependencies, no security changes. Synthetic data only. Use build/ for walkthroughs, breaks and
-benchmarks, with TMPDIR set to build/tmp. Gate commits on pytest's own exit code, as in its
-"Commit hygiene", and run deliberate breaks as in its "Testing for review". A test that fails on
-unbroken code proves nothing about a deliberate break. Check which test caught each break, and
-that a benchmark shape can reach the cost it claims to measure.
+Owner notes:
+- <review outcomes, e.g. "M12.2 and M12.3 reviewed and approved">
+- <permissions renewed, e.g. "local commits approved for M13 on feature/m10-rules">
+- <scope change or stopping point, if any>
 ```

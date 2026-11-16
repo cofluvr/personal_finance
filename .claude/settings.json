@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(git push:*)"
+    ],
+    "deny": [
+      "WebFetch",
+      "WebSearch",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(gh:*)",
+      "Bash(pip install:*)",
+      "Bash(.venv/bin/pip install:*)",
+      "Bash(python -m pip install:*)",
+      "Bash(git rebase:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git push --force:*)",
+      "Read(//Users/michaelbattaile/Documents/commoncents_data/**)",
+      "Read(~/CommonCents_LocalBackups/**)",
+      "Read(//Volumes/CommonCents/**)",
+      "Read(//Volumes/CommonCentsBackup/**)"
+    ]
+  }
+}
