@@ -59,7 +59,7 @@ class BudgetLedger(ObligationLedger):
             assert self.run("household", "member", "add", name)[0] == 0
         for name in ("Dining", "Groceries"):
             assert self.run("category", "add", name)[0] == 0
-        self.card("c1.csv", "03/02/2026,SYNTHETIC CAFE,6.50,")
+        self.card("c1.csv", "02/02/2026,SYNTHETIC CAFE,6.50,")
 
     # Settings.
 

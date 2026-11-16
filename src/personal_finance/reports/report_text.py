@@ -57,6 +57,7 @@ from personal_finance.reconcile.transfer_effects import (
     TRANSFER_DATE_WINDOW_DAYS,
 )
 from personal_finance.reports.coverage_evidence import load_document_coverage
+from personal_finance.reports.budget_report import budget_report
 from personal_finance.reports.income_report import income_report
 from personal_finance.reports.household import (
     ONE_MEMBER,
@@ -1505,4 +1506,109 @@ def income_report_lines(conn, as_of, account_id=None, first_month=None,
                 out.add(f"  Disclosure: {month.disclosures[key]} {words}")
     if not report.months:
         out.add("No months: the ledger holds no transaction in scope.")
+    return out
+
+
+BUDGET_NOTICE = (
+    "Budget pace, never safe to spend. Actual is discretionary spending, pending included, plus "
+    "possible spending: money out not yet classified, and transfer kinds not yet confirmed, "
+    "counted against the target until classified. Fixed commitments and income are planned "
+    "context, never inputs."
+)
+
+
+def spent_words(spent) -> str:
+    return f"{spent.count}, {format_cents(spent.cents)}"
+
+
+def describe_against_pace(cents: int) -> str:
+    if cents > 0:
+        return f"above pace by {format_cents(cents)}"
+    if cents < 0:
+        return f"below pace by {format_cents(-cents)}"
+    return "on pace"
+
+
+def budget_report_lines(conn, month, as_of, member_name=None) -> ReportLines:
+    """pf report budget's lines, which its UI page renders (D-069 points 3 to 5)."""
+    report = budget_report(conn, month, as_of, member_name)
+    out = ReportLines()
+    scope = "the household" if member_name is None else f"member {shown(member_name)}"
+    out.add(f"Budget for {scope}, month {report.month}, as of {report.as_of}: "
+            f"{report.state} month")
+    out.add(BUDGET_NOTICE)
+    plan = report.plan
+    if plan is None:
+        out.add("No budget plan applies to this month. Run budget preview to make one.")
+    else:
+        out.add(f"  Plan in effect: from {plan.effective_from}, see budgets")
+        if report.corrected_after_close:
+            out.add("  Disclosure: target corrected after the month closed")
+    if report.target_cents is not None:
+        out.add(f"  Target, planned: {format_cents(report.target_cents)}")
+    elif plan is not None:
+        out.add(f"  Target: none, the plan does not divide the allowance among members")
+    out.add(f"  Baseline income, planned, context only: "
+            f"{format_cents(report.baseline_income_planned_cents)}")
+    out.add(f"  Fixed commitments due, planned, apart from the target: "
+            f"{format_cents(report.fixed_planned_cents)}")
+    if report.state == "future":
+        out.add("  A future month: the plan only.")
+        return out
+    out.add(f"  Fixed spending, actual, apart from the target: {spent_words(report.fixed_actual)}")
+    out.add(f"  Discretionary spending, actual: {spent_words(report.discretionary)}")
+    out.add(f"  Possible spending, unclassified, actual, counted until classified: "
+            f"{spent_words(report.unclassified)}")
+    out.add(f"  Possible spending, unconfirmed transfer kinds, actual, counted until classified: "
+            f"{spent_words(report.transfer_kinds)}")
+    out.add(f"  Of which pending, actual: {spent_words(report.pending)}")
+    if member_name is not None:
+        out.add(f"  Unattributed, actual, counted against the household only: "
+                f"{spent_words(report.unattributed)}")
+    out.add(f"  Spent against the target, actual: {format_cents(report.actual_cents)}")
+    if report.target_cents is None:
+        return out
+    capacity = report.target_cents - report.actual_cents
+    provisional = ", provisional" if report.provisional else ""
+    if capacity < 0:
+        out.add(f"  Over target by {format_cents(-capacity)}, budget pace{provisional}")
+    else:
+        out.add(f"  Remaining capacity, budget pace{provisional}: {format_cents(capacity)}")
+    if report.provisional:
+        out.add("  Provisional: it rests on spending not yet classified"
+                + ("" if member_name is None else ", or not yet attributed to a member"))
+    if report.state == "closed":
+        out.add(f"  Unused capacity, planned, to savings (not a bank transfer): "
+                f"{format_cents(max(0, capacity))}")
+    pace = report.pace
+    if pace is not None:
+        out.add(f"  Days remaining, including today: {pace.days_remaining} of "
+                f"{pace.days_in_month}")
+        out.add(f"  Original daily allowance, budget pace: "
+                f"{format_cents(pace.original_daily_cents)}")
+        out.add(f"  Revised daily allowance, budget pace: "
+                f"{format_cents(pace.revised_daily_cents)}")
+        out.add(f"  Revised weekly allowance, budget pace: "
+                f"{format_cents(pace.revised_weekly_cents)}")
+        out.add(f"  Pace to date, budget pace: {format_cents(pace.pace_to_date_cents)}, "
+                f"{describe_against_pace(pace.against_pace_cents)}")
+        if pace.reduction_per_day_cents is not None:
+            out.add(f"  Reduction needed to recover, budget pace: "
+                    f"{format_cents(pace.reduction_per_day_cents)} a day for "
+                    f"{pace.days_remaining} days")
+        if pace.equivalent_days is not None:
+            out.add(f"  Equivalent days of original allowance, budget pace: "
+                    f"{pace.equivalent_days}")
+    if report.largest:
+        out.add("  Largest discretionary spending, actual:")
+        for item in report.largest:
+            out.add(f"    Transaction {item.transaction_id}: {item.effective_date}, "
+                    f"{shown(item.description or '')}, {format_cents(item.spent_cents)}")
+    for allowance in report.categories:
+        left = allowance.allowance_cents - allowance.spent_cents
+        state = (f"{format_cents(left)} left" if left >= 0
+                 else f"over by {format_cents(-left)}")
+        out.add(f"  Category {shown(allowance.name)}: allowance, planned "
+                f"{format_cents(allowance.allowance_cents)}, spent, actual "
+                f"{format_cents(allowance.spent_cents)}, budget pace {state}")
     return out

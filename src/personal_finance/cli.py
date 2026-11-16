@@ -237,6 +237,7 @@ from personal_finance.reports.household_evidence import (
 )
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.report_text import (
+    budget_report_lines,
     income_report_lines,
     ATTRIBUTION_EXPLANATIONS,
     CATEGORIZATION_STATE_EXPLANATIONS,
@@ -1325,6 +1326,13 @@ def build_parser() -> argparse.ArgumentParser:
                                help="the last month, YYYY-MM, inclusive")
     income_report.add_argument("--as-of",
                                help=f"{TODAY_HELP}: missed only once it has passed")
+    budget_report = command(
+        "budget", report_commands, handler=run_report_budget,
+        help="a month's spending against its budget plan, with budget pace and revised allowances",
+    )
+    budget_report.add_argument("--month", help="the month, YYYY-MM, else the as-of month")
+    budget_report.add_argument("--member", help="one member's part, a name from household members")
+    budget_report.add_argument("--as-of", help=TODAY_HELP)
     household_view = household.add_mutually_exclusive_group()
     household_view.add_argument("--member", help="one member's parts, a name from household members")
     household_view.add_argument("--shared", action="store_true",
@@ -4046,6 +4054,18 @@ def run_report_income(args) -> int:
     as_of = as_of_date(conn, args.as_of)
     account_id = find_account(conn, args.account) if args.account else None
     print_report(income_report_lines(conn, as_of, account_id, first_month, last_month))
+    return 0
+
+
+def run_report_budget(args) -> int:
+    month = validated_month("--month", args.month)
+    if args.as_of is not None:
+        checked_as_of(args.as_of)
+    conn = open_ledger(args.db, read_only=True)
+    as_of = as_of_date(conn, args.as_of)
+    if args.member is not None and load_household(conn).find_member(args.member) is None:
+        raise CommandError("household member not found. Run household members.")
+    print_report(budget_report_lines(conn, month or as_of.isoformat()[:7], as_of, args.member))
     return 0
 
 
