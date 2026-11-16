@@ -44,6 +44,8 @@ LEDGER_TABLES = (
     "recurring_obligation", "recurring_obligation_terms", "recurring_obligation_event",
     "obligation_proposal_dismissal", "obligation_proposal_dismissal_event",
     "transaction_obligation",
+    "ledger_setting_key", "ledger_setting", "ledger_setting_event", "budget_plan",
+    "budget_plan_member_part", "budget_plan_category", "budget_plan_event",
 )
 
 
