@@ -748,7 +748,8 @@ LISTS = [("documents",), ("transactions",), ("totals",), ("report", "monthly"),
          ("storage",), ("category", "list"), ("review", "categorizations"), ("category", "rules"),
          ("household", "members"), ("household", "share", "show"), ("review", "allocations"),
          ("income", "sources"), ("income", "proposals"), ("obligations",),
-         ("obligation", "proposals"), ("obligation", "dismissals")]
+         ("obligation", "proposals"), ("obligation", "dismissals"), ("setting", "show"),
+         ("budgets",)]
 PER_ACCOUNT = [("totals",), ("report", "monthly"), ("review", "merges"), ("review", "decisions"),
                ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
                ("review", "resolutions"), ("review", "coverage", "history"),
@@ -770,6 +771,7 @@ PER_ID = [
     ("SELECT id FROM allocation_statement", [("review", "allocation", "show")]),
     ("SELECT id FROM income_source", [("income", "source", "show", "--as-of", "2026-03-31")]),
     ("SELECT id FROM recurring_obligation", [("obligation", "show", "--as-of", "2026-03-31")]),
+    ("SELECT id FROM budget_plan", [("budget", "show")]),
 ]
 
 
@@ -860,6 +862,7 @@ def build_rich_ledger(ledger, *, checking_rows, decision, match, one_sided, corr
     build_household(ledger)
     build_income(ledger)
     build_obligations(ledger)
+    build_budgets(ledger)
 
     items_before = set(ledger.items())
     ledger.card("p1.csv", CAFE, extra=FIRST_HALF, account="S")
@@ -972,6 +975,40 @@ def build_obligations(ledger):
                 "25.00..40.00", "--class", "discretionary", "--as-of", "2026-03-20",
                 "--revision", obligation_token(ledger.run(*show)[1], "Terms revision"))
         assert code == 0, err
+
+
+def budget_token(out, kind="Revision"):
+    return re.search(rf"{kind}: ((?:bp|st)1-[0-9a-f]{{16}})", out)[1]
+
+
+def build_budgets(ledger):
+    """The household timezone set, undone and set again, a plan divided between the members with
+    a category allowance, superseded, a later plan undone, and a closed month corrected (D-069)."""
+    for zone in ("Europe/Paris", "America/Chicago"):
+        code, _, err = ledger.run("setting", "set", "household_timezone", zone, "--revision",
+                                  budget_token(ledger.run("setting", "show")[1]))
+        assert code == 0, err
+        if zone == "Europe/Paris":
+            code, _, err = ledger.run("setting", "undo", "household_timezone", "--revision",
+                                      budget_token(ledger.run("setting", "show")[1]))
+            assert code == 0, err
+    as_of = ["--as-of", "2026-03-20"]
+    plans = []
+    for words in (["--from", "2026-03", "--allowance", "1000.00", "--member", "Michael=600",
+                   "--member", "M=400", "--category", "Food=250"],
+                  ["--from", "2026-05", "--allowance", "900.00"],
+                  ["--from", "2026-01", "--allowance", "800.00", "--correct-closed-month"]):
+        if len(plans) == 1:
+            words += ["--supersedes", plans[0], "--supersedes-revision",
+                      budget_token(ledger.run("budget", "show", plans[0])[1],
+                                   "Supersede revision")]
+        code, out, err = ledger.run("budget", "set", *words, *as_of, "--revision", budget_token(
+            ledger.run("budget", "preview", *words, *as_of)[1]))
+        assert code == 0, err
+        plans.append(re.search(r"Budget plan (\S+) recorded", out)[1])
+    code, _, err = ledger.run("budget", "undo", plans[1], *as_of, "--revision", budget_token(
+        ledger.run("budget", "show", plans[1])[1], "Undo revision"))
+    assert code == 0, err
 
 
 def household_token(ledger, *words):

@@ -175,9 +175,9 @@ class TestReport:  # IC3
         conn.close()
 
     def test_an_as_of_is_required_and_months_are_checked(self, full):
-        with pytest.raises(SystemExit) as refused:
-            full.run("report", "income")
-        assert refused.value.code == 2
+        # With no --as-of and no household timezone, today is unknown (M13.1, G7).
+        code, _, err = full.run("report", "income")
+        assert code == 2 and "household_timezone" in err
         code, _, err = full.run("report", "income", "--as-of", "2026-3-1")
         assert code == 2 and "--as-of must be a date" in err
         code, _, err = full.run("report", "income", "--as-of", AS_OF, "--from", "2026-03",

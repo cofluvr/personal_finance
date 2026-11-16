@@ -18,6 +18,7 @@ from personal_finance.cli import (
     UNEXPECTED_ERROR,
     CommandError,
     checked_as_of,
+    household_today_if_set,
     explained_error,
     find_account,
     open_ledger,
@@ -276,12 +277,14 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         self.send_page(200, "Household report", lines, form=form)
 
     def answer_income(self, conn, parameters, account_id, first_month, last_month):
-        """The income report as of a date the page is given, never the clock (G7)."""
+        """The income report as of the date the page is given, else today in the household's
+        timezone, read by the CLI's one clock read (G7). With neither, the page asks for one."""
         text = parameters.get("as_of") or None
         form = income_form(conn, account_id, first_month, last_month, text)
-        if text is None:
+        as_of = (household_today_if_set(conn) if text is None
+                 else date.fromisoformat(checked_as_of(text)))
+        if as_of is None:
             return self.send_page(200, "Income report", notice=CHOOSE_AS_OF, form=form)
-        as_of = date.fromisoformat(checked_as_of(text))
         lines = income_report_lines(conn, as_of, account_id, first_month, last_month)
         self.send_page(200, "Income report", lines, form=form)
 
