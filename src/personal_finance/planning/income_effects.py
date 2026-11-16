@@ -9,13 +9,21 @@ the source's normalized text. Two sources reaching one deposit leave it to neith
 reads the clock: missed and expected are worked out only where an as-of date is given.
 """
 
-import calendar
 import json
 import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from personal_finance.planning.schedules import (  # noqa: F401, the schedules income reads
+    Cadence,
+    cadence_dates,
+    dates_to_show,
+    on_cadence,
+    paired_with_dates,
+    scheduled_dates,
+    unpaid_state,
+)
 from personal_finance.reconcile.category_effects import CONFIRMED_TRANSFER_SQL
 from personal_finance.reconcile.category_rule_effects import (
     NORMALIZATION_VERSION,
@@ -38,23 +46,6 @@ EXTRA = "extra"
 
 # Point 3: floor(occurrences per year / 12). Longer cadences are never salary.
 BASELINE_COUNT = {"weekly": 4, "biweekly": 2, "semimonthly": 2, "monthly": 1}
-WEEK_STEPS = {"weekly": 7, "biweekly": 14}
-MONTH_STEPS = {"semimonthly": 1, "monthly": 1, "quarterly": 3, "annual": 12}
-
-
-@dataclass(frozen=True)
-class Cadence:
-    """weekly and biweekly count from the anchor. Every other cadence names its days, and the
-    anchor fixes which months: every month, every third, the anchor's month, or every N."""
-
-    name: str
-    first_day: int | None = None
-    second_day: int | None = None
-    interval_months: int | None = None
-
-    @property
-    def months_between(self) -> int:
-        return self.interval_months or MONTH_STEPS[self.name]
 
 
 @dataclass(frozen=True)
@@ -92,6 +83,10 @@ class IncomeSource:
     undone_at: str | None = None
     # The active source superseding this one, if any.
     superseded_by: str | None = None
+
+    @property
+    def entry_id(self) -> str:
+        return self.source_id
 
     @property
     def applies(self) -> bool:
@@ -148,60 +143,11 @@ class Occurrence:
     deposit: DepositFacts | None
 
 
-def last_day(year: int, month: int) -> int:
-    return calendar.monthrange(year, month)[1]
-
-
-def month_dates(cadence: Cadence, year: int, month: int) -> list[date]:
-    """The cadence's days in one month. A day beyond the month's end is its last day."""
-    days = [cadence.first_day] + ([cadence.second_day] if cadence.second_day else [])
-    return [date(year, month, min(day, last_day(year, month))) for day in days]
-
-
-def cadence_dates(cadence: Cadence, anchor: date, start: date, end: date) -> list[date]:
-    """The cadence's nominal dates from start through end, both included, fixed by anchor."""
-    if start > end:
-        return []
-    if cadence.name in WEEK_STEPS:
-        step = WEEK_STEPS[cadence.name]
-        first = -((anchor - start).days // step)
-        found = []
-        nominal = anchor + timedelta(days=first * step)
-        while nominal <= end:
-            if nominal >= start:
-                found.append(nominal)
-            nominal += timedelta(days=step)
-        return found
-    step = cadence.months_between
-    anchor_index = anchor.year * 12 + anchor.month - 1
-    found = []
-    for index in range(start.year * 12 + start.month - 1, end.year * 12 + end.month):
-        if (index - anchor_index) % step == 0:
-            year, month = divmod(index, 12)
-            found.extend(nominal for nominal in month_dates(cadence, year, month + 1)
-                         if start <= nominal <= end)
-    return found
-
-
-def on_cadence(cadence: Cadence, anchor: date) -> bool:
-    """Whether the anchor is itself one of its cadence's nominal dates."""
-    return cadence_dates(cadence, anchor, anchor, anchor) == [anchor]
-
-
 def nominal_dates(source: IncomeSource, end: date) -> list[tuple[date, Terms]]:
     """Every nominal pay date from the first pay date through end, each with the terms in effect.
     Each terms row's own cadence and anchor give its dates, from its effective_from until the next
     row's."""
-    found = []
-    for position, terms in enumerate(source.terms):
-        start = date.fromisoformat(terms.effective_from)
-        until = end
-        if position + 1 < len(source.terms):
-            until = min(end, date.fromisoformat(source.terms[position + 1].effective_from)
-                        - timedelta(days=1))
-        found.extend((nominal, terms) for nominal in
-                     cadence_dates(terms.cadence, date.fromisoformat(terms.anchor), start, until))
-    return found
+    return scheduled_dates(source.terms, end)
 
 
 def matches(source: IncomeSource, facts: DepositFacts) -> bool:
@@ -221,25 +167,7 @@ def paired_deposits(source: IncomeSource, deposits) -> dict[str, tuple[date, Ter
     """Each deposit paired one to one with a nominal date within the tolerance, by transaction
     ID. Pairs are taken greedily, nearest first, then the earlier nominal date, then the earlier
     deposit, then the transaction ID, so import order never decides."""
-    if not deposits:
-        return {}
-    tolerance = source.definition.tolerance_days
-    latest = max(date.fromisoformat(facts.reporting_date) for facts in deposits)
-    dates = nominal_dates(source, latest + timedelta(days=tolerance))
-    candidates = []
-    for facts in deposits:
-        when = date.fromisoformat(facts.reporting_date)
-        for nominal, terms in dates:
-            distance = abs((when - nominal).days)
-            if distance <= tolerance:
-                candidates.append((distance, nominal, facts.reporting_date,
-                                   facts.transaction_id, terms))
-    paired, taken = {}, set()
-    for _, nominal, _, transaction_id, terms in sorted(candidates, key=lambda pair: pair[:4]):
-        if transaction_id not in paired and nominal not in taken:
-            paired[transaction_id] = (nominal, terms)
-            taken.add(nominal)
-    return paired
+    return paired_with_dates(source.terms, source.definition.tolerance_days, deposits)
 
 
 def source_outcomes(sources, facts_list) -> dict[tuple[str, str], DepositOutcome]:
@@ -277,19 +205,13 @@ def occurrences(source: IncomeSource, facts_list, outcomes, as_of: date) -> list
     by_id = {facts.transaction_id: facts for facts in facts_list}
     paid = {outcome.nominal_date: outcome for (_, source_id), outcome in outcomes.items()
             if source_id == source.source_id and outcome.nominal_date is not None}
-    latest = max([date.fromisoformat(nominal) for nominal in paid] + [as_of])
-    longest = max(1 if terms.cadence.name in WEEK_STEPS else terms.cadence.months_between
-                  for terms in source.terms)
-    tolerance = timedelta(days=source.definition.tolerance_days)
-    found, place_in_month, next_shown = [], defaultdict(int), False
-    for nominal, terms in nominal_dates(source, latest + timedelta(days=31 * (longest + 1))):
+    found, place_in_month = [], defaultdict(int)
+    for nominal, terms, shown in dates_to_show(source.terms, paid, as_of):
         text = nominal.isoformat()
         place = place_in_month[text[:7]]
         place_in_month[text[:7]] += 1
-        upcoming = nominal > as_of and text not in paid
-        if upcoming and next_shown:
+        if not shown:
             continue
-        next_shown = next_shown or upcoming
         if source.definition.kind == SALARY:
             part = BASELINE if place < BASELINE_COUNT[terms.cadence.name] else EXTRA
         else:
@@ -298,8 +220,8 @@ def occurrences(source: IncomeSource, facts_list, outcomes, as_of: date) -> list
             found.append(Occurrence(text, terms, paid[text].state, part,
                                     by_id[paid[text].transaction_id]))
         else:
-            found.append(Occurrence(text, terms, MISSED if as_of > nominal + tolerance
-                                    else EXPECTED, part, None))
+            found.append(Occurrence(text, terms, unpaid_state(
+                nominal, as_of, source.definition.tolerance_days), part, None))
     return found
 
 

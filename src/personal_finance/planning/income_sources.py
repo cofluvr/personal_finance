@@ -7,14 +7,20 @@ what was typed is valid, then its in1 token. A source moves no record and change
 transfer, category or allocation, so only the sources' outcomes are rewritten (G1).
 """
 
-import hmac
-import re
 import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import date
 
-from personal_finance.money import MoneyParseError, parse_cents
+from personal_finance.planning import entries
+from personal_finance.planning.entries import (  # noqa: F401, parsed_date is income's too
+    ChainRefusals,
+    checked_cadence,
+    in_one_write,
+    parsed_amount,
+    parsed_date,
+    refuse_if_closed_month,
+)
 from personal_finance.planning.income_effects import (
     BASELINE_COUNT,
     SALARY,
@@ -28,9 +34,9 @@ from personal_finance.planning.income_effects import (
     write_income_source_effects,
 )
 from personal_finance.planning.income_proposals import IncomeProposal, find_proposal
-from personal_finance.reconcile.apply import stale_accounts
+from personal_finance.planning.schedules import CADENCE_INVALID  # noqa: F401, income's too
 from personal_finance.reconcile.category_rule_effects import normalized_text
-from personal_finance.reconcile.decisions import STALE_ACCOUNT, DecisionRefused
+from personal_finance.reconcile.decisions import DecisionRefused
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
 from personal_finance.reports.income_evidence import (
     TERMS,
@@ -60,12 +66,6 @@ AMOUNT_INVALID = "--amount must be an amount above zero, such as 2500.00. Nothin
 AMOUNT_TOLERANCE_INVALID = (
     "--amount-tolerance must be an amount of zero or more, such as 25.00. Nothing was changed."
 )
-CADENCE_INVALID = (
-    "--cadence must be weekly, biweekly, semimonthly:D1,D2 with D1 before D2, monthly:D, "
-    "quarterly:D, annual:MM-DD or every:N-months:D, each day from 1 to 31 and N from 2. Nothing "
-    "was changed."
-)
-DATE_INVALID = "{option} must be a date written YYYY-MM-DD. Nothing was changed."
 ANCHOR_OFF_CADENCE = (
     "--anchor must be one of the cadence's own pay dates, a real pay date. Nothing was changed."
 )
@@ -108,27 +108,6 @@ STALE_INCOME_REVISION = (
     "source show and check it again."
 )
 
-_DAY = r"([1-9]|[12][0-9]|3[01])"
-_CADENCES = (
-    (re.compile(r"weekly"), lambda found: Cadence("weekly")),
-    (re.compile(r"biweekly"), lambda found: Cadence("biweekly")),
-    (re.compile(rf"semimonthly:{_DAY},{_DAY}"),
-     lambda found: Cadence("semimonthly", int(found[1]), int(found[2]))),
-    (re.compile(rf"monthly:{_DAY}"), lambda found: Cadence("monthly", int(found[1]))),
-    (re.compile(rf"quarterly:{_DAY}"), lambda found: Cadence("quarterly", int(found[1]))),
-    (re.compile(rf"every:([2-9]|[1-9][0-9])-months:{_DAY}"),
-     lambda found: Cadence("every_months", int(found[2]), interval_months=int(found[1]))),
-)
-_ANNUAL = re.compile(r"annual:(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])")
-
-
-@dataclass(frozen=True)
-class StatedCadence:
-    cadence: Cadence
-    # For annual only: the month it names, which its anchor must fall in.
-    month: int | None = None
-
-
 @dataclass(frozen=True)
 class SourceRequest:
     """What a person typed for income preview and income add."""
@@ -161,43 +140,9 @@ class SourceAdded:
     outlook: IncomeOutlook
 
 
-def parsed_cadence(text: str) -> StatedCadence:
-    for pattern, build in _CADENCES:
-        found = pattern.fullmatch(text)
-        if found:
-            cadence = build(found)
-            if cadence.second_day is not None and cadence.second_day <= cadence.first_day:
-                raise DecisionRefused(CADENCE_INVALID)
-            return StatedCadence(cadence)
-    found = _ANNUAL.fullmatch(text)
-    if found:
-        return StatedCadence(Cadence("annual", int(found[2])), int(found[1]))
-    raise DecisionRefused(CADENCE_INVALID)
-
-
-def parsed_date(text: str, option: str) -> str:
-    try:
-        parsed = date.fromisoformat(text)
-    except ValueError:
-        raise DecisionRefused(DATE_INVALID.format(option=option)) from None
-    if parsed.isoformat() != text:
-        raise DecisionRefused(DATE_INVALID.format(option=option))
-    return text
-
-
-def parsed_amount(text: str, message: str, *, least: int) -> int:
-    try:
-        cents = parse_cents(text)
-    except MoneyParseError:
-        raise DecisionRefused(message) from None
-    if cents is None or cents < least:
-        raise DecisionRefused(message)
-    return cents
-
-
 def checked_terms(cadence_text: str, anchor_text: str, amount_text: str, kind: str,
                   effective_from: str | None = None) -> Terms:
-    stated = parsed_cadence(cadence_text)
+    stated = checked_cadence(cadence_text)
     anchor = parsed_date(anchor_text, "--anchor")
     when = date.fromisoformat(anchor)
     if not on_cadence(stated.cadence, when) or stated.month not in (None, when.month):
@@ -212,28 +157,20 @@ def refuse_unless_salary_cadence(kind: str, cadence: Cadence) -> None:
         raise DecisionRefused(SALARY_CADENCE)
 
 
+SOURCE_REFUSALS = ChainRefusals(SOURCE_NOT_FOUND, SOURCE_NOT_ACTIVE, SOURCE_SUPERSEDED)
+
+
 def find_source(sources, source_id: str) -> IncomeSource:
     """The source with this ID that is still the newest of its chain."""
-    return refuse_unless_newest(sources, lookup_source(sources, source_id))
+    return entries.find_newest(sources, source_id, SOURCE_REFUSALS)
 
 
 def lookup_source(sources, source_id: str) -> IncomeSource:
-    source = next((source for source in sources if source.source_id == source_id), None)
-    if source is None:
-        raise DecisionRefused(SOURCE_NOT_FOUND)
-    return source
+    return entries.lookup_entry(sources, source_id, SOURCE_REFUSALS)
 
 
 def refuse_unless_newest(sources, source: IncomeSource) -> IncomeSource:
-    if source.undone_at:
-        raise DecisionRefused(SOURCE_NOT_ACTIVE)
-    if source.superseded_by:
-        newest = source
-        by_id = {other.source_id: other for other in sources}
-        while newest.superseded_by:
-            newest = by_id[newest.superseded_by]
-        raise DecisionRefused(SOURCE_SUPERSEDED.format(newest=newest.source_id))
-    return source
+    return entries.refuse_unless_newest(sources, source, SOURCE_REFUSALS)
 
 
 def checked_source(conn: sqlite3.Connection, request: SourceRequest) -> CheckedSource:
@@ -304,25 +241,11 @@ def source_preview(conn: sqlite3.Connection, request: SourceRequest) -> IncomeOu
 def refuse_unless_current(conn: sqlite3.Connection, account_id: str,
                           rules: MatchingRules) -> None:
     """The source's account must be current (D-033), or nothing is decided."""
-    if stale_accounts(conn, rules, account_id):
-        raise DecisionRefused(STALE_ACCOUNT)
+    entries.refuse_unless_current(conn, account_id, rules)
 
 
 def refuse_unless_revision(outlook: IncomeOutlook, revision: str, message: str) -> None:
-    if not hmac.compare_digest(outlook.revision.encode(), revision.encode()):
-        raise DecisionRefused(message)
-
-
-def in_one_write(conn: sqlite3.Connection, write):
-    """D-043: one write lock, one commit, and nothing kept from a refusal or a failure."""
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        result = write()
-        conn.execute("COMMIT")
-    except BaseException:
-        conn.execute("ROLLBACK")
-        raise
-    return result
+    entries.refuse_unless_revision(outlook.revision, revision, message)
 
 
 def add_source(conn: sqlite3.Connection, request: SourceRequest, revision: str,
@@ -386,8 +309,7 @@ def _change_terms(conn, source_id, effective_from, amount, as_of, revision, cade
     refuse_unless_newest(sources, source)
     effective_from = parsed_date(effective_from, "--effective-from")
     as_of = parsed_date(as_of, "--as-of")
-    if effective_from[:7] < as_of[:7]:
-        raise DecisionRefused(TERMS_CLOSED_MONTH)
+    refuse_if_closed_month(effective_from, as_of, TERMS_CLOSED_MONTH)
     latest = source.terms[-1]
     if effective_from <= latest.effective_from:
         raise DecisionRefused(TERMS_NOT_LATER.format(latest=latest.effective_from))
