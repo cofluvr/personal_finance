@@ -5,12 +5,12 @@ import hashlib
 import json
 import sqlite3
 
-from test_decisions import INCOME_TABLES
+from test_decisions import INCOME_TABLES, OBLIGATION_TABLES
 
 from personal_finance.db.backups import tagged
 
 # Every table M12 and later add. Each later planning migration adds its own.
-PLANNING_TABLES = frozenset(INCOME_TABLES)
+PLANNING_TABLES = frozenset((*INCOME_TABLES, *OBLIGATION_TABLES))
 
 
 def evidence_digest(conn: sqlite3.Connection) -> str:

@@ -32,6 +32,7 @@ from test_decisions import (
     CATEGORY_RULE_TABLES,
     ALLOCATION_TABLES,
     INCOME_TABLES,
+    OBLIGATION_TABLES,
     CATEGORY_TABLES,
     CHECKING_HEADER,
     HOUSEHOLD_TABLES,
@@ -55,7 +56,7 @@ from personal_finance.db.migrate import connect, load_migrations
 LATEST = len(load_migrations())
 LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", *REAL_LEDGER_TABLES, *BACKUP_TABLES,
                  *CATEGORY_TABLES, *CATEGORIZATION_TABLES, *CATEGORY_RULE_TABLES,
-                 *HOUSEHOLD_TABLES, *ALLOCATION_TABLES, *INCOME_TABLES)
+                 *HOUSEHOLD_TABLES, *ALLOCATION_TABLES, *INCOME_TABLES, *OBLIGATION_TABLES)
 LEDGER_VOLUME = Path("/Volumes/SyntheticLedger")
 BACKUP_VOLUME = Path("/Volumes/SyntheticBackups")
 

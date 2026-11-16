@@ -41,6 +41,9 @@ LEDGER_TABLES = (
     "allocation_statement", "allocation_statement_part", "allocation_statement_record",
     "allocation_statement_event", "transaction_allocation", "income_source",
     "income_source_terms", "income_source_event", "transaction_income_source",
+    "recurring_obligation", "recurring_obligation_terms", "recurring_obligation_event",
+    "obligation_proposal_dismissal", "obligation_proposal_dismissal_event",
+    "transaction_obligation",
 )
 
 
