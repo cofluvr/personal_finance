@@ -1,28 +1,41 @@
-# Session Handoff: M12.1 Built, Awaiting Review
+# Session Handoff: M12 Built, M13.1 Started, Awaiting Review
 
-For a fresh session. Written 2026-11-15. **M1 to M11 are complete and accepted.** `main` holds M1
-to M9 at `19ee858`. M10, M11 and M12.1 are on `feature/m10-rules`, not merged.
+For a fresh session. Written 2026-11-16 at the end of an overnight session the owner ran without
+stopping between slices. **M1 to M11 are complete and accepted, and M12.1 was accepted on
+2026-11-15 as built, both departures included.** `main` holds M1 to M9 at `19ee858`. M10 to M12
+and M13.1's first commit are on `feature/m10-rules`, not merged and not pushed.
 
-**M12.1, income sources, is built and awaits the owner's review.** It follows D-068 and its "M12.1
-slice plan", approved on 2026-11-13 with I to M as recommended (`181c8cf`), and was committed in one
-commit after it. "How M12.1 was implemented", under D-068 in
-[decisions-m12-m21.md](decisions-m12-m21.md), gives what was built, the breaks and the G6
-comparison. Two departures from the slice plan's wording are there for the owner to accept or
-change:
+**What the overnight session did, for the owner's review, in order:**
 
-- `income proposals` prints no token. `income preview --from-proposal` prints it.
-- A proposal anchors on the nominal date its earliest deposit pairs with.
+1. **M12.2, recurring obligations** (`f3f46cb` migration 0025, `261f8f9` the `entries.py` and
+   `schedules.py` extraction, `3bd3631` obligations, IB1 to IB5). Built without its own slice
+   plan, on the owner's instruction, applying M12.1's slice plan where it carries over. Its
+   departures are in "How M12.2 was implemented" under D-068: the dismissal's own event table,
+   three commands beyond D-068's list (`obligation preview`, `obligation dismissals`,
+   `obligation dismissal undo`), the class on the terms, and `obligation proposals` printing a
+   dismiss revision.
+2. **M12.3, `pf report income`,** its `/income` page and the `--recurring` benchmark row
+   (`09483c1`, records in `79e839f`). Departures in "How M12.3 was implemented": `--as-of`
+   required until M13.1, default months starting at the first pay or due date when earlier.
+3. **M13.1's migration 0026** (`bb60fd8`): settings and budget plans' tables, with G10's tests.
+   The rest of M13.1 (setting and budget commands, `st1`, `bp1`, today from the household
+   timezone) is **not built**: drafts are under `build/m13/draft/` (`settings.py`, `budgets.py`),
+   unreviewed and untested. The next session finishes M13.1 from them or from scratch.
 
-**Next, after the review:** M12.2, recurring obligations (IB1 to IB5), which extracts
-`planning/entries.py` and `planning/schedules.py` from M12.1's code with every M12.1 output byte for
-byte unchanged.
+**Not done, and why:** M13.2 to M21 were not reached. When they are, two limits from the kickoff
+still hold and were not lifted by the overnight instruction: **M17's browser writes** (a security
+change) and **M20** (the `segno` dependency, network to install it, and a listener beyond
+loopback) need the owner's explicit approval in a session that allows them. Everything else in
+M13 to M19 needs no new permission beyond the approved plans.
 
-**M10, M11 and M12.1 are not yet on the real ledger.** It stays at version 20 until the owner makes
-a verified backup and runs `pf migrate`:
+**Latest results:** M12.2's full-suite gate, 3,119 passed (`3bd3631`). G6 for M12.2, 89,273 of
+89,323 runs identical, the rest the two stamped ledgers. Breaks: M12.2 27 applied, 24 caught, two
+gaps closed, one equivalent; M12.3 15 applied, 14 caught, one gap closed. `--recurring`: every
+target met, stopping rule not met (see [benchmarks.md](benchmarks.md)).
 
-1. 21 first, verified on its own;
-2. then 22 and 23, each after a verified backup (D-065 point 7);
-3. then 24 once M12 is accepted (G10: one milestone at a time).
+**M10, M11 and M12 are not yet on the real ledger.** It stays at version 20 until the owner makes
+a verified backup and runs `pf migrate`: 21, then 22 and 23 (D-065 point 7), then 24 and 25 once
+M12 is accepted, then 26 with M13 (G10: one milestone at a time).
 
 The owner's members, share and defaults are entered with the `household` commands, which nothing
 here has run on real data. No security control changed, no dependency was added, and the UI stays
@@ -55,7 +68,7 @@ and changed code. Renaming existing code wholesale is a separate change for the 
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `main` holds everything through M9 at `19ee858`. M10 and M11 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
 | Latest commit | Run `git log -1`. M9's acceptance is `19ee858`. On `feature/m10-rules`: M10 `a294d64` to `871cdad`, the M11 plan and approvals to `b61d85d`, one commit per M11 slice, the review's changes `e9745ec`, the types and categories refusal fix `b47b308`, M11's acceptance record `aacbe47`, M12.1's approved slice plan `181c8cf`, and M12.1 itself. Earlier commits are in the archive |
-| Latest gating run | Full suite, exit code 0, chained to M12.1's commit: see its commit message. About 14 minutes, 3,005 tests |
+| Latest gating run | Full suite, exit code 0, chained to M12.2's commit `3bd3631`. About 16 minutes, 3,119 tests. Later commits gated on their slice's files |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -111,7 +124,20 @@ Then only what the task needs:
 - For M12 to M21: D-067's guardrails G1 to G13 in [decisions-m12-m21.md](decisions-m12-m21.md)
   first, then the milestone's own decision, D-068 to D-077, and the decisions it names. Each
   milestone's criteria move into [plan.md](plan.md) when it starts.
-- For changes to M12.1, and for M12.2: D-068 with its "M12.1 slice plan" and "How M12.1 was
+- For M13.1's remaining work: D-069 points 1, 2 and 6 and BA1 to BA4 in [plan.md](plan.md),
+  migration 0026, `tests/scenarios/test_budget_migration.py`, `planning/entries.py`, and the
+  drafts in `build/m13/draft/`. Making `--as-of` optional on the M12 commands that take it
+  (`income source show`, `income terms`, `obligation show`, `obligation terms`, `report income`
+  and the `/income` page) is part of M13.1 (M12.1 slice plan point 1).
+- For changes to M12.2 or M12.3: "How M12.2 was implemented" and "How M12.3 was implemented"
+  under D-068, `planning/schedules.py`, `entries.py`, `obligation_effects.py`, `obligations.py`,
+  `obligation_proposals.py`, `reports/obligation_evidence.py`, `obligation_spending.py`,
+  `income_report.py`, the Recurring lines in `reports/report_text.py` and `review_evidence.py`,
+  migration 0025, and `tests/scenarios/test_obligations.py`, `test_obligation_migration.py` and
+  `test_income_report.py`. G6's scripts are `build/m12_2/g6/` (`capture.py --obligations`,
+  `compare.py` strips Recurring sections, `migrate_copies.py` from 24). Pass the compare its
+  ledger roots as the capture saw them, relative.
+- For changes to M12.1: D-068 with its "M12.1 slice plan" and "How M12.1 was
   implemented", IA1 to IA7 and IB1 to IB5 in [plan.md](plan.md), `planning/income_effects.py`,
   `planning/income_sources.py`, `planning/income_proposals.py`, `reports/income_evidence.py`,
   migration 0024, the `income` handlers in `cli.py`, `write_transfer_effects`, and
@@ -125,9 +151,11 @@ Then only what the task needs:
   and `tests/scenarios/test_category_rules.py`. Rules read the derived types, transfers,
   corrections and person's categories, so run `test_categorizations.py` too.
 - **A new migration** breaks every older migration test's set-back: `drop_category_tables` in
-  `test_decisions.py` drops 0024 to 0019 through `drop_category_rule_tables`,
-  `drop_household_tables`, `drop_allocation_tables` and `drop_income_tables`, and grows with each later migration's
-  tables. Also add the tables to `tests/unit/test_migrations.py`,
+  `test_decisions.py` drops 0026 to 0019 through `drop_category_rule_tables`,
+  `drop_household_tables`, `drop_allocation_tables`, `drop_income_tables`,
+  `drop_obligation_tables` and `drop_budget_tables`, and grows with each later migration's tables.
+  Also add the tables to `tests/unit/test_migrations.py`, `planning_digest.py`'s
+  `PLANNING_TABLES`,
   `test_review_show.py`'s and `test_backups.py`'s `LEDGER_TABLES`, and the hand-added migrations of
   `test_pending_posted_migration.py`.
 - For changes to M8: D-062 in the full text and its criteria in [plan.md](plan.md), `ui/server.py`,
@@ -213,6 +241,17 @@ Pitfalls that recurred across M1 to M3.4:
 - **A break that renames a key** of token material keeps the data in the digest: drop it instead.
   A schema test must refuse on the trigger under test alone: in M11.2 one passed on the primary key.
 
+- **Import cycles in `planning/`.** Effects modules load while `reconcile/apply` is still
+  importing, so they may import `planning/schedules.py` (pure) but never `planning/entries.py`,
+  `reconcile.decisions` or `reports.totals`. Report figures go in `reports/`.
+- **A G1 test must assert before it reassigns.** M12.2's evidence test reassigned `before` without
+  asserting the first writes, and a break inserting a category survived it.
+- **A benchmark's first command after a long build runs slow.** M12.3's first `totals` and import
+  were about 1.2s slower than every later run on the same ledger. Attribute a cost on one ledger in
+  one session before calling the stopping rule.
+- **The suite's ledgers and a suite gate compete.** A G6 capture running beside a full-suite gate
+  stretched the gate to an hour. Run them apart when time matters.
+
 ## Open follow-ups
 
 **F2. Legacy identity timestamps. Partly done.** An ID retired before migration 0004 has no stored
@@ -291,8 +330,11 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
   throwaway ledger, with the owner, at the final review.
 - [real-data-readiness.md](real-data-readiness.md) names the backup volume `CommonCentsBackups`.
   The owner's is `/Volumes/CommonCentsBackup`. A doc fix, not made.
-- **The review of M12.1,** including its two departures from the slice plan's wording, then the
-  approval of M12.2 and renewed commit permission for it.
+- **The review of M12.2 and M12.3,** both built without their own slice plans under the overnight
+  instruction, with their departures listed under D-068. Then whether M13.1 continues from the
+  drafts, and renewed commit permission for it.
+- The household timezone, the monthly allowance, members' parts and any category allowances
+  (D-069's inputs), and the bills to confirm first (D-068's).
 - A delivery deadline, if any (D-066).
 - Each milestone's own inputs, listed in its decision, when it starts.
 - On the real ledger, a verified backup, then `pf migrate` to version 21 for M10, verified, then
@@ -305,9 +347,9 @@ Every session reads the "Read first" list, so its cost grows with them. At the e
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits | Approved on 2026-11-15 for M12.1 on `feature/m10-rules`: the slice plan's approval (`181c8cf`) and M12.1. All used | **Must be renewed** for any later change |
+| Local commits | Approved on 2026-11-15 for M12.2, then by the owner's overnight instruction for each later slice through M20, without stopping for review, on `feature/m10-rules`. Used through `bb60fd8` and this handoff's commit | **Must be renewed** for any later change |
 | M11 | Accepted on 2026-11-10. Not yet on the real ledger | The real-ledger migrations 21, 22 and 23, each after a verified backup |
-| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes. M12.1's slice plan approved on 2026-11-15 with I to M, and M12.1 built | M12.1's review. Each later slice built in order and reviewed. Installing `segno` still needs its pinned version and hash, and W1's check, at M20 |
+| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes. M12.1 accepted on 2026-11-15. M12.2 and M12.3 built on 2026-11-15 and 16 without slice plans, on the owner's instruction. M13.1's migration built | M12.2's and M12.3's review. M17's browser writes and M20 need the owner's approval in a session whose kickoff allows a security change, a dependency and network. Installing `segno` still needs its pinned version and hash, and W1's check |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |
@@ -341,13 +383,13 @@ branch is feature/m10-rules, the working tree is clean, and run the test suite w
 code before changing anything. Do not contact GitHub.
 
 Next task, from the owner:
-Build M12.2 under D-068, recurring obligations (IB1 to IB5), after my review of M12.1 (state its
-outcome here). Read D-067's G1 to G13, D-068 points 5 and 6, and "How M12.1 was implemented"
-first. Before changing src/, keep the suite's ledgers with --basetemp from a git archive export
-of the latest commit for G6. Write migration 0025 first with its G10 checklist, then extract
-planning/entries.py and planning/schedules.py with every M12.1 output byte for byte unchanged,
-then IB1 to IB5. Gate every commit on pytest's own exit code, and run 20 to 25 breaks by G12.
-Stop for review when M12.2 is built.
+Finish M13.1 under D-069 (BA1 to BA4), after my review of M12.2 and M12.3 (state its outcome
+here). Read D-067's G1 to G13, D-069 points 1, 2 and 6, and "How M12.2 was implemented" and "How
+M12.3 was implemented" first. Migration 0026 is committed; the drafts in build/m13/draft/ are
+unreviewed. Before changing src/, keep the suite's ledgers with --basetemp from a git archive
+export of the latest commit for G6. Build settings and budget plans, and make --as-of optional
+where M12 requires it, reading today from the household timezone. Gate every commit on pytest's
+own exit code, and run 20 to 25 breaks by G12. Stop for review when M13.1 is built.
 
 Task: do only what the owner asks. A new milestone, such as M6, needs its own plan as the next
 free decision number, and approval before any of it is built. Each slice of it then needs its own
