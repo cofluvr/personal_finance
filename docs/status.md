@@ -64,7 +64,8 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | **M11 overall** | **Complete and accepted** on 2026-11-10 (D-065). Not on the real ledger, which stays at version 20 until 21, then 22 and 23, each after a verified backup |
 | M12.1: income sources | Accepted on 2026-11-15 as built, both departures included (D-068) |
 | M12.2: recurring obligations | Built on 2026-11-15 (D-068, "How M12.2 was implemented"), awaiting the owner's review |
-| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12.1 accepted, M12.2 built, nothing later |
+| M12.3: the income report, its page, the benchmark row | Built on 2026-11-16 (D-068, "How M12.3 was implemented"), awaiting the owner's review |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12.1 accepted, M12.2 and M12.3 built, M13.1 started |
 
 ## What exists
 
@@ -92,7 +93,7 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations`,
   `0017_real_ledger`, `0018_backup_records`, `0019_categories`, `0020_categorizations`,
   `0021_category_rules`, `0022_household`, `0023_allocations`, `0024_income_sources` and
-  `0025_recurring_obligations`,
+  `0025_recurring_obligations`, `0026_settings_and_budgets` (its tables only, M13.1 in progress),
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts and five unverified institution layouts (D-059), explicit coverage, atomic
   per-file import.
@@ -144,7 +145,7 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   recurring obligations' due dates, the spending each reaches and its state and class, derived on
   every write; adding, superseding, re-terming, undoing and dismissing; and proposals from history
   (D-068 point 5). `reports.obligation_evidence` holds `ob1`, and `reports.obligation_spending`
-  fixed and discretionary spending.
+  fixed and discretionary spending. `reports.income_report` builds `pf report income` (D-068 point 8).
 - `personal_finance.reconcile.transfer_effects` and `transfers`: which transfer matches and one-sided
   transfers apply and which pairs are candidates, read after each account derives alone, and
   matching, stating and undoing under one write lock (D-054, D-055).
@@ -191,7 +192,7 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `income sources`, `income source show`, `income undo`, `obligation proposals`,
   `obligation preview`, `obligation add`, `obligation terms`, `obligation show`,
   `obligation undo`, `obligation dismiss`, `obligation dismissals`, `obligation dismissal undo`,
-  `obligations`, `totals`,
+  `obligations`, `report income`, `totals`,
   `report monthly`, `report household`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
   `backup verify`, `backup restore`, `pdf text`, run
@@ -302,9 +303,10 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
   discretionary. Like income, an obligation has no end date, and `obligation show` needs `--as-of`.
 - Fixed and discretionary spending appear only in `pf obligations` until M12.3's report. `totals`
   and `report monthly` are unchanged (G6).
-- No report counts baseline or extra income, or obligations due, until M12.3.
-- The local UI is read-only, and shows seven commands' output only, `report household` the
-  seventh. It searches nothing, imports
+- `report income` and its page need an as-of date until M13.1's household timezone. The page
+  never reads the clock.
+- The local UI is read-only, and shows eight commands' output only, `report income` the
+  eighth. It searches nothing, imports
   nothing, exports nothing and shows no `trace` or decision history, which carry creation
   timestamps (F2). Decisions are made with `pf review` in the terminal (D-062).
 - `pf ui` cannot stop what the browser keeps: history (addresses with IDs and months, a fixed

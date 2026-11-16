@@ -151,6 +151,14 @@ class TestReport:  # IC3
                 in february)
         assert "  Fixed obligations expected: 0, missed: 1" in month_block(out, "2026-03")
 
+    def test_a_range_is_due_at_its_high(self, ledger):  # G8, toward protection
+        ledger.pay("w1.csv", "2026-01-10", amount="-30.00", text="SYNTHETIC WATER")
+        ledger.ob_add_ok(name="Water", match="synthetic water", cadence="monthly:10",
+                         anchor="2026-01-10", amount=None, amount_range="20.00..45.00")
+        january = month_block(report(ledger), "2026-01")
+        assert "  Fixed obligations due, planned: 1, 45.00" in january
+        assert "  Fixed obligations paid, actual: 1, 30.00" in january
+
     def test_every_figure_is_labelled(self, full):
         for line in report(full).splitlines():
             if re.search(r"\d+\.\d\d", line) and not line.startswith(("Income and", "Month")):

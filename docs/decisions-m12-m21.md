@@ -893,8 +893,41 @@ its own slice plan, applying M12.1's slice plan where it carries over, for the o
   Both closed ones were caught on the rerun. Break 4, another account's payments, was caught only
   by IB3's two-account ledgers: the loader reads the obligations' accounts alone, so the check
   matters only once obligations sit on two accounts, as M12.1 found for income.
-- **Compared as G6:** recorded with the commit after M12.2's, once the capture over the suite's ledgers finishes.
+- **Compared as G6:** the suite's 2,912 ledgers, kept with `--basetemp` from a `git archive` export
+  of `e1cc0b4`, read by that code and, with copies migrated to 25, by a frozen copy of M12.2's
+  `src/`, `income source show` per source and every reached deposit's `review transaction show`
+  included, so the extraction's every M12.1 output is held (IB1).
+  - Of 89,323 runs, 89,273 are identical, after taking out the 103 "Recurring" sections IB5 adds.
+    All 50 others are the two ledgers a test stamps 25 to mean newer than the code, which reads
+    them as current, as in M11 and M12.1. No token version moved.
+  - Another 8,736 runs of `obligations`, `obligation proposals` and `obligation dismissals` show
+    nothing on any ledger that opens.
 
+
+**How M12.3 was implemented** (built on 2026-11-16 under the owner's overnight instruction, without
+its own slice plan, for the owner's review):
+
+- `reports/income_report.py` builds `pf report income --as-of DATE [--account] [--from] [--to]`
+  by month. A pay or due date decides the month (point 3). Per source: baseline planned (the
+  baseline count's dates times the amount in effect on each), baseline received, extra and side
+  received (actual, "to goals (M14)"), and expected and missed. Per class: obligations due
+  (planned, a range at its HIGH, G8), paid (actual), expected and missed. Then possible paychecks
+  (actual, never counted) and disclosures, in the month of the transaction. The lines are in
+  `reports/report_text.py`, every figure labelled planned, actual or expected (G1).
+- **Departures:** `--as-of` is required until M13.1's timezone (as `income source show`). Default
+  months run from the first transaction, or the first pay or due date in scope if earlier, through
+  `--as-of`'s month: a late January pay date with its deposit in February otherwise left January
+  out. The UI page `/income` takes `as_of` in its address and asks for one when given none, so the
+  interface reads no clock.
+- **Tests:** `tests/scenarios/test_income_report.py`: IC1's two ledgers differing by a third
+  biweekly paycheck give identical baseline lines in every month, early and late payments across a
+  month end, and 2026's three-paycheck months for a Friday anchor (January and July); IC2; IC3's
+  labels, read-only digest, page parity per account and range, and names holding HTML; and G6
+  point 3, `totals` and `report monthly` unchanged with the planning tables emptied.
+- **Breaks (G12):** 15 applied, a report slice's smaller surface. 14 were caught on the first run.
+  One survived, a test gap (every obligation was exact, so due at LOW or HIGH looked alike),
+  closed and caught on the rerun.
+- **Benchmark:** `--scale --recurring`, in [benchmarks.md](benchmarks.md).
 ---
 
 ## D-069 M13 plan: budgets and spending allowances — Approved

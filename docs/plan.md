@@ -615,7 +615,7 @@ as recommended, and M12.1 built on 2026-11-15 for the owner's review.
 |---|---|---|
 | M12.1 | Income sources: migration 0024, schedules, proposals, preview, add, supersede, terms, undo, expected against actual, `in1` | Accepted on 2026-11-15 |
 | M12.2 | Recurring obligations: migration 0025, `planning/entries.py` and `planning/schedules.py` extracted, proposals, dismissal, fixed and discretionary, `ob1` | Built, awaiting review |
-| M12.3 | `pf report income`: baseline, extra and side income by month, obligations due and paid, its UI page, the `--recurring` benchmark row | Not started |
+| M12.3 | `pf report income`: baseline, extra and side income by month, obligations due and paid, its UI page, the `--recurring` benchmark row | Built, awaiting review |
 
 ### M12.1 acceptance criteria
 
