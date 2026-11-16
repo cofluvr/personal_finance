@@ -57,6 +57,7 @@ from personal_finance.reconcile.transfer_effects import (
     TRANSFER_DATE_WINDOW_DAYS,
 )
 from personal_finance.reports.coverage_evidence import load_document_coverage
+from personal_finance.reports.income_report import income_report
 from personal_finance.reports.household import (
     ONE_MEMBER,
     SHARED_ONLY,
@@ -1433,3 +1434,75 @@ def describe_household(report) -> list[str]:
         found.append("Cents the share cannot divide evenly go by largest remainder, ties to the "
                      "member added first.")
     return found
+
+
+def account_name_of(conn, account_id) -> str:
+    return conn.execute("SELECT display_name FROM account WHERE id = ?",
+                        (account_id,)).fetchone()[0]
+
+
+INCOME_DISCLOSURES = (
+    ("source_conflict", "deposits two sources reach, counted toward neither"),
+    ("amount_changed", "paychecks outside their amount tolerance"),
+    ("unscheduled", "deposits a source reaches with no pay date within the tolerance"),
+    ("obligation_conflict", "payments two obligations reach, counted as discretionary"),
+    ("amount_out_of_range", "payments outside their obligation's range"),
+    ("unscheduled_payment", "payments an obligation reaches with no due date within the "
+                            "tolerance"),
+)
+
+
+def tally_words(tally) -> str:
+    return f"{tally.count}, {format_cents(tally.cents)}"
+
+
+def income_report_lines(conn, as_of, account_id=None, first_month=None,
+                        last_month=None) -> ReportLines:
+    """pf report income's lines, which its UI page renders (D-068 point 8)."""
+    report = income_report(conn, as_of, account_id, first_month, last_month)
+    out = ReportLines()
+    scope = "every account" if account_id is None else (
+        f"account {shown(account_name_of(conn, account_id))}")
+    out.add(f"Income and obligations for {scope}, as of {report.as_of}")
+    out.add("Months are chosen by pay and due dates, never by when money arrived. Baseline and "
+            "due are planned, from each source's and obligation's terms. Received, extra and "
+            "paid are actual. Expected and missed depend on the as-of date.")
+    for month in report.months:
+        out.add(f"Month {month.month}")
+        for row in month.sources:
+            out.add(f"  {row.kind.capitalize()} {shown(row.name)}, account "
+                    f"{shown(account_name_of(conn, row.account_id))}:")
+            for part_name, label in (("baseline", "Baseline"), ("extra", "Extra"),
+                                     ("side", "Side")):
+                part = row.parts.get(part_name)
+                if part is None:
+                    continue
+                if part_name == "baseline":
+                    out.add(f"    Baseline, planned: {tally_words(part.planned)}")
+                    out.add(f"    Baseline, actual received: {tally_words(part.received)}")
+                else:
+                    line = f"    {label}, actual received: {tally_words(part.received)}"
+                    if part.received.count:
+                        line += ": to goals (M14)"
+                    out.add(line)
+                out.add(f"    {label}, expected: {part.expected}, missed: {part.missed}")
+        baseline = month.total("baseline", "planned")
+        extra = month.total("extra", "received") + month.total("side", "received")
+        out.add(f"  Baseline income, planned: {format_cents(baseline)}")
+        out.add(f"  Baseline income, actual received: "
+                f"{format_cents(month.total('baseline', 'received'))}")
+        out.add(f"  Extra income, actual received: {format_cents(extra)}, of which side "
+                f"{format_cents(month.total('side', 'received'))}")
+        for name, row in month.classes.items():
+            out.add(f"  {name.capitalize()} obligations due, planned: {tally_words(row.due)}")
+            out.add(f"  {name.capitalize()} obligations paid, actual: {tally_words(row.paid)}")
+            out.add(f"  {name.capitalize()} obligations expected: {row.expected}, missed: "
+                    f"{row.missed}")
+        out.add(f"  Possible paychecks, unclassified, actual, never counted: "
+                f"{tally_words(month.possible_paychecks)}")
+        for key, words in INCOME_DISCLOSURES:
+            if month.disclosures.get(key):
+                out.add(f"  Disclosure: {month.disclosures[key]} {words}")
+    if not report.months:
+        out.add("No months: the ledger holds no transaction in scope.")
+    return out

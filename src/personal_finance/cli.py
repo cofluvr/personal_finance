@@ -218,6 +218,7 @@ from personal_finance.reports.household_evidence import (
 )
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.report_text import (
+    income_report_lines,
     ATTRIBUTION_EXPLANATIONS,
     CATEGORIZATION_STATE_EXPLANATIONS,
     CLASSIFICATION_STATE_EXPLANATIONS,
@@ -1238,6 +1239,17 @@ def build_parser() -> argparse.ArgumentParser:
     household.add_argument("--account", help="account name or ID")
     household.add_argument("--from", dest="first_month", help="the first month, YYYY-MM, inclusive")
     household.add_argument("--to", dest="last_month", help="the last month, YYYY-MM, inclusive")
+    income_report = command(
+        "income", report_commands, handler=run_report_income,
+        help="income by source and obligations by class, by month, against their schedules",
+    )
+    income_report.add_argument("--account", help="account name or ID")
+    income_report.add_argument("--from", dest="first_month",
+                               help="the first month, YYYY-MM, inclusive")
+    income_report.add_argument("--to", dest="last_month",
+                               help="the last month, YYYY-MM, inclusive")
+    income_report.add_argument("--as-of", required=True,
+                               help="today, YYYY-MM-DD: missed only once it has passed")
     household_view = household.add_mutually_exclusive_group()
     household_view.add_argument("--member", help="one member's parts, a name from household members")
     household_view.add_argument("--shared", action="store_true",
@@ -3911,6 +3923,18 @@ def run_report_household(args) -> int:
         member_id = member.member_id
     print_report(household_report_lines(conn, account_id, first_month, last_month, member_id,
                                         args.shared))
+    return 0
+
+
+def run_report_income(args) -> int:
+    first_month = validated_month("--from", args.first_month)
+    last_month = validated_month("--to", args.last_month)
+    if first_month and last_month and first_month > last_month:
+        raise CommandError("--from is after --to. Nothing was changed.")
+    as_of = date.fromisoformat(checked_as_of(args.as_of))
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    print_report(income_report_lines(conn, as_of, account_id, first_month, last_month))
     return 0
 
 
