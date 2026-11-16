@@ -88,7 +88,7 @@ and keep its index line.
 | D-065 | M11 plan: household members, attribution and allocations — Approved with A to I and the owner's inputs, implemented and accepted in M11. Real ledger not yet migrated |
 | D-066 | Roadmap to a finished backend: M12 to M21 — Approved with A to E |
 | D-067 | Cross-milestone guardrails for M12 to M21 — Approved, in [decisions-m12-m21.md](decisions-m12-m21.md) |
-| D-068 | M12 plan: income and recurring obligations — Approved, not yet built |
+| D-068 | M12 plan: income and recurring obligations — Approved. M12.1 accepted on 2026-11-15, M12.2 built for review |
 | D-069 | M13 plan: budgets and spending allowances — Approved, not yet built |
 | D-070 | M14 plan: goals, reserves and the tax reserve — Approved, not yet built |
 | D-071 | M15 plan: net worth and loans — Approved, not yet built |

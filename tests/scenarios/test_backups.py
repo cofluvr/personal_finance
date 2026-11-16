@@ -31,6 +31,10 @@ from test_decisions import (
     CATEGORIZATION_TABLES,
     CATEGORY_RULE_TABLES,
     ALLOCATION_TABLES,
+    INCOME_TABLES,
+    OBLIGATION_TABLES,
+    SETTING_KEY_TABLES,
+    BUDGET_TABLES,
     CATEGORY_TABLES,
     CHECKING_HEADER,
     HOUSEHOLD_TABLES,
@@ -54,7 +58,8 @@ from personal_finance.db.migrate import connect, load_migrations
 LATEST = len(load_migrations())
 LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", *REAL_LEDGER_TABLES, *BACKUP_TABLES,
                  *CATEGORY_TABLES, *CATEGORIZATION_TABLES, *CATEGORY_RULE_TABLES,
-                 *HOUSEHOLD_TABLES, *ALLOCATION_TABLES)
+                 *HOUSEHOLD_TABLES, *ALLOCATION_TABLES, *INCOME_TABLES, *OBLIGATION_TABLES,
+                 *SETTING_KEY_TABLES, *BUDGET_TABLES)
 LEDGER_VOLUME = Path("/Volumes/SyntheticLedger")
 BACKUP_VOLUME = Path("/Volumes/SyntheticBackups")
 
@@ -741,7 +746,9 @@ LISTS = [("documents",), ("transactions",), ("totals",), ("report", "monthly"),
          ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
          ("review", "resolutions"), ("review", "coverage", "history"), ("balance", "list"),
          ("storage",), ("category", "list"), ("review", "categorizations"), ("category", "rules"),
-         ("household", "members"), ("household", "share", "show"), ("review", "allocations")]
+         ("household", "members"), ("household", "share", "show"), ("review", "allocations"),
+         ("income", "sources"), ("income", "proposals"), ("obligations",),
+         ("obligation", "proposals"), ("obligation", "dismissals")]
 PER_ACCOUNT = [("totals",), ("report", "monthly"), ("review", "merges"), ("review", "decisions"),
                ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
                ("review", "resolutions"), ("review", "coverage", "history"),
@@ -761,6 +768,8 @@ PER_ID = [
     ("SELECT id FROM category_assignment", [("review", "categorization", "show")]),
     ("SELECT id FROM category_rule", [("category", "rule", "show")]),
     ("SELECT id FROM allocation_statement", [("review", "allocation", "show")]),
+    ("SELECT id FROM income_source", [("income", "source", "show", "--as-of", "2026-03-31")]),
+    ("SELECT id FROM recurring_obligation", [("obligation", "show", "--as-of", "2026-03-31")]),
 ]
 
 
@@ -849,6 +858,8 @@ def build_rich_ledger(ledger, *, checking_rows, decision, match, one_sided, corr
                                       re.search(r"Revision: (q1-[0-9a-f]{16})", shown)[1])
             assert code == 0, err
     build_household(ledger)
+    build_income(ledger)
+    build_obligations(ledger)
 
     items_before = set(ledger.items())
     ledger.card("p1.csv", CAFE, extra=FIRST_HALF, account="S")
@@ -885,6 +896,82 @@ def build_rich_ledger(ledger, *, checking_rows, decision, match, one_sided, corr
     day = date(2026, 1, 1)
     for step, balance in enumerate(balances):
         ledger.record_ok((day + timedelta(days=7 * step)).isoformat(), f"{balance}.00")
+
+
+def income_token(out, kind="Revision"):
+    return re.search(rf"{kind}: (in1-[0-9a-f]{{16}})", out)[1]
+
+
+def build_income(ledger):
+    """Two paychecks typed income, a source over them with a later terms row, and a second
+    source added then undone (D-068)."""
+    ledger.load_path(ledger.write("pay.csv", CHECKING_HEADER, [
+        "P1,2026-01-15,2026-01-15,SYNTHETIC PAYROLL,2500.00,POSTED",
+        "P2,2026-02-16,2026-02-16,SYNTHETIC PAYROLL,2550.00,POSTED"]),
+        layout="synthetic_checking_v1")
+    for transaction in rows_of(ledger, "pay.csv"):
+        ledger.classify_ok(transaction, "income")
+    for name, match, undone in (("Pay", "synthetic payroll", False), ("Other", "payroll", True)):
+        words = ["--account", "A", "--name", name, "--kind", "salary", "--match", match,
+                 "--cadence", "monthly:15", "--anchor", "2026-01-15", "--amount", "2500.00"]
+        code, out, err = ledger.run("income", "add", *words, "--revision",
+                                    income_token(ledger.run("income", "preview", *words)[1]))
+        assert code == 0, err
+        source = re.search(r"Income source (\S+) recorded", out)[1]
+        show = ("income", "source", "show", source, "--as-of", "2026-02-20")
+        if undone:
+            code, _, err = ledger.run("income", "undo", source, "--revision",
+                                      income_token(ledger.run(*show)[1], "Undo revision"))
+        else:
+            code, _, err = ledger.run(
+                "income", "terms", source, "--effective-from", "2026-03-01", "--amount",
+                "2600.00", "--as-of", "2026-02-20", "--revision",
+                income_token(ledger.run(*show)[1], "Terms revision"))
+        assert code == 0, err
+
+
+def obligation_token(out, kind="Revision"):
+    return re.search(rf"{kind}: (ob1-[0-9a-f]{{16}})", out)[1]
+
+
+def build_obligations(ledger):
+    """Three bills typed purchase, an obligation over them with a later terms row, a second added
+    then undone, and a proposal dismissed then its dismissal undone (D-068)."""
+    ledger.load_path(ledger.write("bills.csv", CHECKING_HEADER, [
+        "W1,2026-01-10,2026-01-10,SYNTHETIC WATER,-30.00,POSTED",
+        "W2,2026-02-10,2026-02-10,SYNTHETIC WATER,-31.00,POSTED",
+        "W3,2026-03-10,2026-03-10,SYNTHETIC WATER,-29.00,POSTED"]),
+        layout="synthetic_checking_v1")
+    for transaction in rows_of(ledger, "bills.csv"):
+        ledger.classify_ok(transaction, "purchase")
+    proposals = ledger.run("obligation", "proposals")[1]
+    key = re.search(r"Proposal ([0-9a-f]{16}):", proposals)[1]
+    code, _, err = ledger.run("obligation", "dismiss", key, "--revision",
+                              obligation_token(proposals, "Dismiss revision"))
+    assert code == 0, err
+    dismissals = ledger.run("obligation", "dismissals")[1]
+    code, _, err = ledger.run("obligation", "dismissal", "undo",
+                              re.search(r"Dismissal (\S+):", dismissals)[1], "--revision",
+                              obligation_token(dismissals, "Undo revision"))
+    assert code == 0, err
+    for name, match, undone in (("Water", "synthetic water", False), ("Other", "water", True)):
+        words = ["--account", "A", "--name", name, "--match", match, "--cadence", "monthly:10",
+                 "--anchor", "2026-01-10", "--range", "25.00..35.00", "--class", "fixed"]
+        code, out, err = ledger.run("obligation", "add", *words, "--revision",
+                                    obligation_token(ledger.run("obligation", "preview",
+                                                                *words)[1]))
+        assert code == 0, err
+        obligation = re.search(r"Obligation (\S+) recorded", out)[1]
+        show = ("obligation", "show", obligation, "--as-of", "2026-03-20")
+        if undone:
+            code, _, err = ledger.run("obligation", "undo", obligation, "--revision",
+                                      obligation_token(ledger.run(*show)[1], "Undo revision"))
+        else:
+            code, _, err = ledger.run(
+                "obligation", "terms", obligation, "--effective-from", "2026-04-01", "--range",
+                "25.00..40.00", "--class", "discretionary", "--as-of", "2026-03-20",
+                "--revision", obligation_token(ledger.run(*show)[1], "Terms revision"))
+        assert code == 0, err
 
 
 def household_token(ledger, *words):
@@ -964,7 +1051,8 @@ def test_a_restored_real_ledger_shows_everything_alike_with_its_originals(  # R4
                                   capsys)
     assert shown[("archive", "verify")][0] == 0
     originals = sorted(os.listdir(vault / "originals"))
-    assert len(originals) == 7
+    # a.csv, pay.csv, bills.csv, p1.csv, p2.csv, out.csv, in.csv, one.csv and u.csv.
+    assert len(originals) == 9
     assert sorted(os.listdir(restored_folder / "originals")) == originals
     for name in originals:
         assert sha256_of(restored_folder / "originals" / name) == name

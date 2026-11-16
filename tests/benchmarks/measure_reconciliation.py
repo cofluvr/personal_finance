@@ -12,7 +12,8 @@ Not part of the test suite. Run from the repository root:
     transfer matches across two accounts, --one-sided for one-sided transfers, --income for income
     and spending in totals, --scale for the 100,000-transaction shape of M4.4, --scale
     --category-rules N for it with N category rules (D-064), --scale --household for it with
-    household members, defaults and 5,000 allocations (D-065), or rows per month
+    household members, defaults and 5,000 allocations (D-065), --scale --recurring for it with 6
+    income sources and 60 obligations (D-068), or rows per month
     such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
@@ -31,6 +32,7 @@ import io
 import sys
 import tempfile
 import time
+from datetime import date
 from itertools import islice
 from pathlib import Path
 
@@ -2217,9 +2219,216 @@ def measure_household() -> None:
               flush=True)
 
 
+# Income sources on the shape, D-068 point 9: two biweekly, two semimonthly and two side, each
+# (name, text, cadence, first_day, second_day, interval, anchor, amount in cents, kind). Every
+# 25th pay date goes unpaid, so missed is reached; biweekly months with a third date give extra.
+RECURRING_SOURCES = (
+    ("Pay A", "SYNTHETIC PAYROLL A", "biweekly", None, None, None, "2022-01-07", 250_000,
+     "salary"),
+    ("Pay B", "SYNTHETIC PAYROLL B", "biweekly", None, None, None, "2022-01-14", 230_000,
+     "salary"),
+    ("Pay C", "SYNTHETIC PAYROLL C", "semimonthly", 1, 15, None, "2022-01-01", 180_000, "salary"),
+    ("Pay D", "SYNTHETIC PAYROLL D", "semimonthly", 15, 28, None, "2022-01-15", 160_000,
+     "salary"),
+    ("Gig E", "SYNTHETIC GIG E", "monthly", 20, None, None, "2022-01-20", 30_000, "side"),
+    ("Gig F", "SYNTHETIC GIG F", "quarterly", 10, None, None, "2022-01-10", 90_000, "side"),
+)
+# 59 bills, each its own obligation, and one broad obligation that also reaches bills 00 to 09,
+# so 600 payments are in obligation_conflict.
+RECURRING_BILLS = 59
+RECURRING_CONFLICTS = 600
+
+
+def recurring_ledger(root: Path):
+    """The scale ledger plus a checking account, Bills, holding the six sources' paychecks and
+    the bills, one file a month with complete coverage, typed directly, then 6 sources and 60
+    obligations written directly and derived once."""
+    from personal_finance.planning.schedules import Cadence, ScheduleTerms, scheduled_dates
+
+    conn, path = scale_ledger(root)
+    conn.execute("INSERT INTO account (id, display_name, account_type) "
+                 "VALUES ('bills', 'Bills', 'checking')")
+    rows = []  # (external ID, day, cents, type, description)
+    unpaid = 0
+    end = date(2026, 12, 31)
+    for number, (_, text, cadence, first, second, interval, anchor, cents, _) in enumerate(
+            RECURRING_SOURCES):
+        terms = (ScheduleTerms(anchor, Cadence(cadence, first, second, interval), anchor),)
+        for index, (nominal, _) in enumerate(scheduled_dates(terms, end)):
+            if index % 25 == 24:
+                unpaid += 1
+                continue
+            rows.append((f"S{number}-{index}", nominal.isoformat(), cents, "income", text))
+    for bill in range(RECURRING_BILLS):
+        day = 1 + bill % 28
+        for month in SCALE_MONTHS:
+            rows.append((f"B{bill}-{month}", f"{month}-{day:02}", -(5_000 + bill * 100),
+                         "purchase", f"SYNTHETIC BILL {bill:02}"))
+    by_month = {month: [] for month in SCALE_MONTHS}
+    for external_id, day, cents, _, text in rows:
+        by_month[day[:7]].append(f"{external_id},{day},{day},{text},{cents / 100:.2f},POSTED\n")
+    for month, lines in by_month.items():
+        source = root / f"bills-{month}.csv"
+        source.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,"
+                          "Status\n" + "".join(lines))
+        last_day = f"{month}-{calendar.monthrange(int(month[:4]), int(month[5:]))[1]:02}"
+        (result,) = import_files(conn, [source], account_id="bills", layout=SYNTHETIC_CHECKING_V1,
+                                 declared_coverage=declare_complete(f"{month}-01", last_day,
+                                                                    "transaction"))
+        assert result.outcome == "imported", result
+    links = {external_id: (transaction_id, record_id)
+             for external_id, transaction_id, record_id in conn.execute(
+                 """SELECT entry.external_id, link.transaction_id, link.source_record_id
+                    FROM transaction_source link
+                    JOIN ledger_transaction entry ON entry.id = link.transaction_id
+                    WHERE entry.account_id = 'bills'""")}
+    conn.execute("BEGIN")
+    classify_directly(conn, "bills", [(*links[external_id], financial_type)
+                                      for external_id, _, _, financial_type, _ in rows])
+    for number, (name, text, cadence, first, second, interval, anchor, cents, kind) in enumerate(
+            RECURRING_SOURCES):
+        source_id = f"src{number}"
+        conn.execute(
+            """INSERT INTO income_source (id, account_id, name, kind, description_contains,
+                                          normalization_version, tolerance_days,
+                                          amount_tolerance_cents, tax_eligible, chain_id)
+               VALUES (?, 'bills', ?, ?, ?, 1, 3, 0, 0, ?)""",
+            (source_id, name, kind, text, source_id))
+        conn.execute(
+            """INSERT INTO income_source_terms (chain_id, effective_from, cadence, first_day,
+                                                second_day, interval_months, anchor,
+                                                amount_cents)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (source_id, anchor, cadence, first, second, interval, anchor, cents))
+        conn.execute("INSERT INTO income_source_event (source_id, event) VALUES (?, 'made')",
+                     (source_id,))
+    obligations = [(f"Bill {bill:02}", f"SYNTHETIC BILL {bill:02}", 1 + bill % 28,
+                    5_000 + bill * 100, 5_000 + bill * 100,
+                    "fixed" if bill % 2 == 0 else "discretionary")
+                   for bill in range(RECURRING_BILLS)]
+    obligations.append(("Bills 0x", "SYNTHETIC BILL 0", 1, 5_000, 6_000, "discretionary"))
+    for number, (name, text, day, low, high, obligation_class) in enumerate(obligations):
+        obligation_id = f"ob{number}"
+        conn.execute(
+            """INSERT INTO recurring_obligation (id, account_id, name, description_contains,
+                                                 normalization_version, tolerance_days,
+                                                 chain_id)
+               VALUES (?, 'bills', ?, ?, 1, 3, ?)""", (obligation_id, name, text, obligation_id))
+        conn.execute(
+            """INSERT INTO recurring_obligation_terms (chain_id, effective_from, cadence,
+                                                       first_day, anchor, low_cents, high_cents,
+                                                       obligation_class)
+               VALUES (?, ?, 'monthly', ?, ?, ?, ?, ?)""",
+            (obligation_id, f"2022-01-{day:02}", day, f"2022-01-{day:02}", low, high,
+             obligation_class))
+        conn.execute("INSERT INTO recurring_obligation_event (obligation_id, event) "
+                     "VALUES (?, 'made')", (obligation_id,))
+    write_transfer_effects(conn)
+    conn.execute("COMMIT")
+    return conn, path, unpaid
+
+
+def measure_recurring() -> None:
+    """Income sources and obligations on the 100,000-transaction shape (D-068 point 9, IC4):
+    report income over every month and one month, both proposals, income add and obligation add,
+    a one-row import and totals, with the counts of received, missed, extra and
+    obligation_conflict. Stops, as G9 says, if a report or proposal misses two seconds or an add
+    costs more than twice the import of one row."""
+    from personal_finance.planning.income_sources import SourceRequest, add_source, source_preview
+    from personal_finance.planning.obligations import (
+        ObligationRequest,
+        add_obligation,
+        obligation_preview,
+    )
+    from personal_finance.reports.income_report import income_report
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, unpaid = recurring_ledger(root)
+        build_seconds = time.perf_counter() - started
+        states = dict(conn.execute(
+            "SELECT state, COUNT(*) FROM transaction_income_source GROUP BY state").fetchall())
+        obligation_states = dict(conn.execute(
+            "SELECT state, COUNT(*) FROM transaction_obligation GROUP BY state").fetchall())
+        report = income_report(conn, date(2026, 12, 31))
+        missed = sum(part.missed for month in report.months for row in month.sources
+                     for part in row.parts.values())
+        extra = sum(row.parts["extra"].received.count for month in report.months
+                    for row in month.sources if "extra" in row.parts)
+        transactions = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()[0]
+        print(f"shape transactions={transactions} sources={len(RECURRING_SOURCES)} "
+              f"obligations={RECURRING_BILLS + 1} income={states} obligation={obligation_states} "
+              f"missed={missed} extra={extra} build={build_seconds:.1f}s", flush=True)
+        # The shape reaches the cost it claims: every source pays and misses, biweekly months
+        # hold extra pay, and the broad obligation conflicts on ten bills' payments.
+        assert transactions > 104_000
+        assert states == {"received": sum(states.values())} and states["received"] > 500
+        expected = sum(part.expected for month in report.months for row in month.sources
+                       for part in row.parts.values())
+        assert missed + expected == unpaid and missed > 0, (missed, expected, unpaid)
+        assert extra > 10
+        assert obligation_states["obligation_conflict"] == 2 * RECURRING_CONFLICTS
+        assert obligation_states["paid"] == RECURRING_BILLS * 60 - RECURRING_CONFLICTS
+        conn.close()
+
+        database = str(path)
+        totals_seconds = timed_command("totals", "--db", database)
+        report_seconds = timed_command("report", "income", "--db", database, "--as-of",
+                                       "2026-12-31")
+        month_seconds = timed_command("report", "income", "--db", database, "--as-of",
+                                      "2026-12-31", "--from", "2026-06", "--to", "2026-06")
+        income_proposals_seconds = timed_command("income", "proposals", "--db", database)
+        obligation_proposals_seconds = timed_command("obligation", "proposals", "--db",
+                                                     database)
+
+        conn = connect(path)
+        request = SourceRequest("bills", "Pay G", "side", "synthetic gig e and more", "monthly:20",
+                                "2022-01-20", "300.00")
+        revision = source_preview(conn, request).revision
+        started = time.perf_counter()
+        add_source(conn, request, revision)
+        income_add_seconds = time.perf_counter() - started
+        request = ObligationRequest("bills", "Bill X", "synthetic bill 58 extra", None,
+                                    "monthly:3", "2022-01-03", "62.00", None, "fixed")
+        revision = obligation_preview(conn, request).revision
+        started = time.perf_counter()
+        add_obligation(conn, request, revision)
+        obligation_add_seconds = time.perf_counter() - started
+        later = root / "later.csv"
+        later.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+                         "LATER,2026-12-30,2026-12-30,SYNTHETIC LATER,-9.00,POSTED\n")
+        started = time.perf_counter()
+        (result,) = import_files(conn, [later], account_id="savings",
+                                 layout=SYNTHETIC_CHECKING_V1)
+        import_seconds = time.perf_counter() - started
+        assert result.outcome == "imported"
+        conn.close()
+        print(f"totals={totals_seconds:7.3f}s report_income={report_seconds:7.3f}s "
+              f"report_income_month={month_seconds:7.3f}s "
+              f"income_proposals={income_proposals_seconds:7.3f}s "
+              f"obligation_proposals={obligation_proposals_seconds:7.3f}s", flush=True)
+        print(f"income_add={income_add_seconds:7.3f}s obligation_add={obligation_add_seconds:7.3f}s "
+              f"one_import={import_seconds:7.3f}s", flush=True)
+        stops = [name for name, seconds in (("income add", income_add_seconds),
+                                            ("obligation add", obligation_add_seconds))
+                 if seconds > 2 * import_seconds or seconds > 2]
+        stops += [name for name, seconds in (("report income", report_seconds),
+                                             ("report income, one month", month_seconds),
+                                             ("income proposals", income_proposals_seconds),
+                                             ("obligation proposals",
+                                              obligation_proposals_seconds))
+                  if seconds > 2]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--scale"]:
         measure_scale()
+        return
+    if sys.argv[1:] == ["--scale", "--recurring"]:
+        measure_recurring()
         return
     if sys.argv[1:] == ["--scale", "--household"]:
         measure_household()

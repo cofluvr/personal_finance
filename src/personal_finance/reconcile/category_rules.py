@@ -14,6 +14,7 @@ from datetime import date
 from personal_finance.reconcile.apply import stale_accounts
 from personal_finance.reconcile.categories import find_category
 from personal_finance.reconcile.categorizations import CATEGORY_UNKNOWN
+from personal_finance.planning.obligation_effects import write_obligation_effects
 from personal_finance.reconcile.category_rule_effects import (
     RuleDefinition,
     load_active_rules,
@@ -136,6 +137,7 @@ def _add_rule(conn, category_name, description_contains, preview_revision, accou
     )
     conn.execute("INSERT INTO category_rule_event (rule_id, event) VALUES (?, 'made')", (rule_id,))
     write_rule_category_effects(conn)
+    write_obligation_effects(conn)
     return RuleAdded(rule_id, outlook)
 
 
@@ -170,4 +172,5 @@ def _undo_rule(conn, rule_id, revision, rules) -> RuleOutlook:
         raise DecisionRefused(STALE_RULE_REVISION)
     conn.execute("INSERT INTO category_rule_event (rule_id, event) VALUES (?, 'undone')", (rule_id,))
     write_rule_category_effects(conn)
+    write_obligation_effects(conn)
     return outlook

@@ -11,11 +11,13 @@ import hmac
 import html
 import re
 import secrets
+from datetime import date
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from personal_finance.cli import (
     UNEXPECTED_ERROR,
     CommandError,
+    checked_as_of,
     explained_error,
     find_account,
     open_ledger,
@@ -25,6 +27,7 @@ from personal_finance.reports.report_text import (
     account_choices,
     document_list_lines,
     household_report_lines,
+    income_report_lines,
     member_choices,
     monthly_report_lines,
     review_item_report,
@@ -71,6 +74,7 @@ NAVIGATION = (
     ("/", "Totals"),
     ("/monthly", "Monthly"),
     ("/household", "Household"),
+    ("/income", "Income"),
     ("/documents", "Import results"),
     ("/transactions", "Transactions"),
     ("/review", "Review queue"),
@@ -82,6 +86,7 @@ PAGE_PARAMETERS = {
     "/": {"account"},
     "/monthly": {"account", "from", "to"},
     "/household": {"account", "from", "to", "member", "view"},
+    "/income": {"account", "from", "to", "as_of"},
     "/documents": set(),
     "/transactions": set(),
     "/review": set(),
@@ -100,6 +105,10 @@ READ_ONLY = "This interface is read-only. Decisions are made with pf review in t
 NOT_FOUND = "There is no such page."
 BAD_ADDRESS = "This address holds a value the interface does not accept."
 UNREADABLE = "This request could not be read."
+CHOOSE_AS_OF = (
+    "Give an as-of date, YYYY-MM-DD. Missed and expected depend on it, and the interface reads "
+    "no clock."
+)
 ITEM_NOT_FOUND = "Review item not found. A later import can replace one: see the review queue."
 
 
@@ -246,6 +255,8 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             raise CommandError("from is after to. Nothing was changed.")
         if path == "/household":
             return self.answer_household(conn, parameters, account_id, first_month, last_month)
+        if path == "/income":
+            return self.answer_income(conn, parameters, account_id, first_month, last_month)
         form = account_form(conn, "/monthly", account_id, first_month, last_month)
         lines = monthly_report_lines(conn, account_id, first_month, last_month)
         self.send_page(200, "Monthly report", lines, form=form)
@@ -263,6 +274,16 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         lines = household_report_lines(conn, account_id, first_month, last_month, member_id,
                                        view == "shared")
         self.send_page(200, "Household report", lines, form=form)
+
+    def answer_income(self, conn, parameters, account_id, first_month, last_month):
+        """The income report as of a date the page is given, never the clock (G7)."""
+        text = parameters.get("as_of") or None
+        form = income_form(conn, account_id, first_month, last_month, text)
+        if text is None:
+            return self.send_page(200, "Income report", notice=CHOOSE_AS_OF, form=form)
+        as_of = date.fromisoformat(checked_as_of(text))
+        lines = income_report_lines(conn, as_of, account_id, first_month, last_month)
+        self.send_page(200, "Income report", lines, form=form)
 
     def send_page(self, status, heading, lines=(), *, notice="", form="", after="",
                   extra_headers=()):
@@ -335,7 +356,7 @@ def account_form(conn, action, account_id, first_month=None, last_month=None) ->
         selected = " selected" if choice_id == account_id else ""
         options.append(f'<option value="{escaped(choice_id)}"{selected}>{escaped(name)}</option>')
     months = ""
-    if action in ("/monthly", "/household"):
+    if action in ("/monthly", "/household", "/income"):
         months = (
             '<label> From <input name="from" placeholder="YYYY-MM" size="8" '
             f'value="{escaped(first_month or "")}"></label>'
@@ -359,6 +380,14 @@ def household_form(conn, account_id, first_month, last_month, member_id, view) -
     views = (f'<label> View <select name="view">{"".join(choices)}</select></label>'
              f'<label> Member <select name="member">{"".join(members)}</select></label>')
     return form.replace(" <button>Show</button>", f"{views} <button>Show</button>")
+
+
+def income_form(conn, account_id, first_month, last_month, as_of) -> str:
+    """The monthly form, then the as-of date."""
+    form = account_form(conn, "/income", account_id, first_month, last_month)
+    field = ('<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+             f'value="{escaped(as_of or "")}"></label>')
+    return form.replace(" <button>Show</button>", f"{field} <button>Show</button>")
 
 
 def decision_hint(ledger_path, report) -> str:

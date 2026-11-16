@@ -11,6 +11,7 @@ import re
 import sqlite3
 import sys
 import uuid
+from datetime import date
 from pathlib import Path
 
 from personal_finance.db.backups import (
@@ -48,6 +49,40 @@ from personal_finance.ingest.layouts import LAYOUTS
 from personal_finance.ingest.pdf_reader import read_pdf_lines
 from personal_finance.ingest.pipeline import import_files
 from personal_finance.money import format_cents
+from personal_finance.planning.income_effects import AMOUNT_CHANGED as INCOME_AMOUNT_CHANGED
+from personal_finance.planning.income_effects import RECEIVED as INCOME_RECEIVED
+from personal_finance.planning.income_effects import SOURCE_CONFLICT, occurrences
+from personal_finance.planning.income_effects import load_sources as load_income_sources
+from personal_finance.planning.income_proposals import cadence_spec, income_proposals
+from personal_finance.planning.income_sources import (
+    DEFAULT_TOLERANCE_DAYS,
+    SourceRequest,
+    add_source,
+    change_terms,
+    checked_source,
+    parsed_date,
+    undo_source,
+)
+from personal_finance.planning.income_sources import KINDS as SOURCE_KINDS
+from personal_finance.planning.obligation_effects import AMOUNT_OUT_OF_RANGE as OBLIGATION_OUT_OF_RANGE
+from personal_finance.planning.obligation_effects import CLASSES as OBLIGATION_CLASSES
+from personal_finance.planning.obligation_effects import OBLIGATION_CONFLICT
+from personal_finance.planning.obligation_effects import PAID as OBLIGATION_PAID
+from personal_finance.planning.obligation_effects import due_occurrences, load_obligations
+from personal_finance.planning.obligation_proposals import load_dismissals, obligation_proposals
+from personal_finance.planning.obligations import DEFAULT_TOLERANCE_DAYS as OBLIGATION_TOLERANCE_DAYS
+from personal_finance.planning.obligations import TermsRequest as ObligationTermsRequest
+from personal_finance.planning.obligations import change_terms as change_obligation_terms
+from personal_finance.planning.obligations import (
+    ObligationRequest,
+    add_obligation,
+    checked_obligation,
+    dismiss_proposal,
+    dismissal_revision,
+    undo_dismissal,
+    undo_obligation,
+)
+from personal_finance.planning.schedules import terms_in_effect
 from personal_finance.reconcile.apply import STATE_ACTIVE, reconcile_account, stale_accounts
 from personal_finance.reconcile.balance_observations import record_observation, undo_observation
 from personal_finance.reconcile.cross_document import (
@@ -122,6 +157,15 @@ from personal_finance.reports.balances import (
     load_observation,
     observation_revision,
 )
+from personal_finance.reports.income_evidence import TERMS as INCOME_TERMS
+from personal_finance.reports.income_evidence import UNDO as INCOME_UNDO
+from personal_finance.reports.income_evidence import preview_outlook, source_outlook
+from personal_finance.reports.obligation_evidence import TERMS as OBLIGATION_TERMS
+from personal_finance.reports.obligation_evidence import UNDO as OBLIGATION_UNDO
+from personal_finance.reports.obligation_evidence import category_name as obligation_category_name
+from personal_finance.reports.obligation_evidence import dismiss_revision, obligation_outlook
+from personal_finance.reports.obligation_evidence import preview_outlook as preview_outlook_of_obligation
+from personal_finance.reports.obligation_spending import spending_by_class
 from personal_finance.reports.category_rule_evidence import (
     RuleOutlook,
     StoredRule,
@@ -174,6 +218,7 @@ from personal_finance.reports.household_evidence import (
 )
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.report_text import (
+    income_report_lines,
     ATTRIBUTION_EXPLANATIONS,
     CATEGORIZATION_STATE_EXPLANATIONS,
     CLASSIFICATION_STATE_EXPLANATIONS,
@@ -463,6 +508,165 @@ def build_parser() -> argparse.ArgumentParser:
     rule_undo.add_argument("rule_id", help="a rule ID from category rules")
     rule_undo.add_argument("--revision", required=True,
                            help="the revision from category rule show")
+
+    income = commands.add_parser(
+        "income", help="state income sources and see their paychecks against their schedules")
+    income_commands = income.add_subparsers(dest="income_command", required=True)
+    income_proposals_command = command(
+        "proposals", income_commands, handler=run_income_proposals,
+        help="list income sources proposed from history, writing nothing")
+    income_proposals_command.add_argument("--account", help="only this account's deposits")
+
+    def source_arguments(sub):
+        sub.add_argument("--account", required=True, help="the account the pay lands in")
+        sub.add_argument("--name", required=True, help="what to call the source")
+        sub.add_argument("--kind", required=True, choices=SOURCE_KINDS)
+        sub.add_argument("--match", required=True,
+                         help="text the deposit's description contains, compared ignoring case "
+                              "and repeated spaces")
+        sub.add_argument("--cadence",
+                         help="weekly, biweekly, semimonthly:D1,D2, monthly:D, quarterly:D, "
+                              "annual:MM-DD or every:N-months:D")
+        sub.add_argument("--anchor", help="one real pay date, YYYY-MM-DD, the first counted")
+        sub.add_argument("--amount", help="the expected take-home amount, such as 2500.00")
+        sub.add_argument("--tolerance-days", type=int, default=DEFAULT_TOLERANCE_DAYS,
+                         help="days a deposit may fall either side of its pay date, 0 to 7")
+        sub.add_argument("--amount-tolerance",
+                         help="how far a deposit may differ from the expected amount, else 0")
+        sub.add_argument("--member", help="the household member it is paid to")
+        sub.add_argument("--tax-eligible", action="store_true",
+                         help="income a tax reserve is taken from (M14)")
+        sub.add_argument("--from-proposal", help="a proposal key from income proposals")
+        sub.add_argument("--supersedes",
+                         help="the source this one replaces, keeping its chain's terms")
+
+    income_preview = command("preview", income_commands, handler=run_income_preview,
+                             help="show every deposit a source would reach, writing nothing")
+    source_arguments(income_preview)
+    income_add = command("add", income_commands, handler=run_income_add,
+                         help="add an income source whose preview is still current")
+    source_arguments(income_add)
+    income_add.add_argument("--revision", required=True, help="the revision from income preview")
+    income_terms = command("terms", income_commands, handler=run_income_terms,
+                           help="change a source's amount or cadence from a date on")
+    income_terms.add_argument("source_id", help="a source ID from income sources")
+    income_terms.add_argument("--effective-from", required=True,
+                              help="the first day the new terms apply, YYYY-MM-DD")
+    income_terms.add_argument("--amount", required=True, help="the expected take-home amount")
+    income_terms.add_argument("--cadence", help="a new cadence, given with --anchor")
+    income_terms.add_argument("--anchor", help="a real pay date of the new cadence")
+    income_terms.add_argument("--as-of", required=True,
+                              help="today, YYYY-MM-DD: a month before it is closed")
+    income_terms.add_argument("--revision", required=True,
+                              help="the terms revision from income source show")
+    income_sources_command = command("sources", income_commands, handler=run_income_sources,
+                                     help="list income sources and what each reaches")
+    income_sources_command.add_argument("--account", help="only this account's sources")
+    income_source = income_commands.add_parser("source", help="inspect one income source")
+    income_source_commands = income_source.add_subparsers(dest="source_command", required=True)
+    income_source_show = command("show", income_source_commands, handler=run_income_source_show,
+                                 help="show a source's pay dates and deposits as of a date")
+    income_source_show.add_argument("source_id", help="a source ID from income sources")
+    income_source_show.add_argument("--as-of", required=True,
+                                    help="today, YYYY-MM-DD: missed only once it has passed")
+    income_undo = command("undo", income_commands, handler=run_income_undo,
+                          help="stop an income source applying, keeping it on record")
+    income_undo.add_argument("source_id", help="a source ID from income sources")
+    income_undo.add_argument("--revision", required=True,
+                             help="the undo revision from income source show")
+
+    obligation = commands.add_parser(
+        "obligation", help="state recurring obligations and see their payments against their "
+                           "schedules")
+    obligation_commands = obligation.add_subparsers(dest="obligation_command", required=True)
+    obligation_proposals_command = command(
+        "proposals", obligation_commands, handler=run_obligation_proposals,
+        help="list obligations proposed from history, writing nothing")
+    obligation_proposals_command.add_argument("--account", help="only this account's spending")
+
+    def obligation_arguments(sub):
+        sub.add_argument("--account", required=True, help="the account the payments leave")
+        sub.add_argument("--name", required=True, help="what to call the obligation")
+        sub.add_argument("--match", required=True,
+                         help="text the payment's description contains, compared ignoring case "
+                              "and repeated spaces")
+        sub.add_argument("--category",
+                         help="only payments whose category, a person's else the rules', is this")
+        sub.add_argument("--cadence",
+                         help="weekly, biweekly, semimonthly:D1,D2, monthly:D, quarterly:D, "
+                              "annual:MM-DD or every:N-months:D")
+        sub.add_argument("--anchor", help="one real due date, YYYY-MM-DD, the first counted")
+        sub.add_argument("--amount", help="the exact amount due, such as 85.00")
+        sub.add_argument("--range", dest="amount_range",
+                         help="the range a payment falls in, LOW..HIGH, such as 60.00..140.00")
+        sub.add_argument("--class", dest="obligation_class", choices=OBLIGATION_CLASSES,
+                         help="fixed or discretionary spending")
+        sub.add_argument("--tolerance-days", type=int, default=OBLIGATION_TOLERANCE_DAYS,
+                         help="days a payment may fall either side of its due date, 0 to 7")
+        sub.add_argument("--from-proposal", help="a proposal key from obligation proposals")
+        sub.add_argument("--supersedes",
+                         help="the obligation this one replaces, keeping its chain's terms")
+
+    obligation_preview_command = command(
+        "preview", obligation_commands, handler=run_obligation_preview,
+        help="show every payment an obligation would reach, writing nothing")
+    obligation_arguments(obligation_preview_command)
+    obligation_add = command("add", obligation_commands, handler=run_obligation_add,
+                             help="add an obligation whose preview is still current")
+    obligation_arguments(obligation_add)
+    obligation_add.add_argument("--revision", required=True,
+                                help="the revision from obligation preview")
+    obligation_terms = command("terms", obligation_commands, handler=run_obligation_terms,
+                               help="change an obligation's amount, cadence or class from a "
+                                    "date on")
+    obligation_terms.add_argument("obligation_id", help="an obligation ID from obligations")
+    obligation_terms.add_argument("--effective-from", required=True,
+                                  help="the first day the new terms apply, YYYY-MM-DD")
+    obligation_terms.add_argument("--amount", help="the exact amount due")
+    obligation_terms.add_argument("--range", dest="amount_range", help="LOW..HIGH")
+    obligation_terms.add_argument("--cadence", help="a new cadence, given with --anchor")
+    obligation_terms.add_argument("--anchor", help="a real due date of the new cadence")
+    obligation_terms.add_argument("--class", dest="obligation_class",
+                                  choices=OBLIGATION_CLASSES,
+                                  help="a new class, else the latest terms row's")
+    obligation_terms.add_argument("--as-of", required=True,
+                                  help="today, YYYY-MM-DD: a month before it is closed")
+    obligation_terms.add_argument("--revision", required=True,
+                                  help="the terms revision from obligation show")
+    obligation_show = command("show", obligation_commands, handler=run_obligation_show,
+                              help="show an obligation's due dates and payments as of a date")
+    obligation_show.add_argument("obligation_id", help="an obligation ID from obligations")
+    obligation_show.add_argument("--as-of", required=True,
+                                 help="today, YYYY-MM-DD: missed only once it has passed")
+    obligation_undo = command("undo", obligation_commands, handler=run_obligation_undo,
+                              help="stop an obligation applying, keeping it on record")
+    obligation_undo.add_argument("obligation_id", help="an obligation ID from obligations")
+    obligation_undo.add_argument("--revision", required=True,
+                                 help="the undo revision from obligation show")
+    obligation_dismiss = command("dismiss", obligation_commands, handler=run_obligation_dismiss,
+                                 help="withdraw a proposal across imports, until undone")
+    obligation_dismiss.add_argument("proposal_key", help="a proposal key from obligation "
+                                                         "proposals")
+    obligation_dismiss.add_argument("--revision", required=True,
+                                    help="the dismiss revision from obligation proposals")
+    obligation_dismissals = command("dismissals", obligation_commands,
+                                    handler=run_obligation_dismissals,
+                                    help="list dismissed proposals, with their undo revisions")
+    obligation_dismissals.add_argument("--account", help="only this account's dismissals")
+    obligation_dismissal = obligation_commands.add_parser("dismissal",
+                                                          help="undo a dismissal")
+    obligation_dismissal_commands = obligation_dismissal.add_subparsers(
+        dest="dismissal_command", required=True)
+    dismissal_undo = command("undo", obligation_dismissal_commands,
+                             handler=run_obligation_dismissal_undo,
+                             help="bring a dismissed proposal back, keeping the dismissal on "
+                                  "record")
+    dismissal_undo.add_argument("dismissal_id", help="a dismissal ID from obligation dismissals")
+    dismissal_undo.add_argument("--revision", required=True,
+                                help="the undo revision from obligation dismissals")
+    obligations_command = command("obligations", commands, handler=run_obligations,
+                                  help="list obligations, and spending by class")
+    obligations_command.add_argument("--account", help="only this account's obligations")
 
     household = commands.add_parser(
         "household", help="name household members, the household share and account defaults")
@@ -1035,6 +1239,17 @@ def build_parser() -> argparse.ArgumentParser:
     household.add_argument("--account", help="account name or ID")
     household.add_argument("--from", dest="first_month", help="the first month, YYYY-MM, inclusive")
     household.add_argument("--to", dest="last_month", help="the last month, YYYY-MM, inclusive")
+    income_report = command(
+        "income", report_commands, handler=run_report_income,
+        help="income by source and obligations by class, by month, against their schedules",
+    )
+    income_report.add_argument("--account", help="account name or ID")
+    income_report.add_argument("--from", dest="first_month",
+                               help="the first month, YYYY-MM, inclusive")
+    income_report.add_argument("--to", dest="last_month",
+                               help="the last month, YYYY-MM, inclusive")
+    income_report.add_argument("--as-of", required=True,
+                               help="today, YYYY-MM-DD: missed only once it has passed")
     household_view = household.add_mutually_exclusive_group()
     household_view.add_argument("--member", help="one member's parts, a name from household members")
     household_view.add_argument("--shared", action="store_true",
@@ -2399,6 +2614,496 @@ def run_category_rule_undo(args) -> int:
     return 0
 
 
+INCOME_NOTICE = (
+    "Only deposits typed income count. The source reaches deposits imported later too, in any "
+    "order, and never binds records."
+)
+
+
+def source_request(conn, args) -> SourceRequest:
+    return SourceRequest(
+        find_account(conn, args.account), args.name, args.kind, args.match, args.cadence,
+        args.anchor, args.amount, args.tolerance_days, args.amount_tolerance, args.member,
+        args.tax_eligible, args.from_proposal, args.supersedes)
+
+
+def source_sentence(conn, source) -> str:
+    definition = source.definition
+    words = (f"{shown(definition.name)}, {definition.kind}, account "
+             f"{shown(shown_account_name(conn, definition.account_id))}, description contains "
+             f"{shown(definition.description_contains)}, dates within "
+             f"{definition.tolerance_days} days, amounts within "
+             f"{shown_amount(definition.amount_tolerance_cents)}")
+    if definition.member_id is not None:
+        words += f", paid to {shown(load_household(conn).name_of(definition.member_id))}"
+    if definition.tax_eligible:
+        words += ", tax eligible"
+    return words
+
+
+def terms_sentence(terms) -> str:
+    return (f"from {terms.effective_from}: {cadence_spec(terms.cadence, terms.anchor)}, anchor "
+            f"{terms.anchor}, expected {shown_amount(terms.amount_cents)}")
+
+
+def deposit_words(entry) -> str:
+    return (f"{shown(entry.account_name)}, {entry.shown_date}, {shown_amount(entry.amount_cents)}, "
+            f"{shown(entry.description)}")
+
+
+def outcome_words(outcome, outlook, terms_on) -> str:
+    if outcome.state in (INCOME_RECEIVED, INCOME_AMOUNT_CHANGED):
+        expected = terms_on(outcome.nominal_date).amount_cents
+        words = (f"{outcome.state} for the pay date {outcome.nominal_date}, expected "
+                 f"{shown_amount(expected)}")
+        if outcome.state == INCOME_AMOUNT_CHANGED:
+            actual = outlook.facts[outcome.transaction_id].amount_cents
+            words += f", differs by {shown_amount(actual - expected)}"
+        return words
+    if outcome.state == SOURCE_CONFLICT:
+        others = ", ".join(outlook.conflicting[outcome.transaction_id])
+        return f"{SOURCE_CONFLICT} with {others or 'the source previewed'}, counted toward neither"
+    return f"{outcome.state}, no pay date within the tolerance"
+
+
+def terms_lookup(source):
+    def terms_on(nominal_date):
+        return [terms for terms in source.terms if terms.effective_from <= nominal_date][-1]
+    return terms_on
+
+
+def print_deposit_lists(conn, outlook, terms_on) -> None:
+    every = [*(outcome.transaction_id for outcome in outlook.reached),
+             *(facts.transaction_id for facts in outlook.possible_paychecks),
+             *(facts.transaction_id for facts in outlook.before_first_pay_date)]
+    shown_by_id = shown_transactions(conn, every)
+    print(f"Reaches: {len(outlook.reached)} deposits, actual amounts")
+    for outcome in outlook.reached:
+        print(f"  Transaction {outcome.transaction_id}: "
+              f"{deposit_words(shown_by_id[outcome.transaction_id])}: "
+              f"{outcome_words(outcome, outlook, terms_on)}")
+    print(f"Possible paychecks, unclassified, never counted: {len(outlook.possible_paychecks)}")
+    for facts in outlook.possible_paychecks:
+        print(f"  Transaction {facts.transaction_id}: "
+              f"{deposit_words(shown_by_id[facts.transaction_id])}")
+    print(f"Before the first pay date, not reached: {len(outlook.before_first_pay_date)}")
+    for facts in outlook.before_first_pay_date:
+        print(f"  Transaction {facts.transaction_id}: "
+              f"{deposit_words(shown_by_id[facts.transaction_id])}")
+
+
+def warn_if_stale(conn, account_id, what) -> None:
+    if stale_accounts(conn, DEFAULT_RULES, account_id):
+        print(f"The source's account has not been reconciled under the current matching rules, so "
+              f"{what} will be refused until it is. Run reconcile.")
+
+
+def run_income_proposals(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    proposals = income_proposals(conn, account_id)
+    for proposal in proposals:
+        spec = cadence_spec(proposal.cadence, proposal.anchor)
+        print(f"Proposal {proposal.proposal_key}: account "
+              f"{shown(shown_account_name(conn, proposal.account_id))}, description "
+              f"{shown(proposal.normalized_text)}, {spec}")
+        print(f"  Deposits: {len(proposal.deposits)}, from {proposal.anchor} to "
+              f"{proposal.last_seen}, actual amounts {shown_amount(proposal.lowest_cents)} to "
+              f"{shown_amount(proposal.highest_cents)}")
+        print(f"  Suggested: --cadence {spec} --anchor {proposal.anchor} --amount "
+              f"{shown_amount(proposal.suggested_amount_cents)}, expected next "
+              f"{proposal.next_expected}")
+    print(f"Income proposals: {len(proposals)}")
+    if proposals:
+        print("To confirm one, run income preview with --from-proposal and the options you "
+              "choose, then income add with its revision.")
+    return 0
+
+
+def run_income_preview(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    request = source_request(conn, args)
+    checked = checked_source(conn, request)
+    outlook = preview_outlook(conn, checked.source, checked.proposal, checked.superseded)
+    print(f"Income source preview: {source_sentence(conn, checked.source)}")
+    if checked.superseded is not None:
+        print(f"  Supersedes {checked.superseded.source_id}, keeping its terms")
+    if checked.proposal is not None:
+        print(f"  From proposal {checked.proposal.proposal_key}")
+    for terms in checked.source.terms:
+        print(f"  Terms {terms_sentence(terms)}")
+    print_deposit_lists(conn, outlook, terms_lookup(checked.source))
+    print(f"Revision: {outlook.revision}")
+    print("To add this source, run income add with the same options and --revision.")
+    warn_if_stale(conn, request.account_id, "adding it")
+    return 0
+
+
+def run_income_add(args) -> int:
+    conn = open_ledger(args.db)
+    added = add_source(conn, source_request(conn, args), args.revision)
+    source = next(source for source in load_income_sources(conn)
+                  if source.source_id == added.source_id)
+    print(f"Income source {added.source_id} recorded: {source_sentence(conn, source)}")
+    if source.supersedes_id:
+        print(f"  Supersedes {source.supersedes_id}. It stays on record.")
+    print(f"  Reaches: {len(added.outlook.reached)} deposits, as previewed.")
+    print(f"  {INCOME_NOTICE}")
+    return 0
+
+
+def run_income_terms(args) -> int:
+    conn = open_ledger(args.db)
+    terms = change_terms(conn, args.source_id, args.effective_from, args.amount, args.as_of,
+                         args.revision, args.cadence, args.anchor)
+    print(f"Income source {args.source_id} terms recorded: {terms_sentence(terms)}")
+    print("  Pay dates before it keep their terms.")
+    return 0
+
+
+def run_income_sources(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    sources = [source for source in load_income_sources(conn)
+               if account_id in (None, source.definition.account_id)]
+    states = {}
+    for source_id, state, count in conn.execute(
+        "SELECT source_id, state, COUNT(*) FROM transaction_income_source "
+        "GROUP BY source_id, state"
+    ):
+        states.setdefault(source_id, []).append(f"{state} {count}")
+    for source in sources:
+        print(f"Income source {source.source_id}: {source.state}, "
+              f"{source_sentence(conn, source)}, latest terms {terms_sentence(source.terms[-1])}, "
+              f"made {source.created_at}")
+        if source.applies:
+            print(f"  Reaches: {', '.join(sorted(states.get(source.source_id, []))) or 'none'}")
+    print(f"Income sources: {len(sources)}")
+    if sources:
+        print("To see a source's pay dates, run income source show with --as-of.")
+    return 0
+
+
+def run_income_source_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    as_of = date.fromisoformat(checked_as_of(args.as_of))
+    sources = load_income_sources(conn)
+    source = next((source for source in sources if source.source_id == args.source_id), None)
+    if source is None:
+        raise CommandError("income source not found. Run income sources.")
+    print(f"Income source {source.source_id}")
+    print(f"  Says: {source_sentence(conn, source)}")
+    print(f"  Status: {source.state}")
+    print(f"  Made: {source.created_at}")
+    if source.supersedes_id:
+        print(f"  Supersedes: {source.supersedes_id}")
+    for terms in source.terms:
+        print(f"  Terms {terms_sentence(terms)}")
+    if source.undone_at:
+        print(f"  Undone: {source.undone_at}. It stays on record and no longer applies.")
+        return 0
+    if source.superseded_by:
+        print(f"  Superseded by {source.superseded_by}, which applies instead.")
+        return 0
+    outlook = source_outlook(conn, source, INCOME_UNDO)
+    facts_list = tuple(outlook.facts.values())
+    outcomes = {(outcome.transaction_id, outcome.source_id): outcome
+                for outcome in outlook.reached}
+    print(f"Pay dates as of {as_of.isoformat()}, amounts expected unless received:")
+    for occurrence in occurrences(source, facts_list, outcomes, as_of):
+        line = (f"  {occurrence.nominal_date} ({occurrence.part}): {occurrence.state}, expected "
+                f"{shown_amount(occurrence.terms.amount_cents)}")
+        if occurrence.deposit is not None:
+            line += (f", received {shown_amount(occurrence.deposit.amount_cents)} on "
+                     f"{occurrence.deposit.reporting_date}, transaction "
+                     f"{occurrence.deposit.transaction_id}")
+        print(line)
+    print_deposit_lists(conn, outlook, terms_lookup(source))
+    print(f"  Terms revision: {source_outlook(conn, source, INCOME_TERMS).revision}")
+    print(f"  Undo revision: {outlook.revision}")
+    print("To change its definition, run income preview with --supersedes.")
+    warn_if_stale(conn, source.definition.account_id, "a change")
+    return 0
+
+
+def checked_as_of(text) -> str:
+    try:
+        return parsed_date(text, "--as-of")
+    except DecisionRefused as refused:
+        raise CommandError(str(refused).replace(" Nothing was changed.", "")) from None
+
+
+def run_income_undo(args) -> int:
+    conn = open_ledger(args.db)
+    source = undo_source(conn, args.source_id, args.revision)
+    print(f"Income source {args.source_id} undone. It stays on record.")
+    if source.supersedes_id:
+        print(f"  Source {source.supersedes_id}, which it superseded, applies again.")
+    return 0
+
+
+OBLIGATION_NOTICE = (
+    "Only money out in spending counts. The obligation reaches payments imported later too, in "
+    "any order, and never binds records."
+)
+
+
+def obligation_request(conn, args) -> ObligationRequest:
+    return ObligationRequest(
+        find_account(conn, args.account), args.name, args.match, args.category, args.cadence,
+        args.anchor, args.amount, args.amount_range, args.obligation_class, args.tolerance_days,
+        args.from_proposal, args.supersedes)
+
+
+def obligation_sentence(conn, obligation) -> str:
+    definition = obligation.definition
+    words = (f"{shown(definition.name)}, account "
+             f"{shown(shown_account_name(conn, definition.account_id))}, description contains "
+             f"{shown(definition.description_contains)}")
+    if definition.category_id is not None:
+        words += f", category {shown(obligation_category_name(conn, definition.category_id))}"
+    return words + f", dates within {definition.tolerance_days} days"
+
+
+def obligation_terms_sentence(terms) -> str:
+    if terms.low_cents == terms.high_cents:
+        amount = f"exactly {shown_amount(terms.low_cents)}"
+    else:
+        amount = (f"from {shown_amount(terms.low_cents)} to {shown_amount(terms.high_cents)}, "
+                  f"planned {shown_amount(terms.planned_cents)}")
+    return (f"from {terms.effective_from}: {cadence_spec(terms.cadence, terms.anchor)}, anchor "
+            f"{terms.anchor}, {terms.obligation_class}, {amount}")
+
+
+def payment_words(entry) -> str:
+    return (f"{shown(entry.account_name)}, {entry.shown_date}, {shown_amount(entry.amount_cents)}, "
+            f"{shown(entry.description)}")
+
+
+def payment_outcome_words(outcome, outlook, obligation) -> str:
+    if outcome.state in (OBLIGATION_PAID, OBLIGATION_OUT_OF_RANGE):
+        terms = terms_in_effect(obligation.terms, outcome.nominal_date)
+        words = (f"{outcome.state} for the due date {outcome.nominal_date}, planned "
+                 f"{shown_amount(terms.planned_cents)}, {outcome.obligation_class}")
+        if outcome.state == OBLIGATION_OUT_OF_RANGE:
+            words += (f", paid {shown_amount(outlook.facts[outcome.transaction_id].paid_cents)}, "
+                      f"outside {shown_amount(terms.low_cents)} to "
+                      f"{shown_amount(terms.high_cents)}")
+        return words
+    if outcome.state == OBLIGATION_CONFLICT:
+        others = ", ".join(outlook.conflicting[outcome.transaction_id])
+        return (f"{OBLIGATION_CONFLICT} with {others or 'the obligation previewed'}, counted "
+                "toward neither, so discretionary")
+    return f"{outcome.state}, no due date within the tolerance, {outcome.obligation_class}"
+
+
+def print_payment_lists(conn, outlook, obligation) -> None:
+    every = [*(outcome.transaction_id for outcome in outlook.reached),
+             *(facts.transaction_id for facts in outlook.before_first_due_date)]
+    shown_by_id = shown_transactions(conn, every)
+    print(f"Reaches: {len(outlook.reached)} payments, actual amounts")
+    for outcome in outlook.reached:
+        print(f"  Transaction {outcome.transaction_id}: "
+              f"{payment_words(shown_by_id[outcome.transaction_id])}: "
+              f"{payment_outcome_words(outcome, outlook, obligation)}")
+    print(f"Before the first due date, not reached: {len(outlook.before_first_due_date)}")
+    for facts in outlook.before_first_due_date:
+        print(f"  Transaction {facts.transaction_id}: "
+              f"{payment_words(shown_by_id[facts.transaction_id])}")
+
+
+def warn_if_obligation_stale(conn, account_id, what) -> None:
+    if stale_accounts(conn, DEFAULT_RULES, account_id):
+        print(f"The obligation's account has not been reconciled under the current matching "
+              f"rules, so {what} will be refused until it is. Run reconcile.")
+
+
+def suggested_amount_words(proposal) -> str:
+    if proposal.exact:
+        return f"--amount {shown_amount(proposal.suggested_amount_cents)}"
+    return (f"--range {shown_amount(proposal.lowest_cents)}.."
+            f"{shown_amount(proposal.highest_cents)}")
+
+
+def run_obligation_proposals(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    proposals = obligation_proposals(conn, account_id)
+    for proposal in proposals:
+        spec = cadence_spec(proposal.cadence, proposal.anchor)
+        print(f"Proposal {proposal.proposal_key}: account "
+              f"{shown(shown_account_name(conn, proposal.account_id))}, description "
+              f"{shown(proposal.normalized_text)}, {spec}")
+        print(f"  Payments: {len(proposal.payments)}, from {proposal.anchor} to "
+              f"{proposal.last_seen}, actual amounts {shown_amount(proposal.lowest_cents)} to "
+              f"{shown_amount(proposal.highest_cents)}")
+        print(f"  Suggested: --cadence {spec} --anchor {proposal.anchor} "
+              f"{suggested_amount_words(proposal)}, expected next {proposal.next_expected}")
+        print(f"  Dismiss revision: {dismiss_revision(conn, proposal)}")
+    print(f"Obligation proposals: {len(proposals)}")
+    if proposals:
+        print("To confirm one, run obligation preview with --from-proposal and the options you "
+              "choose, then obligation add with its revision. To withdraw one, run obligation "
+              "dismiss with its dismiss revision.")
+    return 0
+
+
+def run_obligation_preview(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    request = obligation_request(conn, args)
+    checked = checked_obligation(conn, request)
+    outlook = preview_outlook_of_obligation(conn, checked.obligation, checked.proposal,
+                                            checked.superseded)
+    print(f"Obligation preview: {obligation_sentence(conn, checked.obligation)}")
+    if checked.superseded is not None:
+        print(f"  Supersedes {checked.superseded.obligation_id}, keeping its terms")
+    if checked.proposal is not None:
+        print(f"  From proposal {checked.proposal.proposal_key}")
+    for terms in checked.obligation.terms:
+        print(f"  Terms {obligation_terms_sentence(terms)}")
+    print_payment_lists(conn, outlook, checked.obligation)
+    print(f"Revision: {outlook.revision}")
+    print("To add this obligation, run obligation add with the same options and --revision.")
+    warn_if_obligation_stale(conn, request.account_id, "adding it")
+    return 0
+
+
+def run_obligation_add(args) -> int:
+    conn = open_ledger(args.db)
+    added = add_obligation(conn, obligation_request(conn, args), args.revision)
+    obligation = next(obligation for obligation in load_obligations(conn)
+                      if obligation.obligation_id == added.obligation_id)
+    print(f"Obligation {added.obligation_id} recorded: {obligation_sentence(conn, obligation)}")
+    if obligation.supersedes_id:
+        print(f"  Supersedes {obligation.supersedes_id}. It stays on record.")
+    print(f"  Reaches: {len(added.outlook.reached)} payments, as previewed.")
+    print(f"  {OBLIGATION_NOTICE}")
+    return 0
+
+
+def run_obligation_terms(args) -> int:
+    conn = open_ledger(args.db)
+    terms = change_obligation_terms(
+        conn, args.obligation_id,
+        ObligationTermsRequest(args.effective_from, args.as_of, args.amount, args.amount_range,
+                               args.cadence, args.anchor, args.obligation_class),
+        args.revision)
+    print(f"Obligation {args.obligation_id} terms recorded: {obligation_terms_sentence(terms)}")
+    print("  Due dates before it keep their terms.")
+    return 0
+
+
+def run_obligations(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    obligations = [obligation for obligation in load_obligations(conn)
+                   if account_id in (None, obligation.definition.account_id)]
+    states = {}
+    for obligation_id, state, count in conn.execute(
+        "SELECT obligation_id, state, COUNT(*) FROM transaction_obligation "
+        "GROUP BY obligation_id, state"
+    ):
+        states.setdefault(obligation_id, []).append(f"{state} {count}")
+    for obligation in obligations:
+        print(f"Obligation {obligation.obligation_id}: {obligation.state}, "
+              f"{obligation_sentence(conn, obligation)}, latest terms "
+              f"{obligation_terms_sentence(obligation.terms[-1])}, made {obligation.created_at}")
+        if obligation.applies:
+            print(f"  Reaches: "
+                  f"{', '.join(sorted(states.get(obligation.obligation_id, []))) or 'none'}")
+    print(f"Obligations: {len(obligations)}")
+    by_class = spending_by_class(conn, account_id)
+    for label, group in (("Fixed", by_class.fixed), ("Discretionary", by_class.discretionary)):
+        print(f"{label} spending, actual: {group.transactions} transactions, out "
+              f"{shown_amount(group.out_cents)}, in {shown_amount(group.in_cents)}")
+    if obligations:
+        print("To see an obligation's due dates, run obligation show with --as-of.")
+    return 0
+
+
+def run_obligation_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    as_of = date.fromisoformat(checked_as_of(args.as_of))
+    obligation = next((obligation for obligation in load_obligations(conn)
+                       if obligation.obligation_id == args.obligation_id), None)
+    if obligation is None:
+        raise CommandError("obligation not found. Run obligations.")
+    print(f"Obligation {obligation.obligation_id}")
+    print(f"  Says: {obligation_sentence(conn, obligation)}")
+    print(f"  Status: {obligation.state}")
+    print(f"  Made: {obligation.created_at}")
+    if obligation.supersedes_id:
+        print(f"  Supersedes: {obligation.supersedes_id}")
+    for terms in obligation.terms:
+        print(f"  Terms {obligation_terms_sentence(terms)}")
+    if obligation.undone_at:
+        print(f"  Undone: {obligation.undone_at}. It stays on record and no longer applies.")
+        return 0
+    if obligation.superseded_by:
+        print(f"  Superseded by {obligation.superseded_by}, which applies instead.")
+        return 0
+    outlook = obligation_outlook(conn, obligation, OBLIGATION_UNDO)
+    outcomes = {(outcome.transaction_id, outcome.obligation_id): outcome
+                for outcome in outlook.reached}
+    print(f"Due dates as of {as_of.isoformat()}, amounts planned unless paid:")
+    for occurrence in due_occurrences(obligation, tuple(outlook.facts.values()), outcomes,
+                                      as_of):
+        line = (f"  {occurrence.nominal_date} ({occurrence.terms.obligation_class}): "
+                f"{occurrence.state}, planned {shown_amount(occurrence.terms.planned_cents)}")
+        if occurrence.payment is not None:
+            line += (f", paid {shown_amount(occurrence.payment.paid_cents)} on "
+                     f"{occurrence.payment.reporting_date}, transaction "
+                     f"{occurrence.payment.transaction_id}")
+        print(line)
+    print_payment_lists(conn, outlook, obligation)
+    print(f"  Terms revision: {obligation_outlook(conn, obligation, OBLIGATION_TERMS).revision}")
+    print(f"  Undo revision: {outlook.revision}")
+    print("To change its definition, run obligation preview with --supersedes.")
+    warn_if_obligation_stale(conn, obligation.definition.account_id, "a change")
+    return 0
+
+
+def run_obligation_undo(args) -> int:
+    conn = open_ledger(args.db)
+    obligation = undo_obligation(conn, args.obligation_id, args.revision)
+    print(f"Obligation {args.obligation_id} undone. It stays on record.")
+    if obligation.supersedes_id:
+        print(f"  Obligation {obligation.supersedes_id}, which it superseded, applies again.")
+    return 0
+
+
+def run_obligation_dismiss(args) -> int:
+    conn = open_ledger(args.db)
+    dismissal_id, proposal = dismiss_proposal(conn, args.proposal_key, args.revision)
+    print(f"Dismissal {dismissal_id} recorded: proposal {proposal.proposal_key} is withdrawn "
+          "across imports until the dismissal is undone.")
+    return 0
+
+
+def run_obligation_dismissals(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    dismissals = [dismissal for dismissal in load_dismissals(conn)
+                  if account_id in (None, dismissal.account_id)]
+    for dismissal in dismissals:
+        print(f"Dismissal {dismissal.dismissal_id}: {dismissal.state}, proposal "
+              f"{dismissal.proposal_key}, account "
+              f"{shown(shown_account_name(conn, dismissal.account_id))}, made "
+              f"{dismissal.created_at}")
+        if dismissal.undone_at is None:
+            print(f"  Undo revision: {dismissal_revision(conn, dismissal)}")
+    print(f"Dismissals: {len(dismissals)}")
+    return 0
+
+
+def run_obligation_dismissal_undo(args) -> int:
+    conn = open_ledger(args.db)
+    dismissal = undo_dismissal(conn, args.dismissal_id, args.revision)
+    print(f"Dismissal {args.dismissal_id} undone: proposal {dismissal.proposal_key} is shown "
+          "again while its history fits. It stays on record.")
+    return 0
+
+
 def run_review_categorize(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
@@ -3218,6 +3923,18 @@ def run_report_household(args) -> int:
         member_id = member.member_id
     print_report(household_report_lines(conn, account_id, first_month, last_month, member_id,
                                         args.shared))
+    return 0
+
+
+def run_report_income(args) -> int:
+    first_month = validated_month("--from", args.first_month)
+    last_month = validated_month("--to", args.last_month)
+    if first_month and last_month and first_month > last_month:
+        raise CommandError("--from is after --to. Nothing was changed.")
+    as_of = date.fromisoformat(checked_as_of(args.as_of))
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    print_report(income_report_lines(conn, as_of, account_id, first_month, last_month))
     return 0
 
 

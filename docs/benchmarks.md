@@ -480,3 +480,32 @@ is run-to-run variance, as M10 recorded. A share set or undo computes `h1` over 
 the share reaches, here 53,525, by their records' document hashes and rows, once to check the
 token and once to report what moved, about 1.5s each time, so an undo and a set take about 6s.
 
+
+**Income sources and obligations on the 100,000-transaction shape (M12.3, IC4, D-068 point 9),**
+measured 2026-11-16 with `measure_reconciliation.py --scale --recurring`, then
+`build/m12_3/attrib/attribute.py` on the same ledger for the column without, nothing else running.
+Full output is in `build/m12_3/`, which is ignored and may not survive.
+
+M4.4's shape plus a checking account, Bills, holding six sources' paychecks (two biweekly, two
+semimonthly, two side, every 25th pay date unpaid) and 59 monthly bills, one file a month with
+complete coverage: 104,100 transactions. 6 sources and 60 obligations are written directly, one of
+them reaching bills 00 to 09 as well. The shape asserts its counts: 560 deposits `received`, 20 pay
+dates missed or expected exactly as left unpaid, 19 extra paychecks received, 2,940 payments
+`paid` and 1,200 `obligation_conflict` rows on 600 payments.
+
+| Operation | First run, right after the build | Same ledger, planning applying | Same ledger, none applying | Provisional target |
+|---|---|---|---|---|
+| `pf totals` | 2.866s | 1.693s, 1.621s | 1.652s, 1.636s | Below 2s: met |
+| `pf report income`, 60 months | 0.197s | | | Below 2s: met |
+| `pf report income`, one month | 0.175s | | | Below 2s: met |
+| `pf income proposals` | 0.447s | | | Below 2s: met |
+| `pf obligation proposals` | 0.711s | | | Below 2s: met |
+| `income add`, under the write lock | 0.061s | | | Below 2s and 2× an import: met |
+| `obligation add`, under the write lock | 0.273s | | | Below 2s and 2× an import: met |
+| One import of one row | 3.679s | 2.400s, 2.400s | 2.197s, 2.204s | At most 0.5s above none: met |
+
+**G9's stopping rule is not met.** The first run's `totals` and import, taken straight after a
+4.5-minute build, were slower than every later run on the same ledger. Measured on one ledger in
+one session, the planning layer adds nothing measurable to `totals`, which reads no planning table,
+and about 0.2s to an import, which rewrites both derived outcomes. `report income` reads only the
+accounts of sources and obligations, so it stays far below its target.
