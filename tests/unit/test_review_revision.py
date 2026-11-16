@@ -172,6 +172,9 @@ def test_exempt_fields_are_identifiers_names_and_the_stale_warning_only():
         # The attribution an account's default gives, the same for every transaction of the
         # account, so no decision or correction changes it (D-065 point 6).
         "household", "allocation_id",
+        # Income sources and obligations reaching it: they bind no records, and their own in1 and
+        # ob1 cover what they reach, so no r, t, d or c token moves (D-068 point 7).
+        "recurring",
     }
 
 

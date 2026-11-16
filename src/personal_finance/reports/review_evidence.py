@@ -52,7 +52,7 @@ IMMATERIAL_FIELDS = frozenset(
     {"issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
      "account_name", "decision_id", "correction_id", "classification_id", "match_id",
      "counterpart_transaction_id", "one_sided_transfer_id", "categorization_id", "rule_id",
-     "household", "allocation_id"}
+     "household", "allocation_id", "recurring"}
 )
 # Fields left out while empty, so that evidence holding none keeps the digest it had before they
 # existed (D-049).
@@ -242,6 +242,22 @@ class TransactionEvidence:
     category_rules: tuple[CategoryRuleEvidence, ...] = ()
     allocations: tuple[AllocationEvidence, ...] = ()
     household: HouseholdEvidence | None = None
+    # Income sources and obligations reaching it. Joins no token: a source or obligation binds no
+    # records, and its own in1 or ob1 covers what it reaches (D-068 point 7).
+    recurring: tuple["RecurringEvidence", ...] = ()
+
+
+@dataclass(frozen=True)
+class RecurringEvidence:
+    """An income source or obligation reaching a transaction, and what the transaction is there."""
+
+    kind: str
+    entry_id: str
+    name: str
+    state: str
+    nominal_date: str | None
+    # An obligation's class there, None in obligation_conflict and for an income source.
+    obligation_class: str | None
 
 
 @dataclass(frozen=True)
@@ -485,7 +501,8 @@ def load_merge_evidence(conn: sqlite3.Connection, transaction_id: str) -> MergeE
                                                            linked_by_transaction),
                            _category_rules_by_transaction(conn, linked_by_transaction),
                            _allocations_by_transaction(conn, account_id, linked_by_transaction),
-                           _household_by_transaction(conn, linked_by_transaction)),
+                           _household_by_transaction(conn, linked_by_transaction),
+                           _recurring_by_transaction(conn, linked_by_transaction)),
         _documents(conn, account_id, documents),
         account_id in stale_accounts(conn, DEFAULT_RULES, account_id),
         account_id,
@@ -577,11 +594,13 @@ def _transactions(conn, issue_id, linked, corrections_by_transaction,
                   one_sided_by_transaction, categorizations_by_transaction,
                   category_rules_by_transaction, allocations_by_transaction,
                   household_by_transaction) -> tuple[TransactionEvidence, ...]:
+    recurring_by_transaction = _recurring_by_transaction(conn, linked)
     entries = [
         _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
                            transfers_by_transaction, one_sided_by_transaction,
                            categorizations_by_transaction, category_rules_by_transaction,
-                           allocations_by_transaction, household_by_transaction)
+                           allocations_by_transaction, household_by_transaction,
+                           recurring_by_transaction)
         for row in conn.execute(
             _TRANSACTION + """
             JOIN review_issue_subject subject ON subject.transaction_id = entry.id
@@ -595,7 +614,8 @@ def _transactions(conn, issue_id, linked, corrections_by_transaction,
 def _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
                        transfers_by_transaction, one_sided_by_transaction,
                        categorizations_by_transaction, category_rules_by_transaction,
-                       allocations_by_transaction, household_by_transaction) -> TransactionEvidence:
+                       allocations_by_transaction, household_by_transaction,
+                       recurring_by_transaction) -> TransactionEvidence:
     transaction_id, *values, primary_id = row
     records = tuple(sorted(linked.get(transaction_id, ()), key=_record_key))
     primary = next(
@@ -609,7 +629,31 @@ def _transaction_entry(row, linked, corrections_by_transaction, classifications_
                                categorizations_by_transaction.get(transaction_id, ()),
                                category_rules_by_transaction.get(transaction_id, ()),
                                allocations_by_transaction.get(transaction_id, ()),
-                               household_by_transaction.get(transaction_id))
+                               household_by_transaction.get(transaction_id),
+                               recurring_by_transaction.get(transaction_id, ()))
+
+
+def _recurring_by_transaction(conn, linked) -> dict[str, tuple[RecurringEvidence, ...]]:
+    """The income sources and obligations reaching each transaction, sources first, each by name
+    then ID."""
+    found = {}
+    for transaction_id, *evidence in conn.execute(
+        """SELECT derived.transaction_id, 'income source', source.id, source.name, derived.state,
+                  derived.nominal_date, NULL
+           FROM transaction_income_source derived
+           JOIN income_source source ON source.id = derived.source_id
+           WHERE derived.transaction_id IN (SELECT value FROM json_each(:ids))
+           UNION ALL
+           SELECT derived.transaction_id, 'obligation', obligation.id, obligation.name,
+                  derived.state, derived.nominal_date, derived.obligation_class
+           FROM transaction_obligation derived
+           JOIN recurring_obligation obligation ON obligation.id = derived.obligation_id
+           WHERE derived.transaction_id IN (SELECT value FROM json_each(:ids))
+           ORDER BY 2, 4, 3""",
+        {"ids": json.dumps(sorted(linked))},
+    ):
+        found.setdefault(transaction_id, []).append(RecurringEvidence(*evidence))
+    return {transaction_id: tuple(items) for transaction_id, items in found.items()}
 
 
 def _household_by_transaction(conn, linked) -> dict[str, HouseholdEvidence]:

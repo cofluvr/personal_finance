@@ -332,7 +332,7 @@ slice aims its breaks at:
 
 ---
 
-## D-068 M12 plan: income and recurring obligations — Approved
+## D-068 M12 plan: income and recurring obligations — Approved, M12.1 accepted
 
 M12 meets PRD §11 and §10's fixed and discretionary split, and closes PRD §21's "Third paychecks do
 not increase normal spending targets" on the income side. M13 holds the rule on the budget side.
@@ -824,6 +824,76 @@ are IA1 to IA7 in [plan.md](plan.md), unchanged.
     on any ledger that opens. The same two stamped ledgers, which have no income tables, give
     `database error`.
 - **Full suite** on the final tree: 3,005 passed, the 2,872 before and 133 new.
+
+**M12.1 accepted** by the owner on 2026-11-15, as built, with both departures above: `income
+proposals` prints no token, and a proposal anchors on the nominal date its earliest deposit pairs
+with.
+
+**How M12.2 was implemented** (built on 2026-11-15 under the owner's instruction to build it without
+its own slice plan, applying M12.1's slice plan where it carries over, for the owner's review):
+
+- **Migration 0025** adds `recurring_obligation`, `recurring_obligation_terms` and
+  `recurring_obligation_event` as 0024's income tables. The amount is a range `low_cents` to
+  `high_cents` (equal for an exact amount), and the class (`fixed` or `discretionary`) is on the
+  terms, since D-068 lets `obligation terms` change it. `obligation_proposal_dismissal` has its own
+  event table, `obligation_proposal_dismissal_event`, so a dismissal can be undone and the key
+  dismissed again (a departure: G10's map names the first table only). The derived
+  `transaction_obligation` holds the state, the due date paired, and the class it is read under,
+  `NULL` in `obligation_conflict`. `tests/scenarios/test_obligation_migration.py` covers G10.
+- **The extraction (point 6)** is its own commit. `planning/schedules.py` holds the pure parts both
+  kinds share: the six cadences' dates, the terms in effect, greedy pairing, the dates a show lists,
+  `missed` and `expected`, cadence parsing and spelling, and fitting a cadence to history (10% band,
+  fewest items, median half down, the key). `planning/entries.py` holds G2 to G4's write path: the
+  lock, the account's currency, the token in constant time, chains with each kind's own refusals,
+  and the dates, amounts and closed months entries parse. Schedules import nothing from `reconcile`,
+  so the effects modules stay free of import cycles. The income tests pass unchanged.
+- **Reach (IB2).** An obligation reaches money out in D-056's spending group on its account, dated
+  no earlier than its first due date less the tolerance, whose normalized effective description
+  contains its text and, when it names a category, whose effective category (a person's, else the
+  rules', D-064) is that one. `transaction_obligation` is rewritten last in
+  `write_transfer_effects`, and after every categorization and category rule write, since a
+  category is a matcher input. A ledger with no obligation pays one `DELETE`.
+- **States.** `paid` within LOW to HIGH, `amount_out_of_range` outside it, `unscheduled` with no
+  due date within the tolerance, and `obligation_conflict` when two reach one payment, which then
+  counts as discretionary. `missed` and `expected` are worked out where shown, as income's. A
+  range's planned amount is its HIGH (G8).
+- **Fixed and discretionary (IB3)** are `reports/obligation_spending.py`: spending reached by a
+  `fixed` obligation outside a conflict is fixed, and every other spending transaction, refunds
+  included, is discretionary. `pf obligations` prints both, actual. An `unscheduled` payment counts
+  with its obligation's class, read from the terms in effect on its date.
+- **Proposals and dismissal (IB4).** Money out in spending is grouped by account and normalized
+  text, all spending types together, and fitted with income's rules. A proposal suggests `--amount`
+  when every payment is equal, else `--range` over what it saw. `obligation proposals` prints a
+  dismiss revision per proposal, since the dismissal's token covers only the key and the group,
+  which the proposal knows whole. New commands beyond D-068's list: `obligation preview` (as
+  `income preview`), `obligation dismissals`, and `obligation dismissal undo`, which IB4 needs.
+- **`ob1`** covers the operation, the obligation by what it says (names standing for IDs), every
+  payment reached with its state, due date and class by record keys, a proposal's whole content,
+  and a superseded obligation's own token. A dismissal's covers its key and group, and its undo's
+  the dismissal and the group as it is now.
+- **Recurring (IB5).** `review show` and `review transaction show` gain "Recurring", listing each
+  income source and obligation reaching the transaction, only where one does. It is a field of
+  `TransactionEvidence` left out of every `r`, `t`, `d` and `c` token (D-068 point 7), and the UI
+  renders the same lines.
+- **Tests:** `tests/scenarios/test_obligations.py` covers IB2 to IB5 and G3 (a stale token per field
+  typed, a race, a fault after the first insert, in an add and a dismissal), import order
+  exhaustively for four files, IB3 on three generated ledgers per account and month, and
+  `evidence_digest` (G1). The backup tests' rich ledger gains obligations, a terms row, an undo and
+  an undone dismissal (G10). `ob` joins the token registry.
+- **Breaks (G12):** 27 applied. 24 were caught on the first run, each by a relevant test. Three
+  survived:
+  - the dismiss token without the group's payments, a test gap, closed: a payment's date moving
+    within its group changes no summary field;
+  - an obligation write changing the evidence, a test of mine passing for the wrong reason: it
+    reassigned what it compared before asserting. Fixed;
+  - a confirmed transfer read as a payment, equivalent code: D-054 refuses both a match on a
+    spending-typed side and typing a matched side as spending, so no spending transaction is ever
+    a confirmed transfer. The filter stays, as D-056's spending group reads.
+
+  Both closed ones were caught on the rerun. Break 4, another account's payments, was caught only
+  by IB3's two-account ledgers: the loader reads the obligations' accounts alone, so the check
+  matters only once obligations sit on two accounts, as M12.1 found for income.
+- **Compared as G6:** recorded with the commit after M12.2's, once the capture over the suite's ledgers finishes.
 
 ---
 

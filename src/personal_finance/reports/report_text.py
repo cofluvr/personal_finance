@@ -586,6 +586,7 @@ def add_transaction_evidence(out, entry, shared) -> None:
     add_allocations(out, entry)
     add_household(out, entry)
     add_transfers(out, entry)
+    add_recurring(out, entry)
 
 
 def _effective_rank_values(record):
@@ -703,6 +704,32 @@ def add_allocations(out, entry) -> None:
                 f"{describe_named_allocation(*allocation.allocation)}, "
                 f"binding {describe_side(allocation.bound_records)}")
     out.add(f"    Allocation: {ALLOCATION_STATE_EXPLANATIONS[entry.allocations[0].state]}")
+
+
+def add_recurring(out, entry) -> None:
+    """Income sources and obligations reaching this transaction (D-068 point 7). A transaction
+    none reaches shows nothing here."""
+    if not entry.recurring:
+        return
+    out.add("  Recurring:")
+    for item in entry.recurring:
+        heading = "Income source" if item.kind == "income source" else "Obligation"
+        out.add(f"    {heading} {item.entry_id} ({shown(item.name)}): "
+                f"{describe_recurring_state(item)}")
+
+
+def describe_recurring_state(item) -> str:
+    occasion = "pay date" if item.kind == "income source" else "due date"
+    if item.nominal_date is not None:
+        words = f"{item.state} for the {occasion} {item.nominal_date}"
+    elif item.state in ("source_conflict", "obligation_conflict"):
+        words = f"{item.state}, counted toward neither"
+        if item.kind == "obligation":
+            words += ", so discretionary"
+        return words
+    else:
+        words = f"{item.state}, no {occasion} within the tolerance"
+    return words if item.obligation_class is None else f"{words}, {item.obligation_class}"
 
 
 def add_transfers(out, entry) -> None:

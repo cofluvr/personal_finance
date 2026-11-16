@@ -9,6 +9,7 @@ or transfer, so only categories are rewritten.
 import sqlite3
 from dataclasses import dataclass
 
+from personal_finance.planning.obligation_effects import write_obligation_effects
 from personal_finance.reconcile.categories import UNCATEGORIZED, find_category
 from personal_finance.reconcile.category_effects import (
     CATEGORY_STATEMENTS,
@@ -113,9 +114,11 @@ CATEGORIZATIONS = StatementKind(
 
 
 def rewrite_categories(conn: sqlite3.Connection) -> None:
-    """A person's categorizations, then the rules' outcomes, which a person's come before."""
+    """A person's categorizations, then the rules' outcomes, which a person's come before, then
+    the obligations', which read both (D-068 point 5)."""
     write_category_effects(conn)
     write_rule_category_effects(conn)
+    write_obligation_effects(conn)
 
 
 def categorize_transaction(
