@@ -751,12 +751,15 @@ LISTS = [("documents",), ("transactions",), ("totals",), ("report", "monthly"),
          ("household", "members"), ("household", "share", "show"), ("review", "allocations"),
          ("income", "sources"), ("income", "proposals"), ("obligations",),
          ("obligation", "proposals"), ("obligation", "dismissals"), ("setting", "show"),
-         ("budgets",)]
+         ("budgets",), ("funds", "--as-of", "2026-03-20"),
+         ("report", "funds", "--as-of", "2026-03-20"), ("review", "consumptions"),
+         ("report", "budget", "--month", "2026-03", "--as-of", "2026-03-20")]
 PER_ACCOUNT = [("totals",), ("report", "monthly"), ("review", "merges"), ("review", "decisions"),
                ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
                ("review", "resolutions"), ("review", "coverage", "history"),
                ("balance", "list"), ("balance", "check"), ("review", "categorizations"),
-               ("household", "account", "show"), ("review", "allocations")]
+               ("household", "account", "show"), ("review", "allocations"),
+               ("review", "consumptions")]
 PER_ID = [
     ("SELECT id FROM ledger_transaction", [("trace",), ("review", "transaction", "show"),
                                            ("review", "merge", "show")]),
@@ -774,6 +777,8 @@ PER_ID = [
     ("SELECT id FROM income_source", [("income", "source", "show", "--as-of", "2026-03-31")]),
     ("SELECT id FROM recurring_obligation", [("obligation", "show", "--as-of", "2026-03-31")]),
     ("SELECT id FROM budget_plan", [("budget", "show")]),
+    ("SELECT id FROM fund", [("fund", "show", "--as-of", "2026-03-31")]),
+    ("SELECT id FROM fund_consumption", [("review", "consumption", "show")]),
 ]
 
 
@@ -865,6 +870,7 @@ def build_rich_ledger(ledger, *, checking_rows, decision, match, one_sided, corr
     build_income(ledger)
     build_obligations(ledger)
     build_budgets(ledger)
+    build_funds(ledger)
 
     items_before = set(ledger.items())
     ledger.card("p1.csv", CAFE, extra=FIRST_HALF, account="S")
@@ -1013,6 +1019,81 @@ def build_budgets(ledger):
     assert code == 0, err
 
 
+def fund_token(out, kind="Revision"):
+    return re.search(rf"{kind}: ((?:fu|fa|fc)1-[0-9a-f]{{16}})", out)[1]
+
+
+def build_funds(ledger):
+    """Savings S observed, a reserve holding part of it and a goal assigned then released, a
+    priority list, a tax reserve over tax-eligible side income with one release kept and one
+    undone, and a bill paid from the reserve, with another consumption undone (D-070)."""
+    as_of = ["--as-of", "2026-03-20"]
+    code, _, err = ledger.run("balance", "record", "--account", "S", "--date", "2026-03-01",
+                              "--balance", "5000.00")
+    assert code == 0, err
+    ledger.load_path(ledger.write("gig.csv", CHECKING_HEADER, [
+        "G1,2026-03-05,2026-03-05,SYNTHETIC GIG,333.33,POSTED"]), layout="synthetic_checking_v1")
+    (gig,) = rows_of(ledger, "gig.csv")
+    ledger.classify_ok(gig, "income")
+    words = ["--account", "A", "--name", "Gig", "--kind", "side", "--match", "synthetic gig",
+             "--cadence", "monthly:5", "--anchor", "2026-03-05", "--amount", "333.33",
+             "--tax-eligible"]
+    code, _, err = ledger.run("income", "add", *words, "--revision",
+                              income_token(ledger.run("income", "preview", *words)[1]))
+    assert code == 0, err
+    funds = {}
+    for name, terms in (("Insurance", ["--kind", "reserve", "--target", "1200.00", "--due",
+                                       "2026-09-01"]),
+                        ("Car", ["--kind", "goal", "--target", "900.00", "--by", "2026-12"]),
+                        ("Tax", ["--kind", "tax", "--percent", "25", "--effective-from",
+                                 "2026-03-01"])):
+        words = ["--name", name, *terms, *as_of]
+        code, out, err = ledger.run("fund", "add", *words, "--revision",
+                                    fund_token(ledger.run("fund", "preview", *words)[1]))
+        assert code == 0, err
+        funds[name] = re.search(r"Fund (\S+) recorded", out)[1]
+
+    def assignment(fund):
+        shown = ledger.run("fund", "show", funds[fund], *as_of)[1]
+        return fund_token(shown.split("Account S:")[1], "Assignment revision, to \\w+")
+
+    for fund, amount in (("Car", "100.00"), ("Insurance", "600.00")):
+        code, _, err = ledger.run("fund", "assign", "--fund", funds[fund], "--account", "S",
+                                  "--amount", amount, *as_of, "--revision", assignment(fund))
+        assert code == 0, err
+    code, _, err = ledger.run("fund", "unassign", "--fund", funds["Car"], "--account", "S",
+                              *as_of, "--revision", assignment("Car"))
+    assert code == 0, err
+    code, _, err = ledger.run("fund", "priority", funds["Insurance"], funds["Car"], "--revision",
+                              fund_token(ledger.run("funds", *as_of)[1], "Priority revision"))
+    assert code == 0, err
+    for amount, undone in (("5.00", True), ("10.00", False)):
+        code, out, err = ledger.run(
+            "fund", "release", "--fund", funds["Tax"], "--amount", amount, "--on", "2026-03-20",
+            *as_of, "--revision",
+            fund_token(ledger.run("fund", "show", funds["Tax"], *as_of)[1], "Release revision"))
+        assert code == 0, err
+        if undone:
+            release = re.search(r"Release (\S+) recorded", out)[1]
+            code, _, err = ledger.run(
+                "fund", "release-undo", release, "--fund", funds["Tax"], "--revision",
+                fund_token(ledger.run("fund", "show", funds["Tax"], *as_of)[1],
+                           "Release undo revision"))
+            assert code == 0, err
+    bills = rows_of(ledger, "bills.csv")
+    for bill, undone in ((bills[1], True), (bills[2], False)):
+        code, out, err = ledger.run("review", "consume", bill, "--account", "A", "--fund",
+                                    funds["Insurance"], "--revision",
+                                    ledger.transaction_revision(bill))
+        assert code == 0, err
+        if undone:
+            consumption = re.search(r"Consumption (\S+) recorded", out)[1]
+            shown = ledger.run("review", "consumption", "show", consumption)[1]
+            code, _, err = ledger.run("review", "consumption", "undo", consumption, "--account",
+                                      "A", "--revision", fund_token(shown))
+            assert code == 0, err
+
+
 def household_token(ledger, *words):
     return re.search(r"Revision: ([ah]1-[0-9a-f]{16})", ledger.run(*words)[1])[1]
 
@@ -1092,8 +1173,8 @@ def test_a_restored_real_ledger_shows_everything_alike_with_its_originals(  # R4
                                   capsys)
     assert shown[("archive", "verify")][0] == 0
     originals = sorted(os.listdir(vault / "originals"))
-    # a.csv, pay.csv, bills.csv, p1.csv, p2.csv, out.csv, in.csv, one.csv and u.csv.
-    assert len(originals) == 9
+    # a.csv, pay.csv, bills.csv, gig.csv, p1.csv, p2.csv, out.csv, in.csv, one.csv and u.csv.
+    assert len(originals) == 10
     assert sorted(os.listdir(restored_folder / "originals")) == originals
     for name in originals:
         assert sha256_of(restored_folder / "originals" / name) == name

@@ -1632,6 +1632,37 @@ and a monthly or percentage goal shows "no target".
     assignments fall by exactly the portion, and its need for the cycle does not change, since the
     purchase is the cycle's own spending.
 
+
+**How M14.3 was implemented** (built on 2026-11-16, within the approved plan):
+
+- **`pf report funds [--as-of]`** (`reports/fund_report.py`, `funds_report_lines` in
+  `reports/report_text.py`) and its read-only `/funds` page, which renders the same lines (GC2).
+  The lines `pf funds` and `pf fund show` printed moved to `report_text.py` as builders shared by
+  all three, their output byte for byte as before (principle 2).
+- **Each active fund's block** is M14.1's standing with its terms, plus "Target reached at the
+  planned rate": as_of's month plus ceil(outstanding ÷ planned contribution) months, counting
+  as_of's own; "reached" when nothing is outstanding; "no target" for a monthly or percentage
+  goal; "a held amount, no planned rate" for an emergency fund or tax reserve still short; "not at
+  the planned rate" for a target with no contribution left to plan.
+- **The month's extra** (point 4) is as_of's month: M12's extra paychecks received, plus side
+  income received less the tax reserve's accrual on side income received that month, plus the
+  unused capacity of the month before, the latest closed one, from `report budget` (none where no
+  target applies). Each fund on the priority list takes up to its outstanding amount (an emergency
+  fund its shortfall), and a goal with no target takes none, so its line says so. What is left is
+  "Unallocated extra". Every line is labelled planned and the notice says no allocation is a
+  transfer or an assignment.
+- **Choices, for the owner's review:** side income is placed in its month by its nominal date (as
+  `report income` does) and its accrual by the deposit's date (as the tax reserve does), so a
+  deposit on the edge of a month can fall apart by a day. Only the latest closed month's unused
+  capacity is offered, once, in the month after it.
+- **GC3:** the rich ledger of `test_backups.py` gains savings observed, a reserve and a goal
+  assigned (one released), a priority list, a tax reserve over tax-eligible side income with one
+  release kept and one undone, and a bill paid from the reserve with a second consumption undone.
+  Its comparison runs `funds`, `report funds`, `report budget`, `review consumptions` and every
+  `fund show` and `review consumption show`.
+- **GC4:** `--scale --funds` in `tests/benchmarks/measure_reconciliation.py`, figures in
+  [benchmarks.md](benchmarks.md).
+
 ---
 
 ## D-071 M15 plan: net worth and loans — Approved

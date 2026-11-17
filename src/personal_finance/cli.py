@@ -97,7 +97,6 @@ from personal_finance.planning.budgets import (
 from personal_finance.planning.funds import (
     ADD as FUND_ADD,
     ASSIGNABLE_ACCOUNT_TYPES,
-    EMERGENCY,
     FUND_NOT_FOUND,
     RELEASE as FUND_RELEASE,
     RELEASE_UNDO as FUND_RELEASE_UNDO,
@@ -274,6 +273,11 @@ from personal_finance.reports.household_evidence import (
 )
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.report_text import (
+    TAX_LABEL,
+    fund_standing_lines,
+    fund_terms_sentence,
+    funds_report_lines,
+    holding_lines,
     budget_report_lines,
     income_report_lines,
     ATTRIBUTION_EXPLANATIONS,
@@ -1500,6 +1504,11 @@ def build_parser() -> argparse.ArgumentParser:
     budget_report.add_argument("--month", help="the month, YYYY-MM, else the as-of month")
     budget_report.add_argument("--member", help="one member's part, a name from household members")
     budget_report.add_argument("--as-of", help=TODAY_HELP)
+    funds_report_command = command(
+        "funds", report_commands, handler=run_report_funds,
+        help="every fund's standing, the month's extra and its planned allocation by priority",
+    )
+    funds_report_command.add_argument("--as-of", help=TODAY_HELP)
     household_view = household.add_mutually_exclusive_group()
     household_view.add_argument("--member", help="one member's parts, a name from household members")
     household_view.add_argument("--shared", action="store_true",
@@ -4374,6 +4383,14 @@ def run_report_budget(args) -> int:
     return 0
 
 
+def run_report_funds(args) -> int:
+    if args.as_of is not None:
+        checked_as_of(args.as_of)
+    conn = open_ledger(args.db, read_only=True)
+    print_report(funds_report_lines(conn, as_of_date(conn, args.as_of)))
+    return 0
+
+
 def run_setting_show(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     keys = setting_keys(conn)
@@ -4530,105 +4547,6 @@ def run_budget_undo(args) -> int:
     return 0
 
 
-FUND_STATE_WORDS = {"funded": "funded", "underfunded": "underfunded",
-                    "in_progress": "in progress", "not_started": "not started"}
-TAX_LABEL = "a planning reserve, not a calculated tax liability"
-
-
-def fund_terms_sentence(fund, terms) -> str:
-    """A terms row as words, each figure labelled with what it is (G1)."""
-    if terms.shape == "monthly":
-        return f"{shown_amount(terms.amount_cents)} a month, planned"
-    if terms.shape == "percent" and fund.kind == TAX_FUND:
-        return f"{format_percent(terms.basis_points)} of tax-eligible income received, {TAX_LABEL}"
-    if terms.shape == "percent":
-        return f"{format_percent(terms.basis_points)} of baseline income a month, planned"
-    if terms.shape == "target_by":
-        return f"target {shown_amount(terms.amount_cents)} by the end of {terms.by_month}, planned"
-    if terms.shape == "minimum":
-        return f"minimum {shown_amount(terms.amount_cents)} held, required"
-    if terms.shape == "months":
-        return f"{terms.month_count} months of fixed commitments held, required"
-    if terms.shape == "due":
-        return f"target {shown_amount(terms.amount_cents)} due {terms.due_date}, planned"
-    return (f"target {shown_amount(terms.amount_cents)} due "
-            f"{cadence_spec(terms.cadence, terms.anchor)} from {terms.anchor}, planned")
-
-
-def print_fund_standing(view) -> None:
-    """A fund's figures as of the date, each labelled planned, required or assigned (G1)."""
-    fund, standing = view.fund, view.standing
-    if standing.state == "not_started":
-        print(f"  State: not started, its terms apply from {fund.terms[0].effective_from}")
-        return
-    if view.baseline_income_cents is not None:
-        print(f"  Baseline income this month, planned: {shown_amount(view.baseline_income_cents)}")
-    if view.monthly_fixed_commitments_cents is not None:
-        print(f"  Fixed commitments a month, planned: "
-              f"{shown_amount(view.monthly_fixed_commitments_cents)}")
-    if view.tax_accrual is not None:
-        accrual, payments = view.tax_accrual, view.tax_payments
-        print(f"  Tax reserve, {TAX_LABEL}: accrued {shown_amount(accrual.cents)} from "
-              f"{accrual.occurrences} received {'occurrence' if accrual.occurrences == 1 else 'occurrences'}, "
-              f"paid {shown_amount(payments.paid_cents)}, released "
-              f"{shown_amount(payments.released_cents)}")
-        if view.paid_beyond_reserve_cents:
-            print(f"  Paid beyond the reserve, {TAX_LABEL}: "
-                  f"{shown_amount(view.paid_beyond_reserve_cents)}")
-    if view.consumed_count and fund.kind != TAX_FUND:
-        cycle = f" since {view.consumed_since}" if view.consumed_since else ""
-        print(f"  Paid from this fund{cycle}: {shown_amount(view.consumed_cents)} in "
-              f"{view.consumed_count} {'transaction' if view.consumed_count == 1 else 'transactions'}"
-              ", taken from its assignments")
-    if standing.required_held_cents is not None:
-        print(f"  Required held: {shown_amount(standing.required_held_cents)}")
-    accounts = ", ".join(f"{shown(name)} {shown_amount(cents)}"
-                         for name, cents in view.assigned_by_account)
-    print(f"  Assigned: {shown_amount(standing.assigned_cents)}"
-          + (f" ({accounts})" if accounts else ""))
-    if standing.due is not None and standing.outstanding_cents:
-        if standing.months_left:
-            print(f"  Outstanding: {shown_amount(standing.outstanding_cents)}, due {standing.due}, "
-                  f"{standing.months_left} {'month' if standing.months_left == 1 else 'months'} "
-                  "left including it")
-        else:
-            print(f"  Outstanding: {shown_amount(standing.outstanding_cents)}, due {standing.due}, "
-                  "which has passed: all of it is needed now")
-    if standing.planned_contribution_cents is not None:
-        print(f"  Planned contribution this month: "
-              f"{shown_amount(standing.planned_contribution_cents)}")
-    if standing.required_held_cents is not None and standing.outstanding_cents:
-        what = "Restoration recommended" if fund.kind == EMERGENCY else "To assign"
-        print(f"  {what}, planned: {shown_amount(standing.outstanding_cents)}")
-    print(f"  State: {FUND_STATE_WORDS[standing.state]}")
-    if view.not_backed_on:
-        print("  Assignment not backed: "
-              + ", ".join(shown(name) for name in view.not_backed_on)
-              + " holds more in funds than its balance observed")
-    if view.provisional_on:
-        print("  Provisional: the balance of "
-              + ", ".join(shown(name) for name in view.provisional_on)
-              + " was observed more than 31 days before")
-
-
-def print_holding(holding, indent="  ") -> None:
-    observation = holding.observation
-    if observation is None:
-        print(f"{indent}Account {shown(holding.account_name)}: no balance observation on or "
-              f"before {holding.as_of}, assigned {shown_amount(holding.assigned_cents)}")
-    else:
-        print(f"{indent}Account {shown(holding.account_name)}: balance observed "
-              f"{shown_amount(observation.balance_cents)} on {observation.observed_on}, assigned "
-              f"{shown_amount(holding.assigned_cents)}, unassigned "
-              f"{shown_amount(max(0, holding.unassigned_cents))}")
-    if holding.over_assigned_cents:
-        print(f"{indent}  Over-assigned by {shown_amount(holding.over_assigned_cents)}: new "
-              "assignments here are refused until assignments are released or a higher balance "
-              "is observed")
-    if holding.provisional:
-        print(f"{indent}  Provisional: observed more than 31 days before {holding.as_of}")
-
-
 def fund_request(args) -> FundRequest:
     return FundRequest(args.name, args.kind, terms_options(args), args.effective_from)
 
@@ -4688,11 +4606,11 @@ def run_funds(args) -> int:
             continue
         terms = fund.terms_on(view.as_of) or fund.terms[0]
         print(f"  Terms: from {terms.effective_from}, {fund_terms_sentence(fund, terms)}")
-        print_fund_standing(fund_view)
+        print_report(fund_standing_lines(fund_view))
     if view.holdings:
         print("Accounts holding funds:")
         for holding in view.holdings:
-            print_holding(holding)
+            print_report(holding_lines(holding))
     names = fund_names(load_funds(conn))
     print("Priority, for extra income and unused capacity, planned: "
           + (", ".join(f"{position}. {shown(names[fund_id])} ({fund_id})"
@@ -4724,14 +4642,14 @@ def run_fund_show(args) -> int:
         print(f"  Undone: {fund.undone_at}. It stays on record and no longer applies.")
         return 0
     print(f"As of {view.as_of}")
-    print_fund_standing(fund_view)
+    print_report(fund_standing_lines(fund_view))
     assignments = load_assignments(conn)
     holdings = [holding for holding in view.holdings
                 if holding.account_type in ASSIGNABLE_ACCOUNT_TYPES
                 or any(held == fund.fund_id for held, _ in holding.assignments)]
     print("Accounts:")
     for holding in holdings:
-        print_holding(holding)
+        print_report(holding_lines(holding))
         held = dict(holding.assignments).get(fund.fund_id)
         operation = assignment_operation(holding, fund.fund_id)
         if held is not None:

@@ -2240,10 +2240,11 @@ RECURRING_BILLS = 59
 RECURRING_CONFLICTS = 600
 
 
-def recurring_ledger(root: Path):
+def recurring_ledger(root: Path, side_tax_eligible: bool = False):
     """The scale ledger plus a checking account, Bills, holding the six sources' paychecks and
     the bills, one file a month with complete coverage, typed directly, then 6 sources and 60
-    obligations written directly and derived once."""
+    obligations written directly and derived once. side_tax_eligible makes the side sources
+    tax-eligible (D-070's --funds row)."""
     from personal_finance.planning.schedules import Cadence, ScheduleTerms, scheduled_dates
 
     conn, path = scale_ledger(root)
@@ -2293,8 +2294,8 @@ def recurring_ledger(root: Path):
             """INSERT INTO income_source (id, account_id, name, kind, description_contains,
                                           normalization_version, tolerance_days,
                                           amount_tolerance_cents, tax_eligible, chain_id)
-               VALUES (?, 'bills', ?, ?, ?, 1, 3, 0, 0, ?)""",
-            (source_id, name, kind, text, source_id))
+               VALUES (?, 'bills', ?, ?, ?, 1, 3, 0, ?, ?)""",
+            (source_id, name, kind, text, int(side_tax_eligible and kind == "side"), source_id))
         conn.execute(
             """INSERT INTO income_source_terms (chain_id, effective_from, cadence, first_day,
                                                 second_day, interval_months, anchor,
@@ -2552,6 +2553,167 @@ def measure_budget() -> None:
               flush=True)
 
 
+FUNDS_ACCOUNTS = ("checking", "savings", "fund1", "fund2", "fund3", "fund4")
+FUNDS_AS_OF = date(2026, 6, 20)
+
+
+def measure_funds() -> None:
+    """Funds on M12's shape (D-070 point 9, GC4): 20 funds of every kind, 6 accounts holding
+    assignments (one over-assigned), 2,000 consumptions of the bills, and 60 months of
+    tax-eligible side income. Times report funds, report budget, fund assign, review consume
+    and a one-row import. Stops, as G9 says, if a report misses two seconds or a write costs
+    more than twice the import of one row, or above two seconds."""
+    from personal_finance.planning.funds import (
+        account_holding,
+        assign,
+        assignment_revision,
+        load_assignments,
+    )
+    from personal_finance.reconcile.consumptions import consume_transaction
+    from personal_finance.reports.fund_report import funds_report
+    from personal_finance.reports.review_evidence import load_merge_evidence, transaction_revision
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _ = recurring_ledger(root, side_tax_eligible=True)
+        conn.execute("BEGIN")
+        for number in range(1, 5):
+            conn.execute("INSERT INTO account (id, display_name, account_type) "
+                         "VALUES (?, ?, 'savings')", (f"fund{number}", f"Fund {number}"))
+        for number, account in enumerate(FUNDS_ACCOUNTS):
+            # fund4 is observed below what is assigned to it, so it is over-assigned.
+            balance = 50_000 if account == "fund4" else 5_000_000
+            conn.execute("INSERT INTO balance_observation (id, account_id, observed_on, "
+                         "balance_cents) VALUES (?, ?, '2026-06-01', ?)",
+                         (f"obs{number}", account, balance))
+            conn.execute("INSERT INTO balance_observation_event (balance_observation_id, event) "
+                         "VALUES (?, 'made')", (f"obs{number}",))
+        funds = [("e0", "emergency", "months", {"month_count": 3}),
+                 ("x0", "tax", "percent", {"basis_points": 2500})]
+        for number in range(9):
+            shape = ("monthly", "percent", "target_by")[number % 3]
+            terms = ({"amount_cents": 20_000}, {"basis_points": 500},
+                     {"amount_cents": 1_000_000, "by_month": "2027-12"})[number % 3]
+            funds.append((f"g{number}", "goal", shape, terms))
+        for number in range(9):
+            if number % 3 == 0:
+                funds.append((f"r{number}", "reserve", "due",
+                              {"amount_cents": 300_000, "due_date": "2026-12-01"}))
+            else:
+                funds.append((f"r{number}", "reserve", "recurring",
+                              {"amount_cents": 150_000, "cadence": "annual",
+                               "first_day": 1 + number, "anchor": f"2022-{number:02}-"
+                                                                  f"{1 + number:02}"}))
+        for fund_id, kind, shape, terms in funds:
+            conn.execute("INSERT INTO fund (id, name, kind) VALUES (?, ?, ?)",
+                         (fund_id, f"Fund {fund_id}", kind))
+            columns = ", ".join(terms)
+            conn.execute(f"INSERT INTO fund_terms (fund_id, effective_from, shape, {columns}) "
+                         f"VALUES (?, '2022-01-01', ?, {', '.join('?' for _ in terms)})",
+                         (fund_id, shape, *terms.values()))
+            conn.execute("INSERT INTO fund_event (fund_id, event) VALUES (?, 'made')",
+                         (fund_id,))
+        for number, (fund_id, kind, _, _) in enumerate(funds):
+            account = FUNDS_ACCOUNTS[number % len(FUNDS_ACCOUNTS)]
+            conn.execute("INSERT INTO fund_assignment (id, fund_id, account_id, amount_cents, "
+                         "created_at) VALUES (?, ?, ?, 100000, '2022-01-01T00:00:00.000Z')",
+                         (f"a{number}", fund_id, account))
+            conn.execute("INSERT INTO fund_assignment_event (assignment_id, event) "
+                         "VALUES (?, 'made')", (f"a{number}",))
+        conn.execute("INSERT INTO fund_priority_event (list_id, event) VALUES ('p0', 'made')")
+        conn.executemany("INSERT INTO fund_priority (list_id, position, fund_id) "
+                         "VALUES ('p0', ?, ?)",
+                         [(position, fund_id) for position, (fund_id, kind, _, _)
+                          in enumerate((fund for fund in funds if fund[1] != "tax"), start=1)])
+        bills = conn.execute(
+            """SELECT link.transaction_id, link.source_record_id FROM transaction_source link
+               JOIN ledger_transaction entry ON entry.id = link.transaction_id
+               JOIN transaction_classification kind ON kind.transaction_id = entry.id
+               WHERE entry.account_id = 'bills' AND kind.financial_type = 'purchase'
+               ORDER BY entry.external_id""").fetchall()
+        consumed = [fund for fund in funds if fund[1] != "emergency"]
+        for number, (transaction_id, record_id) in enumerate(bills[:FUNDS_CONSUMPTIONS]):
+            consumption_id = f"c{number}"
+            conn.execute("INSERT INTO fund_consumption (id, account_id, fund_id, "
+                         "target_transaction_id, target_revision) VALUES (?, 'bills', ?, ?, "
+                         "'t11-0')", (consumption_id, consumed[number % len(consumed)][0],
+                                      transaction_id))
+            conn.execute("INSERT INTO fund_consumption_record (consumption_id, source_record_id) "
+                         "VALUES (?, ?)", (consumption_id, record_id))
+            conn.execute("INSERT INTO fund_consumption_event (consumption_id, event) "
+                         "VALUES (?, 'made')", (consumption_id,))
+        write_transfer_effects(conn)
+        conn.execute("COMMIT")
+        build_seconds = time.perf_counter() - started
+
+        report = funds_report(conn, FUNDS_AS_OF)
+        applied = conn.execute("SELECT COUNT(*) FROM transaction_fund_consumption "
+                               "WHERE state = 'applied'").fetchone()[0]
+        tax = next(view for view in report.view.funds if view.fund.kind == "tax")
+        over = [holding for holding in report.view.holdings if holding.over_assigned_cents]
+        holding_accounts = {holding.account_id for holding in report.view.holdings
+                            if holding.assignments}
+        print(f"shape funds={len(report.view.funds)} accounts_holding={len(holding_accounts)} "
+              f"over_assigned={len(over)} consumptions={applied} "
+              f"tax_occurrences={tax.tax_accrual.occurrences} build={build_seconds:.1f}s",
+              flush=True)
+        # The shape reaches the cost it claims.
+        assert len(report.view.funds) == 20
+        assert {fund.fund.kind for fund in report.view.funds} == {"goal", "emergency", "reserve",
+                                                                  "tax"}
+        assert holding_accounts == set(FUNDS_ACCOUNTS) and len(over) == 1
+        assert applied == FUNDS_CONSUMPTIONS
+        assert tax.tax_accrual.occurrences >= 60
+        conn.close()
+
+        database = str(path)
+        as_of = FUNDS_AS_OF.isoformat()
+        report_seconds = timed_command("report", "funds", "--db", database, "--as-of", as_of)
+        budget_seconds = timed_command("report", "budget", "--db", database, "--month",
+                                       as_of[:7], "--as-of", as_of)
+
+        conn = connect(path)
+        conn.execute("INSERT INTO fund (id, name, kind) VALUES ('late', 'Late', 'goal')")
+        conn.execute("INSERT INTO fund_terms (fund_id, effective_from, shape, amount_cents) "
+                     "VALUES ('late', '2026-06-01', 'monthly', 1000)")
+        conn.execute("INSERT INTO fund_event (fund_id, event) VALUES ('late', 'made')")
+        conn.commit()
+        assignments = load_assignments(conn)
+        revision = assignment_revision(account_holding(conn, "savings", as_of, assignments),
+                                       "late", assignments)
+        started = time.perf_counter()
+        assign(conn, "late", "savings", "10.00", as_of, revision)
+        assign_seconds = time.perf_counter() - started
+        (transaction_id, _) = bills[FUNDS_CONSUMPTIONS]
+        revision = transaction_revision(load_merge_evidence(conn, transaction_id))
+        started = time.perf_counter()
+        consume_transaction(conn, "bills", transaction_id, revision, "r0")
+        consume_seconds = time.perf_counter() - started
+        later = root / "later.csv"
+        later.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+                         "LATER,2026-12-30,2026-12-30,SYNTHETIC LATER,-9.00,POSTED\n")
+        started = time.perf_counter()
+        (result,) = import_files(conn, [later], account_id="savings",
+                                 layout=SYNTHETIC_CHECKING_V1)
+        import_seconds = time.perf_counter() - started
+        assert result.outcome == "imported"
+        conn.close()
+        print(f"report_funds={report_seconds:7.3f}s report_budget={budget_seconds:7.3f}s "
+              f"fund_assign={assign_seconds:7.3f}s review_consume={consume_seconds:7.3f}s "
+              f"one_import={import_seconds:7.3f}s", flush=True)
+        stops = [name for name, seconds in (("report funds", report_seconds),
+                                            ("report budget", budget_seconds)) if seconds > 2]
+        stops += [name for name, seconds in (("fund assign", assign_seconds),
+                                             ("review consume", consume_seconds))
+                  if seconds > 2 * import_seconds or seconds > 2]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
+FUNDS_CONSUMPTIONS = 2_000
+
+
 def main() -> None:
     if sys.argv[1:] == ["--scale"]:
         measure_scale()
@@ -2561,6 +2723,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--scale", "--budget"]:
         measure_budget()
+        return
+    if sys.argv[1:] == ["--scale", "--funds"]:
+        measure_funds()
         return
     if sys.argv[1:] == ["--scale", "--household"]:
         measure_household()

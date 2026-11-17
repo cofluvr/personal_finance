@@ -725,7 +725,14 @@ between slices. No security control changes. `r`, `t`, `d` and `c` move once, in
 | GB3 | Tax accrual rounds up per occurrence from `effective_from`. Payments and releases reduce required, never below zero, and every tax line carries PRD §16's label |
 | GB4 | `r13`, `t11`, `d10` and `c6` keep every digest without consumption, with a test pinning each definition and `fc1`. Every command but those point 7 names is byte for byte as before (G6) |
 
-M14.3's criteria, GC1 to GC4, move here when it starts.
+### M14.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| GC1 | Extra income and unused capacity allocate down the priority list exactly, each fund to its need, leaving the remainder shown. All are labelled planned |
+| GC2 | `report funds` and its page agree line for line, read-only, with names holding HTML shown as text |
+| GC3 | Backup and restore keep funds, assignments, priority, consumptions and releases, compared as HB5 |
+| GC4 | `--funds` asserts its counts and records its figures under G9. Every earlier criterion still passes |
 
 ### Not in M14
 

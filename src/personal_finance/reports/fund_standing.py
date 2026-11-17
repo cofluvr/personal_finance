@@ -33,6 +33,7 @@ from personal_finance.planning.funds import (
 from personal_finance.planning.income_effects import (
     BASELINE,
     RECEIVED,
+    SIDE,
     applying_sources,
     load_deposit_facts,
     source_outcomes,
@@ -78,12 +79,15 @@ class TaxAccrual:
     occurrences: int
 
 
-def tax_accrual(conn: sqlite3.Connection, fund: Fund, as_of: str) -> TaxAccrual:
+def tax_accrual(conn: sqlite3.Connection, fund: Fund, as_of: str,
+                from_day: str | None = None, side_only: bool = False) -> TaxAccrual:
     """For each received occurrence of a tax-eligible source dated from the fund's first
     effective_from through as_of, ceil(amount × bps ÷ 10,000) under the terms in effect that day
-    (point 6), rounded toward protection."""
+    (point 6), rounded toward protection. from_day counts only occurrences from that day, and
+    side_only only side income's (point 4: side income's extra is net of its accrual)."""
     sources = applying_sources(conn)
-    eligible = {source.source_id for source in sources if source.definition.tax_eligible}
+    eligible = {source.source_id for source in sources if source.definition.tax_eligible
+                and (not side_only or source.definition.kind == SIDE)}
     if not eligible:
         return TaxAccrual(0, 0)
     deposits = load_deposit_facts(conn, {source.definition.account_id for source in sources})
@@ -93,7 +97,7 @@ def tax_accrual(conn: sqlite3.Connection, fund: Fund, as_of: str) -> TaxAccrual:
         received_on = by_id[transaction_id].reporting_date
         terms = fund.terms_on(received_on)
         if (source_id in eligible and outcome.state == RECEIVED and terms is not None
-                and received_on <= as_of):
+                and received_on <= as_of and (from_day is None or received_on >= from_day)):
             cents += ceiling_division(by_id[transaction_id].amount_cents * terms.basis_points,
                                       10_000)
             occurrences += 1

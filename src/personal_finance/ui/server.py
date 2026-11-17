@@ -28,6 +28,7 @@ from personal_finance.reports.report_text import (
     account_choices,
     document_list_lines,
     budget_report_lines,
+    funds_report_lines,
     household_report_lines,
     income_report_lines,
     member_choices,
@@ -78,6 +79,7 @@ NAVIGATION = (
     ("/household", "Household"),
     ("/income", "Income"),
     ("/budget", "Budget"),
+    ("/funds", "Funds"),
     ("/documents", "Import results"),
     ("/transactions", "Transactions"),
     ("/review", "Review queue"),
@@ -91,6 +93,7 @@ PAGE_PARAMETERS = {
     "/household": {"account", "from", "to", "member", "view"},
     "/income": {"account", "from", "to", "as_of"},
     "/budget": {"month", "member", "as_of"},
+    "/funds": {"as_of"},
     "/documents": set(),
     "/transactions": set(),
     "/review": set(),
@@ -255,6 +258,8 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return self.send_page(200, "Review item", report.lines, after=hint)
         if path == "/budget":
             return self.answer_budget(conn, parameters)
+        if path == "/funds":
+            return self.answer_funds(conn, parameters)
         first_month = validated_month("from", parameters.get("from") or None)
         last_month = validated_month("to", parameters.get("to") or None)
         if first_month and last_month and first_month > last_month:
@@ -311,6 +316,17 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         lines = budget_report_lines(conn, month or as_of.isoformat()[:7], as_of,
                                     None if member_id is None else names[member_id])
         self.send_page(200, "Budget report", lines, form=form)
+
+    def answer_funds(self, conn, parameters):
+        """The funds report as of the date the page is given, else today in the household's
+        timezone (G7)."""
+        text = parameters.get("as_of") or None
+        form = funds_form(text)
+        as_of = (household_today_if_set(conn) if text is None
+                 else date.fromisoformat(checked_as_of(text)))
+        if as_of is None:
+            return self.send_page(200, "Funds report", notice=CHOOSE_AS_OF, form=form)
+        self.send_page(200, "Funds report", funds_report_lines(conn, as_of), form=form)
 
     def send_page(self, status, heading, lines=(), *, notice="", form="", after="",
                   extra_headers=()):
@@ -429,6 +445,13 @@ def budget_form(conn, month, member_id, as_of) -> str:
             f'value="{escaped(month or "")}"></label>'
             f'<label> Member <select name="member">{"".join(members)}</select></label>'
             '<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+            f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
+
+
+def funds_form(as_of) -> str:
+    """A form that reloads the funds page by GET with an as-of date."""
+    return ('<form method="get" action="/funds">'
+            '<label>As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
             f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
 
 

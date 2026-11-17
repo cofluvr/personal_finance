@@ -17,6 +17,8 @@ from personal_finance.reconcile.apply import stale_accounts
 from personal_finance.reconcile.categories import UNCATEGORIZED, list_categories
 from personal_finance.reconcile.category_effects import NOT_SPENDING, SPENDING_TYPES
 from personal_finance.reconcile.allocation_effects import AMOUNT_DIFFERS
+from personal_finance.planning.funds import EMERGENCY, TAX
+from personal_finance.planning.schedules import cadence_spec
 from personal_finance.reconcile.household_effects import (
     ALLOCATED,
     BY_MEMBER,
@@ -58,6 +60,7 @@ from personal_finance.reconcile.transfer_effects import (
 )
 from personal_finance.reports.coverage_evidence import load_document_coverage
 from personal_finance.reports.budget_report import budget_report
+from personal_finance.reports.fund_report import funds_report
 from personal_finance.reports.income_report import income_report
 from personal_finance.reports.household import (
     ONE_MEMBER,
@@ -1646,4 +1649,179 @@ def budget_report_lines(conn, month, as_of, member_name=None) -> ReportLines:
         out.add(f"  Category {shown(allowance.name)}: allowance, planned "
                 f"{format_cents(allowance.allowance_cents)}, spent, actual "
                 f"{format_cents(allowance.spent_cents)}, budget pace {state}")
+    return out
+
+
+# Funds (D-070): the lines pf funds, pf fund show and pf report funds share.
+
+FUND_STATE_WORDS = {"funded": "funded", "underfunded": "underfunded",
+                    "in_progress": "in progress", "not_started": "not started"}
+TAX_LABEL = "a planning reserve, not a calculated tax liability"
+
+
+def fund_terms_sentence(fund, terms) -> str:
+    """A terms row as words, each figure labelled with what it is (G1)."""
+    if terms.shape == "monthly":
+        return f"{shown_amount(terms.amount_cents)} a month, planned"
+    if terms.shape == "percent" and fund.kind == TAX:
+        return f"{format_percent(terms.basis_points)} of tax-eligible income received, {TAX_LABEL}"
+    if terms.shape == "percent":
+        return f"{format_percent(terms.basis_points)} of baseline income a month, planned"
+    if terms.shape == "target_by":
+        return f"target {shown_amount(terms.amount_cents)} by the end of {terms.by_month}, planned"
+    if terms.shape == "minimum":
+        return f"minimum {shown_amount(terms.amount_cents)} held, required"
+    if terms.shape == "months":
+        return f"{terms.month_count} months of fixed commitments held, required"
+    if terms.shape == "due":
+        return f"target {shown_amount(terms.amount_cents)} due {terms.due_date}, planned"
+    return (f"target {shown_amount(terms.amount_cents)} due "
+            f"{cadence_spec(terms.cadence, terms.anchor)} from {terms.anchor}, planned")
+
+
+def add_fund_standing(out, view) -> None:
+    """A fund's figures as of the date, each labelled planned, required or assigned (G1)."""
+    fund, standing = view.fund, view.standing
+    if standing.state == "not_started":
+        out.add(f"  State: not started, its terms apply from {fund.terms[0].effective_from}")
+        return
+    if view.baseline_income_cents is not None:
+        out.add(f"  Baseline income this month, planned: {shown_amount(view.baseline_income_cents)}")
+    if view.monthly_fixed_commitments_cents is not None:
+        out.add(f"  Fixed commitments a month, planned: "
+              f"{shown_amount(view.monthly_fixed_commitments_cents)}")
+    if view.tax_accrual is not None:
+        accrual, payments = view.tax_accrual, view.tax_payments
+        out.add(f"  Tax reserve, {TAX_LABEL}: accrued {shown_amount(accrual.cents)} from "
+              f"{accrual.occurrences} received {'occurrence' if accrual.occurrences == 1 else 'occurrences'}, "
+              f"paid {shown_amount(payments.paid_cents)}, released "
+              f"{shown_amount(payments.released_cents)}")
+        if view.paid_beyond_reserve_cents:
+            out.add(f"  Paid beyond the reserve, {TAX_LABEL}: "
+                  f"{shown_amount(view.paid_beyond_reserve_cents)}")
+    if view.consumed_count and fund.kind != TAX:
+        cycle = f" since {view.consumed_since}" if view.consumed_since else ""
+        out.add(f"  Paid from this fund{cycle}: {shown_amount(view.consumed_cents)} in "
+              f"{view.consumed_count} {'transaction' if view.consumed_count == 1 else 'transactions'}"
+              ", taken from its assignments")
+    if standing.required_held_cents is not None:
+        out.add(f"  Required held: {shown_amount(standing.required_held_cents)}")
+    accounts = ", ".join(f"{shown(name)} {shown_amount(cents)}"
+                         for name, cents in view.assigned_by_account)
+    out.add(f"  Assigned: {shown_amount(standing.assigned_cents)}"
+          + (f" ({accounts})" if accounts else ""))
+    if standing.due is not None and standing.outstanding_cents:
+        if standing.months_left:
+            out.add(f"  Outstanding: {shown_amount(standing.outstanding_cents)}, due {standing.due}, "
+                  f"{standing.months_left} {'month' if standing.months_left == 1 else 'months'} "
+                  "left including it")
+        else:
+            out.add(f"  Outstanding: {shown_amount(standing.outstanding_cents)}, due {standing.due}, "
+                  "which has passed: all of it is needed now")
+    if standing.planned_contribution_cents is not None:
+        out.add(f"  Planned contribution this month: "
+              f"{shown_amount(standing.planned_contribution_cents)}")
+    if standing.required_held_cents is not None and standing.outstanding_cents:
+        what = "Restoration recommended" if fund.kind == EMERGENCY else "To assign"
+        out.add(f"  {what}, planned: {shown_amount(standing.outstanding_cents)}")
+    out.add(f"  State: {FUND_STATE_WORDS[standing.state]}")
+    if view.not_backed_on:
+        out.add("  Assignment not backed: "
+              + ", ".join(shown(name) for name in view.not_backed_on)
+              + " holds more in funds than its balance observed")
+    if view.provisional_on:
+        out.add("  Provisional: the balance of "
+              + ", ".join(shown(name) for name in view.provisional_on)
+              + " was observed more than 31 days before")
+
+
+def add_holding(out, holding, indent="  ") -> None:
+    observation = holding.observation
+    if observation is None:
+        out.add(f"{indent}Account {shown(holding.account_name)}: no balance observation on or "
+              f"before {holding.as_of}, assigned {shown_amount(holding.assigned_cents)}")
+    else:
+        out.add(f"{indent}Account {shown(holding.account_name)}: balance observed "
+              f"{shown_amount(observation.balance_cents)} on {observation.observed_on}, assigned "
+              f"{shown_amount(holding.assigned_cents)}, unassigned "
+              f"{shown_amount(max(0, holding.unassigned_cents))}")
+    if holding.over_assigned_cents:
+        out.add(f"{indent}  Over-assigned by {shown_amount(holding.over_assigned_cents)}: new "
+              "assignments here are refused until assignments are released or a higher balance "
+              "is observed")
+    if holding.provisional:
+        out.add(f"{indent}  Provisional: observed more than 31 days before {holding.as_of}")
+
+
+def fund_standing_lines(view) -> ReportLines:
+    out = ReportLines()
+    add_fund_standing(out, view)
+    return out
+
+
+def holding_lines(holding, indent="  ") -> ReportLines:
+    out = ReportLines()
+    add_holding(out, holding, indent)
+    return out
+
+
+FUNDS_NOTICE = (
+    "Funds as a plan: planned contributions, required amounts and the extra's allocation are "
+    "planned figures, never transfers and never assignments. Assigned amounts say what an "
+    "account's observed balance already holds, less what a fund has paid."
+)
+
+
+def funds_report_lines(conn, as_of) -> ReportLines:
+    """pf report funds' lines, which its UI page renders (D-070 point 8)."""
+    report = funds_report(conn, as_of)
+    view, extra = report.view, report.extra
+    out = ReportLines()
+    out.add(f"Funds as of {view.as_of}")
+    out.add(FUNDS_NOTICE)
+    for fund_view in view.funds:
+        fund = fund_view.fund
+        if not fund.applies:
+            continue
+        terms = fund.terms_on(view.as_of) or fund.terms[0]
+        out.add(f"Fund {fund.fund_id}: {shown(fund.name)}, {fund.kind}")
+        out.add(f"  Terms: from {terms.effective_from}, {fund_terms_sentence(fund, terms)}")
+        add_fund_standing(out, fund_view)
+        out.add(f"  Target reached at the planned rate: {report.reached[fund.fund_id]}")
+    undone = sum(not fund_view.fund.applies for fund_view in view.funds)
+    if undone:
+        out.add(f"Undone funds, not shown: {undone}. Run funds.")
+    out.add(f"Extra in {extra.month}, planned allocation by priority, not a transfer:")
+    out.add(f"  Extra paychecks received, actual: {format_cents(extra.extra_paychecks_cents)}")
+    if extra.side_tax_accrual_cents is None:
+        out.add(f"  Side income received, actual: {format_cents(extra.side_income_cents)}, no "
+                "tax reserve in effect")
+    else:
+        out.add(f"  Side income received, actual: {format_cents(extra.side_income_cents)}, less "
+                f"its tax reserve accrual {format_cents(extra.side_tax_accrual_cents)}, "
+                f"{TAX_LABEL}")
+    if extra.unused_capacity_cents is None:
+        out.add(f"  Unused capacity of {extra.closed_month}: none, no budget target applies")
+    else:
+        out.add(f"  Unused capacity of {extra.closed_month}, planned: "
+                f"{format_cents(extra.unused_capacity_cents)}")
+    out.add(f"  Extra to allocate, planned: {format_cents(extra.total_cents)}")
+    for position, allocation in enumerate(report.allocations, start=1):
+        need = ("no target, takes none" if allocation.need_cents is None
+                else f"needs {format_cents(allocation.need_cents)}")
+        out.add(f"  {position}. {shown(allocation.name)} ({allocation.fund_id}): {need}, "
+                f"planned {format_cents(allocation.allocated_cents)}")
+    if not report.allocations:
+        out.add("  No priority list: run fund priority to order the funds")
+    out.add(f"  Unallocated extra, planned: {format_cents(report.unallocated_cents)}")
+    out.add("Accounts holding funds:")
+    for holding in view.holdings:
+        add_holding(out, holding)
+    if not view.holdings:
+        out.add("  none: add a checking, savings or investment account")
+    not_backed = [holding for holding in view.holdings if holding.over_assigned_cents]
+    provisional = [holding for holding in view.holdings if holding.provisional]
+    out.add("Disclosures:")
+    out.add(f"  Accounts holding more in funds than their balance observed: {len(not_backed)}")
+    out.add(f"  Accounts whose balance was observed more than 31 days before: {len(provisional)}")
     return out
