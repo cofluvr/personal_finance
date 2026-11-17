@@ -69,8 +69,13 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M13.1: settings, budget plans, today from the household timezone | Accepted on 2026-11-16 as built, its departures included (D-069) |
 | M13.2: the budget report, its page, the benchmark row | Accepted on 2026-11-16 as built, its departures included (D-069) |
 | **M13 overall** | **Complete and accepted** on 2026-11-16. Not on the real ledger, which takes 26 after M12's migrations, each after a verified backup |
-| M14.1: funds, assignments and the priority list | Built on 2026-11-16 (D-070, "How M14.1 was implemented"), awaiting the owner's review |
-| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 and M13 accepted, M14.1 built for review |
+| M14.1: funds, assignments and the priority list | Accepted on 2026-11-16 as built, its departures included (D-070) |
+| M14.2: consumption, tax payments and releases | Built on 2026-11-16 (D-070, "How M14.2 was implemented"), awaiting the owner's review |
+| M14.3: `report funds`, the extra by priority, its page, the restore test, `--funds` | Built on 2026-11-16 (D-070, "How M14.3 was implemented"), awaiting the owner's review |
+| M15.1: net worth, account links, its page | Built on 2026-11-16 (D-071, "How M15.1 was implemented"), awaiting the owner's review |
+| M15.2: loan terms, actual against schedule, projections, payoff orders | Built on 2026-11-17 (D-071, "How M15.2 was implemented"), awaiting the owner's review |
+| M15.3: principal and interest, interest in Spending, `--loans` | Built on 2026-11-17 (D-071, "How M15.3 was implemented"), awaiting the owner's review |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12, M13 and M14.1 accepted, M14.2 to M15.3 built for review |
 
 ## What exists
 
@@ -210,7 +215,12 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `obligations`, `report income`, `setting show`, `setting set`, `setting undo`,
   `budget preview`, `budget set`, `budget show`, `budget undo`, `budgets`, `report budget`,
   `fund preview`, `fund add`, `fund terms`, `fund undo`, `fund show`, `fund assign`,
-  `fund unassign`, `fund priority`, `funds`,
+  `fund unassign`, `fund priority`, `fund release`, `fund release-undo`, `funds`,
+  `report funds`, `review consume`, `review consumptions`, `review consumption show`,
+  `review consumption undo`, `account links`, `account link`, `account unlink`,
+  `report net-worth`, `loan terms add`, `loan terms show`, `loan terms undo`, `loan rate`,
+  `loan payment`, `loan plan set`, `report loans`, `loan project`, `loan payoff`,
+  `review breakdown`, `review breakdowns`, `review breakdown-show`, `review breakdown-undo`,
   `totals`,
   `report monthly`, `report household`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
@@ -340,11 +350,25 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
   is over-assigned, disclosed and never absorbed. One emergency fund and one tax reserve at a
   time. A fund has no supersession: its terms change from a date, anything else is undo then
   add, and a fund holding an assignment cannot be undone. A fund's start and terms cannot fall
-  in a closed month. The tax reserve accrues from received occurrences only; payments and
-  releases arrive with M14.2, so it shows them as 0.00. Consumption, `report funds`, the
-  priority allocation of extra income and the funds page are M14.2 and M14.3.
-- The local UI is read-only, and shows nine commands' output only, `report income` and
-  `report budget` the last two. It searches nothing, imports
+  in a closed month. The tax reserve accrues from received occurrences only.
+- A consumption (M14.2) pays from what the assignments active when it was stated still hold, so
+  a later assignment never rewrites it; its portion is computed where read, never stored. The
+  emergency fund is never consumed. `report budget` takes the portion out of discretionary
+  actual; `totals` and categories count the purchase once, unchanged. A fund paying for a
+  transaction cannot be undone until each consumption is.
+- `report funds` (M14.3) offers as extra only as_of's month's extra paychecks and side income (net
+  of its tax accrual) and the latest closed month's unused capacity; a goal with no target takes
+  none. Every allocation is planned, never an assignment or a transfer.
+- Net worth (M15.1) reads balance observations only. `balance record --from-statement` is not
+  built: no statement balance is stored. Net worth by member divides by account attribution.
+- Loan projections and payoff orders (M15.2) are projections, not lender-exact: monthly
+  interest, no fees, no daily accrual, at most 600 months. A card takes a rate only. Periods may
+  start in a closed month, since a schedule is the lender's contract.
+- A breakdown (M15.3) is the only change of M12 to M21 to `totals`, `report monthly` and
+  `report household`: only where one applies, interest and fees move from confirmed transfers to
+  spending, and each divided payment is counted in both groups, disclosed by count.
+- The local UI is read-only, and shows eleven commands' output only, `report funds` and
+  `report net-worth` the last two. It searches nothing, imports
   nothing, exports nothing and shows no `trace` or decision history, which carry creation
   timestamps (F2). Decisions are made with `pf review` in the terminal (D-062).
 - `pf ui` cannot stop what the browser keeps: history (addresses with IDs and months, a fixed

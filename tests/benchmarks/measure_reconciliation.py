@@ -2621,6 +2621,13 @@ def measure_funds() -> None:
                          (f"a{number}", fund_id, account))
             conn.execute("INSERT INTO fund_assignment_event (assignment_id, event) "
                          "VALUES (?, 'made')", (f"a{number}",))
+        # The emergency fund is never consumed, so its assignment on fund4, beyond fund4's
+        # balance, keeps that account over-assigned whatever the consumptions take.
+        conn.execute("INSERT INTO fund_assignment (id, fund_id, account_id, amount_cents, "
+                     "created_at) VALUES ('over', 'e0', 'fund4', 300000, "
+                     "'2022-01-01T00:00:00.000Z')")
+        conn.execute("INSERT INTO fund_assignment_event (assignment_id, event) "
+                     "VALUES ('over', 'made')")
         conn.execute("INSERT INTO fund_priority_event (list_id, event) VALUES ('p0', 'made')")
         conn.executemany("INSERT INTO fund_priority (list_id, position, fund_id) "
                          "VALUES ('p0', ?, ?)",

@@ -750,7 +750,7 @@ built. No security control changes. `r`, `t`, `d` and `c` move once, in M15.3.
 |---|---|---|
 | M15.1 | Net worth: migration 0029, `pf account links`, `link`, `unlink`, `al1`, valuation dates and warnings, retirement and investment history, `pf report net-worth [--member]`, its page | Built, for review |
 | M15.2 | Loan terms and planning: migration 0030, rate and payment periods, actual against schedule, projections, payoff orders, `pf report loans`, `loan project`, `loan payoff`, `lt1` | Built, for review |
-| M15.3 | Principal and interest: migration 0031, `review breakdown`, interest in Spending by amount, `r14`, `t12`, `d11`, `c7`, `lb1`, `--loans` | Not started |
+| M15.3 | Principal and interest: migration 0031, `review breakdown`, interest in Spending by amount, `r14`, `t12`, `d11`, `c7`, `lb1`, `--loans` | Built, for review |
 
 ### M15.1 acceptance criteria
 
@@ -772,7 +772,14 @@ built. No security control changes. `r`, `t`, `d` and `c` move once, in M15.3.
 | LB4 | A projection matches a hand-computed amortization for 12 months to the cent, half-even, flags negative amortization, stops at 600 months and prints every assumption of point 5 |
 | LB5 | Payoff orders follow point 6's ordering and ties, roll payments over, and are deterministic. Every figure is labelled projection |
 
-M15.3's criteria, LC1 to LC4, move here when it starts.
+### M15.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| LC1 | Migration 0031 meets G10. `review breakdown` follows D-043 and D-063, and refuses interest + fees > \|amount\|, an unconfirmed or non-loan payment and a stale `t12` |
+| LC2 | With breakdowns, D-056's groups add to net movement exactly by amount, Spending rises by exactly the applied interest and fees, Confirmed transfers fall by the same, and the category line moves with them. D-055's warning is withdrawn only where a breakdown applies |
+| LC3 | Without breakdowns, `totals`, `report monthly` and `report household` are byte for byte as before. `r14`, `t12`, `d11` and `c7` keep every digest, with `lb1` pinned |
+| LC4 | `--loans` asserts its counts and records its figures, `totals` among them, under G9. Every earlier criterion still passes |
 
 ### Not in M15
 

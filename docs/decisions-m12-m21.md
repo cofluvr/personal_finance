@@ -1631,6 +1631,17 @@ and a monthly or percentage goal shows "no target".
   - **GB2's "outstanding falls by the consumed portion"** is met as what the fund holds: its
     assignments fall by exactly the portion, and its need for the cycle does not change, since the
     purchase is the cycle's own spending.
+- **Breaks (G12):** 26 applied, 25 caught on the first run. One was a test gap, closed and caught
+  on the rerun: a category allowance counting the consumed portion.
+- **Compared as G6:** the suite's ledgers, kept with `--basetemp` from a `git archive` export of
+  `2c5d9a1`, read by that code, and copies migrated to 28 read by a frozen copy of M14.2's `src/`,
+  with `r12:r13,t10:t11,d9:d10,c5:c6` read as token bumps. Of 130,691 runs, 130,618 are identical.
+  The other 73: 70 on the two ledgers a failed-migration test stamps at the newest version, which
+  the old code refused as newer; 3 where a test typed a token-shaped `t10-0000…` into a
+  description, which the comparison's own bump rewrites. Five `fund show` runs of a tax reserve
+  gain only the "Release revision" line, taken out as the one intended addition. `review
+  consumptions` ran on all 3,219 ledgers, refusing exactly where `review allocations` does, apart
+  from the two stamped ledgers.
 
 
 **How M14.3 was implemented** (built on 2026-11-16, within the approved plan):
@@ -1662,10 +1673,17 @@ and a monthly or percentage goal shows "no target".
   `fund show` and `review consumption show`.
 - **GC4:** `--scale --funds` in `tests/benchmarks/measure_reconciliation.py`, figures in
   [benchmarks.md](benchmarks.md).
+- **Breaks (G12):** 18 applied, 14 caught on the first run. Three were test gaps, closed and
+  caught on the rerun: a month over target offering capacity, salary in the side accrual, and
+  earlier months in it. One guard was unreachable and removed: the extra is never negative, since
+  an accrual never exceeds the side income it comes from.
+- **Compared as G6:** M14.3's code, frozen at `91422e9`, over the same copies migrated to 28 that
+  M14.2's after-capture read, against that capture: all 133,910 runs identical, `pf funds` and
+  `pf fund show` included, so moving their lines into `report_text.py` changed nothing.
 
 ---
 
-## D-071 M15 plan: net worth and loans — Approved, M15.1 and M15.2 built
+## D-071 M15 plan: net worth and loans — Approved, built for review
 
 M15 meets:
 
@@ -1981,6 +1999,50 @@ differs from its spending attribution; the payoff plan's extra amount, or the de
 - **Breaks (G12):** 23 applied, 18 caught on the first run. Five were test gaps, closed and caught
   on the rerun: a rate step within a month, a snowball tie broken by rate, a paid-off loan's
   payment rolling over (by hand), and one token input each for the rates and the plan's order.
+
+
+**How M15.3 was implemented** (built on 2026-11-17, within the approved plan):
+
+- **Migration 0031** first, in its own commit (`a9de224`): `loan_payment_breakdown` (canonical
+  `interest:fees` in cents, never `0:0`), its records and events, and the derived
+  `transaction_loan_breakdown` (`applied`, `conflict`, `basis_changed`, `does_not_fit`).
+- **The fifth stated kind** (`reconcile/breakdown_effects.py`, `breakdowns.py`,
+  `reports/breakdown_evidence.py`), written after consumptions in `write_transfer_effects`. It
+  fits a confirmed loan payment: money out typed `loan_payment` that an applied match or
+  one-sided transfer confirms (D-054's fit rule lands it only on a loan), with interest and fees
+  no more than its effective amount. Confirming or separating refuses where it would leave one
+  unsettled.
+- **Totals, monthly and household** (point 7): the tally takes an applied breakdown's interest
+  and fees out of the payment's confirmed transfer into Spending, on a "loan interest and fees
+  within loan payments" line and under "Interest and financial fees", and counts the divided
+  payments on a line of their own, so each cent is in one group and the count explains the
+  payments counted in both. A shared payment's members each take a share of the interest and fees
+  in proportion to their part, by largest remainder. The category list now also shows where only
+  a breakdown applies. D-055's warning counts only payments holding no applied breakdown.
+- **Tokens:** `r14`, `t12`, `d11` and `c7`, each leaving breakdowns out while none reaches. `lb1`
+  covers the transactions holding the bound records, their outcome with and without it, and the
+  stated value; it is pinned by being the same in two ledgers built alike (no random ID enters
+  it).
+- **`report loans`** shows each loan's "Interest and fees paid, actual, as breakdowns state them"
+  where any applies. Breakdowns never edit a balance.
+- **Departure, for the owner's review:** `review breakdown-show` and `review breakdown-undo`,
+  not `review breakdown show` and `undo`, since `review breakdown TRANSACTION_ID` makes the
+  statement and argparse cannot also hang subcommands under it (as `fund release-undo`).
+- **Breaks (G12):** 19 applied, 14 caught on the first run. Four were test gaps, closed and caught
+  on the rerun: a plain transfer confirmed to a loan, negative fees, `lb1`'s outcome, and another
+  loan's breakdowns in `report loans`. One was equivalent code and removed: `totals` filtering on
+  `applied`, when a breakdown that does not apply stores no value.
+
+**M15 compared as G6, once for the three slices** (a departure from G6's "before each slice", for
+the time each capture takes: about three hours here). M15.3's code, frozen at `145969c`, read
+copies of M14's migrated ledgers brought from 28 to 31, against M14.3's capture of the same
+ledgers at 28, with `r13:r14,t11:t12,d10:d11,c6:c7` read as token bumps: all 133,910 runs
+identical, so no command changed where no breakdown applies, and no digest moved. The new
+commands (`report funds`, `account links`, `report net-worth`, `report loans`, `loan payoff`,
+`review breakdowns`) ran on all 3,219 ledgers and refuse exactly where `funds` does, apart from
+two: `report funds` and `report budget` alike stop on a test ledger holding a household timezone
+of "x", written into the table by hand (`setting set` refuses it), and on the M13 ledger whose
+planning tables a test drops.
 
 ---
 

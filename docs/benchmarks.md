@@ -533,3 +533,49 @@ the household's.
 the transfer candidate search. A member's view adds attributing the month's counted transactions.
 Plans bind no records and derive nothing, so an import, a classification and `totals` pay nothing
 for them.
+
+
+**Funds on the same shape (M14.3, GC4, D-070 point 9),** measured 2026-11-17 with
+`measure_reconciliation.py --scale --funds`, nothing else running. Output in
+`build/m14_3/benchmark-funds.log`, which is ignored and may not survive.
+
+`--recurring`'s shape, its side sources tax-eligible, plus four savings accounts: 20 funds of
+every kind (one emergency, one tax reserve, nine goals, nine reserves, six of them annual), each
+assigned on one of six accounts, one account over-assigned, a priority list over the 19 that take
+one, and 2,000 bills paid from goals, reserves and the tax reserve. The shape asserts its counts:
+20 funds of all four kinds, all six accounts holding assignments, exactly one over-assigned, 2,000
+consumptions applied, and 70 tax-eligible occurrences accrued.
+
+| Operation | First run, right after the build | Provisional target |
+|---|---|---|
+| `pf report funds` | 0.617s | Below 2s: met |
+| `pf report budget`, the month | 0.293s | Below 2s: met |
+| `fund assign`, under the write lock | 0.020s | Below 2s and 2× an import: met |
+| `review consume`, under the write lock | 0.088s | Below 2s and 2× an import: met |
+| One import of one row | 2.262s | At most 0.5s above none: met |
+
+**G9's stopping rule is not met.** The consumed portions are computed where read, from the
+applied consumptions and the assignments, so `report funds` and `report budget` pay for 2,000 of
+them in well under a second.
+
+**Loans on the same shape (M15.3, LC4, D-071 point 9),** measured 2026-11-17 with
+`measure_reconciliation.py --scale --loans`, nothing else running. Output in
+`build/m15_3/benchmark-loans.log`, which is ignored and may not survive.
+
+`--recurring`'s shape plus a checking account, Payer, holding 5,001 loan payments over 120 months
+to eight loans, each confirmed by a one-sided transfer, 5,000 of them broken down: 109,101
+transactions. Two loans graduated in six steps each, one aggregate with three subaccounts, every
+loan observed, and a custom payoff plan with an extra. The shape asserts its counts: more than
+107,000 transactions, 5,000 breakdowns applied and two six-step schedules.
+
+| Operation | First run, right after the build | Provisional target |
+|---|---|---|
+| `pf report net-worth` | 0.021s | Below 2s: met |
+| `pf report loans` | 0.067s | Below 2s: met |
+| `pf loan payoff`, all three orders | 0.032s | Below 2s: met |
+| `pf totals` | 1.779s | Below 2s, and the stop at 2.0s (D-071 point 9): met |
+| `review breakdown`, under the write lock | 0.154s | Below 2s and 2× an import: met |
+| One import of one row | 2.470s | At most 0.5s above none: met |
+
+**G9's stopping rule is not met, and `totals` stays below 2.0s** with 5,000 breakdowns, which it
+reads in the same query as each transaction's type and category.
