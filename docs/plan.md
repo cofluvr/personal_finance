@@ -749,7 +749,7 @@ built. No security control changes. `r`, `t`, `d` and `c` move once, in M15.3.
 | Slice | Scope | Status |
 |---|---|---|
 | M15.1 | Net worth: migration 0029, `pf account links`, `link`, `unlink`, `al1`, valuation dates and warnings, retirement and investment history, `pf report net-worth [--member]`, its page | Built, for review |
-| M15.2 | Loan terms and planning: migration 0030, rate and payment periods, actual against schedule, projections, payoff orders, `pf report loans`, `loan project`, `loan payoff`, `lt1` | Not started |
+| M15.2 | Loan terms and planning: migration 0030, rate and payment periods, actual against schedule, projections, payoff orders, `pf report loans`, `loan project`, `loan payoff`, `lt1` | Built, for review |
 | M15.3 | Principal and interest: migration 0031, `review breakdown`, interest in Spending by amount, `r14`, `t12`, `d11`, `c7`, `lb1`, `--loans` | Not started |
 
 ### M15.1 acceptance criteria
@@ -762,7 +762,17 @@ built. No security control changes. `r`, `t`, `d` and `c` move once, in M15.3.
 | LA4 | `--member` parts plus unattributed equal net worth exactly. (`--from-statement` is not built: no statement balance is stored) |
 | LA5 | `report net-worth` and its page agree line for line, read-only |
 
-M15.2's and M15.3's criteria, LB1 to LC4, move here when each starts.
+### M15.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| LB1 | Migration 0030 meets G10. Terms refuse a non-loan or non-card account, a rate or payment out of range, a due day outside 1 to 28 (no month-end clamping), and a stale `lt1` |
+| LB2 | Graduated schedule: the amount due on each due date is the period in effect, at every step, including a step on the due date itself |
+| LB3 | Actual against schedule produces each state exactly, counts only confirmed transfers, and lists unconfirmed payments apart |
+| LB4 | A projection matches a hand-computed amortization for 12 months to the cent, half-even, flags negative amortization, stops at 600 months and prints every assumption of point 5 |
+| LB5 | Payoff orders follow point 6's ordering and ties, roll payments over, and are deterministic. Every figure is labelled projection |
+
+M15.3's criteria, LC1 to LC4, move here when it starts.
 
 ### Not in M15
 

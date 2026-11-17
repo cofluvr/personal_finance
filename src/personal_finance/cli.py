@@ -123,6 +123,17 @@ from personal_finance.planning.funds import (
     undo_fund,
 )
 from personal_finance.planning.fund_releases import release_tax_reserve, undo_release
+from personal_finance.planning.entries import parsed_amount
+from personal_finance.planning.loans import EXTRA_INVALID as LOAN_EXTRA_INVALID
+from personal_finance.planning.loans import HORIZON_MONTHS as LOAN_HORIZON
+from personal_finance.planning.loans import PAYMENT as LOAN_PAYMENT
+from personal_finance.planning.loans import RATE as LOAN_RATE
+from personal_finance.planning.loans import TermsRequest as LoanTermsRequest
+from personal_finance.planning.loans import add_period as add_loan_period
+from personal_finance.planning.loans import add_terms as add_loan_terms
+from personal_finance.planning.loans import checked_order as checked_loan_order
+from personal_finance.planning.loans import set_plan as set_payoff_plan
+from personal_finance.planning.loans import undo_terms as undo_loan_terms
 from personal_finance.planning.net_worth import LINK as ACCOUNT_LINK
 from personal_finance.planning.net_worth import UNLINK as ACCOUNT_UNLINK
 from personal_finance.planning.net_worth import (
@@ -286,6 +297,10 @@ from personal_finance.reports.report_text import (
     fund_terms_sentence,
     funds_report_lines,
     net_worth_report_lines,
+    loan_payoff_lines,
+    loan_projection_lines,
+    loan_terms_lines,
+    loans_report_lines,
     holding_lines,
     budget_report_lines,
     income_report_lines,
@@ -800,6 +815,66 @@ def build_parser() -> argparse.ArgumentParser:
     fund_release_undo.add_argument("--fund", required=True, help="the tax reserve's fund ID")
     fund_release_undo.add_argument("--revision", required=True,
                                    help="the release undo revision from fund show")
+
+    loan = commands.add_parser("loan", help="state loan terms, project loans and compare payoff "
+                                             "orders")
+    loan_commands = loan.add_subparsers(dest="loan_command", required=True)
+    loan_terms = loan_commands.add_parser("terms", help="add, show or undo an account's loan "
+                                                        "terms")
+    loan_terms_commands = loan_terms.add_subparsers(dest="loan_terms_command", required=True)
+    terms_add = command("add", loan_terms_commands, handler=run_loan_terms_add,
+                        help="record a loan's or card's terms")
+    terms_add.add_argument("--account", required=True, help="the loan or card, name or ID")
+    terms_add.add_argument("--rate", required=True, help="the APR in percent, such as 6.875")
+    terms_add.add_argument("--payment", help="a loan's scheduled payment, such as 1500.00")
+    terms_add.add_argument("--due-day", required=True, dest="due_day",
+                           help="the day of the month payments are due, 1 to 28")
+    terms_add.add_argument("--effective-from", required=True,
+                           help="the first day the rate and payment apply")
+    terms_add.add_argument("--remaining-months", dest="remaining_months",
+                           help="the months left, as the lender states them")
+    terms_add.add_argument("--revision", required=True,
+                           help="the add revision from loan terms show")
+    terms_show = command("show", loan_terms_commands, handler=run_loan_terms_show,
+                         help="show an account's loan terms and their revisions")
+    terms_show.add_argument("--account", required=True, help="the loan or card, name or ID")
+    terms_undo = command("undo", loan_terms_commands, handler=run_loan_terms_undo,
+                         help="stop an account's loan terms applying, keeping them on record")
+    terms_undo.add_argument("--account", required=True, help="the loan or card, name or ID")
+    terms_undo.add_argument("--revision", required=True,
+                            help="the undo revision from loan terms show")
+    for name, handler, option, words in (
+            ("rate", run_loan_rate, "--rate", "a new rate from a date"),
+            ("payment", run_loan_payment, "--amount", "a new scheduled payment from a date")):
+        sub = command(name, loan_commands, handler=handler, help=words)
+        sub.add_argument("--account", required=True, help="the loan or card, name or ID")
+        sub.add_argument(option, required=True, dest="value",
+                         help="the APR in percent" if name == "rate" else "the amount")
+        sub.add_argument("--effective-from", required=True, help="the first day it applies")
+        sub.add_argument("--revision", required=True,
+                         help=f"the {name} revision from loan terms show")
+    loan_plan = loan_commands.add_parser("plan", help="set the payoff plan")
+    loan_plan_commands = loan_plan.add_subparsers(dest="loan_plan_command", required=True)
+    plan_set = command("set", loan_plan_commands, handler=run_loan_plan_set,
+                       help="set the payoff order and its extra, as a plan")
+    plan_set.add_argument("--order", required=True,
+                          help="avalanche, snowball or custom:A,B,... naming every loan")
+    plan_set.add_argument("--extra", help="an extra amount a month, such as 200.00")
+    plan_set.add_argument("--extra-from-fund", dest="extra_from_fund",
+                          help="a goal whose planned contribution is the extra (the debt goal)")
+    plan_set.add_argument("--revision", required=True,
+                          help="the plan revision from report loans")
+    loan_project = command("project", loan_commands, handler=run_loan_project,
+                           help="project one loan or card from its latest observation")
+    loan_project.add_argument("--account", required=True, help="the loan or card, name or ID")
+    loan_project.add_argument("--extra", help="an extra amount a month, such as 200.00")
+    loan_project.add_argument("--months", help="how many months, at most 600")
+    loan_project.add_argument("--as-of", help=TODAY_HELP)
+    loan_payoff = command("payoff", loan_commands, handler=run_loan_payoff,
+                          help="compare payoff orders side by side, as projections")
+    loan_payoff.add_argument("--order", help="only this order: avalanche, snowball or custom:A,B")
+    loan_payoff.add_argument("--extra", help="an extra amount a month, else the payoff plan's")
+    loan_payoff.add_argument("--as-of", help=TODAY_HELP)
 
     obligation = commands.add_parser(
         "obligation", help="state recurring obligations and see their payments against their "
@@ -1536,6 +1611,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="net worth from balance observations, with retirement and investment history",
     )
     net_worth_command.add_argument("--as-of", help=TODAY_HELP)
+    loans_report_command = command(
+        "loans", report_commands, handler=run_report_loans,
+        help="each loan's terms and its actual payments against its schedule")
+    loans_report_command.add_argument("--as-of", help=TODAY_HELP)
     net_worth_command.add_argument("--member",
                                    help="one member's part by account attribution, a name from "
                                         "household members")
@@ -1741,6 +1820,91 @@ def run_report_net_worth(args) -> int:
         raise CommandError("household member not found. Run household members.")
     print_report(net_worth_report_lines(conn, as_of_date(conn, args.as_of).isoformat(),
                                        args.member))
+    return 0
+
+
+def run_loan_terms_add(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    add_loan_terms(conn, account_id, LoanTermsRequest(args.rate, args.due_day,
+                                                      args.effective_from, args.payment,
+                                                      args.remaining_months), args.revision)
+    print(f"Loan terms recorded for {shown(args.account)}: from {args.effective_from}, rate "
+          f"{args.rate}%" + (f", payment {args.payment}" if args.payment else "")
+          + f", due day {args.due_day}")
+    return 0
+
+
+def run_loan_terms_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    print_report(loan_terms_lines(conn, find_account(conn, args.account)))
+    return 0
+
+
+def run_loan_terms_undo(args) -> int:
+    conn = open_ledger(args.db)
+    undo_loan_terms(conn, find_account(conn, args.account), args.revision)
+    print(f"Loan terms of {shown(args.account)} undone. They stay on record.")
+    return 0
+
+
+def run_loan_rate(args) -> int:
+    conn = open_ledger(args.db)
+    add_loan_period(conn, find_account(conn, args.account), LOAN_RATE, args.value,
+                    args.effective_from, args.revision)
+    print(f"Rate recorded for {shown(args.account)}: {args.value}% from {args.effective_from}")
+    return 0
+
+
+def run_loan_payment(args) -> int:
+    conn = open_ledger(args.db)
+    add_loan_period(conn, find_account(conn, args.account), LOAN_PAYMENT, args.value,
+                    args.effective_from, args.revision)
+    print(f"Scheduled payment recorded for {shown(args.account)}: {args.value} from "
+          f"{args.effective_from}")
+    return 0
+
+
+def run_loan_plan_set(args) -> int:
+    conn = open_ledger(args.db)
+    set_payoff_plan(conn, args.order, args.extra, args.extra_from_fund, args.revision,
+                    find_account)
+    print(f"Payoff plan recorded, planned: {args.order}")
+    return 0
+
+
+def checked_extra(text) -> int:
+    return 0 if text is None else parsed_amount(text, LOAN_EXTRA_INVALID, least=1)
+
+
+def run_loan_project(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account)
+    months = LOAN_HORIZON
+    if args.months is not None:
+        if not args.months.isdigit() or not 1 <= int(args.months) <= LOAN_HORIZON:
+            raise CommandError(f"--months must be a whole number from 1 to {LOAN_HORIZON}.")
+        months = int(args.months)
+    print_report(loan_projection_lines(conn, account_id,
+                                       as_of_date(conn, args.as_of).isoformat(),
+                                       checked_extra(args.extra), months))
+    return 0
+
+
+def run_loan_payoff(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    order, custom = None, ()
+    if args.order is not None:
+        order, custom = checked_loan_order(conn, args.order, find_account)
+    extra = None if args.extra is None else checked_extra(args.extra)
+    print_report(loan_payoff_lines(conn, as_of_date(conn, args.as_of).isoformat(), order, extra,
+                                   custom))
+    return 0
+
+
+def run_report_loans(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    print_report(loans_report_lines(conn, as_of_date(conn, args.as_of)))
     return 0
 
 

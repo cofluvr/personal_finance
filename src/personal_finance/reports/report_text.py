@@ -9,6 +9,7 @@ report rather than truncating it.
 
 import json
 from dataclasses import dataclass
+from datetime import date
 from itertools import islice
 from typing import NamedTuple
 
@@ -61,7 +62,10 @@ from personal_finance.reconcile.transfer_effects import (
 from personal_finance.reports.coverage_evidence import load_document_coverage
 from personal_finance.reports.budget_report import budget_report
 from personal_finance.reports.fund_report import funds_report
+from personal_finance.reports.fund_standing import funds_view
 from personal_finance.reports.net_worth_report import net_worth
+from personal_finance.reports import loan_report
+from personal_finance.planning import loans
 from personal_finance.reports.income_report import income_report
 from personal_finance.reports.household import (
     ONE_MEMBER,
@@ -1880,4 +1884,188 @@ def net_worth_report_lines(conn, as_of, member_name=None) -> ReportLines:
         out.add("  Every part, by account attribution, adding to net worth:")
         for part in report.parts:
             out.add(f"    {shown(part.name)}: {format_cents(part.cents)}")
+    return out
+
+
+# Loans (D-071 points 4 to 6).
+
+LOANS_NOTICE = (
+    "Loan terms as stated, and actual payments against the schedule: only transfers confirmed "
+    "into a loan count as paid, and anything else is listed apart until confirmed."
+)
+
+
+def loan_terms_lines(conn, account_id) -> ReportLines:
+    """pf loan terms show's lines: the account's terms and each operation's lt1 token."""
+    name, account_type = loans.account_kind(conn, account_id)
+    terms = loans.load_loan_terms(conn).get(account_id)
+    out = ReportLines()
+    out.add(f"Loan terms of {shown(name)} ({account_type.replace('_', ' ')})")
+    if terms is None:
+        out.add("  No loan terms.")
+        out.add(f"Add revision: {loans.terms_revision(loans.ADD, account_id, None)}")
+        return out
+    remaining = ("not stated" if terms.remaining_months is None
+                 else f"{terms.remaining_months}, as the lender states")
+    out.add(f"  Due day: {terms.due_day}. Remaining months: {remaining}")
+    for start, rate in terms.rates:
+        out.add(f"  Rate from {start}: {loans.format_rate(rate)}")
+    for start, payment in terms.payments:
+        out.add(f"  Payment from {start}, scheduled: {format_cents(payment)}")
+    if not terms.payments:
+        out.add("  No scheduled payment: a card's rate is for interest projection only")
+    out.add(f"Rate revision: {loans.terms_revision(loans.RATE, account_id, terms)}")
+    if account_type == "loan":
+        out.add(f"Payment revision: {loans.terms_revision(loans.PAYMENT, account_id, terms)}")
+    out.add(f"Undo revision: {loans.terms_revision(loans.UNDO, account_id, terms)}")
+    return out
+
+
+def describe_plan(conn, plan) -> str:
+    if plan is None:
+        return "none"
+    names = dict(conn.execute("SELECT id, display_name FROM account"))
+    order = plan.order_kind
+    if plan.custom_order:
+        order += " " + ", ".join(shown(names[account]) for account in plan.custom_order)
+    if plan.extra_cents is not None:
+        return f"{order}, extra {format_cents(plan.extra_cents)} a month, planned"
+    if plan.extra_fund_id is not None:
+        fund = conn.execute("SELECT name FROM fund WHERE id = ?",
+                            (plan.extra_fund_id,)).fetchone()[0]
+        return f"{order}, extra from goal {shown(fund)}'s planned contribution"
+    return f"{order}, no extra"
+
+
+def loans_report_lines(conn, as_of) -> ReportLines:
+    """pf report loans' lines (D-071 points 4 and 6)."""
+    view = loan_report.loans_view(conn, as_of)
+    out = ReportLines()
+    out.add(f"Loans as of {view.as_of}")
+    out.add(LOANS_NOTICE)
+    for loan in view.loans:
+        terms = loan.terms
+        out.add(f"Loan {shown(terms.account_name)} ({terms.account_type.replace('_', ' ')}): due "
+                f"day {terms.due_day}")
+        rate = terms.rate_on(view.as_of)
+        out.add("  Rate in effect: " + (loans.format_rate(rate) if rate is not None
+                                         else f"none before {terms.rates[0][0]}"))
+        if terms.payments:
+            out.add(f"  Payment in effect, scheduled: "
+                    f"{format_cents(terms.payment_on(view.as_of))}")
+        else:
+            out.add("  No scheduled payment: a card's rate is for interest projection only")
+        if loan.observed is None:
+            out.add(f"  No balance observation on or before {view.as_of}: no projection")
+        else:
+            out.add(f"  Balance observed: {format_cents(loan.observed[1])} owed on "
+                    f"{loan.observed[0]}")
+        for period in loan.periods:
+            excess = (f", extra {format_cents(period.paid_cents - period.due_cents)}"
+                      if period.state == loans.EXTRA else "")
+            out.add(f"  Due {period.due}: due {format_cents(period.due_cents)}, scheduled, paid "
+                    f"{format_cents(period.paid_cents)}, actual, {period.state}{excess}")
+        if loan.unconfirmed_count:
+            out.add(f"  Money in not confirmed as a payment, not counted until confirmed: "
+                    f"{loan.unconfirmed_count}, {format_cents(loan.unconfirmed_cents)}")
+    if not view.loans:
+        out.add("No loan terms. Run loan terms add.")
+    count, cents = view.unconfirmed_payments
+    out.add(f"Loan payments not confirmed to any loan, not counted until confirmed: {count}, "
+            f"{format_cents(cents)}")
+    plan = loans.active_plan(conn)
+    out.add(f"Payoff plan: {describe_plan(conn, plan)}")
+    out.add(f"  Plan revision: {loans.plan_revision(plan)}")
+    return out
+
+
+def add_assumptions(out) -> None:
+    out.add("Assumptions, projection, not lender-exact:")
+    for assumption in loans.ASSUMPTIONS:
+        out.add(f"  {assumption}")
+
+
+def loan_projection_lines(conn, account_id, as_of, extra_cents=0,
+                          months=loans.HORIZON_MONTHS) -> ReportLines:
+    """pf loan project's lines (D-071 point 5)."""
+    name, _ = loans.account_kind(conn, account_id)
+    terms = loans.load_loan_terms(conn).get(account_id)
+    out = ReportLines()
+    label = loans.PROJECTION_LABEL
+    out.add(f"Projection for {shown(name)} as of {as_of}, {label}")
+    if terms is None:
+        out.add("  No loan terms: no projection. Run loan terms add.")
+        return out
+    observed = loan_report.owed_as_of(conn, account_id, as_of)
+    if observed is None:
+        out.add(f"  No balance observation on or before {as_of}: no projection")
+        return out
+    add_assumptions(out)
+    if extra_cents:
+        out.add(f"  Extra assumed each month: {format_cents(extra_cents)}")
+    projection = loans.project(terms, observed[1], observed[0], extra_cents, months)
+    out.add(f"Start: {format_cents(observed[1])} owed, observed on {observed[0]}")
+    for month in projection.months:
+        flag = ", negative amortization" if month.negative_amortization else ""
+        out.add(f"  Due {month.due}: rate {loans.format_rate(month.rate_millionths)}, payment "
+                f"{format_cents(month.payment_cents)}, interest {format_cents(month.interest_cents)}, "
+                f"principal {format_cents(month.principal_cents)}, balance "
+                f"{format_cents(month.balance_cents)}, {label}{flag}")
+    if projection.paid_off:
+        out.add(f"Paid off on {projection.paid_off}, {label}")
+    else:
+        out.add(f"Not paid off within {len(projection.months)} months, {label}")
+    out.add(f"Total interest: {format_cents(projection.total_interest_cents)}, {label}")
+    if projection.negative_amortization:
+        out.add("Negative amortization: in some months the interest is above the payment, so "
+                "what is owed grows")
+    return out
+
+
+def payoff_extra(conn, as_of, extra_cents):
+    """The extra a month: as typed, else the plan's, else the planned contribution of the plan's
+    debt goal (D-070 point 4), else none. Returns the cents and where they come from."""
+    if extra_cents is not None:
+        return extra_cents, "as typed"
+    plan = loans.active_plan(conn)
+    if plan is None:
+        return 0, "no payoff plan"
+    if plan.extra_cents is not None:
+        return plan.extra_cents, "the payoff plan's"
+    if plan.extra_fund_id is not None:
+        view = next(fund_view for fund_view in funds_view(conn, date.fromisoformat(as_of)).funds
+                    if fund_view.fund.fund_id == plan.extra_fund_id)
+        planned = view.standing.planned_contribution_cents or 0
+        return planned, f"goal {shown(view.fund.name)}'s planned contribution"
+    return 0, "the payoff plan names none"
+
+
+def loan_payoff_lines(conn, as_of, order=None, extra_cents=None, custom=()) -> ReportLines:
+    """pf loan payoff's lines: each order side by side (D-071 point 6)."""
+    extra, source = payoff_extra(conn, as_of, extra_cents)
+    debts, outcomes = loan_report.payoff_orders(conn, date.fromisoformat(as_of), extra, order,
+                                                custom)
+    label = loans.PROJECTION_LABEL
+    names = {debt.terms.account_id: debt.terms.account_name for debt in debts}
+    out = ReportLines()
+    out.add(f"Payoff orders as of {as_of}, {label}")
+    if not debts:
+        out.add("  No loan with terms and a balance owed: nothing to order")
+        return out
+    out.add(f"  Monthly budget: every scheduled payment in effect, paid off or not, plus extra "
+            f"{format_cents(extra)}, {source}")
+    for debt in debts:
+        out.add(f"  Loan {shown(debt.terms.account_name)}: {format_cents(debt.owed_cents)} owed, "
+                f"rate {loans.format_rate(debt.rate_millionths)}")
+    add_assumptions(out)
+    for outcome in outcomes:
+        out.add(f"Order {outcome.order}: " + ", ".join(shown(names[account])
+                                                       for account in outcome.sequence))
+        for account in outcome.sequence:
+            paid_off = outcome.payoff_by_account[account] or "not within the horizon"
+            out.add(f"  Loan {shown(names[account])}: paid off {paid_off}, interest "
+                    f"{format_cents(outcome.interest_by_account[account])}, {label}")
+        months = outcome.months_to_debt_free
+        out.add(f"  Debt-free in {months} months, {label}" if months is not None
+                else f"  Not debt-free within {loans.HORIZON_MONTHS} months, {label}")
     return out

@@ -1665,7 +1665,7 @@ and a monthly or percentage goal shows "no target".
 
 ---
 
-## D-071 M15 plan: net worth and loans — Approved, M15.1 built
+## D-071 M15 plan: net worth and loans — Approved, M15.1 and M15.2 built
 
 M15 meets:
 
@@ -1941,6 +1941,46 @@ differs from its spending attribution; the payoff plan's extra amount, or the de
   account not counted, and a matched contribution into another account. Two were equivalent code,
   both redundant and removed: `al1`'s separate list of links (its observations already name
   them), and skipping uncounted accounts in member parts (they count 0.00).
+
+
+**How M15.2 was implemented** (built on 2026-11-17, within the approved plan):
+
+- **Migration 0030** first, in its own commit (`49ee826`): `loan_terms` (due day 1 to 28, optional
+  remaining months, on a loan or card by trigger) and its events, `loan_rate_period` (millionths
+  of a percent, 0 to 100%), `loan_payment_period` (a loan's only, by trigger), and `payoff_plan`
+  with its events, the plan made last applying.
+- **`planning/loans.py`:** the model, the writes under one write lock with `lt1` (the operation,
+  the account, and its due day, remaining months and every rate and payment period; over the
+  payoff plan, the plan as it applies), and the pure math: due dates, point 6's states, point 5's
+  projection in `Decimal` (the context's `divide`, since the G8 check refuses the `/` operator in
+  planning modules) and the payoff orders. `reports/loan_report.py` gathers actual payments and
+  each order's debts.
+- **Commands:** `pf loan terms add | show | undo`, `pf loan rate`, `pf loan payment`, `pf loan plan
+  set`, `pf report loans`, `pf loan project` and `pf loan payoff`. `loan terms show` is beyond
+  D-071's list in that it prints each operation's token, the add token included before any terms.
+- **Choices, for the owner's review:**
+  - **Periods may start on any day from the terms' first one,** closed months included: a loan's
+    schedule is the lender's contract, not a plan, so a graduated loan entered late can still be
+    checked against its past steps. A day already holding a period of the same kind is refused.
+  - **A card's terms take `--rate` and `--due-day` only;** `--payment` and `loan payment` are
+    refused on a card, and payoff orders leave cards out (choice 3 of the plan).
+  - **The debt goal is named, never guessed:** `loan plan set --extra-from-fund GOAL_ID`, whose
+    planned contribution as of the date is the extra. `--extra` on `loan payoff` overrides the
+    plan's.
+  - **Actual payments** are the confirmed transfers into the loan, dated by the transaction that
+    holds them (a match's inflow, a one-sided transfer's outflow), in the period after the previous
+    due date through this one, from the first due date on or after the first payment period
+    through the next due date after `as_of`. Money in on the loan with no confirmed transfer is
+    listed per loan, and payments typed `loan_payment` that no transfer confirms are listed
+    once, both "not counted until confirmed".
+  - **States:** a due date on or after `as_of` with less paid is `upcoming`, even when partly paid.
+  - **A projection** starts at the first due date after the latest observation, each month a full
+    month's interest. **Payoff orders** start the month after `as_of`, from each loan's latest
+    observation by then, at its rate in effect on `as_of`, which fixes the order; each month's
+    budget is every loan's scheduled payment in effect, paid off or not, plus the extra.
+- **Breaks (G12):** 23 applied, 18 caught on the first run. Five were test gaps, closed and caught
+  on the rerun: a rate step within a month, a snowball tie broken by rate, a paid-off loan's
+  payment rolling over (by hand), and one token input each for the rates and the plan's order.
 
 ---
 
