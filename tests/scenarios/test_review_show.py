@@ -48,6 +48,8 @@ LEDGER_TABLES = (
     "budget_plan_member_part", "budget_plan_category", "budget_plan_event",
     "fund", "fund_terms", "fund_event", "fund_assignment", "fund_assignment_event",
     "fund_priority_event", "fund_priority",
+    "fund_consumption", "fund_consumption_record", "fund_consumption_event",
+    "transaction_fund_consumption", "tax_reserve_release", "tax_reserve_release_event",
 )
 
 

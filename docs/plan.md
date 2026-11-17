@@ -696,12 +696,13 @@ and budgets in scenarios (M18), as D-069 lists them.
 
 Approved by the owner on 2026-11-10 as D-070, with A to I, in
 [decisions-m12-m21.md](decisions-m12-m21.md), under D-067's guardrails G1 to G13. The owner allowed
-M14.1 to be built on 2026-11-16. No security control changes. `r`, `t`, `d` and `c` move once, in
-M14.2.
+M14.1 to be built on 2026-11-16 and accepted it as built the same day, approving the plan for
+M14.2 to M15.3 under D-070 ("M14.2 to M15.3: the implementation plan") to be built without a stop
+between slices. No security control changes. `r`, `t`, `d` and `c` move once, in M14.2.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M14.1 | Funds, assignments and priority: migration 0027, `pf fund preview`, `add`, `terms`, `undo`, `show`, `assign`, `unassign`, `priority`, `pf funds`, the four kinds' required amounts, the assignability guard, planned contributions, `fu1`, `fa1` | Built, awaiting review |
+| M14.1 | Funds, assignments and priority: migration 0027, `pf fund preview`, `add`, `terms`, `undo`, `show`, `assign`, `unassign`, `priority`, `pf funds`, the four kinds' required amounts, the assignability guard, planned contributions, `fu1`, `fa1` | Accepted 2026-11-16 |
 | M14.2 | Consumption and the tax reserve: migration 0028, `review consume`, tax payments and releases, `fc1`, `r13`, `t11`, `d10`, `c6` | Not started |
 | M14.3 | `pf report funds`, extra income and unused capacity by priority, "paid from reserves", the page, the restore test, `--funds` | Not started |
 
@@ -715,7 +716,16 @@ M14.2.
 | GA4 | A later lower observation makes the account `over_assigned` by exactly the difference, disclosed wherever funds show, and new assignments there refuse until resolved. A race test (G3): two assignments shown against one observation, so the second refuses |
 | GA5 | Planned contributions and restoration change no assignment. `evidence_digest` is unchanged by every fund write |
 
-M14.2's and M14.3's criteria, GB1 to GC4, move here when each starts.
+### M14.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| GB1 | Migration 0028 meets G10. `review consume` follows D-043 and D-063: a stale `t11`, another account, a transaction not in spending and an unknown fund are refused. Chains, agreement, conflict and `basis_changed` follow CB2 and CB3 |
+| GB2 | No double count: a purchase consuming a reserve counts once in `totals` and its category, leaves discretionary actual by exactly the consumed portion, and its excess stays discretionary. The fund's outstanding amount falls by exactly the consumed portion. Undo restores both exactly |
+| GB3 | Tax accrual rounds up per occurrence from `effective_from`. Payments and releases reduce required, never below zero, and every tax line carries PRD §16's label |
+| GB4 | `r13`, `t11`, `d10` and `c6` keep every digest without consumption, with a test pinning each definition and `fc1`. Every command but those point 7 names is byte for byte as before (G6) |
+
+M14.3's criteria, GC1 to GC4, move here when it starts.
 
 ### Not in M14
 

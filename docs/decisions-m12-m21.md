@@ -1210,7 +1210,7 @@ through M13, for the owner's review):
 
 ---
 
-## D-070 M14 plan: goals, reserves and the tax reserve — Approved
+## D-070 M14 plan: goals, reserves and the tax reserve — Approved, M14.1 accepted
 
 M14 meets PRD §13's goals, emergency fund and annual and irregular expenses, and §16's
 lightweight tax reserve. It closes three PRD §21 boxes:
@@ -1529,6 +1529,53 @@ current assignments.
   same words, apart from those two stamped ledgers and the M13 test ledger whose planning tables
   are dropped, each explained by the tables it lacks.
 - **No benchmark row:** `--funds` is M14.3's (point 9).
+
+**M14.1 accepted, as built, by the owner on 2026-11-16,** with every departure and choice above.
+
+### M14.2 to M15.3: the implementation plan — Approved
+
+Approved by the owner on 2026-11-16, with local commits on `feature/m10-rules` for all five
+slices, built in order without a stop between them, and one review after M15.3. The lead
+engineer's recommendation stands wherever discretion is needed. Each slice keeps the routine
+(migration first, gated commits, 20 to 25 breaks, G6, records). A missed G9 target is recorded
+with its cost and not optimized, and the work goes on, except `totals` above 2.0s in M15.3, which
+stops the work (D-071 point 9). A failure twice the same way, a contradiction in a decision, or
+anything needing a security change, a dependency or the network still stops it.
+
+**M14.2's choices:**
+
+1. **`fund release undo RELEASE_ID --revision fu1-…`,** beyond point 7's list, as `fund preview`
+   was: G4's undo needs a command.
+2. **Which assignment a consumption reduces:** the assignments active when the consumption was
+   stated, the transaction's own account first, then the others by account name. A refund
+   consumed against the fund restores them in the same order. An assignment released later takes
+   its reduction with it, and one made later starts whole, so no later assignment rewrites a
+   consumed portion.
+3. **The tax reserve's "paid" is the whole payment.** The cap of point 5 (the assigned amount not
+   yet consumed) decides only the portion leaving discretionary actual and the reduction of the
+   assignment.
+4. **A recurring reserve's cycle** runs from the day after its previous due date through its next
+   due date on or after `as_of`.
+5. **A refund restores a fund only when it is itself consumed against the fund,** as point 5 says,
+   never inferred.
+6. **M13's "paid from reserves" line lands in M14.2,** not M14.3, since GB2 tests the change to
+   discretionary actual.
+
+**M14.3's choices:** the states stay as M14.1 built them, with `in progress` and `not started`. A
+target's "reached" month is the first month whose planned contributions cover what is outstanding,
+and a monthly or percentage goal shows "no target".
+
+**M15's choices (D-071):**
+
+- **M15.1: `balance record --from-statement` is not built.** D-071 point 1 assumes D-060 stores
+  each PDF statement's closing balance, but D-060 as amended for U.S. Bank's printout built no
+  statement balances (migration 0019 for balances was never written), so there is nothing to read.
+  LA4's second half falls away. A later decision may add it if a statement layout arrives.
+  `--member` divides by M11's attribution (D-071 C), since no ownership input differs.
+- **M15.2:** a due day from 1 to 28 only, with no month-end clamping. The payoff plan names its
+  debt goal explicitly, `loan plan set --extra-from-fund FUND_ID`, since D-070 never defines how
+  to tell which goal is the debt goal. A card takes rate terms only, for interest projection, and
+  is refused in `loan payment` and in payoff orders.
 
 ---
 
