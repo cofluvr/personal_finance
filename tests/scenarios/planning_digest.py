@@ -11,6 +11,7 @@ from test_decisions import (
     FUND_TABLES,
     LINK_TABLES,
     LOAN_TABLES,
+    BREAKDOWN_TABLES,
     INCOME_TABLES,
     OBLIGATION_TABLES,
     SETTING_KEY_TABLES,
@@ -21,7 +22,8 @@ from personal_finance.db.backups import tagged
 # Every table M12 and later add. Each later planning migration adds its own.
 PLANNING_TABLES = frozenset((*INCOME_TABLES, *OBLIGATION_TABLES, *SETTING_KEY_TABLES,
                              *BUDGET_TABLES, *FUND_TABLES, *CONSUMPTION_TABLES,
-                             *LINK_TABLES, *LOAN_TABLES))
+                             *LINK_TABLES, *LOAN_TABLES,
+                             *BREAKDOWN_TABLES))
 
 
 def evidence_digest(conn: sqlite3.Connection) -> str:

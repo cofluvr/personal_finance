@@ -52,7 +52,8 @@ LEDGER_TABLES = (
     "transaction_fund_consumption", "tax_reserve_release", "tax_reserve_release_event",
     "account_link", "account_link_event",
     "loan_terms", "loan_terms_event", "loan_rate_period", "loan_payment_period", "payoff_plan",
-    "payoff_plan_event",
+    "payoff_plan_event", "loan_payment_breakdown", "loan_payment_breakdown_record",
+    "loan_payment_breakdown_event", "transaction_loan_breakdown",
 )
 
 
