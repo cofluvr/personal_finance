@@ -98,6 +98,7 @@ and keep its index line.
 | D-075 | M19 plan: snapshots — Approved, not yet built |
 | D-076 | M20 plan: pairing and local-network sync — Approved as a security change, with `segno`, not yet built |
 | D-077 | M21 plan: backend acceptance, stress testing and the security audit — Approved, not yet built |
+| D-078 | Test suite cost: a copied test ledger, a narrower W1 check and a `slow` tier — Approved and built |
 
 ## Rules in brief
 
@@ -789,3 +790,27 @@ when it is planned.
   Alternatively scenarios in the terminal first.
 - **E. Sync as M19's file, then M20's explicit sync mode** (point 6). Alternatively the file alone,
   or Phase 1C after M16 (point 7).
+
+## D-078 Test suite cost: a copied test ledger, a narrower W1 check and a `slow` tier — Approved
+
+Approved by the owner on 2026-11-16, with no new dependency. Measured on `5acb48e` (3,254 tests,
+17m24s, exit 0): 6,528 new ledgers each replayed every migration (251 s), the 26 W1 cases that
+add one import each copied and scanned the whole package, and 37 test functions over 3 s, mostly
+order and generated-ledger property tests, took about 300 s of what remained.
+
+1. **A copied test ledger.** `tests/fresh_ledger.py` builds one ledger with `create_database` per
+   process and writes copies, owner-only and never over an existing file. The `db_path` fixture,
+   `Ledger` in test_decisions.py and the `replay` helpers of test_import_order.py and
+   test_decision_order.py use it. Tests of creation itself keep `create_database`: `pf init` in
+   test_cli.py, `init --real`, the migration tests (test_migrations.py overrides `db_path`) and every
+   ledger built from an older migration folder. A test there shows a copy matches a ledger made by
+   `create_database` apart from SQLite's clock readings in seeded rows. Migration time fell to 20 s.
+2. **W1's added-import cases scan the edited module alone.** The other modules are unchanged and
+   the first W1 test shows them clean, so the whole-package scan found the same.
+3. **A `slow` marker** on test functions over about 3 s, registered in pyproject.toml. Plain
+   `pytest` still runs everything. The gate rules are in CLAUDE.md.
+
+Not adopted: selecting tests from a coverage map (a new dependency, and blind to the SQL in
+migrations and triggers), pytest-xdist (a new dependency), and fewer Hypothesis examples. Full
+suite after 1 and 2: 3,255 passed in 10m40s.
+

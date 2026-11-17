@@ -26,3 +26,6 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "--strict-markers"
+markers = [
+    "slow: a test function over about 3 seconds, mostly order and generated-ledger property tests. Commit gates during a slice skip them with -m 'not slow'; the gate before review runs everything (D-078).",
+]

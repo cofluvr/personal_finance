@@ -6,6 +6,7 @@ declared document arrives.
 
 from itertools import permutations
 
+import pytest
 import test_coverage_declarations
 from test_decisions import CARD_HEADER, WHOLE_MONTH
 
@@ -33,6 +34,7 @@ def built(folder, capsys, order, point):
     return ledger
 
 
+@pytest.mark.slow
 def test_every_valid_point_of_every_order_gives_the_same_outcome(tmp_path, capsys):
     reference = None
     compared = 0

@@ -6,6 +6,7 @@ corrected record's file arrives.
 
 from itertools import permutations
 
+import pytest
 import test_corrections
 from test_decisions import CARD_HEADER, CHECKING_HEADER
 from test_supersession import holding
@@ -44,6 +45,7 @@ def built(folder, capsys, order, point):
     return ledger, correction
 
 
+@pytest.mark.slow
 def test_every_valid_point_of_every_order_gives_the_same_outcome(tmp_path, capsys):
     reference = None
     compared = 0

@@ -53,9 +53,10 @@ and changed code. Renaming existing code wholesale is a separate change for the 
   as `pytest | tail` hides that exit code (zsh has no `PIPESTATUS`). `bd095bf` is a broken commit
   made when they were not chained, and history is not rewritten to remove it.
 - While a slice is in progress, gate each commit on the test files for the code it changes and the
-  scenario files that exercise it. Gate the last commit before stopping for review on the full
-  suite (duration in the handoff's latest gating run). If a gate fails, rerun only the failing
-  tests with `pytest --lf` while fixing, then rerun the gate itself before committing.
+  scenario files that exercise it, with `-m "not slow"`. Gate the last commit before stopping for
+  review on the full suite, slow tests included (duration in the handoff's latest gating run). If
+  a gate fails, rerun only the failing tests with `pytest --lf` while fixing, then rerun the gate
+  itself before committing.
 
 ## Testing for review
 
@@ -67,8 +68,9 @@ about a deliberate break.
    money and direction rules, token inputs, and the new invariants and migrations. Skip wording,
    messages and paths that only save work.
 2. **Narrow first.** Run each break against the one or two test files that cover the broken code,
-   with the most relevant file first. Widen to the slice's wider set only for a break that survives
-   there, before calling it a gap.
+   with the most relevant file first, and `-m "not slow"`. A break that survives there runs again
+   on the same files with the slow tests, then widens to the slice's wider set, before it is called
+   a gap.
 3. **Stop at the first failure.** Run breaks with `pytest -x -q --tb=no`. One relevant failure is a
    catch. Record which test failed, and treat a catch by an unrelated test as a survivor.
 4. **Rerun only what needs it.** On the final code, rerun only the breaks that survived, those whose
@@ -122,6 +124,9 @@ reach the cost it claims to measure.
   never `planning/entries.py`, `reconcile.decisions` or `reports.totals`. Report figures go in
   `reports/`.
 - **A G1 test must assert before it reassigns.**
+- **Test ledgers and the `slow` marker (D-078).** Make a test's ledger with the `db_path` fixture,
+  `Ledger` or `create_fresh_ledger`; call `create_database` only where creation itself is under
+  test. Mark a new test function `slow` when it takes over about 3 s.
 - **A benchmark's first command after a long build runs slow** (about 1.2s in M12.3). Attribute a
   cost on one ledger in one session before calling the stopping rule.
 - **The suite's ledgers and a suite gate compete.** Run a G6 capture and a full-suite gate apart.

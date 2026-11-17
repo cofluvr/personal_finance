@@ -695,6 +695,7 @@ def built(folder, capsys, order, point):
     return ledger, allocation
 
 
+@pytest.mark.slow
 def test_every_valid_point_of_every_order_gives_the_same_outcome(tmp_path, capsys):  # HB4
     reference = None
     compared = 0

@@ -868,6 +868,7 @@ def generated_with_rules(folder, capsys, generated_rows):
     return ledger
 
 
+@pytest.mark.slow
 @settings(max_examples=20, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(generated_rows=rows)
@@ -888,6 +889,7 @@ def test_categories_add_to_spending_with_rules(capsys, generated_rows):  # RC1
         conn.close()
 
 
+@pytest.mark.slow
 @settings(max_examples=12, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(generated_rows=rows)
@@ -1020,6 +1022,7 @@ class TestReports:  # RC1, RC2, RC3
                                    [(None, None)])
 
 
+@pytest.mark.slow
 @settings(max_examples=6, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(generated_rows=rows)

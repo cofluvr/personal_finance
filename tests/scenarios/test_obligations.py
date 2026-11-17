@@ -306,6 +306,7 @@ class TestStates:  # IB2
         assert code == 2 and "--as-of must be a date" in err
 
 
+@pytest.mark.slow
 def test_pairing_is_the_same_in_every_import_order(capsys):  # IB2, exhaustively for four files
     rows = [("b1.csv", "2026-01-05"), ("b2.csv", "2026-01-06"), ("b3.csv", "2026-02-03"),
             ("b4.csv", "2026-02-08")]
@@ -360,6 +361,7 @@ def generated_ledger(ledger, seed):
     return ledger
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("seed", [1, 2, 3])
 def test_fixed_and_discretionary_add_to_spending_exactly(ledger, seed):  # IB3
     generated_ledger(ledger, seed)

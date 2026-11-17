@@ -1057,6 +1057,7 @@ checking_rows = st.lists(st.tuples(st.integers(1, 9999), st.booleans(), st.integ
                                    st.integers(1, 26)), min_size=1, max_size=6)
 
 
+@pytest.mark.slow
 @settings(max_examples=8, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(rows=checking_rows, decision=st.sampled_from(("open", "reject", "confirm")),
@@ -1075,6 +1076,7 @@ def test_a_restored_ledger_shows_everything_alike_over_generated_ledgers(  # R4
         assert any(out for code, out, _ in shown.values() if code == 0)
 
 
+@pytest.mark.slow
 def test_a_restored_real_ledger_shows_everything_alike_with_its_originals(  # R4
         vault, backups_folder, capsys, tmp_path):
     ledger = RealBackupLedger(vault, capsys)

@@ -322,6 +322,7 @@ def assert_units_hold(conn, results, live_before):
 BROKEN = File("not,the,header\n", SYNTHETIC_CHECKING_V1)
 
 
+@pytest.mark.slow
 @settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(
     files=st.lists(st.one_of(checking_file(), st.just(BROKEN)), min_size=1, max_size=5),

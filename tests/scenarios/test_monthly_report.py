@@ -144,6 +144,7 @@ def generated_ledger(folder, capsys, checking_rows, savings_days, one_sided):
     return ledger
 
 
+@pytest.mark.slow
 @settings(max_examples=40, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(checking_rows=rows, savings_days=st.lists(st.integers(1, 89), max_size=4),

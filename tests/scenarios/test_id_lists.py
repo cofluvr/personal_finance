@@ -116,6 +116,7 @@ def test_run_summary_of_more_files_than_the_limit(small_ledger):
     assert (summary.final_transactions, summary.consolidated_records) == (3, 2)
 
 
+@pytest.mark.slow
 def test_totals_with_more_active_separations_than_the_limit(conn, tmp_path):
     """L1 and L3: 32,767 active separations, each pairing a transaction of its own with one shared
     transaction, so that leaving out any of them changes the count, and one undone separation of
@@ -153,6 +154,7 @@ def test_totals_with_more_active_separations_than_the_limit(conn, tmp_path):
     assert account_movement(conn, "out").transactions_separated == PAST_THE_LIMIT + 1
 
 
+@pytest.mark.slow
 def test_writing_transfer_effects_for_more_bound_transactions_than_the_limit(conn, tmp_path):
     """L3: 32,767 applied one-sided transfers, each binding one transaction, all read by one write.
     They stand in for matches, whose sides SQLite inserts in time quadratic in an account's

@@ -1,8 +1,9 @@
 import socket
 
 import pytest
+from fresh_ledger import create_fresh_ledger
 
-from personal_finance.db.migrate import connect, create_database
+from personal_finance.db.migrate import connect
 
 
 class NetworkBlocked(RuntimeError):
@@ -24,8 +25,9 @@ def no_network(monkeypatch):
 
 @pytest.fixture
 def db_path(tmp_path):
+    """A migrated ledger copied from a template. Tests of creation itself override this."""
     path = tmp_path / "ledger.db"
-    create_database(path)
+    create_fresh_ledger(path)
     return path
 
 

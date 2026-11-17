@@ -6,6 +6,8 @@ import tempfile
 from itertools import permutations
 from pathlib import Path
 
+import pytest
+from fresh_ledger import create_fresh_ledger
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 from ledger_view import active_constraints, semantic_view
@@ -108,7 +110,7 @@ def replay(files, decide_after=None, undo=False, decide=reject_first_and_second)
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
         path = root / "ledger.db"
-        create_database(path)
+        create_fresh_ledger(path)
         conn = connect(path)
         conn.execute(
             "INSERT INTO account (id, display_name, account_type) VALUES ('acct', 'a', 'checking')"
@@ -196,6 +198,7 @@ def valid_points(order):
     return st.integers(max(order.index(FIRST), order.index(SECOND)) + 1, len(order))
 
 
+@pytest.mark.slow
 @settings(
     max_examples=150,
     deadline=None,
@@ -273,6 +276,7 @@ def test_a_confirmation_and_a_rejection_in_either_order():  # C15
     assert relations == ["different_event", "same_event"]
 
 
+@pytest.mark.slow
 @settings(
     max_examples=100,
     deadline=None,
@@ -385,6 +389,7 @@ def merged_points(order):
     return st.integers(max(order.index(MERGE_A), order.index(MERGE_B)) + 1, len(order))
 
 
+@pytest.mark.slow
 @settings(
     max_examples=100,
     deadline=None,

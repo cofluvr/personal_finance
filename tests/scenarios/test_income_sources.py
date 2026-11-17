@@ -414,6 +414,7 @@ FILES = {
 }
 
 
+@pytest.mark.slow
 def test_pairing_is_the_same_in_every_import_order(capsys):  # IA4, exhaustively for four files
     found = set()
     for order in itertools.permutations(sorted(FILES)):
