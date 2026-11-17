@@ -18,6 +18,7 @@ KIND = re.compile(r"[a-z]{1,2}")
 # Each kind and the constant holding its version. Each later slice adds its own (G5's table).
 REGISTRY = {
     "a": "ATTRIBUTION_REVISION_VERSION",
+    "al": "LINK_REVISION_VERSION",
     "b": "OBSERVATION_REVISION_VERSION",
     "bp": "BUDGET_REVISION_VERSION",
     "c": "CORRECTION_REVISION_VERSION",

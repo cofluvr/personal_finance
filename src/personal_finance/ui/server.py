@@ -29,6 +29,7 @@ from personal_finance.reports.report_text import (
     document_list_lines,
     budget_report_lines,
     funds_report_lines,
+    net_worth_report_lines,
     household_report_lines,
     income_report_lines,
     member_choices,
@@ -80,6 +81,7 @@ NAVIGATION = (
     ("/income", "Income"),
     ("/budget", "Budget"),
     ("/funds", "Funds"),
+    ("/net-worth", "Net worth"),
     ("/documents", "Import results"),
     ("/transactions", "Transactions"),
     ("/review", "Review queue"),
@@ -94,6 +96,7 @@ PAGE_PARAMETERS = {
     "/income": {"account", "from", "to", "as_of"},
     "/budget": {"month", "member", "as_of"},
     "/funds": {"as_of"},
+    "/net-worth": {"as_of", "member"},
     "/documents": set(),
     "/transactions": set(),
     "/review": set(),
@@ -260,6 +263,8 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return self.answer_budget(conn, parameters)
         if path == "/funds":
             return self.answer_funds(conn, parameters)
+        if path == "/net-worth":
+            return self.answer_net_worth(conn, parameters)
         first_month = validated_month("from", parameters.get("from") or None)
         last_month = validated_month("to", parameters.get("to") or None)
         if first_month and last_month and first_month > last_month:
@@ -327,6 +332,24 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         if as_of is None:
             return self.send_page(200, "Funds report", notice=CHOOSE_AS_OF, form=form)
         self.send_page(200, "Funds report", funds_report_lines(conn, as_of), form=form)
+
+    def answer_net_worth(self, conn, parameters):
+        """Net worth as of the date the page is given, else today in the household's timezone,
+        for the household or one member by ID (G7)."""
+        member = parameters.get("member") or None
+        names = dict(member_choices(conn))
+        if member is not None and (not member.isdigit() or int(member) not in names):
+            return self.send_page(400, "Bad address", notice=BAD_ADDRESS)
+        member_id = None if member is None else int(member)
+        text = parameters.get("as_of") or None
+        form = net_worth_form(conn, member_id, text)
+        as_of = (household_today_if_set(conn) if text is None
+                 else date.fromisoformat(checked_as_of(text)))
+        if as_of is None:
+            return self.send_page(200, "Net worth", notice=CHOOSE_AS_OF, form=form)
+        lines = net_worth_report_lines(conn, as_of.isoformat(),
+                                       None if member_id is None else names[member_id])
+        self.send_page(200, "Net worth", lines, form=form)
 
     def send_page(self, status, heading, lines=(), *, notice="", form="", after="",
                   extra_headers=()):
@@ -444,6 +467,19 @@ def budget_form(conn, month, member_id, as_of) -> str:
             '<label>Month <input name="month" placeholder="YYYY-MM" size="8" '
             f'value="{escaped(month or "")}"></label>'
             f'<label> Member <select name="member">{"".join(members)}</select></label>'
+            '<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+            f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
+
+
+def net_worth_form(conn, member_id, as_of) -> str:
+    """A form that reloads the net worth page by GET: the household or a member, and the as-of
+    date."""
+    members = ['<option value="">Household</option>']
+    for choice_id, name in member_choices(conn):
+        selected = " selected" if choice_id == member_id else ""
+        members.append(f'<option value="{choice_id}"{selected}>{escaped(name)}</option>')
+    return ('<form method="get" action="/net-worth">'
+            f'<label>Member <select name="member">{"".join(members)}</select></label>'
             '<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
             f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
 

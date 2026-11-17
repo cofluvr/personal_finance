@@ -1665,7 +1665,7 @@ and a monthly or percentage goal shows "no target".
 
 ---
 
-## D-071 M15 plan: net worth and loans — Approved
+## D-071 M15 plan: net worth and loans — Approved, M15.1 built
 
 M15 meets:
 
@@ -1909,6 +1909,38 @@ differs from its spending attribution; the payoff plan's extra amount, or the de
 | LC2 | With breakdowns, D-056's groups add to net movement exactly by amount, Spending rises by exactly the applied interest and fees, Confirmed transfers fall by the same, and the category line moves with them. D-055's warning is withdrawn only where a breakdown applies |
 | LC3 | Without breakdowns, `totals`, `report monthly` and `report household` are byte for byte as before. `r14`, `t12`, `d11` and `c7` keep every digest, with `lb1` pinned |
 | LC4 | `--loans` asserts its counts and records its figures, `totals` among them, under G9. Every earlier criterion still passes |
+
+
+**How M15.1 was implemented** (built on 2026-11-16, within the approved plan):
+
+- **Migration 0029** first, in its own commit (`8d93ec7`): `account_link` (both sides loans by
+  trigger, never itself) and its events, with G10's tests in `test_link_migration.py`.
+- **`planning/net_worth.py`:** valuations at each account's latest observation on or before
+  `as_of` (M14.1's `latest_observation`), point 2's counting rule as a pure function, the
+  mixed-date accounts (every counted one when they span more than 31 days, else those older than
+  31 days at `as_of`), and the link writes. `al1` covers the operation, the aggregate, to unlink
+  the subaccount, and the latest observation of the aggregate and of each account linked to it,
+  whose keys name its links.
+- **Commands:** `pf account links` (beyond D-071's list, as `fund preview`: it shows each loan's
+  link and unlink tokens), `pf account link`, `pf account unlink`, and `pf report net-worth
+  [--as-of] [--member]` with its read-only `/net-worth` page.
+- **Choices, for the owner's review:**
+  - **A valued subaccount of an unvalued aggregate, beside an unvalued subaccount,** is "not
+    counted: aggregate not valued", so the debt is not counted in part. A subaccount with no
+    observation under a valued aggregate is "not counted: aggregate valued".
+  - **Retirement and investment history** is every active observation through `as_of` and, by
+    month of the money out, the applied `investment_contribution` transfers into the account:
+    matches whose inflow is there, and one-sided transfers naming it.
+  - **By member** divides each counted valuation by the account's default attribution (M11), a
+    shared account by the share through `allocate_cents`. Every member's part and the
+    unattributed part are listed, adding exactly to net worth.
+  - **`--from-statement` is not built** (the plan's correction): nothing stores a statement
+    balance.
+- **Breaks (G12):** 18 applied, 13 caught on the first run. Three were test gaps, closed and
+  caught on the rerun: one subaccount's unlink token used for another, a member's part from an
+  account not counted, and a matched contribution into another account. Two were equivalent code,
+  both redundant and removed: `al1`'s separate list of links (its observations already name
+  them), and skipping uncounted accounts in member parts (they count 0.00).
 
 ---
 

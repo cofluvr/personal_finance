@@ -703,8 +703,8 @@ between slices. No security control changes. `r`, `t`, `d` and `c` move once, in
 | Slice | Scope | Status |
 |---|---|---|
 | M14.1 | Funds, assignments and priority: migration 0027, `pf fund preview`, `add`, `terms`, `undo`, `show`, `assign`, `unassign`, `priority`, `pf funds`, the four kinds' required amounts, the assignability guard, planned contributions, `fu1`, `fa1` | Accepted 2026-11-16 |
-| M14.2 | Consumption and the tax reserve: migration 0028, `review consume`, tax payments and releases, `fc1`, `r13`, `t11`, `d10`, `c6` | Not started |
-| M14.3 | `pf report funds`, extra income and unused capacity by priority, "paid from reserves", the page, the restore test, `--funds` | Not started |
+| M14.2 | Consumption and the tax reserve: migration 0028, `review consume`, tax payments and releases, `fc1`, `r13`, `t11`, `d10`, `c6` | Built, for review |
+| M14.3 | `pf report funds`, extra income and unused capacity by priority, "paid from reserves" (built in M14.2), the page, the restore test, `--funds` | Built, for review |
 
 ### M14.1 acceptance criteria
 
@@ -738,6 +738,37 @@ between slices. No security control changes. `r`, `t`, `d` and `c` move once, in
 
 Automatic consumption matchers, automatic assignments, per-source extra overrides, goals in net
 worth (M15), safe to spend (M16) and goals in snapshots (M19), as D-070 lists them.
+
+## M15 plan
+
+Approved by the owner on 2026-11-10 as D-071, with A to H, in
+[decisions-m12-m21.md](decisions-m12-m21.md), and its implementation plan on 2026-11-16 under
+D-070 ("M14.2 to M15.3: the implementation plan"), with `balance record --from-statement` not
+built. No security control changes. `r`, `t`, `d` and `c` move once, in M15.3.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M15.1 | Net worth: migration 0029, `pf account links`, `link`, `unlink`, `al1`, valuation dates and warnings, retirement and investment history, `pf report net-worth [--member]`, its page | Built, for review |
+| M15.2 | Loan terms and planning: migration 0030, rate and payment periods, actual against schedule, projections, payoff orders, `pf report loans`, `loan project`, `loan payoff`, `lt1` | Not started |
+| M15.3 | Principal and interest: migration 0031, `review breakdown`, interest in Spending by amount, `r14`, `t12`, `d11`, `c7`, `lb1`, `--loans` | Not started |
+
+### M15.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| LA1 | Migration 0029 meets G10. `account link` refuses non-loans, two levels, a second aggregate and a stale `al1` |
+| LA2 | Net worth adds valuations exactly, with liabilities negative. An unvalued account is listed and not counted, and the incompleteness and mixed-date warnings fire exactly at 31 days |
+| LA3 | Subaccounts and aggregate never both counted, over generated link and observation sets, with each branch of point 2 produced |
+| LA4 | `--member` parts plus unattributed equal net worth exactly. (`--from-statement` is not built: no statement balance is stored) |
+| LA5 | `report net-worth` and its page agree line for line, read-only |
+
+M15.2's and M15.3's criteria, LB1 to LC4, move here when each starts.
+
+### Not in M15
+
+Lender-exact accrual, fees inside projections, statement balances read automatically, investment
+performance or prices, a separate ownership table, and loans in scenarios (M18), as D-071 lists
+them.
 
 ## Backlog benchmarks
 

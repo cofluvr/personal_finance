@@ -61,6 +61,7 @@ from personal_finance.reconcile.transfer_effects import (
 from personal_finance.reports.coverage_evidence import load_document_coverage
 from personal_finance.reports.budget_report import budget_report
 from personal_finance.reports.fund_report import funds_report
+from personal_finance.reports.net_worth_report import net_worth
 from personal_finance.reports.income_report import income_report
 from personal_finance.reports.household import (
     ONE_MEMBER,
@@ -1824,4 +1825,59 @@ def funds_report_lines(conn, as_of) -> ReportLines:
     out.add("Disclosures:")
     out.add(f"  Accounts holding more in funds than their balance observed: {len(not_backed)}")
     out.add(f"  Accounts whose balance was observed more than 31 days before: {len(provisional)}")
+    return out
+
+
+NET_WORTH_NOTICE = (
+    "Net worth from balance observations, never transaction totals: each account's latest "
+    "observation on or before the date, what is owed negative. An account with none is not "
+    "valued, never counted as zero."
+)
+
+
+def net_worth_report_lines(conn, as_of, member_name=None) -> ReportLines:
+    """pf report net-worth's lines, which its UI page renders (D-071 points 1 to 3)."""
+    report = net_worth(conn, as_of, member_name)
+    out = ReportLines()
+    out.add(f"Net worth as of {report.as_of}")
+    out.add(NET_WORTH_NOTICE)
+    for valuation in report.valued:
+        account = f"  Account {shown(valuation.name)} ({valuation.account_type.replace('_', ' ')})"
+        if valuation.observation is None:
+            out.add(f"{account}: not valued, no observation on or before {report.as_of}")
+            continue
+        words = "" if valuation.how == "counted" else f", {valuation.how}"
+        out.add(f"{account}: {format_cents(valuation.observation.balance_cents)}, observed "
+                f"{valuation.observation.observed_on}{words}")
+    incomplete = ""
+    if report.not_valued:
+        count = len(report.not_valued)
+        incomplete = (f", incomplete: {count} {'account' if count == 1 else 'accounts'} not "
+                      "valued")
+    out.add(f"Net worth, observed: {format_cents(report.total_cents)}{incomplete}")
+    if report.not_valued:
+        out.add("  Not valued: " + ", ".join(shown(name) for name in report.not_valued))
+    if report.mixed_dates:
+        out.add("  Mixed dates: the valuations counted span more than 31 days, or some are "
+                "older than 31 days: " + ", ".join(shown(name) for name in report.mixed_dates))
+    if report.histories:
+        out.add("Retirement and investment history:")
+        for history in report.histories:
+            out.add(f"  Account {shown(history.name)} ({history.account_type})")
+            observed = ", ".join(f"{day} {format_cents(cents)}"
+                                 for day, cents in history.observations) or "none"
+            out.add(f"    Observed: {observed}")
+            contributed = ", ".join(f"{month} {format_cents(cents)} ({count})"
+                                    for month, cents, count in history.contributions) or "none"
+            out.add(f"    Contributions in, applied investment contributions, actual: "
+                    f"{contributed}")
+        out.add("  Payroll contributions never appear as take-home deposits, so nothing here is "
+                "subtracted twice.")
+    if member_name is not None:
+        mine = next(part for part in report.parts if part.name == member_name)
+        out.add(f"Net worth of {shown(member_name)}, by account attribution, observed: "
+                f"{format_cents(mine.cents)}")
+        out.add("  Every part, by account attribution, adding to net worth:")
+        for part in report.parts:
+            out.add(f"    {shown(part.name)}: {format_cents(part.cents)}")
     return out

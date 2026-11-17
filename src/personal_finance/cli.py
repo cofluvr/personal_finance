@@ -123,6 +123,14 @@ from personal_finance.planning.funds import (
     undo_fund,
 )
 from personal_finance.planning.fund_releases import release_tax_reserve, undo_release
+from personal_finance.planning.net_worth import LINK as ACCOUNT_LINK
+from personal_finance.planning.net_worth import UNLINK as ACCOUNT_UNLINK
+from personal_finance.planning.net_worth import (
+    link_account,
+    link_revision,
+    load_links,
+    unlink_account,
+)
 from personal_finance.planning.settings import (
     active_setting,
     household_timezone,
@@ -277,6 +285,7 @@ from personal_finance.reports.report_text import (
     fund_standing_lines,
     fund_terms_sentence,
     funds_report_lines,
+    net_worth_report_lines,
     holding_lines,
     budget_report_lines,
     income_report_lines,
@@ -529,6 +538,19 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--type", required=True, choices=ACCOUNT_TYPES)
     add.add_argument("--institution")
     add.add_argument("--last4")
+    links = command("links", account_commands, handler=run_account_links,
+                    help="list loan accounts, their links and their link revisions")
+    link = command("link", account_commands, handler=run_account_link,
+                   help="put a loan subaccount under an aggregate loan account")
+    link.add_argument("--subaccount", required=True, help="the subaccount's name or ID")
+    link.add_argument("--aggregate", required=True, help="the aggregate's name or ID")
+    link.add_argument("--revision", required=True,
+                      help="the aggregate's link revision from account links")
+    unlink = command("unlink", account_commands, handler=run_account_unlink,
+                     help="stop a subaccount's link applying, keeping it on record")
+    unlink.add_argument("--subaccount", required=True, help="the subaccount's name or ID")
+    unlink.add_argument("--revision", required=True,
+                        help="the subaccount's unlink revision from account links")
 
     category = commands.add_parser("category", help="name the categories spending can take")
     category_commands = category.add_subparsers(dest="category_command", required=True)
@@ -1509,6 +1531,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="every fund's standing, the month's extra and its planned allocation by priority",
     )
     funds_report_command.add_argument("--as-of", help=TODAY_HELP)
+    net_worth_command = command(
+        "net-worth", report_commands, handler=run_report_net_worth,
+        help="net worth from balance observations, with retirement and investment history",
+    )
+    net_worth_command.add_argument("--as-of", help=TODAY_HELP)
+    net_worth_command.add_argument("--member",
+                                   help="one member's part by account attribution, a name from "
+                                        "household members")
     household_view = household.add_mutually_exclusive_group()
     household_view.add_argument("--member", help="one member's parts, a name from household members")
     household_view.add_argument("--shared", action="store_true",
@@ -1663,6 +1693,54 @@ def run_account_add(args) -> int:
     except sqlite3.IntegrityError:
         raise CommandError("account name is already used, or last4 is not four digits") from None
     print(f"Added account {args.name}: {account_id}")
+    return 0
+
+
+def run_account_links(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    loans = conn.execute("SELECT id, display_name FROM account WHERE account_type = 'loan' "
+                         "ORDER BY display_name").fetchall()
+    names = dict(loans)
+    aggregate_of = {link.subaccount_id: link.aggregate_id for link in load_links(conn)}
+    for account_id, name in loans:
+        if account_id in aggregate_of:
+            print(f"Loan {shown(name)} ({account_id}): subaccount of "
+                  f"{shown(names[aggregate_of[account_id]])}")
+            print(f"  Unlink revision: "
+                  f"{link_revision(conn, ACCOUNT_UNLINK, aggregate_of[account_id], account_id)}")
+            continue
+        under = sorted(names[sub] for sub, aggregate in aggregate_of.items()
+                       if aggregate == account_id)
+        print(f"Loan {shown(name)} ({account_id}): "
+              + ("aggregate of " + ", ".join(shown(sub) for sub in under) if under
+                 else "no link"))
+        print(f"  Link revision, as aggregate: {link_revision(conn, ACCOUNT_LINK, account_id)}")
+    print(f"Loans: {len(loans)}, links: {len(aggregate_of)}")
+    return 0
+
+
+def run_account_link(args) -> int:
+    conn = open_ledger(args.db)
+    subaccount, aggregate = find_account(conn, args.subaccount), find_account(conn, args.aggregate)
+    link_id = link_account(conn, subaccount, aggregate, args.revision)
+    print(f"Link {link_id} recorded: {shown(args.subaccount)} is a subaccount of "
+          f"{shown(args.aggregate)}. Net worth counts the debt once.")
+    return 0
+
+
+def run_account_unlink(args) -> int:
+    conn = open_ledger(args.db)
+    link = unlink_account(conn, find_account(conn, args.subaccount), args.revision)
+    print(f"Link {link.link_id} undone. It stays on record.")
+    return 0
+
+
+def run_report_net_worth(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    if args.member is not None and load_household(conn).find_member(args.member) is None:
+        raise CommandError("household member not found. Run household members.")
+    print_report(net_worth_report_lines(conn, as_of_date(conn, args.as_of).isoformat(),
+                                       args.member))
     return 0
 
 
