@@ -94,6 +94,32 @@ from personal_finance.planning.budgets import (
     undo_plan,
     undo_revision,
 )
+from personal_finance.planning.funds import (
+    ADD as FUND_ADD,
+    ASSIGNABLE_ACCOUNT_TYPES,
+    EMERGENCY,
+    FUND_NOT_FOUND,
+    TAX as TAX_FUND,
+    TERMS as FUND_TERMS,
+    UNDO as FUND_UNDO,
+    UNASSIGN,
+    FundRequest,
+    TermsOptions,
+    account_holding,
+    add_fund,
+    assign,
+    assignment_operation,
+    change_terms as change_fund_terms,
+    checked_fund,
+    fund_revision,
+    load_assignments,
+    load_funds,
+    priority_revision,
+    assignment_revision,
+    set_priority,
+    unassign,
+    undo_fund,
+)
 from personal_finance.planning.settings import (
     active_setting,
     household_timezone,
@@ -176,6 +202,7 @@ from personal_finance.reports.balances import (
     load_observation,
     observation_revision,
 )
+from personal_finance.reports.fund_standing import funds_view
 from personal_finance.reports.income_evidence import TERMS as INCOME_TERMS
 from personal_finance.reports.income_evidence import UNDO as INCOME_UNDO
 from personal_finance.reports.income_evidence import preview_outlook, source_outlook
@@ -650,6 +677,78 @@ def build_parser() -> argparse.ArgumentParser:
     budget_undo.add_argument("--revision", required=True,
                              help="the undo revision from budget show")
     budget_undo.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
+
+    funds_command = command(
+        "funds", handler=run_funds,
+        help="list funds with what each needs, the accounts holding them and the priority")
+    funds_command.add_argument("--as-of", help=TODAY_HELP)
+    fund = commands.add_parser(
+        "fund", help="state goals, the emergency fund, reserves and the tax reserve, and assign "
+                     "account balances to them")
+    fund_commands = fund.add_subparsers(dest="fund_command", required=True)
+
+    def fund_terms_arguments(sub):
+        sub.add_argument("--monthly", help="a goal's planned contribution a month, such as 500.00")
+        sub.add_argument("--percent-of-income", dest="percent_of_income",
+                         help="a goal's percentage of baseline income a month, such as 10")
+        sub.add_argument("--target", help="a goal's or reserve's target amount")
+        sub.add_argument("--by", help="a goal's last month for its target, YYYY-MM")
+        sub.add_argument("--minimum", help="the emergency fund's minimum amount held")
+        sub.add_argument("--months", help="the emergency fund's months of fixed commitments held")
+        sub.add_argument("--due", help="a reserve's due date, YYYY-MM-DD")
+        sub.add_argument("--cadence",
+                         help="a reserve's recurrence, annual:MM-DD or every:N-months:D")
+        sub.add_argument("--anchor", help="an every-N-months reserve's first due date")
+        sub.add_argument("--percent", help="the tax reserve's percentage of tax-eligible income")
+        sub.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
+
+    def fund_arguments(sub):
+        sub.add_argument("--name", required=True, help="the fund's name")
+        sub.add_argument("--kind", required=True, help="goal, emergency, reserve or tax")
+        sub.add_argument("--effective-from", help="the first day its terms apply, else --as-of")
+        fund_terms_arguments(sub)
+
+    fund_preview = command("preview", fund_commands, handler=run_fund_preview,
+                           help="show a fund and its revision, writing nothing")
+    fund_arguments(fund_preview)
+    fund_add = command("add", fund_commands, handler=run_fund_add,
+                       help="record a fund whose preview is still current")
+    fund_arguments(fund_add)
+    fund_add.add_argument("--revision", required=True, help="the revision from fund preview")
+    fund_terms = command("terms", fund_commands, handler=run_fund_terms,
+                         help="change a fund's terms from a date, keeping earlier months")
+    fund_terms.add_argument("fund_id", help="a fund ID from funds")
+    fund_terms.add_argument("--effective-from", required=True,
+                            help="the first day the new terms apply")
+    fund_terms_arguments(fund_terms)
+    fund_terms.add_argument("--revision", required=True,
+                            help="the terms revision from fund show")
+    fund_undo = command("undo", fund_commands, handler=run_fund_undo,
+                        help="stop a fund applying, keeping it on record")
+    fund_undo.add_argument("fund_id", help="a fund ID from funds")
+    fund_undo.add_argument("--revision", required=True, help="the undo revision from fund show")
+    fund_show = command("show", fund_commands, handler=run_fund_show,
+                        help="show a fund, what it needs, its accounts and its revisions")
+    fund_show.add_argument("fund_id", help="a fund ID from funds")
+    fund_show.add_argument("--as-of", help=TODAY_HELP)
+    for name, handler, words in (
+            ("assign", run_fund_assign, "assign part of an account's observed balance to a fund"),
+            ("unassign", run_fund_unassign, "release a fund's assignment on an account")):
+        sub = command(name, fund_commands, handler=handler, help=words)
+        sub.add_argument("--fund", required=True, help="a fund ID from funds")
+        sub.add_argument("--account", required=True, help="the account's name or ID")
+        if name == "assign":
+            sub.add_argument("--amount", required=True, help="the amount, such as 1200.00")
+        sub.add_argument("--as-of", help=f"{TODAY_HELP}: the balance observed by then")
+        sub.add_argument("--revision", required=True,
+                         help="the account's assignment revision from fund show")
+    fund_priority = command("priority", fund_commands, handler=run_fund_priority,
+                            help="set the order in which funds take extra income, as a plan")
+    fund_priority.add_argument("fund_ids", nargs="*", metavar="FUND_ID",
+                               help="goals, reserves and the emergency fund, first first; none "
+                                    "clears the list")
+    fund_priority.add_argument("--revision", required=True,
+                               help="the priority revision from funds")
 
     obligation = commands.add_parser(
         "obligation", help="state recurring obligations and see their payments against their "
@@ -4222,6 +4321,247 @@ def run_budget_undo(args) -> int:
     print(f"Budget plan {args.plan_id} undone. It stays on record.")
     if plan.supersedes_id:
         print(f"  Plan {plan.supersedes_id}, which it superseded, applies again.")
+    return 0
+
+
+FUND_STATE_WORDS = {"funded": "funded", "underfunded": "underfunded",
+                    "in_progress": "in progress", "not_started": "not started"}
+TAX_LABEL = "a planning reserve, not a calculated tax liability"
+
+
+def fund_terms_sentence(fund, terms) -> str:
+    """A terms row as words, each figure labelled with what it is (G1)."""
+    if terms.shape == "monthly":
+        return f"{shown_amount(terms.amount_cents)} a month, planned"
+    if terms.shape == "percent" and fund.kind == TAX_FUND:
+        return f"{format_percent(terms.basis_points)} of tax-eligible income received, {TAX_LABEL}"
+    if terms.shape == "percent":
+        return f"{format_percent(terms.basis_points)} of baseline income a month, planned"
+    if terms.shape == "target_by":
+        return f"target {shown_amount(terms.amount_cents)} by the end of {terms.by_month}, planned"
+    if terms.shape == "minimum":
+        return f"minimum {shown_amount(terms.amount_cents)} held, required"
+    if terms.shape == "months":
+        return f"{terms.month_count} months of fixed commitments held, required"
+    if terms.shape == "due":
+        return f"target {shown_amount(terms.amount_cents)} due {terms.due_date}, planned"
+    return (f"target {shown_amount(terms.amount_cents)} due "
+            f"{cadence_spec(terms.cadence, terms.anchor)} from {terms.anchor}, planned")
+
+
+def print_fund_standing(view) -> None:
+    """A fund's figures as of the date, each labelled planned, required or assigned (G1)."""
+    fund, standing = view.fund, view.standing
+    if standing.state == "not_started":
+        print(f"  State: not started, its terms apply from {fund.terms[0].effective_from}")
+        return
+    if view.baseline_income_cents is not None:
+        print(f"  Baseline income this month, planned: {shown_amount(view.baseline_income_cents)}")
+    if view.monthly_fixed_commitments_cents is not None:
+        print(f"  Fixed commitments a month, planned: "
+              f"{shown_amount(view.monthly_fixed_commitments_cents)}")
+    if view.tax_accrual is not None:
+        accrual = view.tax_accrual
+        print(f"  Tax reserve, {TAX_LABEL}: accrued {shown_amount(accrual.cents)} from "
+              f"{accrual.occurrences} received {'occurrence' if accrual.occurrences == 1 else 'occurrences'}, "
+              "paid 0.00, released 0.00")
+    if standing.required_held_cents is not None:
+        print(f"  Required held: {shown_amount(standing.required_held_cents)}")
+    accounts = ", ".join(f"{shown(name)} {shown_amount(cents)}"
+                         for name, cents in view.assigned_by_account)
+    print(f"  Assigned: {shown_amount(standing.assigned_cents)}"
+          + (f" ({accounts})" if accounts else ""))
+    if standing.due is not None and standing.outstanding_cents:
+        if standing.months_left:
+            print(f"  Outstanding: {shown_amount(standing.outstanding_cents)}, due {standing.due}, "
+                  f"{standing.months_left} {'month' if standing.months_left == 1 else 'months'} "
+                  "left including it")
+        else:
+            print(f"  Outstanding: {shown_amount(standing.outstanding_cents)}, due {standing.due}, "
+                  "which has passed: all of it is needed now")
+    if standing.planned_contribution_cents is not None:
+        print(f"  Planned contribution this month: "
+              f"{shown_amount(standing.planned_contribution_cents)}")
+    if standing.required_held_cents is not None and standing.outstanding_cents:
+        what = "Restoration recommended" if fund.kind == EMERGENCY else "To assign"
+        print(f"  {what}, planned: {shown_amount(standing.outstanding_cents)}")
+    print(f"  State: {FUND_STATE_WORDS[standing.state]}")
+    if view.not_backed_on:
+        print("  Assignment not backed: "
+              + ", ".join(shown(name) for name in view.not_backed_on)
+              + " holds more in funds than its balance observed")
+    if view.provisional_on:
+        print("  Provisional: the balance of "
+              + ", ".join(shown(name) for name in view.provisional_on)
+              + " was observed more than 31 days before")
+
+
+def print_holding(holding, indent="  ") -> None:
+    observation = holding.observation
+    if observation is None:
+        print(f"{indent}Account {shown(holding.account_name)}: no balance observation on or "
+              f"before {holding.as_of}, assigned {shown_amount(holding.assigned_cents)}")
+    else:
+        print(f"{indent}Account {shown(holding.account_name)}: balance observed "
+              f"{shown_amount(observation.balance_cents)} on {observation.observed_on}, assigned "
+              f"{shown_amount(holding.assigned_cents)}, unassigned "
+              f"{shown_amount(max(0, holding.unassigned_cents))}")
+    if holding.over_assigned_cents:
+        print(f"{indent}  Over-assigned by {shown_amount(holding.over_assigned_cents)}: new "
+              "assignments here are refused until assignments are released or a higher balance "
+              "is observed")
+    if holding.provisional:
+        print(f"{indent}  Provisional: observed more than 31 days before {holding.as_of}")
+
+
+def fund_request(args) -> FundRequest:
+    return FundRequest(args.name, args.kind, terms_options(args), args.effective_from)
+
+
+def terms_options(args) -> TermsOptions:
+    return TermsOptions(args.monthly, args.percent_of_income, args.target, args.by, args.minimum,
+                        args.months, args.due, args.cadence, args.anchor, args.percent)
+
+
+def run_fund_preview(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    fund = checked_fund(conn, fund_request(args), as_of_text(conn, args.as_of))
+    print(f"Fund preview: {shown(fund.name)}, {fund.kind}")
+    print(f"  Terms: from {fund.terms[0].effective_from}, {fund_terms_sentence(fund, fund.terms[0])}")
+    print(f"Revision: {fund_revision(FUND_ADD, fund)}")
+    print("To record this fund, run fund add with the same options and --revision.")
+    return 0
+
+
+def run_fund_add(args) -> int:
+    conn = open_ledger(args.db)
+    fund_id = add_fund(conn, fund_request(args), as_of_text(conn, args.as_of), args.revision)
+    print(f"Fund {fund_id} recorded: {shown(args.name)}, {args.kind}")
+    print("Nothing is assigned to it. Assign what an account already holds with fund assign.")
+    return 0
+
+
+def run_fund_terms(args) -> int:
+    conn = open_ledger(args.db)
+    fund = next((fund for fund in load_funds(conn) if fund.fund_id == args.fund_id), None)
+    terms = change_fund_terms(conn, args.fund_id, terms_options(args), args.effective_from,
+                              as_of_text(conn, args.as_of), args.revision)
+    print(f"Fund {args.fund_id} terms recorded: from {terms.effective_from}, "
+          f"{fund_terms_sentence(fund, terms)}")
+    return 0
+
+
+def run_fund_undo(args) -> int:
+    conn = open_ledger(args.db)
+    undo_fund(conn, args.fund_id, args.revision)
+    print(f"Fund {args.fund_id} undone. It stays on record.")
+    return 0
+
+
+def fund_names(funds) -> dict:
+    return {fund.fund_id: fund.name for fund in funds}
+
+
+def run_funds(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    view = funds_view(conn, as_of_date(conn, args.as_of))
+    print(f"Funds as of {view.as_of}")
+    for fund_view in view.funds:
+        fund = fund_view.fund
+        print(f"Fund {fund.fund_id}: {shown(fund.name)}, {fund.kind}, {fund.state}")
+        if not fund.applies:
+            continue
+        terms = fund.terms_on(view.as_of) or fund.terms[0]
+        print(f"  Terms: from {terms.effective_from}, {fund_terms_sentence(fund, terms)}")
+        print_fund_standing(fund_view)
+    if view.holdings:
+        print("Accounts holding funds:")
+        for holding in view.holdings:
+            print_holding(holding)
+    names = fund_names(load_funds(conn))
+    print("Priority, for extra income and unused capacity, planned: "
+          + (", ".join(f"{position}. {shown(names[fund_id])} ({fund_id})"
+                       for position, fund_id in enumerate(view.priority, start=1)) or "none"))
+    print(f"  Priority revision: {priority_revision(view.priority)}")
+    active = sum(fund_view.fund.applies for fund_view in view.funds)
+    print(f"Funds: {len(view.funds)}, {active} active")
+    if view.funds:
+        print("To see a fund's terms, accounts and revisions, run fund show.")
+    return 0
+
+
+def run_fund_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    view = funds_view(conn, as_of_date(conn, args.as_of))
+    fund_view = next((fund_view for fund_view in view.funds
+                      if fund_view.fund.fund_id == args.fund_id), None)
+    if fund_view is None:
+        raise CommandError(FUND_NOT_FOUND.replace(" Nothing was changed.", ""))
+    fund = fund_view.fund
+    print(f"Fund {fund.fund_id}")
+    print(f"  Name: {shown(fund.name)}")
+    print(f"  Kind: {fund.kind}")
+    print(f"  Status: {fund.state}")
+    print(f"  Made: {fund.created_at}")
+    for terms in fund.terms:
+        print(f"  Terms from {terms.effective_from}: {fund_terms_sentence(fund, terms)}")
+    if not fund.applies:
+        print(f"  Undone: {fund.undone_at}. It stays on record and no longer applies.")
+        return 0
+    print(f"As of {view.as_of}")
+    print_fund_standing(fund_view)
+    assignments = load_assignments(conn)
+    holdings = [holding for holding in view.holdings
+                if holding.account_type in ASSIGNABLE_ACCOUNT_TYPES
+                or any(held == fund.fund_id for held, _ in holding.assignments)]
+    print("Accounts:")
+    for holding in holdings:
+        print_holding(holding)
+        held = dict(holding.assignments).get(fund.fund_id)
+        operation = assignment_operation(holding, fund.fund_id)
+        if held is not None:
+            print(f"    This fund: {shown_amount(held)} assigned")
+        if operation == UNASSIGN or holding.observation is not None:
+            print(f"    Assignment revision, to {operation}: "
+                  f"{assignment_revision(holding, fund.fund_id, assignments)}")
+    if not holdings:
+        print("  none can hold a fund: add a checking, savings or investment account")
+    print(f"Terms revision: {fund_revision(FUND_TERMS, fund)}")
+    print(f"Undo revision: {fund_revision(FUND_UNDO, fund)}")
+    print("To change its terms from a date, run fund terms. To assign, run fund assign.")
+    return 0
+
+
+def run_fund_assign(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    as_of = as_of_text(conn, args.as_of)
+    assignment_id = assign(conn, args.fund, account_id, args.amount, as_of, args.revision)
+    holding = account_holding(conn, account_id, as_of)
+    print(f"Assignment {assignment_id} recorded: {shown_amount(dict(holding.assignments)[args.fund])} "
+          f"of {shown(holding.account_name)} to fund {args.fund}. No money moved: it says what "
+          "the balance already holds.")
+    print(f"  {shown(holding.account_name)} now holds {shown_amount(holding.assigned_cents)} in "
+          f"funds, {shown_amount(holding.unassigned_cents)} unassigned")
+    return 0
+
+
+def run_fund_unassign(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    released = unassign(conn, args.fund, account_id, as_of_text(conn, args.as_of), args.revision)
+    print(f"Assignment {released.assignment_id} released: {shown_amount(released.amount_cents)} "
+          f"of fund {args.fund}. It stays on record.")
+    return 0
+
+
+def run_fund_priority(args) -> int:
+    conn = open_ledger(args.db)
+    set_priority(conn, args.fund_ids, args.revision)
+    names = fund_names(load_funds(conn))
+    print("Priority recorded, planned: "
+          + (", ".join(f"{position}. {shown(names[fund_id])}"
+                       for position, fund_id in enumerate(args.fund_ids, start=1)) or "none"))
     return 0
 
 
