@@ -46,6 +46,8 @@ LEDGER_TABLES = (
     "transaction_obligation",
     "ledger_setting_key", "ledger_setting", "ledger_setting_event", "budget_plan",
     "budget_plan_member_part", "budget_plan_category", "budget_plan_event",
+    "fund", "fund_terms", "fund_event", "fund_assignment", "fund_assignment_event",
+    "fund_priority_event", "fund_priority",
 )
 
 
