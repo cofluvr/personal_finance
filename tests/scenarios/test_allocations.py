@@ -266,7 +266,7 @@ class TestRefusals:  # HB1
         transaction = single(ledger)
         make_stale(ledger)
         self.refused(ledger, STALE_ACCOUNT, transaction, "--member", "Nobody",
-                     revision="t11-0000000000000000")
+                     revision="t12-0000000000000000")
 
     def test_the_same_allocation_again(self, ledger):
         transaction = single(ledger)

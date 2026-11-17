@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from personal_finance.planning.funds import latest_observation
+from personal_finance.reconcile.breakdown_effects import parsed
 from personal_finance.planning.loans import (
     AVALANCHE,
     CUSTOM,
@@ -68,6 +69,20 @@ UNCONFIRMED_LOAN_PAYMENTS = """
                       WHERE effect.transaction_id = entry.id)"""
 
 
+# Applied breakdowns of payments confirmed into a loan: the interest and fees the lender stated
+# (D-071 point 7). They never edit a balance.
+BROKEN_DOWN_PAYMENTS = """
+    SELECT divided.breakdown FROM transaction_loan_breakdown divided
+    WHERE divided.state = 'applied' AND divided.transaction_id IN (
+        SELECT matched.outflow_transaction_id FROM transfer_match_effect matched
+        JOIN ledger_transaction inflow ON inflow.id = matched.inflow_transaction_id
+        WHERE inflow.account_id = :account
+        UNION
+        SELECT effect.transaction_id FROM one_sided_transfer_effect effect
+        JOIN one_sided_transfer statement ON statement.id = effect.one_sided_transfer_id
+        WHERE statement.counterpart_account_id = :account)"""
+
+
 @dataclass(frozen=True)
 class DuePeriod:
     due: str
@@ -84,6 +99,9 @@ class LoanView:
     periods: tuple[DuePeriod, ...]
     unconfirmed_count: int
     unconfirmed_cents: int
+    # Payments into it a breakdown divides, and their interest and fees together.
+    broken_down_count: int = 0
+    broken_down_cents: int = 0
 
 
 @dataclass(frozen=True)
@@ -128,8 +146,11 @@ def loans_view(conn: sqlite3.Connection, as_of: date) -> LoansView:
     for terms in load_loan_terms(conn).values():
         count, cents = conn.execute(UNCONFIRMED_ON_LOAN,
                                     {"account": terms.account_id, "as_of": text}).fetchone()
+        stated = [parsed(value) for (value,) in conn.execute(BROKEN_DOWN_PAYMENTS,
+                                                              {"account": terms.account_id})]
         loans.append(LoanView(terms, owed_as_of(conn, terms.account_id, text),
-                              schedule(conn, terms, as_of), count, cents))
+                              schedule(conn, terms, as_of), count, cents, len(stated),
+                              sum(interest + fees for interest, fees in stated)))
     return LoansView(text, tuple(loans),
                      tuple(conn.execute(UNCONFIRMED_LOAN_PAYMENTS, {"as_of": text}).fetchone()))
 

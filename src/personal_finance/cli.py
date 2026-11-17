@@ -184,6 +184,8 @@ from personal_finance.reconcile.record_resolutions import (
 )
 from personal_finance.reconcile.allocation_effects import AMOUNT_DIFFERS
 from personal_finance.reconcile.allocations import Stated, allocate_transaction, undo_allocation
+from personal_finance.reconcile.breakdown_effects import parsed as parsed_breakdown
+from personal_finance.reconcile.breakdowns import break_down, undo_breakdown
 from personal_finance.reconcile.consumptions import consume_transaction, undo_consumption
 from personal_finance.reconcile.household import (
     add_member,
@@ -224,6 +226,11 @@ from personal_finance.reports.balances import (
     list_observations,
     load_observation,
     observation_revision,
+)
+from personal_finance.reports.breakdown_evidence import (
+    breakdown_undo_outlook,
+    list_breakdowns,
+    load_breakdown,
 )
 from personal_finance.reports.consumption_evidence import (
     consumption_undo_outlook,
@@ -1428,6 +1435,38 @@ def build_parser() -> argparse.ArgumentParser:
     consumption_undo.add_argument(
         "--revision", required=True, help="the revision from review consumption show"
     )
+
+    breakdown = command(
+        "breakdown", review_commands, handler=run_review_breakdown,
+        help="state a loan payment's interest and fees, as the lender's statement gives them",
+    )
+    breakdown.add_argument("transaction_id", help="a transaction ID from transactions")
+    breakdown.add_argument("--account", required=True, help="account name or ID")
+    breakdown.add_argument("--interest", required=True, help="the interest, such as 57.25")
+    breakdown.add_argument("--fees", help="any fees, such as 15.00")
+    breakdown.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    breakdown.add_argument(
+        "--supersedes",
+        help="the breakdown applying to this transaction now, which this one replaces",
+    )
+    breakdown.add_argument(
+        "--supersedes-revision",
+        help="the revision from review breakdown-show for the breakdown being replaced",
+    )
+    breakdowns = command("breakdowns", review_commands, handler=run_review_breakdowns,
+                         help="list stored loan payment breakdowns")
+    breakdowns.add_argument("--account", help="account name or ID")
+    breakdown_show = command("breakdown-show", review_commands, handler=run_review_breakdown_show,
+                             help="show what a breakdown binds and what undoing it would do")
+    breakdown_show.add_argument("breakdown_id", help="a breakdown ID from review breakdowns")
+    breakdown_undo = command("breakdown-undo", review_commands, handler=run_review_breakdown_undo,
+                             help="stop a breakdown applying, keeping it on record")
+    breakdown_undo.add_argument("breakdown_id", help="a breakdown ID from review breakdowns")
+    breakdown_undo.add_argument("--account", required=True, help="account name or ID")
+    breakdown_undo.add_argument("--revision", required=True,
+                                help="the revision from review breakdown-show")
 
     transfer = review_commands.add_parser(
         "transfer", help="match, inspect or undo a transfer between two accounts"
@@ -2703,6 +2742,7 @@ def run_review_undo(args) -> int:
     print_newly_unmatched(result.newly_unsettled_matches)
     print_newly_unattributed(result.newly_unattributed_transactions)
     print_newly_unconsumed(result.newly_unconsumed_transactions)
+    print_newly_unbroken(result.newly_unbroken_down_transactions)
     print(f"  {UNDO_NOTICE}")
     return 0
 
@@ -4014,6 +4054,124 @@ def run_review_consumption_undo(args) -> int:
     print_newly_unconsumed(result.newly_unsettled_transactions)
     print(f"  {CONSUMPTION_UNDO_NOTICE}")
     return 0
+
+
+BREAKDOWN_NOTICE = (
+    "Totals, report monthly and report household count the interest and fees in spending, under "
+    "Interest and financial fees, and the principal in confirmed transfers. Matching never reads "
+    "breakdowns, and new records are not bound, but a re-export that joins this transaction "
+    "keeps the breakdown applied."
+)
+
+# How a broken-down transaction's outcome reads in an undo preview.
+BREAKDOWN_PREVIEW_STATES = {
+    None: "no breakdown",
+    FIELD_APPLIED: "broken down",
+    FIELD_IN_CONFLICT: "no breakdown applies, breakdowns disagree",
+    FIELD_BASIS_CHANGED: "no breakdown applies, basis changed",
+    "does_not_fit": "no breakdown applies, it no longer fits",
+}
+
+
+def describe_breakdown(value) -> str:
+    interest, fees = parsed_breakdown(value)
+    return f"interest {shown_amount(interest)}, fees {shown_amount(fees)}"
+
+
+def run_review_breakdown(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    result = break_down(conn, account_id, args.transaction_id, args.revision, args.interest,
+                        args.fees, supersedes=args.supersedes,
+                        supersedes_revision=args.supersedes_revision)
+    print(f"Breakdown {result.breakdown_id} recorded: transaction {args.transaction_id}, "
+          f"{describe_breakdown(result.breakdown)}, binding {result.bound_record_count} records.")
+    if args.supersedes:
+        print(f"  Supersedes breakdown {args.supersedes}. It stays on record.")
+    print(f"  {BREAKDOWN_NOTICE}")
+    return 0
+
+
+def run_review_breakdowns(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_breakdowns(conn, account_id)
+    for breakdown_id, account, created_at, state, value, bound_count in rows:
+        print(f"Breakdown {breakdown_id}: {state}, {describe_breakdown(value)}, {bound_count} "
+              f"records, {shown(account)}, {created_at}")
+    print(f"Breakdowns: {len(rows)}")
+    for transaction_id, state in conn.execute(
+        """SELECT derived.transaction_id, derived.state FROM transaction_loan_breakdown derived
+           JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+           WHERE derived.state <> 'applied' AND (:account IS NULL OR entry.account_id = :account)
+           ORDER BY derived.transaction_id""",
+        {"account": account_id},
+    ):
+        print(f"Transaction {transaction_id}: {BREAKDOWN_PREVIEW_STATES[state]}")
+    if rows:
+        print("To see what a breakdown binds, run review breakdown-show.")
+    return 0
+
+
+def run_review_breakdown_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    breakdown = load_breakdown(conn, args.breakdown_id)
+    if breakdown is None:
+        raise CommandError("breakdown not found. Run review breakdowns.")
+    print(f"Breakdown {breakdown.statement_id}")
+    print(f"  Account: {shown(breakdown.account_name)} ({breakdown.account_id})")
+    print(f"  Stated: {describe_breakdown(breakdown.shown_value)}")
+    print(f"  Status: {breakdown.state}")
+    print(f"  Made: {breakdown.created_at}")
+    if breakdown.undone_at:
+        print(f"  Undone: {breakdown.undone_at}. It stays on record and no longer applies.")
+    if breakdown.superseded_by:
+        print(f"  Superseded by breakdown {breakdown.superseded_by}. It stays on record and no "
+              "longer applies, unless that breakdown is undone.")
+    if breakdown.newest_of_chain != breakdown.superseded_by:
+        print(f"  Newest of its chain: breakdown {breakdown.newest_of_chain}, the only one that "
+              "can be undone. Each undo restores the breakdown before it.")
+    if breakdown.supersedes_id:
+        print(f"  Supersedes breakdown {breakdown.supersedes_id}")
+    print(f"  From transaction: {breakdown.target_transaction_id}")
+    print("Bound records:")
+    for record in breakdown.bound_records:
+        print(f"  {shown(record.file_name)} row {record.row}, now in "
+              f"{record.transaction_id or 'no transaction'}")
+    if breakdown.state == STATE_ACTIVE:
+        outlook = breakdown_undo_outlook(conn, breakdown)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this breakdown now:")
+        if breakdown.supersedes_id:
+            print(f"  Restores breakdown {breakdown.supersedes_id}, which it superseded")
+        for transaction_id, state_now, state_after in outlook.state_by_transaction:
+            print(f"  Transaction {transaction_id}: {BREAKDOWN_PREVIEW_STATES[state_now]} now, "
+                  f"{BREAKDOWN_PREVIEW_STATES[state_after]} after")
+        if stale_accounts(conn, DEFAULT_RULES, breakdown.account_id):
+            print("This account has not been reconciled under the current matching rules, so "
+                  "undo will be refused until it is. Run reconcile.")
+    return 0
+
+
+def run_review_breakdown_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_breakdown(conn, account_id, args.breakdown_id, args.revision)
+    print(f"Breakdown {args.breakdown_id} undone. It stays on record and no longer applies.")
+    if result.restored:
+        print(f"  Breakdown {result.restored}, which it superseded, applies again.")
+    print_newly_unbroken(result.newly_unsettled_transactions)
+    print("  The payment counts whole in confirmed transfers again, or as the breakdown this one "
+          "superseded divides it.")
+    return 0
+
+
+def print_newly_unbroken(count) -> None:
+    if count:
+        print(f"  Loan payments now with no breakdown applying, because breakdowns disagree, lost "
+              f"their basis or no longer fit: {count}. Run review breakdowns.")
 
 
 def print_newly_unconsumed(count) -> None:

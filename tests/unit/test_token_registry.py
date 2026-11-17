@@ -31,6 +31,7 @@ REGISTRY = {
     "h": "SHARE_REVISION_VERSION",
     "in": "INCOME_REVISION_VERSION",
     "k": "DECLARATION_REVISION_VERSION",
+    "lb": "BREAKDOWN_REVISION_VERSION",
     "lt": "LOAN_REVISION_VERSION",
     "m": "MATCH_REVISION_VERSION",
     "o": "ONE_SIDED_REVISION_VERSION",
@@ -83,7 +84,7 @@ def test_a_reused_or_unregistered_kind_fails():
 
 def test_a_single_letter_and_a_version_never_read_as_two_letters():
     assert not KIND.fullmatch("t1")
-    assert re.fullmatch(r"([a-z]{1,2})(\d+)-[0-9a-f]{16}", "t11-0123456789abcdef").groups() == (
-        "t", "11")
+    assert re.fullmatch(r"([a-z]{1,2})(\d+)-[0-9a-f]{16}", "t12-0123456789abcdef").groups() == (
+        "t", "12")
     assert re.fullmatch(r"([a-z]{1,2})(\d+)-[0-9a-f]{16}", "in1-0123456789abcdef").groups() == (
         "in", "1")

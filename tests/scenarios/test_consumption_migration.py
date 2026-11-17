@@ -118,7 +118,7 @@ def stated(tmp_path, capsys):
         conn.execute("INSERT INTO fund (id, name, kind) VALUES (?, ?, ?)",
                      (fund_id, fund_id.upper(), kind))
     conn.execute("INSERT INTO fund_consumption (id, account_id, fund_id, target_transaction_id, "
-                 "target_revision) VALUES ('c', ?, 'g', 'x', 't11-0')", (account,))
+                 "target_revision) VALUES ('c', ?, 'g', 'x', 't12-0')", (account,))
     conn.execute("INSERT INTO fund_consumption_record (consumption_id, source_record_id) "
                  "VALUES ('c', ?)", (record,))
     conn.execute("INSERT INTO fund_consumption_event (consumption_id, event) VALUES ('c', 'made')")
@@ -146,11 +146,11 @@ class TestAppendOnly:  # GB1, G2
         conn = stated.conn()
         for fund_id, consumption_id in (("r", "c2"), ("t", "c3")):
             conn.execute("INSERT INTO fund_consumption (id, account_id, fund_id, "
-                         "target_transaction_id, target_revision) VALUES (?, ?, ?, 'x', 't11-0')",
+                         "target_transaction_id, target_revision) VALUES (?, ?, ?, 'x', 't12-0')",
                          (consumption_id, stated.account_id, fund_id))
         conn.execute("INSERT INTO fund_consumption (id, account_id, fund_id, target_transaction_id, "
                      "target_revision, supersedes_consumption_id) "
-                     "VALUES ('c4', ?, 'r', 'x', 't11-0', 'c')", (stated.account_id,))
+                     "VALUES ('c4', ?, 'r', 'x', 't12-0', 'c')", (stated.account_id,))
         conn.execute("INSERT INTO fund_consumption_event (consumption_id, event) "
                      "VALUES ('c', 'undone')")
         conn.execute("INSERT INTO tax_reserve_release (id, fund_id, amount_cents, released_on) "
@@ -162,11 +162,11 @@ class TestAppendOnly:  # GB1, G2
     @pytest.mark.parametrize("statement", [
         # The emergency fund is never consumed, and nor is a fund not on record.
         "INSERT INTO fund_consumption (id, account_id, fund_id, target_transaction_id, "
-        "target_revision) VALUES ('x', :account, 'e', 'x', 't11-0')",
+        "target_revision) VALUES ('x', :account, 'e', 'x', 't12-0')",
         "INSERT INTO fund_consumption (id, account_id, fund_id, target_transaction_id, "
-        "target_revision) VALUES ('x', :account, 'nobody', 'x', 't11-0')",
+        "target_revision) VALUES ('x', :account, 'nobody', 'x', 't12-0')",
         "INSERT INTO fund_consumption (id, account_id, fund_id, target_transaction_id, "
-        "target_revision) VALUES ('x', 'no-account', 'g', 'x', 't11-0')",
+        "target_revision) VALUES ('x', 'no-account', 'g', 'x', 't12-0')",
         "INSERT INTO fund_consumption_record (consumption_id, source_record_id) "
         "VALUES ('c', 'no-record')",
         "INSERT INTO fund_consumption_event (consumption_id, event) VALUES ('c', 'paused')",
@@ -198,7 +198,7 @@ class TestAppendOnly:  # GB1, G2
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("INSERT INTO fund_consumption (id, account_id, fund_id, "
                          "target_transaction_id, target_revision, supersedes_consumption_id) "
-                         "VALUES ('x', ?, 'g', 'x', 't11-0', 'c')", (other,))
+                         "VALUES ('x', ?, 'g', 'x', 't12-0', 'c')", (other,))
         conn.execute("INSERT INTO transaction_fund_consumption (transaction_id, state, fund_id) "
                      "VALUES ((SELECT id FROM ledger_transaction), 'applied', 'g')")
         conn.close()

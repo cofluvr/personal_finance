@@ -43,8 +43,9 @@ from personal_finance.reports.decision_evidence import BoundRecord
 # transactions with and without it, since whether one by amount sums turns on it, left out where
 # none binds them (D-065). Version 6 adds, for an amount, the outcome of fund consumptions on its
 # transactions now, since the portion consumed turns on it, left out where none reaches them
-# (D-070 point 7).
-CORRECTION_REVISION_VERSION = 6
+# (D-070 point 7). Version 7 adds, for an amount, the outcome of loan payment breakdowns on its
+# transactions now, since whether one fits turns on it, left out where none reaches them (D-071).
+CORRECTION_REVISION_VERSION = 7
 
 
 @dataclass(frozen=True)
@@ -271,6 +272,19 @@ def correction_undo_outlook(
         )
         if consumed:
             material["consumptions"] = consumed
+        broken_down = sorted(
+            [keyed(records_by_transaction[transaction]), state, breakdown]
+            for transaction, state, breakdown in conn.execute(
+                """SELECT derived.transaction_id, derived.state, derived.breakdown
+                   FROM transaction_loan_breakdown derived
+                   JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+                   WHERE entry.account_id = ?""",
+                (account_id,),
+            )
+            if transaction in holding_transactions
+        )
+        if broken_down:
+            material["breakdowns"] = broken_down
     category_rules = rules_matching_texts(
         load_active_rules(conn), account_id,
         [*(description for transaction, description in conn.execute(

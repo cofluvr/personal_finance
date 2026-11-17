@@ -175,7 +175,7 @@ class TestRefusals:  # GB1
     def test_a_stale_token(self, ledger):
         transaction = purchase(ledger)
         ledger.refused_with(lambda: ledger.consume(transaction, ledger.reserve,
-                                                   revision="t11-0000000000000000"),
+                                                   revision="t12-0000000000000000"),
                             STALE_TRANSACTION_REVISION)
 
     def test_another_account_s_transaction(self, ledger):
@@ -210,7 +210,7 @@ class TestRefusals:  # GB1
         transaction = purchase(ledger)
         make_stale(ledger)
         ledger.refused_with(lambda: ledger.consume(transaction, "no-such-fund",
-                                                   revision="t11-0000000000000000"),
+                                                   revision="t12-0000000000000000"),
                             STALE_ACCOUNT)
 
     def test_again_and_the_same_fund_again(self, ledger):
@@ -504,7 +504,7 @@ class TestTaxReserve:  # GB3
 
 def every_token(ledger, item, transaction, decision, correction):
     # IncomeLedger's show is an income source's, so the item is shown here.
-    item_revision = re.search(r"Revision: (r13-[0-9a-f]{16})",
+    item_revision = re.search(r"Revision: (r14-[0-9a-f]{16})",
                               ledger.run("review", "show", item)[1])[1]
     return (item_revision, ledger.transaction_revision(transaction),
             ledger.decision_revision(decision), ledger.correction_revision(correction))
@@ -526,10 +526,10 @@ def decided(ledger):
 
 class TestTokens:  # GB4
     def test_the_versions_are_pinned(self):
-        assert review_evidence.REVISION_VERSION == 13
-        assert review_evidence.TRANSACTION_REVISION_VERSION == 11
-        assert decision_evidence.DECISION_REVISION_VERSION == 10
-        assert correction_evidence.CORRECTION_REVISION_VERSION == 6
+        assert review_evidence.REVISION_VERSION == 14
+        assert review_evidence.TRANSACTION_REVISION_VERSION == 12
+        assert decision_evidence.DECISION_REVISION_VERSION == 11
+        assert correction_evidence.CORRECTION_REVISION_VERSION == 7
         assert consumption_evidence.CONSUMPTION_REVISION_VERSION == 1
 
     def test_funds_assignments_and_releases_change_no_shared_token(self, ledger, decided):

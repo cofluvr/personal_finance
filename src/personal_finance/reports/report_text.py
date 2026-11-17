@@ -81,6 +81,7 @@ from personal_finance.reports.review_evidence import (
     rows_sharing_a_document,
 )
 from personal_finance.reports.totals import (
+    LOAN_INTEREST,
     GroupTotal,
     account_movement,
     category_rule_outcomes,
@@ -615,6 +616,7 @@ def add_transaction_evidence(out, entry, shared) -> None:
     add_transfers(out, entry)
     add_recurring(out, entry)
     add_consumptions(out, entry)
+    add_breakdowns(out, entry)
 
 
 def _effective_rank_values(record):
@@ -748,6 +750,35 @@ def add_consumptions(out, entry) -> None:
             "counts it once, unchanged, and the fund's own figures show the portion consumed")
 
 
+# What each outcome of a loan payment breakdown means (D-071 point 7).
+BREAKDOWN_STATE_EXPLANATIONS = {
+    FIELD_APPLIED: "the stated interest and fees count in spending, the principal in transfers",
+    FIELD_IN_CONFLICT: "breakdowns disagree, so none applies. Undo all but one to settle it",
+    FIELD_BASIS_CHANGED: (
+        "a breakdown binds records now in several transactions, so none applies. Undo it, then "
+        "break down each transaction"
+    ),
+    "does_not_fit": (
+        "it is no longer a confirmed loan payment, or its interest and fees are more than its "
+        "amount, so none applies. Undo the breakdown, or what changed"
+    ),
+}
+
+
+def add_breakdowns(out, entry) -> None:
+    """Loan payment breakdowns binding this transaction's records (D-071 point 7): the Principal
+    and interest section. A transaction none reaches shows nothing here."""
+    if not entry.breakdowns:
+        return
+    out.add("  Principal and interest:")
+    for breakdown in entry.breakdowns:
+        out.add(f"    Breakdown {breakdown.breakdown_id}: interest "
+                f"{format_cents(breakdown.interest_cents)}, fees "
+                f"{format_cents(breakdown.fees_cents)}, binding "
+                f"{describe_side(breakdown.bound_records)}")
+    out.add(f"    Breakdown: {BREAKDOWN_STATE_EXPLANATIONS[entry.breakdowns[0].state]}")
+
+
 def add_recurring(out, entry) -> None:
     """Income sources and obligations reaching this transaction (D-068 point 7). A transaction
     none reaches shows nothing here."""
@@ -843,12 +874,14 @@ def out_and_in(group) -> str:
 
 
 def categories_in_use(conn):
-    """The category list while a categorization or a category rule's outcome reaches some
-    transaction, else None, so that a ledger never categorized, or with every categorization and
-    rule undone, reports as before (D-063, D-064)."""
+    """The category list while a categorization, a category rule's outcome or an applied loan
+    payment breakdown reaches some transaction, else None, so that a ledger never categorized, or
+    with every categorization, rule and breakdown undone, reports as before (D-063, D-064,
+    D-071)."""
     if conn.execute(
         """SELECT 1 FROM transaction_category
-           UNION ALL SELECT 1 FROM transaction_rule_category LIMIT 1"""
+           UNION ALL SELECT 1 FROM transaction_rule_category
+           UNION ALL SELECT 1 FROM transaction_loan_breakdown WHERE state = 'applied' LIMIT 1"""
     ).fetchone() is None:
         return None
     return list_categories(conn)
@@ -901,6 +934,9 @@ def add_income_and_spending_groups(out, groups, categories=None) -> None:
         out.add(f"    {financial_type}: {out_and_in(group)}")
     out.add(f"  Of a transfer kind, not confirmed: {out_and_in(groups.unconfirmed_transfer_kinds)}")
     out.add(f"  Unclassified: {out_and_in(groups.unclassified)}")
+    if groups.divided_loan_payments:
+        out.add(f"  Loan payments a breakdown divides, counted in spending and in confirmed "
+                f"transfers: {groups.divided_loan_payments}")
 
 
 def add_month(out, month, categories=None) -> None:
@@ -1414,7 +1450,7 @@ def _add_household_table(out, columns, categories) -> None:
     row("Net account movement", net)
     flows("Income", lambda groups: groups.income)
     flows("Spending", lambda groups: groups.spending)
-    types = [financial_type for financial_type in SPENDING_TYPES
+    types = [financial_type for financial_type in (*SPENDING_TYPES, LOAN_INTEREST)
              if any(by_type(column.groups, financial_type).transactions for column in columns)]
     for financial_type in types:
         flows(f"  {financial_type}", lambda groups, kind=financial_type: by_type(groups, kind))
@@ -1432,6 +1468,9 @@ def _add_household_table(out, columns, categories) -> None:
     row("Transactions", lambda groups: str(sum(
         part.transactions for part in (groups.income, groups.spending, groups.confirmed_transfers,
                                        groups.unconfirmed_transfer_kinds, groups.unclassified))))
+    if any(column.groups.divided_loan_payments for column in columns):
+        row("  Divided loan payments, counted twice",
+            lambda groups: str(groups.divided_loan_payments))
 
     headings = [shown(column.heading) for column in columns]
     label_width = max(len(label) for label, _ in rows)
@@ -1965,6 +2004,9 @@ def loans_report_lines(conn, as_of) -> ReportLines:
                       if period.state == loans.EXTRA else "")
             out.add(f"  Due {period.due}: due {format_cents(period.due_cents)}, scheduled, paid "
                     f"{format_cents(period.paid_cents)}, actual, {period.state}{excess}")
+        if loan.broken_down_count:
+            out.add(f"  Interest and fees paid, actual, as breakdowns state them: "
+                    f"{loan.broken_down_count}, {format_cents(loan.broken_down_cents)}")
         if loan.unconfirmed_count:
             out.add(f"  Money in not confirmed as a payment, not counted until confirmed: "
                     f"{loan.unconfirmed_count}, {format_cents(loan.unconfirmed_cents)}")

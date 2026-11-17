@@ -15,10 +15,12 @@ from personal_finance.reconcile.coverage_in_effect import (
     complete_coverage_by_basis,
     spans_cover_every_day,
 )
+from personal_finance.reconcile.breakdown_effects import applied_breakdowns
 from personal_finance.reports.totals import (
     CONFIRMED_TRANSFER_SQL,
     IncomeAndSpending,
     IncomeAndSpendingTally,
+    interest_category_id,
 )
 
 DATED_BY_TRANSACTION_DATE = "transaction_date"
@@ -128,6 +130,9 @@ def monthly_report(conn: sqlite3.Connection, account_id: str | None = None,
     """
     month_by_transaction = {}
     in_scope = []
+    broken_down = {transaction_id: interest + fees
+                   for transaction_id, (interest, fees) in applied_breakdowns(conn).items()}
+    interest_category = interest_category_id(conn)
     for (transaction_id, transaction_account_id, amount_cents, transaction_date, posting_date,
          settlement_status, financial_type, confirmed_transfer, category_id) in conn.execute(
         f"""SELECT entry.id, entry.account_id,
@@ -214,7 +219,8 @@ def monthly_report(conn: sqlite3.Connection, account_id: str | None = None,
         report.pending_transactions += settlement_status == "pending"
         report.dated_by_transaction_date += dated_by == DATED_BY_TRANSACTION_DATE
         report.dated_by_posting_date += dated_by == DATED_BY_POSTING_DATE
-        report.tally.add(amount_cents, financial_type, confirmed_transfer, category_id)
+        report.tally.add(amount_cents, financial_type, confirmed_transfer, category_id,
+                         broken_down.get(transaction_id, 0), interest_category)
         if transaction_id in review_items_by_transaction:
             report.open_review_items |= review_items_by_transaction[transaction_id]
             report.transactions_in_open_review_items += 1

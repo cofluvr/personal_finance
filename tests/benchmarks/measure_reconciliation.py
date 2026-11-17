@@ -2060,7 +2060,7 @@ def scale_allocations(conn) -> dict[str, int]:
         conn.execute(
             """INSERT INTO allocation_statement (id, account_id, allocation,
                                                  target_transaction_id, target_revision)
-               VALUES (?, ?, ?, ?, 't11-0')""", (allocation_id, account, value, transaction))
+               VALUES (?, ?, ?, ?, 't12-0')""", (allocation_id, account, value, transaction))
         conn.executemany("INSERT INTO allocation_statement_part VALUES (?, ?, ?)",
                          [(allocation_id, member, part) for member, part in parts])
         conn.execute("INSERT INTO allocation_statement_record VALUES (?, ?)",
@@ -2637,7 +2637,7 @@ def measure_funds() -> None:
             consumption_id = f"c{number}"
             conn.execute("INSERT INTO fund_consumption (id, account_id, fund_id, "
                          "target_transaction_id, target_revision) VALUES (?, 'bills', ?, ?, "
-                         "'t11-0')", (consumption_id, consumed[number % len(consumed)][0],
+                         "'t12-0')", (consumption_id, consumed[number % len(consumed)][0],
                                       transaction_id))
             conn.execute("INSERT INTO fund_consumption_record (consumption_id, source_record_id) "
                          "VALUES (?, ?)", (consumption_id, record_id))
@@ -2713,6 +2713,156 @@ def measure_funds() -> None:
 
 FUNDS_CONSUMPTIONS = 2_000
 
+LOANS_BREAKDOWNS = 5_000
+LOANS_AS_OF = date(2026, 12, 20)
+LOAN_MONTHS = [f"{2017 + number // 12}-{1 + number % 12:02}" for number in range(120)]
+
+
+def measure_loans() -> None:
+    """Loans on M12's shape (D-071 point 9, LC4): 8 loans (2 graduated with 6 steps each, 1
+    aggregate with 3 subaccounts), 120 months of payments, 5,000 of them confirmed and broken
+    down. Times report net-worth, report loans, loan payoff with all three orders, totals and
+    review breakdown. Stops, as G9 says, if a report misses two seconds, if totals crosses 2.0s
+    (D-071 point 9), or if review breakdown costs more than twice the import of one row."""
+    from personal_finance.reconcile.breakdowns import break_down
+    from personal_finance.reports.review_evidence import load_merge_evidence, transaction_revision
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _ = recurring_ledger(root)
+        loans = [f"loan{number}" for number in range(8)]
+        conn.execute("INSERT INTO account (id, display_name, account_type) "
+                     "VALUES ('payer', 'Payer', 'checking')")
+        for loan in loans:
+            conn.execute("INSERT INTO account (id, display_name, account_type) "
+                         "VALUES (?, ?, 'loan')", (loan, loan.capitalize()))
+        rows, cents_by_row = [], {}
+        for number in range(LOANS_BREAKDOWNS + 1):
+            month = LOAN_MONTHS[number % len(LOAN_MONTHS)]
+            day = 1 + number % 28
+            cents = 50_000 + number % 1_000
+            rows.append(f"L{number},{month}-{day:02},{month}-{day:02},SYNTHETIC LOAN "
+                        f"{number % 8},-{cents // 100}.{cents % 100:02},POSTED\n")
+            cents_by_row[f"L{number}"] = cents
+        source = root / "payer.csv"
+        source.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,"
+                          "Status\n" + "".join(rows))
+        (result,) = import_files(conn, [source], account_id="payer", layout=SYNTHETIC_CHECKING_V1)
+        assert result.outcome == "imported", result
+        links = {external_id: (transaction_id, record_id)
+                 for external_id, transaction_id, record_id in conn.execute(
+                     """SELECT entry.external_id, link.transaction_id, link.source_record_id
+                        FROM transaction_source link
+                        JOIN ledger_transaction entry ON entry.id = link.transaction_id
+                        WHERE entry.account_id = 'payer'""")}
+        conn.execute("BEGIN")
+        classify_directly(conn, "payer", [(*links[f"L{number}"], "loan_payment")
+                                          for number in range(LOANS_BREAKDOWNS + 1)])
+        for number in range(LOANS_BREAKDOWNS + 1):
+            transaction_id, record_id = links[f"L{number}"]
+            statement_id = f"ol{number:06}"
+            conn.execute("""INSERT INTO one_sided_transfer (id, account_id, counterpart_account_id,
+                                                         target_transaction_id, target_revision)
+                            VALUES (?, 'payer', ?, ?, 't12-0')""",
+                         (statement_id, loans[number % 8], transaction_id))
+            conn.execute("INSERT INTO one_sided_transfer_record VALUES (?, ?)",
+                         (statement_id, record_id))
+            conn.execute("INSERT INTO one_sided_transfer_event (one_sided_transfer_id, event) "
+                         "VALUES (?, 'made')", (statement_id,))
+            if number == LOANS_BREAKDOWNS:
+                continue  # left for the timed review breakdown
+            breakdown_id = f"lb{number:06}"
+            conn.execute("""INSERT INTO loan_payment_breakdown (id, account_id, breakdown,
+                                                             target_transaction_id,
+                                                             target_revision)
+                            VALUES (?, 'payer', ?, ?, 't12-0')""",
+                         (breakdown_id, f"{cents_by_row[f'L{number}'] // 5}:{number % 3 * 100}",
+                          transaction_id))
+            conn.execute("INSERT INTO loan_payment_breakdown_record VALUES (?, ?)",
+                         (breakdown_id, record_id))
+            conn.execute("INSERT INTO loan_payment_breakdown_event (breakdown_id, event) "
+                         "VALUES (?, 'made')", (breakdown_id,))
+        for number, loan in enumerate(loans):
+            conn.execute("INSERT INTO loan_terms (id, account_id, due_day) VALUES (?, ?, ?)",
+                         (f"t{number}", loan, 1 + number))
+            conn.execute("INSERT INTO loan_terms_event (terms_id, event) VALUES (?, 'made')",
+                         (f"t{number}",))
+            steps = 6 if number < 2 else 1
+            for step in range(steps):
+                start = f"{2017 + step}-01-01"
+                conn.execute("INSERT INTO loan_rate_period (terms_id, effective_from, "
+                             "rate_millionths) VALUES (?, ?, ?)",
+                             (f"t{number}", start, 3_000_000 + number * 500_000 + step * 10_000))
+                conn.execute("INSERT INTO loan_payment_period (terms_id, effective_from, "
+                             "payment_cents) VALUES (?, ?, ?)",
+                             (f"t{number}", start, 40_000 + step * 2_000))
+            conn.execute("INSERT INTO balance_observation (id, account_id, observed_on, "
+                         "balance_cents) VALUES (?, ?, '2026-12-01', ?)",
+                         (f"lo{number}", loan, -(5_000_000 + number * 1_000_000)))
+            conn.execute("INSERT INTO balance_observation_event (balance_observation_id, event) "
+                         "VALUES (?, 'made')", (f"lo{number}",))
+        # loan7 is the aggregate of loan4 to loan6.
+        for number, sub in enumerate(("loan4", "loan5", "loan6")):
+            conn.execute("INSERT INTO account_link (id, subaccount_id, aggregate_id) "
+                         "VALUES (?, ?, 'loan7')", (f"k{number}", sub))
+            conn.execute("INSERT INTO account_link_event (link_id, event) VALUES (?, 'made')",
+                         (f"k{number}",))
+        conn.execute("INSERT INTO payoff_plan (id, order_kind, custom_order, extra_cents) "
+                     "VALUES ('p0', 'custom', ?, 50000)", (",".join(reversed(loans)),))
+        conn.execute("INSERT INTO payoff_plan_event (plan_id, event) VALUES ('p0', 'made')")
+        write_transfer_effects(conn)
+        conn.execute("COMMIT")
+        build_seconds = time.perf_counter() - started
+
+        applied = conn.execute("SELECT COUNT(*) FROM transaction_loan_breakdown "
+                               "WHERE state = 'applied'").fetchone()[0]
+        graduated = conn.execute("SELECT COUNT(*) FROM (SELECT terms_id FROM loan_payment_period "
+                                 "GROUP BY terms_id HAVING COUNT(*) = 6)").fetchone()[0]
+        transactions = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()[0]
+        print(f"shape transactions={transactions} loans={len(loans)} graduated={graduated} "
+              f"links=3 breakdowns={applied} build={build_seconds:.1f}s", flush=True)
+        # The shape reaches the cost it claims.
+        assert transactions > 107_000
+        assert applied == LOANS_BREAKDOWNS and graduated == 2
+        conn.close()
+
+        database = str(path)
+        as_of = LOANS_AS_OF.isoformat()
+        net_worth_seconds = timed_command("report", "net-worth", "--db", database, "--as-of",
+                                          as_of)
+        loans_seconds = timed_command("report", "loans", "--db", database, "--as-of", as_of)
+        payoff_seconds = timed_command("loan", "payoff", "--db", database, "--as-of", as_of)
+        totals_seconds = timed_command("totals", "--db", database)
+
+        conn = connect(path)
+        transaction_id, _ = links[f"L{LOANS_BREAKDOWNS}"]
+        revision = transaction_revision(load_merge_evidence(conn, transaction_id))
+        started = time.perf_counter()
+        break_down(conn, "payer", transaction_id, revision, "57.25")
+        breakdown_seconds = time.perf_counter() - started
+        later = root / "later.csv"
+        later.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+                         "LATER,2026-12-30,2026-12-30,SYNTHETIC LATER,-9.00,POSTED\n")
+        started = time.perf_counter()
+        (result,) = import_files(conn, [later], account_id="savings",
+                                 layout=SYNTHETIC_CHECKING_V1)
+        import_seconds = time.perf_counter() - started
+        assert result.outcome == "imported"
+        conn.close()
+        print(f"report_net_worth={net_worth_seconds:7.3f}s report_loans={loans_seconds:7.3f}s "
+              f"loan_payoff={payoff_seconds:7.3f}s totals={totals_seconds:7.3f}s "
+              f"review_breakdown={breakdown_seconds:7.3f}s one_import={import_seconds:7.3f}s",
+              flush=True)
+        stops = [name for name, seconds in (("report net-worth", net_worth_seconds),
+                                            ("report loans", loans_seconds),
+                                            ("loan payoff", payoff_seconds),
+                                            ("totals", totals_seconds)) if seconds > 2]
+        if breakdown_seconds > 2 * import_seconds or breakdown_seconds > 2:
+            stops.append("review breakdown")
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
 
 def main() -> None:
     if sys.argv[1:] == ["--scale"]:
@@ -2726,6 +2876,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--scale", "--funds"]:
         measure_funds()
+        return
+    if sys.argv[1:] == ["--scale", "--loans"]:
+        measure_loans()
         return
     if sys.argv[1:] == ["--scale", "--household"]:
         measure_household()
