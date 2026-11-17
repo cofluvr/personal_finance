@@ -22,8 +22,8 @@ with it. Nothing else does.
 |---|---|---|
 | D-067 | Cross-milestone guardrails for M12 to M21 | Approved |
 | D-068 | M12 Income and recurring obligations | Approved, accepted on 2026-11-16 |
-| D-069 | M13 Budgets and spending allowances | Approved, built for review |
-| D-070 | M14 Goals, reserves and the tax reserve | Approved |
+| D-069 | M13 Budgets and spending allowances | Approved, accepted on 2026-11-16 |
+| D-070 | M14 Goals, reserves and the tax reserve | Approved, M14.1 built for review |
 | D-071 | M15 Net worth and loans | Approved |
 | D-072 | M16 Safe-to-spend and the cash-flow constraint | Approved |
 | D-073 | M17 The local UI completed, with browser writes (security change) | Approved |
@@ -934,7 +934,7 @@ its own slice plan, for the owner's review):
 
 ---
 
-## D-069 M13 plan: budgets and spending allowances — Approved
+## D-069 M13 plan: budgets and spending allowances — Approved, M13 accepted
 
 M13 meets PRD §12's budget structure and required outputs, without safe-to-spend, which is M16
 (D-066 point 2):
@@ -1456,6 +1456,79 @@ current assignments.
 | GC2 | `report funds` and its page agree line for line, read-only, with names holding HTML shown as text |
 | GC3 | Backup and restore keep funds, assignments, priority, consumptions and releases, compared as HB5 |
 | GC4 | `--funds` asserts its counts and records its figures under G9. Every earlier criterion still passes |
+
+**How M14.1 was implemented** (built on 2026-11-16, for the owner's review):
+
+- **Migration 0027** was built first, in its own commit (`3fbcc7a`), with G10's tests in
+  `tests/scenarios/test_fund_migration.py`. `fund` holds a name and a kind. `fund_terms` holds
+  dated terms by **shape** (`monthly`, `percent`, `target_by`, `minimum`, `months`, `due`,
+  `recurring`), each shape's columns enforced by CHECKs, and a trigger refuses a shape its fund's
+  kind does not take. `fund_assignment` and its events hold assignments. The priority list is
+  `fund_priority_event`, one row per list made, and `fund_priority`, its positions.
+- `planning/funds.py` holds the model, point 1's formulas as pure functions in integer cents,
+  every division rounded up (G8), the writes under one write lock, and `fu1` and `fa1`.
+  `reports/fund_standing.py` gathers what the formulas read from M12, as of a date: baseline
+  income planned in the month (from `report income`'s builder), fixed commitments planned in the
+  month (each applying obligation's terms in effect at the month's end, a range's HIGH, spread as
+  ceil(amount × occurrences per year ÷ 12)), and the tax accrual.
+- **Commands:** `fund preview` (beyond D-070's list, as `budget preview`, since `fund add
+  --revision` needs one), `fund add`, `fund terms`, `fund undo`, `fund show`, `fund assign`,
+  `fund unassign`, `fund priority` and `funds`. Each command reading a date takes `--as-of`, else
+  today in the household zone (G7).
+- **Figures shown, each labelled:** a goal's or reserve's *planned contribution this month*, the
+  emergency fund's and tax reserve's *required held* amount with the *restoration recommended* or
+  *to assign* shortfall, *assigned* by account, a target's *outstanding* amount with the months
+  left including its last, and the tax reserve's accrual labelled "a planning reserve, not a
+  calculated tax liability" (PRD §16).
+- **States:** `funded`, `underfunded` and two of this slice's own, for the owner's review:
+  `in progress` (a target with months left and something outstanding, and every monthly or
+  percentage goal, which has no target to reach) and `not started` (before the first terms row).
+  `over_assigned` and `provisional` are marks on accounts, carried to every fund assigned there as
+  "Assignment not backed" and "Provisional", as point 2 says.
+- **`fa1`** covers the operation valid now (a fund holding an assignment on the account can only
+  release it, as `st1`), the fund and account, the account's latest observation on or before the
+  date, the account's active assignments and the fund's. `fund show` prints one per account. The
+  amount typed is not in it: the guard checks it under the write lock.
+- **`fu1`** covers the operation, the fund's ID once recorded, its name, kind and every terms row;
+  over the priority list, the list as it applies.
+- **Departures and choices, for the owner's review:**
+  - **No supersession of a fund.** D-070's command list has none, so a fund's terms change with
+    `fund terms` from a date (every value of its kind typed again), and a new name or kind is undo
+    then add. G4's chain for funds is not built until it is needed (principle 1).
+  - **A fund holding an assignment cannot be undone,** naming the accounts to release first, so
+    no money is left assigned to a fund that no longer applies. A priority list skips a fund
+    undone since it was made.
+  - **One emergency fund and one tax reserve at a time,** since point 1 speaks of "the"
+    emergency fund, and two tax reserves would accrue the same income twice.
+  - **A fund's start defaults to `--as-of`,** for every kind, and like its later terms cannot fall
+    in a closed month. So the tax reserve cannot start before this month: a correction flag, as
+    D-069's, is not built until the owner needs one.
+  - **The tax accrual counts `received` occurrences only,** as point 6 says, so a deposit paired
+    as `amount_changed` accrues nothing until its source's terms match it. It counts each one
+    from the fund's first `effective_from` through `as_of`, by the deposit's date, under the terms
+    in effect that day. Payments and releases arrive with M14.2 and show as 0.00.
+  - **An annual reserve's anchor** is its first date on or after the fund's start, and an
+    every-N-months reserve needs `--anchor` on its cadence. A recurring reserve's next due date
+    is the first on or after `as_of`, so on its due day it still needs its outstanding amount
+    that month.
+  - **An account with no observation on or before the date** shows every assigned cent as
+    over-assigned, since nothing backs it.
+  - **An assignment checks the account is current** (G3 step 3), as M12's writes do, though it
+    reads no transaction.
+- **Tests:** `tests/unit/test_fund_required.py` (GA2 by hand: each kind at a deadline month,
+  mid-term and past due, rounding up, terms in effect by date) and `tests/scenarios/test_funds.py`
+  (GA2 to GA5 end to end; a stale token for each input of `fu1` and `fa1`, a race and a fault after
+  the first insert, as G3). The registry pins `fu` and `fa` (G5).
+- **Breaks (G12):** 25 applied, 24 caught on the first run, each by a relevant test. One was a test
+  gap, closed and caught on the rerun: tax accrued on income that is not tax-eligible.
+- **Compared as G6:** the suite's ledgers, kept with `--basetemp` from a `git archive` export of
+  `d6b453d`, read by that code, and copies migrated to 27 read by a frozen copy of M14.1's `src/`.
+  Of 124,128 runs, 124,060 are identical, with no token version moved. The other 68 are the two
+  ledgers a failed-migration test stamps at 27 without its tables, which the old code refused as
+  newer. `funds` ran on all 3,126 ledgers: it exits 0 where `budgets` does and refuses with the
+  same words, apart from those two stamped ledgers and the M13 test ledger whose planning tables
+  are dropped, each explained by the tables it lacks.
+- **No benchmark row:** `--funds` is M14.3's (point 9).
 
 ---
 

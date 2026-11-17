@@ -225,6 +225,10 @@ class TestRequired:  # GA2
             ledger.deposit(f"g{number}.csv", day, amount="333.33", text="SYNTHETIC GIG")
         ledger.add_ok(name="Gig", kind="side", match="synthetic gig", cadence="monthly:10",
                       anchor="2026-01-10", amount="333.33", tax_eligible=True)
+        # A salary received in the same months, not tax-eligible, accrues nothing.
+        ledger.deposit("p1.csv", "2026-02-13")
+        ledger.add_ok()
+        assert (("p1.csv",), "Pay", "received", "2026-02-13") in ledger.outcomes()
         fund = ledger.add_fund_ok(name="Tax", kind="tax", percent="25",
                                   effective_from="2026-02-01", as_of="2026-02-01")
         # 333.33 × 25% is 83.3325, rounded up per occurrence, from February only.

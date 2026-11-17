@@ -664,8 +664,8 @@ moves.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M13.1 | Settings and budget plans: migration 0026, `pf setting`, `pf budget preview`, `set`, `show`, `undo`, `pf budgets`, chains, `st1`, `bp1`, today from the household timezone, `--as-of` optional on M12's commands | Built, awaiting review |
-| M13.2 | `pf report budget`: actual against target, pace, revised allowances, the personal view, closed months and unused capacity, the `/budget` page, the `--budget` benchmark row | Built, awaiting review |
+| M13.1 | Settings and budget plans: migration 0026, `pf setting`, `pf budget preview`, `set`, `show`, `undo`, `pf budgets`, chains, `st1`, `bp1`, today from the household timezone, `--as-of` optional on M12's commands | Accepted on 2026-11-16, as built |
+| M13.2 | `pf report budget`: actual against target, pace, revised allowances, the personal view, closed months and unused capacity, the `/budget` page, the `--budget` benchmark row | Accepted on 2026-11-16, as built |
 
 ### M13.1 acceptance criteria
 
@@ -691,6 +691,36 @@ moves.
 
 Rollover, weekly or custom periods, budgets by account, safe to spend (M16), alerts, goals (M14)
 and budgets in scenarios (M18), as D-069 lists them.
+
+## M14 plan
+
+Approved by the owner on 2026-11-10 as D-070, with A to I, in
+[decisions-m12-m21.md](decisions-m12-m21.md), under D-067's guardrails G1 to G13. The owner allowed
+M14.1 to be built on 2026-11-16. No security control changes. `r`, `t`, `d` and `c` move once, in
+M14.2.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M14.1 | Funds, assignments and priority: migration 0027, `pf fund preview`, `add`, `terms`, `undo`, `show`, `assign`, `unassign`, `priority`, `pf funds`, the four kinds' required amounts, the assignability guard, planned contributions, `fu1`, `fa1` | Built, awaiting review |
+| M14.2 | Consumption and the tax reserve: migration 0028, `review consume`, tax payments and releases, `fc1`, `r13`, `t11`, `d10`, `c6` | Not started |
+| M14.3 | `pf report funds`, extra income and unused capacity by priority, "paid from reserves", the page, the restore test, `--funds` | Not started |
+
+### M14.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| GA1 | Migration 0027 meets G10, every trigger refusing with a control |
+| GA2 | Each kind's required amount, by point 1's formula, computed by hand at a deadline month, mid-term and past due, rounded up (G8). A percentage goal is byte-identical across M12's third-paycheck pair |
+| GA3 | `fund assign` refuses beyond the latest observation, on an account with no observation, on a card, loan or retirement account, a second active assignment and a stale `fa1`, changing nothing |
+| GA4 | A later lower observation makes the account `over_assigned` by exactly the difference, disclosed wherever funds show, and new assignments there refuse until resolved. A race test (G3): two assignments shown against one observation, so the second refuses |
+| GA5 | Planned contributions and restoration change no assignment. `evidence_digest` is unchanged by every fund write |
+
+M14.2's and M14.3's criteria, GB1 to GC4, move here when each starts.
+
+### Not in M14
+
+Automatic consumption matchers, automatic assignments, per-source extra overrides, goals in net
+worth (M15), safe to spend (M16) and goals in snapshots (M19), as D-070 lists them.
 
 ## Backlog benchmarks
 

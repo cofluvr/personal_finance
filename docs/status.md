@@ -66,9 +66,11 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M12.2: recurring obligations | Accepted on 2026-11-16 as built, its departures included (D-068) |
 | M12.3: the income report, its page, the benchmark row | Accepted on 2026-11-16 as built, its departures included (D-068) |
 | **M12 overall** | **Complete and accepted** on 2026-11-16. Not on the real ledger, which takes 24 and 25 after M10's and M11's migrations, each after a verified backup |
-| M13.1: settings, budget plans, today from the household timezone | Built on 2026-11-16 (D-069, "How M13.1 was implemented"), awaiting the owner's review |
-| M13.2: the budget report, its page, the benchmark row | Built on 2026-11-16 (D-069, "How M13.2 was implemented"), awaiting the owner's review |
-| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 accepted, M13 built for review |
+| M13.1: settings, budget plans, today from the household timezone | Accepted on 2026-11-16 as built, its departures included (D-069) |
+| M13.2: the budget report, its page, the benchmark row | Accepted on 2026-11-16 as built, its departures included (D-069) |
+| **M13 overall** | **Complete and accepted** on 2026-11-16. Not on the real ledger, which takes 26 after M12's migrations, each after a verified backup |
+| M14.1: funds, assignments and the priority list | Built on 2026-11-16 (D-070, "How M14.1 was implemented"), awaiting the owner's review |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 and M13 accepted, M14.1 built for review |
 
 ## What exists
 
@@ -96,7 +98,7 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations`,
   `0017_real_ledger`, `0018_backup_records`, `0019_categories`, `0020_categorizations`,
   `0021_category_rules`, `0022_household`, `0023_allocations`, `0024_income_sources` and
-  `0025_recurring_obligations` and `0026_settings_and_budgets`,
+  `0025_recurring_obligations`, `0026_settings_and_budgets` and `0027_funds`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts and five unverified institution layouts (D-059), explicit coverage, atomic
   per-file import.
@@ -155,6 +157,10 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 - `personal_finance.planning.budgets` and `budget_pace`: budget plans, the plan in effect for a
   month, chains and closed months, with `bp1` (D-069 points 2 and 6); and point 4's formulas in
   integer cents. `reports.budget_report` builds `pf report budget` (D-069 points 3 to 5).
+- `personal_finance.planning.funds`: funds of four kinds with dated terms, each kind's required
+  amount rounded up, assignments of an account's observed balance with the guard, and the
+  priority list, with `fu1` and `fa1` (D-070 points 1 to 4). `reports.fund_standing` gathers
+  baseline income, fixed commitments and the tax accrual from M12 for `pf funds` and `fund show`.
 - `personal_finance.reconcile.transfer_effects` and `transfers`: which transfer matches and one-sided
   transfers apply and which pairs are candidates, read after each account derives alone, and
   matching, stating and undoing under one write lock (D-054, D-055).
@@ -203,6 +209,8 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `obligation undo`, `obligation dismiss`, `obligation dismissals`, `obligation dismissal undo`,
   `obligations`, `report income`, `setting show`, `setting set`, `setting undo`,
   `budget preview`, `budget set`, `budget show`, `budget undo`, `budgets`, `report budget`,
+  `fund preview`, `fund add`, `fund terms`, `fund undo`, `fund show`, `fund assign`,
+  `fund unassign`, `fund priority`, `funds`,
   `totals`,
   `report monthly`, `report household`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
@@ -326,6 +334,15 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
   cap counts its subcategories. A closed month's correction is disclosed from the plan's
   `--correct-closed-month` flag and the month the plan was made, so a correction made with an
   `--as-of` far from the real date discloses by the real date.
+- Funds (M14.1) are planning figures: nothing is assigned automatically, and an assignment says
+  what an account's observed balance already holds, never that money moved. An account holds
+  assignments up to its latest balance observation on or before the date; below it, the account
+  is over-assigned, disclosed and never absorbed. One emergency fund and one tax reserve at a
+  time. A fund has no supersession: its terms change from a date, anything else is undo then
+  add, and a fund holding an assignment cannot be undone. A fund's start and terms cannot fall
+  in a closed month. The tax reserve accrues from received occurrences only; payments and
+  releases arrive with M14.2, so it shows them as 0.00. Consumption, `report funds`, the
+  priority allocation of extra income and the funds page are M14.2 and M14.3.
 - The local UI is read-only, and shows nine commands' output only, `report income` and
   `report budget` the last two. It searches nothing, imports
   nothing, exports nothing and shows no `trace` or decision history, which carry creation

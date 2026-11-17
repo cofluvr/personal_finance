@@ -89,8 +89,8 @@ and keep its index line.
 | D-066 | Roadmap to a finished backend: M12 to M21 — Approved with A to E |
 | D-067 | Cross-milestone guardrails for M12 to M21 — Approved, in [decisions-m12-m21.md](decisions-m12-m21.md) |
 | D-068 | M12 plan: income and recurring obligations — Approved. M12 accepted on 2026-11-16 |
-| D-069 | M13 plan: budgets and spending allowances — Approved. M13.1 and M13.2 built for review |
-| D-070 | M14 plan: goals, reserves and the tax reserve — Approved, not yet built |
+| D-069 | M13 plan: budgets and spending allowances — Approved, M13 accepted on 2026-11-16 |
+| D-070 | M14 plan: goals, reserves and the tax reserve — Approved. M14.1 built for review |
 | D-071 | M15 plan: net worth and loans — Approved, not yet built |
 | D-072 | M16 plan: safe-to-spend and the cash-flow constraint — Approved, not yet built |
 | D-073 | M17 plan: the local UI completed, with browser writes — Approved as a security change, not yet built |

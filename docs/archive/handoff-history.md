@@ -1040,3 +1040,39 @@ M13 to M19 needs no new permission beyond the approved plans.
 89,323 runs identical, the rest the two stamped ledgers. Breaks: M12.2 27 applied, 24 caught, two
 gaps closed, one equivalent; M12.3 15 applied, 14 caught, one gap closed. `--recurring`: every
 target met, stopping rule not met (see [benchmarks.md](benchmarks.md)).
+
+## M13's handoff state, as built for review
+
+Moved from the handoff on 2026-11-16, unchanged. The owner approved M13.1 and M13.2 the same day, as built.
+
+For a fresh session. Written 2026-11-16. **M1 to M12 are complete and accepted:** the owner
+approved M12.2 and M12.3 on 2026-11-16, as built. `main` holds M1 to M9 at `19ee858`. M10 to M13
+are on `feature/m10-rules`, not merged and not pushed.
+
+**M13 is built, for the owner's review,** under D-069, without stopping between its slices, on the
+owner's instruction:
+
+1. **M13.1** (`6d0123a`, with migration 0026 at `bb60fd8`): `pf setting`, `pf budget preview`,
+   `set`, `show` and `undo`, `pf budgets`, `st1` and `bp1`, and today read from the household
+   timezone, with `--as-of` optional on M12's commands and the `/income` page.
+2. **M13.2** (`84d98e0`): `pf report budget`, its `/budget` page and the `--budget` benchmark row.
+
+Their departures and choices are in "How M13.1 was implemented" and "How M13.2 was implemented"
+under D-069: `budget preview` beyond D-069's list, one setting revision per key, closed months
+decided by the months a write changes (so an undo touching one is refused), no two applying plans
+from one month, every member named in a divided plan, category caps counting subcategories, and
+how a corrected closed month is disclosed.
+
+**Latest results:** the full-suite gate, 3,254 passed, chained to this handoff's commit. G6 for M13: 108,865 of 108,865 runs identical. Breaks: M13.1 25
+applied, 23 caught, two equivalent; M13.2 25 applied, 21 caught, one equivalent, three gaps closed.
+`--budget`: every target met, stopping rule not met (see [benchmarks.md](benchmarks.md)).
+
+**M10, M11 and M12 are not yet on the real ledger.** It stays at version 20 until the owner makes
+a verified backup and runs `pf migrate`: 21, then 22 and 23 (D-065 point 7), then 24 and 25 for
+M12, then 26 once M13 is accepted (G10: one milestone at a time). After 26, the owner sets the
+household timezone with `pf setting set` before any command that needs today.
+
+The owner's members, share and defaults are entered with the `household` commands, which nothing
+here has run on real data. No security control changed, no dependency was added, and the UI stays
+read-only. Every fixture is invented. Point F with the owner on their already-imported files is
+still open.
