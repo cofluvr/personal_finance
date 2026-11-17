@@ -70,6 +70,7 @@ def built(folder, capsys, contents, order, point):
     return ledger, statement
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(("counterpart_row", "found"), [(OTHER_SIDE, True),
                                                         (OUTSIDE_THE_WINDOW, False)])
 def test_every_valid_point_of_every_order_gives_the_same_outcome(tmp_path, capsys,

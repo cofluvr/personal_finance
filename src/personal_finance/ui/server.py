@@ -18,6 +18,7 @@ from personal_finance.cli import (
     UNEXPECTED_ERROR,
     CommandError,
     checked_as_of,
+    household_today_if_set,
     explained_error,
     find_account,
     open_ledger,
@@ -26,6 +27,7 @@ from personal_finance.cli import (
 from personal_finance.reports.report_text import (
     account_choices,
     document_list_lines,
+    budget_report_lines,
     household_report_lines,
     income_report_lines,
     member_choices,
@@ -75,6 +77,7 @@ NAVIGATION = (
     ("/monthly", "Monthly"),
     ("/household", "Household"),
     ("/income", "Income"),
+    ("/budget", "Budget"),
     ("/documents", "Import results"),
     ("/transactions", "Transactions"),
     ("/review", "Review queue"),
@@ -87,6 +90,7 @@ PAGE_PARAMETERS = {
     "/monthly": {"account", "from", "to"},
     "/household": {"account", "from", "to", "member", "view"},
     "/income": {"account", "from", "to", "as_of"},
+    "/budget": {"month", "member", "as_of"},
     "/documents": set(),
     "/transactions": set(),
     "/review": set(),
@@ -249,6 +253,8 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
                 return self.send_page(404, "Not found", notice=ITEM_NOT_FOUND)
             hint = decision_hint(self.server.ledger_path, report)
             return self.send_page(200, "Review item", report.lines, after=hint)
+        if path == "/budget":
+            return self.answer_budget(conn, parameters)
         first_month = validated_month("from", parameters.get("from") or None)
         last_month = validated_month("to", parameters.get("to") or None)
         if first_month and last_month and first_month > last_month:
@@ -276,14 +282,35 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         self.send_page(200, "Household report", lines, form=form)
 
     def answer_income(self, conn, parameters, account_id, first_month, last_month):
-        """The income report as of a date the page is given, never the clock (G7)."""
+        """The income report as of the date the page is given, else today in the household's
+        timezone, read by the CLI's one clock read (G7). With neither, the page asks for one."""
         text = parameters.get("as_of") or None
         form = income_form(conn, account_id, first_month, last_month, text)
-        if text is None:
+        as_of = (household_today_if_set(conn) if text is None
+                 else date.fromisoformat(checked_as_of(text)))
+        if as_of is None:
             return self.send_page(200, "Income report", notice=CHOOSE_AS_OF, form=form)
-        as_of = date.fromisoformat(checked_as_of(text))
         lines = income_report_lines(conn, as_of, account_id, first_month, last_month)
         self.send_page(200, "Income report", lines, form=form)
+
+    def answer_budget(self, conn, parameters):
+        """The budget report for a month, the household or one member by ID, as of the date the
+        page is given, else today in the household's timezone (G7)."""
+        month = validated_month("month", parameters.get("month") or None)
+        member = parameters.get("member") or None
+        names = dict(member_choices(conn))
+        if member is not None and (not member.isdigit() or int(member) not in names):
+            return self.send_page(400, "Bad address", notice=BAD_ADDRESS)
+        member_id = None if member is None else int(member)
+        text = parameters.get("as_of") or None
+        form = budget_form(conn, month, member_id, text)
+        as_of = (household_today_if_set(conn) if text is None
+                 else date.fromisoformat(checked_as_of(text)))
+        if as_of is None:
+            return self.send_page(200, "Budget report", notice=CHOOSE_AS_OF, form=form)
+        lines = budget_report_lines(conn, month or as_of.isoformat()[:7], as_of,
+                                    None if member_id is None else names[member_id])
+        self.send_page(200, "Budget report", lines, form=form)
 
     def send_page(self, status, heading, lines=(), *, notice="", form="", after="",
                   extra_headers=()):
@@ -388,6 +415,21 @@ def income_form(conn, account_id, first_month, last_month, as_of) -> str:
     field = ('<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
              f'value="{escaped(as_of or "")}"></label>')
     return form.replace(" <button>Show</button>", f"{field} <button>Show</button>")
+
+
+def budget_form(conn, month, member_id, as_of) -> str:
+    """A form that reloads the budget page by GET: a month, the household or a member, and the
+    as-of date."""
+    members = ['<option value="">Household</option>']
+    for choice_id, name in member_choices(conn):
+        selected = " selected" if choice_id == member_id else ""
+        members.append(f'<option value="{choice_id}"{selected}>{escaped(name)}</option>')
+    return ('<form method="get" action="/budget">'
+            '<label>Month <input name="month" placeholder="YYYY-MM" size="8" '
+            f'value="{escaped(month or "")}"></label>'
+            f'<label> Member <select name="member">{"".join(members)}</select></label>'
+            '<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+            f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
 
 
 def decision_hint(ledger_path, report) -> str:

@@ -62,6 +62,7 @@ def test_the_launcher_is_executable():
     assert (ROOT / "bin" / "pf").stat().st_mode & stat.S_IXUSR
 
 
+@pytest.mark.slow
 def test_it_shows_help_under_the_name_pf(spaced, tmp_path):
     result = pf(spaced / "bin" / "pf", "--help", cwd=tmp_path)
     assert result.returncode == 0
@@ -122,6 +123,7 @@ def test_a_missing_environment_is_explained(tmp_path):
     assert "README.md" in result.stderr
 
 
+@pytest.mark.slow
 def test_the_module_route_still_works(tmp_path):
     result = subprocess.run(
         [sys.executable, "-m", "personal_finance", "--help"],

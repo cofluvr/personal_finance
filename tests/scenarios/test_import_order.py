@@ -6,11 +6,13 @@ from dataclasses import dataclass
 from itertools import combinations, permutations
 from pathlib import Path
 
+import pytest
+from fresh_ledger import create_fresh_ledger
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from ledger_view import semantic_view
 
-from personal_finance.db.migrate import connect, create_database
+from personal_finance.db.migrate import connect
 from personal_finance.ingest.coverage import Coverage, declare_complete
 from personal_finance.ingest.layouts import SYNTHETIC_CARD_V1, SYNTHETIC_CHECKING_V1
 from personal_finance.ingest.pipeline import import_files
@@ -100,7 +102,7 @@ def replay(files):
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
         path = root / "ledger.db"
-        create_database(path)
+        create_fresh_ledger(path)
         conn = connect(path)
         conn.execute(
             "INSERT INTO account (id, display_name, account_type) VALUES ('acct', 'a', 'checking')"
@@ -127,6 +129,7 @@ def orderings(draw):
     return files, list(shuffled) + repeats
 
 
+@pytest.mark.slow
 @settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(orderings())
 def test_a16_every_order_gives_the_same_outcome(case):
@@ -208,6 +211,7 @@ def focused_orderings(draw):
     return files, list(shuffled) + repeats
 
 
+@pytest.mark.slow
 @settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(focused_orderings())
 def test_a16_every_order_gives_the_same_outcome_on_the_hard_paths(case):

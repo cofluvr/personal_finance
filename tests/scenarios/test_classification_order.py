@@ -6,6 +6,7 @@ classified record's file arrives.
 
 from itertools import permutations
 
+import pytest
 from test_classifications import ClassificationLedger
 from test_correction_order import FILES
 from test_supersession import holding
@@ -46,6 +47,7 @@ def built(folder, capsys, order, point):
     return ledger, classification
 
 
+@pytest.mark.slow
 def test_every_valid_point_of_every_order_gives_the_same_outcome(tmp_path, capsys):
     reference = None
     compared = 0

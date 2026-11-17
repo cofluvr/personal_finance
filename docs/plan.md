@@ -614,8 +614,8 @@ as recommended, and M12.1 built on 2026-11-15 for the owner's review.
 | Slice | Scope | Status |
 |---|---|---|
 | M12.1 | Income sources: migration 0024, schedules, proposals, preview, add, supersede, terms, undo, expected against actual, `in1` | Accepted on 2026-11-15 |
-| M12.2 | Recurring obligations: migration 0025, `planning/entries.py` and `planning/schedules.py` extracted, proposals, dismissal, fixed and discretionary, `ob1` | Built, awaiting review |
-| M12.3 | `pf report income`: baseline, extra and side income by month, obligations due and paid, its UI page, the `--recurring` benchmark row | Built, awaiting review |
+| M12.2 | Recurring obligations: migration 0025, `planning/entries.py` and `planning/schedules.py` extracted, proposals, dismissal, fixed and discretionary, `ob1` | Accepted on 2026-11-16 |
+| M12.3 | `pf report income`: baseline, extra and side income by month, obligations due and paid, its UI page, the `--recurring` benchmark row | Accepted on 2026-11-16 |
 
 ### M12.1 acceptance criteria
 
@@ -653,6 +653,44 @@ as recommended, and M12.1 built on 2026-11-15 for the owner's review.
 Per-deposit assignment statements, sources or obligations that set a type, a normalized merchant,
 gross income and payroll deductions, income categories, tax reserves (M14), budgets (M13), and
 ending a source on a date (D-068, and its M12.1 slice plan).
+
+## M13 plan
+
+Approved by the owner on 2026-11-10 as D-069, with A to H, in
+[decisions-m12-m21.md](decisions-m12-m21.md), under D-067's guardrails G1 to G13. M13.1's
+migration was built on 2026-11-16, and the owner allowed M13.1 and M13.2 to be built the same day
+without stopping between them. No security control changes, and no `r`, `t`, `d` or `c` token
+moves.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M13.1 | Settings and budget plans: migration 0026, `pf setting`, `pf budget preview`, `set`, `show`, `undo`, `pf budgets`, chains, `st1`, `bp1`, today from the household timezone, `--as-of` optional on M12's commands | Built, awaiting review |
+| M13.2 | `pf report budget`: actual against target, pace, revised allowances, the personal view, closed months and unused capacity, the `/budget` page, the `--budget` benchmark row | Built, awaiting review |
+
+### M13.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| BA1 | Migration 0026 meets G10, seeds `household_timezone` only, and every trigger refuses with a control |
+| BA2 | `setting set` refuses an unknown key, an unknown zone, a second active value and a stale `st1`. Every planning command needing today refuses with no zone set, naming the command to run |
+| BA3 | `budget set` refuses: member amounts not summing exactly to the allowance, an unknown member or category, a negative amount, a closed-month `effective_from` without the flag, and a stale `bp1`. Each refusal changes nothing, and `evidence_digest` is unchanged by every budget write |
+| BA4 | The plan in effect for each month is the newest active plan with `effective_from` ≤ the month. Chains follow G4, and every planning module is free of clock calls (G7's test) |
+
+### M13.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| BB1 | Each formula of point 4, computed by hand for a 28-, 30- and 31-day month, on day 1, a middle day and the last day, with A below, at and above the target and C negative |
+| BB2 | Σ revised daily × R ≤ C, and the revised weekly allowance ≤ C, over generated months and amounts (Hypothesis) |
+| BB3 | Pending, unclassified and unconfirmed transfer-kind money out reduce capacity, each on its own line. Classifying one moves it to actual discretionary or out of the budget, exactly |
+| BB4 | Members' actuals plus unattributed equal the household's, and a member's view with any unattributed spending reads provisional |
+| BB5 | Third-paycheck parity as point 5. A closed month shows unused capacity labelled planned, and a corrected closed month is disclosed |
+| BB6 | `report budget` opens read-only. Its UI page equals it line for line. `--budget` asserts its counts and records its figures under G9. Every earlier criterion still passes |
+
+### Not in M13
+
+Rollover, weekly or custom periods, budgets by account, safe to spend (M16), alerts, goals (M14)
+and budgets in scenarios (M18), as D-069 lists them.
 
 ## Backlog benchmarks
 

@@ -246,6 +246,7 @@ def assert_categories_add_to_spending(found):
         found.spending.transactions, found.spending.out_cents, found.spending.in_cents)
 
 
+@pytest.mark.slow
 @settings(max_examples=25, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(generated_rows=rows)
@@ -311,6 +312,7 @@ def without_categories(text):
     return kept
 
 
+@pytest.mark.slow
 @settings(max_examples=15, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(generated_rows=rows)

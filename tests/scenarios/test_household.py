@@ -473,6 +473,7 @@ def without_household_lines(shown):
             for code, out, err in shown]
 
 
+@pytest.mark.slow
 @settings(max_examples=12, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(generated_rows=rows, defaults=st.tuples(st.sampled_from(["Michael", "M", None]),

@@ -665,6 +665,7 @@ def decision_points(order):
     ]
 
 
+@pytest.mark.slow
 def test_a_superseding_separation_at_any_point_in_any_order(tmp_path, capsys):  # N16
     canonical = replay(tmp_path / "canonical", capsys, tuple(ORDER_FILES), 3, 3)
     compared = 0

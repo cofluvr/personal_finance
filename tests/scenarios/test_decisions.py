@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from fresh_ledger import create_fresh_ledger
 from ledger_view import semantic_view
 
 from personal_finance.cli import UNDO_NOTICE, main
@@ -189,7 +190,8 @@ class Ledger:
         self.capsys = capsys
         self.db = str(self.path)
         self.files = 0
-        assert self.run("init")[0] == 0
+        # A copy of a migrated ledger, as `init` makes; test_cli.py tests `init` itself.
+        create_fresh_ledger(self.path)
         self.add_account("A")
 
     def add_account(self, name, account_type="checking"):
@@ -1341,6 +1343,7 @@ class TestRollback:
         assert ledger.reject(item, (one, two), revision=token)[0] == 2
         assert ledger.dump() == before
 
+    @pytest.mark.slow
     def test_a_busy_ledger_changes_nothing(self, ledger):
         item, one, two = pair_up(ledger)
         token = ledger.revision(item)

@@ -13,7 +13,6 @@ ingest/pdf_reader.py never lets it run.
 """
 
 import ast
-import shutil
 from pathlib import Path
 
 import pypdf
@@ -146,12 +145,11 @@ ADDED = [
 
 @pytest.mark.parametrize("relative_path, added", ADDED,
                          ids=[f"{path}: {added}" for path, added in ADDED])
-def test_an_added_import_fails(tmp_path, relative_path, added):
-    copy = tmp_path / "personal_finance"
-    shutil.copytree(PACKAGE_FOLDER, copy, ignore=shutil.ignore_patterns("__pycache__"))
-    module = copy / relative_path
-    module.write_text(module.read_text() + "\n" + added + "\n")
-    found, _ = refused_uses_under(copy)
+def test_an_added_import_fails(relative_path, added):
+    """Only the edited module is scanned: the others are unchanged, and the first test shows
+    them clean, so a scan of the whole package would find the same."""
+    edited_source = (PACKAGE_FOLDER / relative_path).read_text(encoding="utf-8")
+    found = refused_uses(edited_source + "\n" + added + "\n", relative_path)
     assert len(found) >= 1
     assert all(entry.startswith(f"{relative_path}:") for entry in found)
 
@@ -195,13 +193,10 @@ def test_the_server_binds_the_loopback_constant_and_nothing_else():
     assert "allow_reuse_address = False" in source
 
 
-def test_harmless_imports_pass_as_a_control(tmp_path):
-    copy = tmp_path / "personal_finance"
-    shutil.copytree(PACKAGE_FOLDER, copy, ignore=shutil.ignore_patterns("__pycache__"))
-    module = copy / "cli.py"
-    module.write_text(module.read_text()
-                      + "\nimport os, json, sqlite3, hashlib\nfrom os import path\nos.fspath\n")
-    assert refused_uses_under(copy) == ([], refused_uses_under(PACKAGE_FOLDER)[1])
+def test_harmless_imports_pass_as_a_control():
+    edited_source = (PACKAGE_FOLDER / "cli.py").read_text(encoding="utf-8")
+    harmless = "\nimport os, json, sqlite3, hashlib\nfrom os import path\nos.fspath\n"
+    assert refused_uses(edited_source + harmless, "cli.py") == []
 
 
 def test_pypdf_reaches_no_network_and_runs_no_program_outside_its_allowance():

@@ -13,7 +13,8 @@ Not part of the test suite. Run from the repository root:
     and spending in totals, --scale for the 100,000-transaction shape of M4.4, --scale
     --category-rules N for it with N category rules (D-064), --scale --household for it with
     household members, defaults and 5,000 allocations (D-065), --scale --recurring for it with 6
-    income sources and 60 obligations (D-068), or rows per month
+    income sources and 60 obligations (D-068), --scale --budget for that with three members, a
+    plan with 12 category allowances and a month of 3,000 purchases (D-069), or rows per month
     such as 200 1000 4000)
 
 Databases are created in a temporary folder and removed afterwards. Each timing covers
@@ -2423,12 +2424,143 @@ def measure_recurring() -> None:
               flush=True)
 
 
+BUDGET_MEMBERS = ("Ann", "Ben", "Cal")
+BUDGET_STORES = "ABCDEFGHIJKL"
+BUDGET_ROWS = 3_000
+BUDGET_MONTH = "2026-06"
+
+
+def measure_budget() -> None:
+    """Budgets on M12's shape (D-069 point 7, BB6): three members, a plan with 12 category
+    allowances, and a month holding 3,000 discretionary purchases on a shared account, each
+    reached by one of 12 category rules. Times report budget for the household and each member,
+    budget set and a one-row import. Stops, as G9 says, if a report misses two seconds or budget
+    set costs more than twice the import of one row."""
+    from personal_finance.planning.budgets import PlanRequest, checked_plan, set_plan
+    from personal_finance.reports.budget_report import budget_report
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _ = recurring_ledger(root)
+        conn.execute("INSERT INTO account (id, display_name, account_type) "
+                     "VALUES ('spend', 'Spend', 'checking')")
+        lines = [f"Q{number},{BUDGET_MONTH}-{1 + number % 28:02},{BUDGET_MONTH}-"
+                 f"{1 + number % 28:02},SYNTHETIC STORE {BUDGET_STORES[number % 12]},"
+                 f"-{1 + number % 90}.{number % 100:02},POSTED\n" for number in range(BUDGET_ROWS)]
+        source = root / "spend.csv"
+        source.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,"
+                          "Status\n" + "".join(lines))
+        (result,) = import_files(conn, [source], account_id="spend", layout=SYNTHETIC_CHECKING_V1)
+        assert result.outcome == "imported", result
+        conn.execute("BEGIN")
+        classify_directly(conn, "spend", [
+            (transaction_id, record_id, "purchase") for transaction_id, record_id in conn.execute(
+                """SELECT link.transaction_id, link.source_record_id FROM transaction_source link
+                   JOIN ledger_transaction entry ON entry.id = link.transaction_id
+                   WHERE entry.account_id = 'spend'""").fetchall()])
+        for number, name in enumerate(BUDGET_MEMBERS, start=1):
+            conn.execute("INSERT INTO household_member (id, name) VALUES (?, ?)", (number, name))
+        conn.execute("INSERT INTO household_share (id) VALUES ('h0')")
+        conn.execute("INSERT INTO household_share_part VALUES ('h0', 1, 3400), ('h0', 2, 3300), "
+                     "('h0', 3, 3300)")
+        conn.execute("INSERT INTO household_share_event (share_id, event) VALUES ('h0', 'made')")
+        for account, member in (("checking", None), ("card", None), ("savings", 1),
+                                ("loan", 2), ("bills", 3), ("spend", None)):
+            conn.execute("INSERT INTO account_attribution (id, account_id, member_id) "
+                         "VALUES (?, ?, ?)", (f"d-{account}", account, member))
+            conn.execute("INSERT INTO account_attribution_event (attribution_id, event) "
+                         "VALUES (?, 'made')", (f"d-{account}",))
+        store_categories = []
+        for letter in BUDGET_STORES:
+            number = conn.execute("INSERT INTO category (name) VALUES (?)",
+                                  (f"Store {letter}",)).lastrowid
+            store_categories.append(number)
+            conn.execute("""INSERT INTO category_rule (id, account_id, category_id,
+                                                       description_contains,
+                                                       normalization_version)
+                            VALUES (?, 'spend', ?, ?, 1)""",
+                         (f"rule-{letter}", number, f"synthetic store {letter.lower()}"))
+            conn.execute("INSERT INTO category_rule_event (rule_id, event) VALUES (?, 'made')",
+                         (f"rule-{letter}",))
+        conn.execute("""INSERT INTO budget_plan (id, effective_from, allowance_cents,
+                                                 corrected_closed_month)
+                        VALUES ('plan0', '2022-01', 3000000, 0)""")
+        conn.executemany("INSERT INTO budget_plan_member_part VALUES ('plan0', ?, 1000000)",
+                         [(1,), (2,), (3,)])
+        conn.executemany("INSERT INTO budget_plan_category VALUES ('plan0', ?, 100000)",
+                         [(number,) for number in store_categories])
+        conn.execute("INSERT INTO budget_plan_event (plan_id, event) VALUES ('plan0', 'made')")
+        write_transfer_effects(conn)
+        conn.execute("COMMIT")
+        build_seconds = time.perf_counter() - started
+
+        as_of = date(2026, 6, 20)
+        household = budget_report(conn, BUDGET_MONTH, as_of, None)
+        members = [budget_report(conn, BUDGET_MONTH, as_of, name) for name in BUDGET_MEMBERS]
+        transactions = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()[0]
+        print(f"shape transactions={transactions} members={len(BUDGET_MEMBERS)} "
+              f"categories={len(household.categories)} "
+              f"discretionary={household.discretionary.count} "
+              f"members_discretionary={[member.discretionary.count for member in members]} "
+              f"unattributed={members[0].unattributed.count} build={build_seconds:.1f}s",
+              flush=True)
+        # The shape reaches the cost it claims: the month holds the 3,000 purchases, every
+        # category allowance is reached, and every member's view divides them.
+        assert transactions > 107_000
+        assert household.discretionary.count >= BUDGET_ROWS
+        assert len(household.categories) == 12
+        assert all(allowance.spent_cents > 0 for allowance in household.categories)
+        assert all(member.discretionary.count >= BUDGET_ROWS for member in members)
+        assert sum(member.actual_cents for member in members) + members[0].unattributed.cents \
+            == household.actual_cents
+        conn.close()
+
+        database = str(path)
+        words = ["report", "budget", "--db", database, "--month", BUDGET_MONTH, "--as-of",
+                 as_of.isoformat()]
+        household_seconds = timed_command(*words)
+        member_seconds = [timed_command(*words, "--member", name) for name in BUDGET_MEMBERS]
+
+        conn = connect(path)
+        request = PlanRequest("2026-07", "30000.00",
+                              tuple(f"{name}=10000.00" for name in BUDGET_MEMBERS),
+                              tuple(f"Store {letter}=1000.00" for letter in BUDGET_STORES))
+        revision = checked_plan(conn, request, "2026-06").revision
+        started = time.perf_counter()
+        set_plan(conn, request, "2026-06", revision)
+        set_seconds = time.perf_counter() - started
+        later = root / "later.csv"
+        later.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+                         "LATER,2026-12-30,2026-12-30,SYNTHETIC LATER,-9.00,POSTED\n")
+        started = time.perf_counter()
+        (result,) = import_files(conn, [later], account_id="savings",
+                                 layout=SYNTHETIC_CHECKING_V1)
+        import_seconds = time.perf_counter() - started
+        assert result.outcome == "imported"
+        conn.close()
+        print(f"report_budget={household_seconds:7.3f}s report_budget_members="
+              f"{','.join(f'{seconds:.3f}' for seconds in member_seconds)}s "
+              f"budget_set={set_seconds:7.3f}s one_import={import_seconds:7.3f}s", flush=True)
+        stops = [name for name, seconds in (("report budget", household_seconds),
+                                            *(("report budget --member", seconds)
+                                              for seconds in member_seconds))
+                 if seconds > 2]
+        if set_seconds > 2 * import_seconds or set_seconds > 2:
+            stops.append("budget set")
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--scale"]:
         measure_scale()
         return
     if sys.argv[1:] == ["--scale", "--recurring"]:
         measure_recurring()
+        return
+    if sys.argv[1:] == ["--scale", "--budget"]:
+        measure_budget()
         return
     if sys.argv[1:] == ["--scale", "--household"]:
         measure_household()

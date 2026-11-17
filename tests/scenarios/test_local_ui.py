@@ -459,6 +459,7 @@ class TestPagesEqualTheCli:  # UB8
         assert_pages_equal_the_cli(capsys, db, ["card"],
                                    [(None, None), ("2026-10", "2026-10"), ("2026-11", None)])
 
+    @pytest.mark.slow
     @settings(max_examples=15, deadline=None,
               suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
     @given(checking_rows=rows, savings_days=st.lists(st.integers(1, 89), max_size=4),

@@ -247,6 +247,7 @@ class TestFilesLeftBehind:
         assert unexpected_files(workspace, requested=["export.txt"]) == []
 
 
+@pytest.mark.slow
 def test_a_reader_closing_the_output_is_neither_an_error_nor_a_success(tmp_path):
     rows = "".join(f"01/10/2026,SYNTHETIC ROW {number},1.00,\n" for number in range(3000))
     (tmp_path / "big.csv").write_text(f"Date,Description,Debit,Credit\n{rows}")

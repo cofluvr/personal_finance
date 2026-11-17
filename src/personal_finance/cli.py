@@ -11,7 +11,7 @@ import re
 import sqlite3
 import sys
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from personal_finance.db.backups import (
@@ -83,6 +83,25 @@ from personal_finance.planning.obligations import (
     undo_obligation,
 )
 from personal_finance.planning.schedules import terms_in_effect
+from personal_finance.planning.budgets import (
+    PlanRequest,
+    changed_months,
+    checked_plan,
+    load_plans,
+    plans_after_supersede,
+    set_plan,
+    supersede_revision,
+    undo_plan,
+    undo_revision,
+)
+from personal_finance.planning.settings import (
+    active_setting,
+    household_timezone,
+    set_setting,
+    setting_keys,
+    setting_revision,
+    undo_setting,
+)
 from personal_finance.reconcile.apply import STATE_ACTIVE, reconcile_account, stale_accounts
 from personal_finance.reconcile.balance_observations import record_observation, undo_observation
 from personal_finance.reconcile.cross_document import (
@@ -218,6 +237,7 @@ from personal_finance.reports.household_evidence import (
 )
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.report_text import (
+    budget_report_lines,
     income_report_lines,
     ATTRIBUTION_EXPLANATIONS,
     CATEGORIZATION_STATE_EXPLANATIONS,
@@ -440,6 +460,9 @@ def print_report(lines: ReportLines) -> None:
         print(line.text)
 
 
+TODAY_HELP = "today, YYYY-MM-DD, else today in the household's timezone"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pf")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -555,8 +578,8 @@ def build_parser() -> argparse.ArgumentParser:
     income_terms.add_argument("--amount", required=True, help="the expected take-home amount")
     income_terms.add_argument("--cadence", help="a new cadence, given with --anchor")
     income_terms.add_argument("--anchor", help="a real pay date of the new cadence")
-    income_terms.add_argument("--as-of", required=True,
-                              help="today, YYYY-MM-DD: a month before it is closed")
+    income_terms.add_argument("--as-of",
+                              help=f"{TODAY_HELP}: a month before it is closed")
     income_terms.add_argument("--revision", required=True,
                               help="the terms revision from income source show")
     income_sources_command = command("sources", income_commands, handler=run_income_sources,
@@ -567,13 +590,66 @@ def build_parser() -> argparse.ArgumentParser:
     income_source_show = command("show", income_source_commands, handler=run_income_source_show,
                                  help="show a source's pay dates and deposits as of a date")
     income_source_show.add_argument("source_id", help="a source ID from income sources")
-    income_source_show.add_argument("--as-of", required=True,
-                                    help="today, YYYY-MM-DD: missed only once it has passed")
+    income_source_show.add_argument("--as-of",
+                                    help=f"{TODAY_HELP}: missed only once it has passed")
     income_undo = command("undo", income_commands, handler=run_income_undo,
                           help="stop an income source applying, keeping it on record")
     income_undo.add_argument("source_id", help="a source ID from income sources")
     income_undo.add_argument("--revision", required=True,
                              help="the undo revision from income source show")
+
+    setting = commands.add_parser(
+        "setting", help="show, set or undo the ledger's settings, such as the household timezone")
+    setting_commands = setting.add_subparsers(dest="setting_command", required=True)
+    command("show", setting_commands, handler=run_setting_show,
+            help="show each setting, its value and its revision")
+    setting_set = command("set", setting_commands, handler=run_setting_set,
+                          help="set a setting that has no value")
+    setting_set.add_argument("key", help="a key from setting show")
+    setting_set.add_argument("value", help="the value, such as America/Chicago")
+    setting_set.add_argument("--revision", required=True, help="the revision from setting show")
+    setting_undo = command("undo", setting_commands, handler=run_setting_undo,
+                           help="stop a setting's value applying, keeping it on record")
+    setting_undo.add_argument("key", help="a key from setting show")
+    setting_undo.add_argument("--revision", required=True, help="the revision from setting show")
+
+    command("budgets", handler=run_budgets, help="list budget plans and the months each holds")
+    budget = commands.add_parser("budget", help="preview, set, inspect or undo a budget plan")
+    budget_commands = budget.add_subparsers(dest="budget_command", required=True)
+
+    def plan_arguments(sub):
+        sub.add_argument("--from", dest="from_month", required=True,
+                         help="the first month the plan applies, YYYY-MM")
+        sub.add_argument("--allowance", required=True,
+                         help="the household's discretionary allowance a month, such as 1500.00")
+        sub.add_argument("--member", action="append", metavar="NAME=AMOUNT",
+                         help="a member's part of the allowance; give every member, adding to "
+                              "it exactly; repeat")
+        sub.add_argument("--category", action="append", metavar="NAME=AMOUNT",
+                         help="a category's allowance a month, a cap of its own; repeat")
+        sub.add_argument("--supersedes", help="the plan this one replaces")
+        sub.add_argument("--supersedes-revision",
+                         help="the supersede revision from budget show of the plan it replaces")
+        sub.add_argument("--correct-closed-month", action="store_true",
+                         help="allow a change to a closed month's plan, disclosed on its reports")
+        sub.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
+
+    budget_preview = command("preview", budget_commands, handler=run_budget_preview,
+                             help="show a plan and the months it changes, writing nothing")
+    plan_arguments(budget_preview)
+    budget_set = command("set", budget_commands, handler=run_budget_set,
+                         help="record a plan whose preview is still current")
+    plan_arguments(budget_set)
+    budget_set.add_argument("--revision", required=True, help="the revision from budget preview")
+    budget_show = command("show", budget_commands, handler=run_budget_show,
+                          help="show a plan, the months it holds and its revisions")
+    budget_show.add_argument("plan_id", help="a plan ID from budgets")
+    budget_undo = command("undo", budget_commands, handler=run_budget_undo,
+                          help="stop a plan applying, keeping it on record")
+    budget_undo.add_argument("plan_id", help="a plan ID from budgets")
+    budget_undo.add_argument("--revision", required=True,
+                             help="the undo revision from budget show")
+    budget_undo.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
 
     obligation = commands.add_parser(
         "obligation", help="state recurring obligations and see their payments against their "
@@ -629,15 +705,15 @@ def build_parser() -> argparse.ArgumentParser:
     obligation_terms.add_argument("--class", dest="obligation_class",
                                   choices=OBLIGATION_CLASSES,
                                   help="a new class, else the latest terms row's")
-    obligation_terms.add_argument("--as-of", required=True,
-                                  help="today, YYYY-MM-DD: a month before it is closed")
+    obligation_terms.add_argument("--as-of",
+                                  help=f"{TODAY_HELP}: a month before it is closed")
     obligation_terms.add_argument("--revision", required=True,
                                   help="the terms revision from obligation show")
     obligation_show = command("show", obligation_commands, handler=run_obligation_show,
                               help="show an obligation's due dates and payments as of a date")
     obligation_show.add_argument("obligation_id", help="an obligation ID from obligations")
-    obligation_show.add_argument("--as-of", required=True,
-                                 help="today, YYYY-MM-DD: missed only once it has passed")
+    obligation_show.add_argument("--as-of",
+                                 help=f"{TODAY_HELP}: missed only once it has passed")
     obligation_undo = command("undo", obligation_commands, handler=run_obligation_undo,
                               help="stop an obligation applying, keeping it on record")
     obligation_undo.add_argument("obligation_id", help="an obligation ID from obligations")
@@ -1248,8 +1324,15 @@ def build_parser() -> argparse.ArgumentParser:
                                help="the first month, YYYY-MM, inclusive")
     income_report.add_argument("--to", dest="last_month",
                                help="the last month, YYYY-MM, inclusive")
-    income_report.add_argument("--as-of", required=True,
-                               help="today, YYYY-MM-DD: missed only once it has passed")
+    income_report.add_argument("--as-of",
+                               help=f"{TODAY_HELP}: missed only once it has passed")
+    budget_report = command(
+        "budget", report_commands, handler=run_report_budget,
+        help="a month's spending against its budget plan, with budget pace and revised allowances",
+    )
+    budget_report.add_argument("--month", help="the month, YYYY-MM, else the as-of month")
+    budget_report.add_argument("--member", help="one member's part, a name from household members")
+    budget_report.add_argument("--as-of", help=TODAY_HELP)
     household_view = household.add_mutually_exclusive_group()
     household_view.add_argument("--member", help="one member's parts, a name from household members")
     household_view.add_argument("--shared", action="store_true",
@@ -2754,8 +2837,8 @@ def run_income_add(args) -> int:
 
 def run_income_terms(args) -> int:
     conn = open_ledger(args.db)
-    terms = change_terms(conn, args.source_id, args.effective_from, args.amount, args.as_of,
-                         args.revision, args.cadence, args.anchor)
+    terms = change_terms(conn, args.source_id, args.effective_from, args.amount,
+                         as_of_text(conn, args.as_of), args.revision, args.cadence, args.anchor)
     print(f"Income source {args.source_id} terms recorded: {terms_sentence(terms)}")
     print("  Pay dates before it keep their terms.")
     return 0
@@ -2786,7 +2869,7 @@ def run_income_sources(args) -> int:
 
 def run_income_source_show(args) -> int:
     conn = open_ledger(args.db, read_only=True)
-    as_of = date.fromisoformat(checked_as_of(args.as_of))
+    as_of = as_of_date(conn, args.as_of)
     sources = load_income_sources(conn)
     source = next((source for source in sources if source.source_id == args.source_id), None)
     if source is None:
@@ -2824,6 +2907,39 @@ def run_income_source_show(args) -> int:
     print("To change its definition, run income preview with --supersedes.")
     warn_if_stale(conn, source.definition.account_id, "a change")
     return 0
+
+
+TIMEZONE_NEEDED = (
+    "this needs today's date in the household's timezone, which is not set. Run setting set "
+    "household_timezone ZONE with the revision from setting show, or give --as-of YYYY-MM-DD."
+)
+
+
+def current_utc_time() -> datetime:
+    """The one clock read (G7). Tests replace it."""
+    return datetime.now(timezone.utc)
+
+
+def household_today(conn) -> date:
+    """Today in the household's timezone, or refused with none set: no zone is assumed."""
+    zone = household_timezone(conn)
+    if zone is None:
+        raise CommandError(TIMEZONE_NEEDED)
+    return current_utc_time().astimezone(zone).date()
+
+
+def household_today_if_set(conn) -> date | None:
+    """Today in the household's timezone, else None with none set, for a page that then asks."""
+    return None if household_timezone(conn) is None else household_today(conn)
+
+
+def as_of_text(conn, text) -> str:
+    """--as-of as given, else today in the household's timezone."""
+    return household_today(conn).isoformat() if text is None else text
+
+
+def as_of_date(conn, text) -> date:
+    return date.fromisoformat(checked_as_of(as_of_text(conn, text)))
 
 
 def checked_as_of(text) -> str:
@@ -2985,8 +3101,9 @@ def run_obligation_terms(args) -> int:
     conn = open_ledger(args.db)
     terms = change_obligation_terms(
         conn, args.obligation_id,
-        ObligationTermsRequest(args.effective_from, args.as_of, args.amount, args.amount_range,
-                               args.cadence, args.anchor, args.obligation_class),
+        ObligationTermsRequest(args.effective_from, as_of_text(conn, args.as_of), args.amount,
+                               args.amount_range, args.cadence, args.anchor,
+                               args.obligation_class),
         args.revision)
     print(f"Obligation {args.obligation_id} terms recorded: {obligation_terms_sentence(terms)}")
     print("  Due dates before it keep their terms.")
@@ -3023,7 +3140,7 @@ def run_obligations(args) -> int:
 
 def run_obligation_show(args) -> int:
     conn = open_ledger(args.db, read_only=True)
-    as_of = date.fromisoformat(checked_as_of(args.as_of))
+    as_of = as_of_date(conn, args.as_of)
     obligation = next((obligation for obligation in load_obligations(conn)
                        if obligation.obligation_id == args.obligation_id), None)
     if obligation is None:
@@ -3931,10 +4048,180 @@ def run_report_income(args) -> int:
     last_month = validated_month("--to", args.last_month)
     if first_month and last_month and first_month > last_month:
         raise CommandError("--from is after --to. Nothing was changed.")
-    as_of = date.fromisoformat(checked_as_of(args.as_of))
+    if args.as_of is not None:
+        checked_as_of(args.as_of)
     conn = open_ledger(args.db, read_only=True)
+    as_of = as_of_date(conn, args.as_of)
     account_id = find_account(conn, args.account) if args.account else None
     print_report(income_report_lines(conn, as_of, account_id, first_month, last_month))
+    return 0
+
+
+def run_report_budget(args) -> int:
+    month = validated_month("--month", args.month)
+    if args.as_of is not None:
+        checked_as_of(args.as_of)
+    conn = open_ledger(args.db, read_only=True)
+    as_of = as_of_date(conn, args.as_of)
+    if args.member is not None and load_household(conn).find_member(args.member) is None:
+        raise CommandError("household member not found. Run household members.")
+    print_report(budget_report_lines(conn, month or as_of.isoformat()[:7], as_of, args.member))
+    return 0
+
+
+def run_setting_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    keys = setting_keys(conn)
+    active = {key: active_setting(conn, key) for key in keys}
+    for key in keys:
+        setting = active[key]
+        if setting is None:
+            print(f"Setting {key}: not set")
+        else:
+            print(f"Setting {key}: {shown(setting.value)}, setting {setting.setting_id}, made "
+                  f"{setting.created_at}")
+        print(f"  Revision: {setting_revision(conn, key)}")
+        if setting is not None:
+            print("  To change it, undo it with setting undo, then set the new value.")
+    count = sum(setting is not None for setting in active.values())
+    print(f"Settings: {len(keys)} {'key' if len(keys) == 1 else 'keys'}, {count} set")
+    return 0
+
+
+def run_setting_set(args) -> int:
+    conn = open_ledger(args.db)
+    setting_id = set_setting(conn, args.key, args.value, args.revision)
+    print(f"Setting {args.key} set to {shown(args.value)}: setting {setting_id}")
+    return 0
+
+
+def run_setting_undo(args) -> int:
+    conn = open_ledger(args.db)
+    undone = undo_setting(conn, args.key, args.revision)
+    print(f"Setting {args.key} undone: it was {shown(undone.value)}. It stays on record.")
+    return 0
+
+
+def plan_sentence(plan) -> str:
+    return (f"from {plan.effective_from}, discretionary allowance, planned "
+            f"{shown_amount(plan.allowance_cents)} a month")
+
+
+def month_before(month: str) -> str:
+    year, number = int(month[:4]), int(month[5:])
+    return f"{year - (number == 1):04}-{(number - 2) % 12 + 1:02}"
+
+
+def months_words(ranges) -> str:
+    return ", ".join(f"{first} onward" if end is None else f"{first} to {month_before(end)}"
+                     for first, end in ranges) or "none"
+
+
+def print_plan_parts(plan) -> None:
+    if plan.member_parts:
+        print("  Members, planned: " + ", ".join(
+            f"{shown(name)} {shown_amount(cents)}" for name, cents in plan.member_parts))
+    else:
+        print("  Members: not divided")
+    if plan.category_allowances:
+        print("  Category allowances, planned: " + ", ".join(
+            f"{shown(name)} {shown_amount(cents)}" for name, cents in plan.category_allowances))
+    else:
+        print("  Category allowances: none")
+    if plan.category_excess_cents:
+        print(f"  Warning: the category allowances exceed the household allowance by "
+              f"{shown_amount(plan.category_excess_cents)}. Categories overlap members, so the "
+              "plan is accepted.")
+
+
+def plan_request(args) -> PlanRequest:
+    return PlanRequest(args.from_month, args.allowance, tuple(args.member or ()),
+                       tuple(args.category or ()), args.supersedes, args.supersedes_revision,
+                       args.correct_closed_month)
+
+
+def run_budget_preview(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    as_of_month = as_of_date(conn, args.as_of).isoformat()[:7]
+    checked = checked_plan(conn, plan_request(args), as_of_month)
+    print(f"Budget plan preview: {plan_sentence(checked.plan)}")
+    print_plan_parts(checked.plan)
+    if checked.superseded is not None:
+        print(f"  Supersedes {checked.superseded.plan_id}")
+    if checked.plan.corrected_closed_month:
+        print(f"  Corrects a closed month: from {checked.changed_months[0][0]}, disclosed on "
+              "every later report of the months it changes")
+    print(f"  Changes the plan in effect for: {months_words(checked.changed_months)}")
+    print(f"Revision: {checked.revision}")
+    print("To record this plan, run budget set with the same options and --revision.")
+    return 0
+
+
+def run_budget_set(args) -> int:
+    conn = open_ledger(args.db)
+    as_of_month = as_of_date(conn, args.as_of).isoformat()[:7]
+    plan_id = set_plan(conn, plan_request(args), as_of_month, args.revision)
+    plan = next(plan for plan in load_plans(conn) if plan.plan_id == plan_id)
+    print(f"Budget plan {plan_id} recorded: {plan_sentence(plan)}")
+    if plan.supersedes_id:
+        print(f"  Supersedes {plan.supersedes_id}. It stays on record.")
+    return 0
+
+
+def run_budgets(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    plans = load_plans(conn)
+    for plan in plans:
+        print(f"Budget plan {plan.plan_id}: {plan.state}, {plan_sentence(plan)}, made "
+              f"{plan.created_at}")
+        if plan.applies:
+            print(f"  In effect: "
+                  f"{months_words(changed_months(plans, plans_after_supersede(plans, plan)))}")
+    print(f"Budget plans: {len(plans)}")
+    if plans:
+        print("To see a plan's parts and revisions, run budget show.")
+    return 0
+
+
+def run_budget_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    plans = load_plans(conn)
+    plan = next((plan for plan in plans if plan.plan_id == args.plan_id), None)
+    if plan is None:
+        raise CommandError("budget plan not found. Run budgets.")
+    by_id = {other.plan_id: other for other in plans}
+    print(f"Budget plan {plan.plan_id}")
+    print(f"  Status: {plan.state}")
+    print(f"  Says: {plan_sentence(plan)}")
+    print_plan_parts(plan)
+    print(f"  Made: {plan.created_at}")
+    if plan.supersedes_id:
+        print(f"  Supersedes: {plan.supersedes_id}")
+    if plan.corrected_closed_month:
+        superseded = by_id.get(plan.supersedes_id)
+        first = min(plan.effective_from, superseded.effective_from if superseded else "9999-12")
+        print(f"  Corrects a closed month: from {first}, disclosed on every later report of the "
+              "months it changed")
+    if plan.undone_at:
+        print(f"  Undone: {plan.undone_at}. It stays on record and no longer applies.")
+        return 0
+    if plan.superseded_by:
+        print(f"  Superseded by {plan.superseded_by}, which applies instead.")
+        return 0
+    print(f"  In effect: {months_words(changed_months(plans, plans_after_supersede(plans, plan)))}")
+    print(f"  Supersede revision: {supersede_revision(plans, plan)}")
+    print(f"  Undo revision: {undo_revision(plans, plan)}")
+    print("To change it, run budget preview with --supersedes and --supersedes-revision.")
+    return 0
+
+
+def run_budget_undo(args) -> int:
+    conn = open_ledger(args.db)
+    as_of_month = as_of_date(conn, args.as_of).isoformat()[:7]
+    plan = undo_plan(conn, args.plan_id, as_of_month, args.revision)
+    print(f"Budget plan {args.plan_id} undone. It stays on record.")
+    if plan.supersedes_id:
+        print(f"  Plan {plan.supersedes_id}, which it superseded, applies again.")
     return 0
 
 

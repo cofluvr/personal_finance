@@ -21,8 +21,8 @@ with it. Nothing else does.
 | Decision | Milestone | Status |
 |---|---|---|
 | D-067 | Cross-milestone guardrails for M12 to M21 | Approved |
-| D-068 | M12 Income and recurring obligations | Approved |
-| D-069 | M13 Budgets and spending allowances | Approved |
+| D-068 | M12 Income and recurring obligations | Approved, accepted on 2026-11-16 |
+| D-069 | M13 Budgets and spending allowances | Approved, built for review |
 | D-070 | M14 Goals, reserves and the tax reserve | Approved |
 | D-071 | M15 Net worth and loans | Approved |
 | D-072 | M16 Safe-to-spend and the cash-flow constraint | Approved |
@@ -332,7 +332,7 @@ slice aims its breaks at:
 
 ---
 
-## D-068 M12 plan: income and recurring obligations — Approved, M12.1 accepted
+## D-068 M12 plan: income and recurring obligations — Approved, M12 accepted
 
 M12 meets PRD §11 and §10's fixed and discretionary split, and closes PRD §21's "Third paychecks do
 not increase normal spending targets" on the income side. M13 holds the rule on the budget side.
@@ -928,6 +928,10 @@ its own slice plan, for the owner's review):
   One survived, a test gap (every obligation was exact, so due at LOW or HIGH looked alike),
   closed and caught on the rerun.
 - **Benchmark:** `--scale --recurring`, in [benchmarks.md](benchmarks.md).
+
+**M12.2 and M12.3 accepted** by the owner on 2026-11-16, as built, with the departures above.
+**M12 is complete.**
+
 ---
 
 ## D-069 M13 plan: budgets and spending allowances — Approved
@@ -1108,6 +1112,101 @@ personal allocations, and any category allowances.
 | BB4 | Members' actuals plus unattributed equal the household's, and a member's view with any unattributed spending reads provisional |
 | BB5 | Third-paycheck parity as point 5. A closed month shows unused capacity labelled planned, and a corrected closed month is disclosed |
 | BB6 | `report budget` opens read-only. Its UI page equals it line for line. `--budget` asserts its counts and records its figures under G9. Every earlier criterion still passes |
+
+
+**How M13.1 was implemented** (built on 2026-11-16, under the owner's instruction to continue
+through M13, for the owner's review):
+
+- **Migration 0026** was built first, in its own commit (`bb60fd8`), with G10's tests in
+  `tests/scenarios/test_budget_migration.py`.
+- `planning/settings.py` holds point 1. A key has at most one active value, from `made` to
+  `undone`, and a change is undo then set. The timezone must be a name in this Mac's IANA
+  database (`zoneinfo.available_timezones()`), which also refuses names such as `localtime` and
+  paths that `ZoneInfo` alone would read. `st1` covers the operation valid now, the key and its
+  active value.
+- `planning/budgets.py` holds point 2's plans and point 6's `bp1`. The plan in effect for a month
+  is the applying plan with the latest `effective_from` no later than it. `bp1` covers the
+  operation, the plan's full content (members and categories by name), its ID once recorded, the
+  superseded plan's own token, and the months whose plan in effect the change moves, as ranges.
+- The CLI's one clock read, `current_utc_time`, turns UTC into the household's day. Every command
+  that needs today takes `--as-of`, else reads the zone, and refuses with none set, naming
+  `setting set` (BA2). `--as-of` became optional on `income source show`, `income terms`,
+  `obligation show`, `obligation terms` and `report income`, and the `/income` page reads today
+  once a zone is set (M12.1 slice plan point 1). Given `--as-of`, each prints as before (G6).
+- **Departures, for the owner's review:**
+  - **`budget preview`,** beyond D-069's list, prints a new plan's `bp1`, as `income preview` does,
+    since `budget set --revision` needs one. `budget undo` takes `--as-of` too, for the rule below.
+  - **`setting show` prints one revision per key,** the one valid now: a key with no value can only
+    be set, and one with a value only undone.
+  - **Closed months, by the months a write changes.** Point 2 refuses an `effective_from` before
+    today's month. Superseding or undoing a plan can change closed months too, whatever the new
+    plan's month, so the first month whose plan in effect a write moves decides. Superseding a
+    closed month's plan needs `--correct-closed-month`. An undo that would change a closed month
+    is refused, naming supersession with the flag, since an undo has no flag to disclose.
+  - **No two applying plans from one month.** A second plan for a month must supersede the first,
+    and an undo that would restore a plan onto a month another applying plan holds is refused, so
+    "the newest plan" is never ambiguous.
+  - **Members by exact amount, every member named.** A plan that divides the allowance gives every
+    household member an amount, 0 allowed ("one amount per M11 member").
+- **Tests:** `tests/scenarios/test_budget_plans.py` covers BA2 to BA4 and G3: a stale token for
+  each input, a race and a fault after the first insert for a setting and a plan, and
+  `evidence_digest` unchanged by every write. The registry pins `st` and `bp` (G5). The backup
+  tests' rich ledger gains a setting undone and set again, a divided plan with a category cap
+  superseded, a later plan undone and a closed month corrected, compared after restore (G10).
+- **Breaks (G12):** 25 applied, 23 caught on the first run, each by a relevant test. Two are
+  equivalent code: `st1` without its operation, since the operation follows from the value; and
+  `bp1` without the superseded plan's token, since `--supersedes-revision` is compared with that
+  same token first.
+
+**How M13.2 was implemented** (built on 2026-11-16, for the owner's review):
+
+- `planning/budget_pace.py` computes point 4's figures in integer cents, every allowance rounded
+  down (G8), as_of's day an argument (G7). `reports/budget_report.py` builds the month, and
+  `report_text.py` its lines, which `pf report budget [--month] [--member] [--as-of]` prints and
+  `/budget` renders. With no `--month`, the as-of month.
+- **Actual (point 3).** Discretionary is M12's: spending types outside a confirmed transfer, not
+  reached by a fixed obligation, pending included and refunds reducing it, by D-057's date.
+  Possible spending is unclassified money out and unconfirmed transfer-kind money out, each on its
+  own line, "counted until classified", with "of which pending" across all three. Capacity reads
+  provisional while any possible spending is left, and in a member's view while anything is
+  unattributed.
+- **A member's view** counts that member's parts of the same transactions, from M11's effective
+  attributions. Unattributed amounts count against the household only. Members' actuals plus
+  unattributed equal the household's (BB4). Its target is the member's part, and a plan that does
+  not divide the allowance gives no member target.
+- **Context, never inputs (point 5):** baseline income planned and fixed obligations due planned
+  for the month, from M12's income report, and fixed spending actual.
+- **Departures and choices, for the owner's review:**
+  - **A category cap counts its subcategories,** so a cap on a top-level category is not
+    overstated by spending put under it.
+  - **The corrected-month disclosure** ("target corrected after the month closed") reads the
+    `corrected_closed_month` flag 0026 stores. A closed month is disclosed when a flagged plan is
+    in effect for it, or left it with no plan, and it lies from the first month that plan or the
+    one it superseded applied from to before the month the plan was made, in the household zone.
+    The made month is the real date, so a correction made with an `--as-of` far from it discloses
+    by the real date.
+  - **The report names the plan by its month, not its ID,** so two ledgers alike but for a third
+    paycheck print byte-identical reports (BB5).
+  - Over target, the largest five discretionary transactions are listed, largest first. Possible
+    spending is on its own lines above them.
+- **Tests:** `tests/unit/test_budget_pace.py` (BB1 by hand for 28-, 30- and 31-day months on day 1,
+  a middle day and the last, A below, at and above T and C negative; BB2 by Hypothesis) and
+  `tests/scenarios/test_budget_report.py` (BB3 to BB6, and G6 point 3 for `totals`,
+  `report monthly` and `report household` with every planning table dropped).
+- **Breaks (G12):** 25 applied, 21 caught on the first run. One is equivalent code: a future month
+  computing actuals, which its lines never show. Three were test gaps, closed and caught on the
+  rerun: a confirmed transfer counted, unattributed spending alone not marking a member
+  provisional, and unused capacity below zero.
+- **Compared as G6, for M13 whole:** the suite's ledgers, kept with `--basetemp` from a
+  `git archive` export of `785c4d8` (3,045 ledgers at version 26, so no copy needed migrating),
+  read by that code and by a frozen copy of M13's `src/`. Every per-ID show is capped at 50 per
+  kind, `obligation show` and `report income` with `--as-of` included. Of 108,865 runs, all
+  108,865 are identical, with no token version moved. Another 12,280 runs of `setting show`,
+  `budgets` and `report budget` exit 0 on every ledger that opens, and give the same refusals as
+  every other command on the rest: older or newer stamped versions, real-ledger marks inside a
+  git tree, and two deliberately damaged backups.
+- **Benchmark:** `--scale --budget`, in [benchmarks.md](benchmarks.md). Every target met, the
+  stopping rule not met.
 
 ---
 

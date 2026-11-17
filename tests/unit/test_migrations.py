@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import stat
 import subprocess
@@ -5,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from fresh_ledger import create_fresh_ledger
 
 from personal_finance.db import migrate as migrate_module
 from personal_finance.db.migrate import (
@@ -24,9 +26,38 @@ def write_migrations(directory, **files):
     return directory
 
 
+ISO_TIMESTAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z")
+
+
 def table_names(conn):
     rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
     return {row[0] for row in rows}
+
+
+@pytest.fixture
+def db_path(tmp_path):
+    """Overrides conftest's copied ledger: this file tests `create_database` itself."""
+    path = tmp_path / "ledger.db"
+    create_database(path)
+    return path
+
+
+def test_the_copied_test_ledger_matches_one_made_by_create_database(tmp_path):
+    made, copied = tmp_path / "made.db", tmp_path / "copied.db"
+    create_database(made)
+    create_fresh_ledger(copied)
+    assert stat.S_IMODE(copied.stat().st_mode) == stat.S_IMODE(made.stat().st_mode) == 0o600
+    made_conn, copied_conn = connect(made), connect(copied)
+    assert schema_version(copied_conn) == schema_version(made_conn) == len(load_migrations())
+    # Seeded rows carry SQLite's clock at migration time, so a copy has the template's.
+    def without_clock_readings(conn):
+        return [ISO_TIMESTAMP.sub("TIMESTAMP", line) for line in conn.iterdump()]
+
+    assert without_clock_readings(copied_conn) == without_clock_readings(made_conn)
+    made_conn.close()
+    copied_conn.close()
+    with pytest.raises(FileExistsError):
+        create_fresh_ledger(copied)
 
 
 def test_new_database_is_at_the_latest_version(conn):

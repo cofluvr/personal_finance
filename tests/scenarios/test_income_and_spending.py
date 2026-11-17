@@ -71,6 +71,7 @@ rows = st.lists(
 )
 
 
+@pytest.mark.slow
 @settings(max_examples=40, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(checking_rows=rows, mirrored=st.lists(st.integers(0, 5), max_size=3))

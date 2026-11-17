@@ -79,6 +79,7 @@ household_choices = st.tuples(
 )
 
 
+@pytest.mark.slow
 @settings(max_examples=15, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(generated_rows=rows, choices=household_choices)
@@ -266,6 +267,7 @@ def report_words():
             ("report", "monthly", "--account", "A", "--from", "2026-02")]
 
 
+@pytest.mark.slow
 @settings(max_examples=10, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(generated_rows=rows, choices=household_choices)
@@ -310,6 +312,7 @@ def assert_household_pages_equal_the_cli(ledger):
         client.close()
 
 
+@pytest.mark.slow
 @settings(max_examples=5, deadline=None,
           suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 @given(generated_rows=rows, choices=household_choices)
