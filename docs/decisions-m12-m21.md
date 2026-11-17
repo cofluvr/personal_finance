@@ -1577,6 +1577,61 @@ and a monthly or percentage goal shows "no target".
   to tell which goal is the debt goal. A card takes rate terms only, for interest projection, and
   is refused in `loan payment` and in payoff orders.
 
+
+**How M14.2 was implemented** (built on 2026-11-16, within the approved plan):
+
+- **Migration 0028** first, in its own commit (`f8cff73`), with G10's tests in
+  `tests/scenarios/test_consumption_migration.py`: `fund_consumption`, its records and events, the
+  derived `transaction_fund_consumption` (`applied`, `conflict`, `basis_changed`, `not_spending`),
+  and `tax_reserve_release` with its events. Triggers refuse a consumption of the emergency fund
+  or of a fund not on record, and a release of any fund but the tax reserve.
+- **The fourth stated kind.** `reconcile/consumption_effects.py` is D-063's `StatedField` for
+  consumptions, its value the fund's ID, fitting only D-056's spending group (as a category does),
+  so a transaction reclassified or confirmed as a transfer holds it as `not_spending`. Its effects
+  are written after allocations in `write_transfer_effects`. `reconcile/consumptions.py` makes and
+  undoes one through `reconcile/statements.py`, refusing an unknown or undone fund, the emergency
+  fund (D-070 point 5 names a reserve, a goal or the tax fund) and a transaction not in spending.
+  Confirming or separating refuses where it would leave a consumption unsettled, as for
+  allocations, and a decision's undo says how many it leaves paid from no fund.
+- **The portion is computed where it is read, never stored** (`planning/funds.py`,
+  `consumed_portions`), since it turns on assignments, which change without a derive. Choice 2
+  fixes which assignments it reads, so a later assignment or release rewrites no portion.
+  Assignments are shown, guarded (`fund assign`) and tokened (`fa1`) at what they still hold, less
+  the portions of consumptions dated by `as_of`.
+- **Required amounts** take the consumed portion: a target's or reserve's outstanding amount is
+  target − what the assignments still hold − what the fund paid in its cycle, so a purchase paid
+  from a reserve leaves its need for the cycle unchanged and moves the money from "assigned" to
+  "paid from this fund". A recurring reserve's cycle starts after its previous due date, never
+  before its anchor (choice 4).
+- **The tax reserve.** Payments are the whole of each transaction consumed against it (choice 3),
+  a refund consumed against it reducing them. `fund release` and `fund release-undo`
+  (`planning/fund_releases.py`) record and undo a release: on a day from the reserve's first terms
+  through `--as-of`, in no closed month, and never beyond the required amount as of `--as-of`.
+  `fu1` covers the tax reserve's active releases, left out while there are none, and `fund show`
+  prints the tax reserve's release token. Required is accrued − paid − released, never below
+  zero, and "Paid beyond the reserve" is shown when payments and releases exceed the accrual.
+- **M13's "paid from reserves"** (choice 6). `report budget` takes each discretionary
+  transaction's portion out of discretionary actual, its category's spending and the largest list,
+  on a line of its own shown only where one applies. A member's part of the portion is in
+  proportion to their part of the spending, rounded toward zero so their spending is never
+  understated (G8).
+- **Tokens.** `r13`, `t11`, `d10` and `c6`: the item and transaction evidence carry each active
+  consumption binding a record, left out while empty; the decision undo token carries the
+  consumptions in scope with and without it; the correction undo token carries, for an amount, the
+  consumption outcomes on its transactions. `fc1` covers the fund, the transactions holding the
+  bound records and their outcome with and without it. `review show` and `review transaction
+  show` gain "Paid from" where a consumption reaches.
+- **Departures, for the owner's review:**
+  - **`fund release-undo RELEASE_ID --fund FUND_ID`,** not `fund release undo` as the plan wrote
+    it: argparse cannot hang a subcommand under a command with its own required options.
+  - **`fund show` of the tax reserve gains its release token line,** "Release revision", on every
+    ledger holding a tax reserve, since `fund release` needs one shown. G6 strips it.
+  - **A fund paying for any transaction cannot be undone** until each consumption naming it is
+    undone, as for assignments.
+  - **GB2's "outstanding falls by the consumed portion"** is met as what the fund holds: its
+    assignments fall by exactly the portion, and its need for the cycle does not change, since the
+    purchase is the cycle's own spending.
+
 ---
 
 ## D-071 M15 plan: net worth and loans — Approved

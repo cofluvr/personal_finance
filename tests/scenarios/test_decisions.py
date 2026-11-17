@@ -244,7 +244,7 @@ class Ledger:
                          ["review", "correction"], ["review", "resolution"],
                          ["review", "coverage"], ["review", "classification"],
                          ["review", "transfer"], ["review", "categorization"],
-                         ["review", "allocation"]):
+                         ["review", "allocation"], ["review", "consumption"]):
             position = 3
         words[position:position] = ["--db", self.db]
         code = main(words)
@@ -284,7 +284,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r12-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r13-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)
@@ -307,7 +307,7 @@ class Ledger:
 
     def decision_revision(self, decision):
         out = self.run("review", "decision", "show", decision)[1]
-        return re.search(r"Revision: (d9-[0-9a-f]{16})", out)[1]
+        return re.search(r"Revision: (d10-[0-9a-f]{16})", out)[1]
 
     def undo(self, decision, revision=None, account="A"):
         return self.run("review", "undo", decision, "--account", account,
@@ -1169,7 +1169,7 @@ class TestUndoToken:  # S21
 
     def test_the_token_has_the_documented_form(self, ledger):
         _, token = self.decided(ledger)
-        assert re.fullmatch(r"d9-[0-9a-f]{16}", token)
+        assert re.fullmatch(r"d10-[0-9a-f]{16}", token)
 
 
 class TestConstraintsApplied:

@@ -2060,7 +2060,7 @@ def scale_allocations(conn) -> dict[str, int]:
         conn.execute(
             """INSERT INTO allocation_statement (id, account_id, allocation,
                                                  target_transaction_id, target_revision)
-               VALUES (?, ?, ?, ?, 't10-0')""", (allocation_id, account, value, transaction))
+               VALUES (?, ?, ?, ?, 't11-0')""", (allocation_id, account, value, transaction))
         conn.executemany("INSERT INTO allocation_statement_part VALUES (?, ?, ?)",
                          [(allocation_id, member, part) for member, part in parts])
         conn.execute("INSERT INTO allocation_statement_record VALUES (?, ?)",

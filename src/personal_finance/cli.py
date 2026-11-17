@@ -99,6 +99,8 @@ from personal_finance.planning.funds import (
     ASSIGNABLE_ACCOUNT_TYPES,
     EMERGENCY,
     FUND_NOT_FOUND,
+    RELEASE as FUND_RELEASE,
+    RELEASE_UNDO as FUND_RELEASE_UNDO,
     TAX as TAX_FUND,
     TERMS as FUND_TERMS,
     UNDO as FUND_UNDO,
@@ -114,12 +116,14 @@ from personal_finance.planning.funds import (
     fund_revision,
     load_assignments,
     load_funds,
+    load_releases,
     priority_revision,
     assignment_revision,
     set_priority,
     unassign,
     undo_fund,
 )
+from personal_finance.planning.fund_releases import release_tax_reserve, undo_release
 from personal_finance.planning.settings import (
     active_setting,
     household_timezone,
@@ -162,6 +166,7 @@ from personal_finance.reconcile.record_resolutions import (
 )
 from personal_finance.reconcile.allocation_effects import AMOUNT_DIFFERS
 from personal_finance.reconcile.allocations import Stated, allocate_transaction, undo_allocation
+from personal_finance.reconcile.consumptions import consume_transaction, undo_consumption
 from personal_finance.reconcile.household import (
     add_member,
     set_account_default,
@@ -201,6 +206,11 @@ from personal_finance.reports.balances import (
     list_observations,
     load_observation,
     observation_revision,
+)
+from personal_finance.reports.consumption_evidence import (
+    consumption_undo_outlook,
+    list_consumptions,
+    load_consumption,
 )
 from personal_finance.reports.fund_standing import funds_view
 from personal_finance.reports.income_evidence import TERMS as INCOME_TERMS
@@ -749,6 +759,21 @@ def build_parser() -> argparse.ArgumentParser:
                                     "clears the list")
     fund_priority.add_argument("--revision", required=True,
                                help="the priority revision from funds")
+    fund_release = command("release", fund_commands, handler=run_fund_release,
+                           help="release part of the tax reserve found too large, as a plan")
+    fund_release.add_argument("--fund", required=True, help="the tax reserve's fund ID")
+    fund_release.add_argument("--amount", required=True, help="the amount, such as 300.00")
+    fund_release.add_argument("--on", required=True, help="the day it is released, YYYY-MM-DD")
+    fund_release.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
+    fund_release.add_argument("--revision", required=True,
+                              help="the release revision from fund show")
+    fund_release_undo = command("release-undo", fund_commands, handler=run_fund_release_undo,
+                                help="stop a release of the tax reserve applying, keeping it on "
+                                     "record")
+    fund_release_undo.add_argument("release_id", help="a release ID from fund show")
+    fund_release_undo.add_argument("--fund", required=True, help="the tax reserve's fund ID")
+    fund_release_undo.add_argument("--revision", required=True,
+                                   help="the release undo revision from fund show")
 
     obligation = commands.add_parser(
         "obligation", help="state recurring obligations and see their payments against their "
@@ -1258,6 +1283,49 @@ def build_parser() -> argparse.ArgumentParser:
     allocation_undo.add_argument("--account", required=True, help="account name or ID")
     allocation_undo.add_argument(
         "--revision", required=True, help="the revision from review allocation show"
+    )
+
+    consume = command(
+        "consume", review_commands, handler=run_review_consume,
+        help="state that a spending transaction is paid from a goal, reserve or the tax reserve",
+    )
+    consume.add_argument("transaction_id", help="a transaction ID from transactions")
+    consume.add_argument("--account", required=True, help="account name or ID")
+    consume.add_argument("--fund", required=True, help="a fund ID from funds")
+    consume.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    consume.add_argument(
+        "--supersedes",
+        help="the consumption applying to this transaction now, which this one replaces",
+    )
+    consume.add_argument(
+        "--supersedes-revision",
+        help="the revision from review consumption show for the consumption being replaced",
+    )
+    consumptions = command(
+        "consumptions", review_commands, handler=run_review_consumptions,
+        help="list stored fund consumptions",
+    )
+    consumptions.add_argument("--account", help="account name or ID")
+    consumption = review_commands.add_parser("consumption",
+                                             help="inspect or undo one fund consumption")
+    consumption_commands = consumption.add_subparsers(dest="consumption_command", required=True)
+    consumption_show = command(
+        "show", consumption_commands, handler=run_review_consumption_show,
+        help="show what a consumption binds and what undoing it would do",
+    )
+    consumption_show.add_argument("consumption_id",
+                                  help="a consumption ID from review consumptions")
+    consumption_undo = command(
+        "undo", consumption_commands, handler=run_review_consumption_undo,
+        help="stop a consumption applying, keeping it on record",
+    )
+    consumption_undo.add_argument("consumption_id",
+                                  help="a consumption ID from review consumptions")
+    consumption_undo.add_argument("--account", required=True, help="account name or ID")
+    consumption_undo.add_argument(
+        "--revision", required=True, help="the revision from review consumption show"
     )
 
     transfer = review_commands.add_parser(
@@ -2383,6 +2451,7 @@ def run_review_undo(args) -> int:
     print_newly_unclassified(result.newly_unclassified_transactions)
     print_newly_unmatched(result.newly_unsettled_matches)
     print_newly_unattributed(result.newly_unattributed_transactions)
+    print_newly_unconsumed(result.newly_unconsumed_transactions)
     print(f"  {UNDO_NOTICE}")
     return 0
 
@@ -3567,6 +3636,143 @@ def run_review_allocation_undo(args) -> int:
     return 0
 
 
+CONSUME_NOTICE = (
+    "Totals and its category count it once, unchanged. The fund pays what its assignments still "
+    "hold, and report budget leaves that portion out of discretionary actual. Matching never "
+    "reads consumptions, and new records are not bound, but a re-export that joins this "
+    "transaction keeps the consumption applied."
+)
+
+CONSUMPTION_UNDO_NOTICE = (
+    "The transaction is paid from the fund of the consumption this one superseded, else from "
+    "none, and counts in discretionary actual again."
+)
+
+# How a consumed transaction's outcome reads in an undo preview.
+CONSUMPTION_PREVIEW_STATES = {
+    None: "paid from no fund",
+    FIELD_APPLIED: "paid from a fund",
+    FIELD_IN_CONFLICT: "paid from no fund, consumptions disagree",
+    FIELD_BASIS_CHANGED: "paid from no fund, basis changed",
+    "not_spending": "paid from no fund, no longer spending",
+}
+
+
+def run_review_consume(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    result = consume_transaction(
+        conn, account_id, args.transaction_id, args.revision, args.fund,
+        supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
+    )
+    name = conn.execute("SELECT name FROM fund WHERE id = ?", (result.fund_id,)).fetchone()[0]
+    print(
+        f"Consumption {result.consumption_id} recorded: transaction {args.transaction_id} is paid "
+        f"from fund {result.fund_id} ({shown(name)}), binding {result.bound_record_count} records."
+    )
+    if args.supersedes:
+        print(f"  Supersedes consumption {args.supersedes}. It stays on record.")
+    print(f"  {CONSUME_NOTICE}")
+    return 0
+
+
+def run_review_consumptions(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_consumptions(conn, account_id)
+    for consumption_id, account, created_at, state, fund_name, bound_count in rows:
+        print(
+            f"Consumption {consumption_id}: {state}, fund {shown(fund_name)}, {bound_count} "
+            f"records, {shown(account)}, {created_at}"
+        )
+    print(f"Consumptions: {len(rows)}")
+    unsettled = conn.execute(
+        """SELECT derived.transaction_id, derived.state FROM transaction_fund_consumption derived
+           JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+           WHERE derived.state <> 'applied' AND (:account IS NULL OR entry.account_id = :account)
+           ORDER BY derived.transaction_id""",
+        {"account": account_id},
+    ).fetchall()
+    for transaction_id, state in unsettled:
+        print(f"Transaction {transaction_id}: {CONSUMPTION_PREVIEW_STATES[state]}")
+    if rows:
+        print("To see what a consumption binds, run review consumption show.")
+    return 0
+
+
+def run_review_consumption_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    consumption = load_consumption(conn, args.consumption_id)
+    if consumption is None:
+        raise CommandError("consumption not found. Run review consumptions.")
+    fund_id = conn.execute("SELECT fund_id FROM fund_consumption WHERE id = ?",
+                           (consumption.statement_id,)).fetchone()[0]
+    print(f"Consumption {consumption.statement_id}")
+    print(f"  Account: {shown(consumption.account_name)} ({consumption.account_id})")
+    print(f"  Paid from: fund {fund_id} ({shown(consumption.shown_value)})")
+    print(f"  Status: {consumption.state}")
+    print(f"  Made: {consumption.created_at}")
+    if consumption.undone_at:
+        print(f"  Undone: {consumption.undone_at}. It stays on record and no longer applies.")
+    if consumption.superseded_by:
+        print(
+            f"  Superseded by consumption {consumption.superseded_by}. It stays on record and no "
+            "longer applies, unless that consumption is undone."
+        )
+    if consumption.newest_of_chain != consumption.superseded_by:
+        print(
+            f"  Newest of its chain: consumption {consumption.newest_of_chain}, the only one that "
+            "can be undone. Each undo restores the consumption before it."
+        )
+    if consumption.supersedes_id:
+        print(f"  Supersedes consumption {consumption.supersedes_id}")
+    print(f"  From transaction: {consumption.target_transaction_id}")
+    print("Bound records:")
+    for record in consumption.bound_records:
+        where = record.transaction_id or "no transaction"
+        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
+
+    if consumption.state == STATE_ACTIVE:
+        outlook = consumption_undo_outlook(conn, consumption)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this consumption now:")
+        if consumption.supersedes_id:
+            print(f"  Restores consumption {consumption.supersedes_id}, which it superseded")
+        for transaction_id, state_now, state_after in outlook.state_by_transaction:
+            print(
+                f"  Transaction {transaction_id}: {CONSUMPTION_PREVIEW_STATES[state_now]} now, "
+                f"{CONSUMPTION_PREVIEW_STATES[state_after]} after"
+            )
+        if stale_accounts(conn, DEFAULT_RULES, consumption.account_id):
+            print(
+                "This account has not been reconciled under the current matching rules, so "
+                "undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
+def run_review_consumption_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_consumption(conn, account_id, args.consumption_id, args.revision)
+    print(f"Consumption {args.consumption_id} undone. It stays on record and no longer applies.")
+    if result.restored:
+        print(f"  Consumption {result.restored}, which it superseded, applies again.")
+    print_newly_unconsumed(result.newly_unsettled_transactions)
+    print(f"  {CONSUMPTION_UNDO_NOTICE}")
+    return 0
+
+
+def print_newly_unconsumed(count) -> None:
+    if count:
+        print(
+            f"  Transactions now paid from no fund, because consumptions disagree, lost their "
+            f"basis or are no longer on spending: {count}. Run review consumptions."
+        )
+
+
 def print_newly_unattributed(count) -> None:
     if count:
         print(
@@ -4361,10 +4567,19 @@ def print_fund_standing(view) -> None:
         print(f"  Fixed commitments a month, planned: "
               f"{shown_amount(view.monthly_fixed_commitments_cents)}")
     if view.tax_accrual is not None:
-        accrual = view.tax_accrual
+        accrual, payments = view.tax_accrual, view.tax_payments
         print(f"  Tax reserve, {TAX_LABEL}: accrued {shown_amount(accrual.cents)} from "
               f"{accrual.occurrences} received {'occurrence' if accrual.occurrences == 1 else 'occurrences'}, "
-              "paid 0.00, released 0.00")
+              f"paid {shown_amount(payments.paid_cents)}, released "
+              f"{shown_amount(payments.released_cents)}")
+        if view.paid_beyond_reserve_cents:
+            print(f"  Paid beyond the reserve, {TAX_LABEL}: "
+                  f"{shown_amount(view.paid_beyond_reserve_cents)}")
+    if view.consumed_count and fund.kind != TAX_FUND:
+        cycle = f" since {view.consumed_since}" if view.consumed_since else ""
+        print(f"  Paid from this fund{cycle}: {shown_amount(view.consumed_cents)} in "
+              f"{view.consumed_count} {'transaction' if view.consumed_count == 1 else 'transactions'}"
+              ", taken from its assignments")
     if standing.required_held_cents is not None:
         print(f"  Required held: {shown_amount(standing.required_held_cents)}")
     accounts = ", ".join(f"{shown(name)} {shown_amount(cents)}"
@@ -4526,9 +4741,34 @@ def run_fund_show(args) -> int:
                   f"{assignment_revision(holding, fund.fund_id, assignments)}")
     if not holdings:
         print("  none can hold a fund: add a checking, savings or investment account")
-    print(f"Terms revision: {fund_revision(FUND_TERMS, fund)}")
-    print(f"Undo revision: {fund_revision(FUND_UNDO, fund)}")
+    releases = load_releases(conn)
+    if fund.kind == TAX_FUND:
+        for release in releases:
+            if release.fund_id == fund.fund_id:
+                print(f"Release {release.release_id}: {shown_amount(release.amount_cents)} on "
+                      f"{release.released_on}, {TAX_LABEL}")
+        print(f"Release revision: {fund_revision(FUND_RELEASE, fund, releases)}")
+        if any(release.fund_id == fund.fund_id for release in releases):
+            print(f"Release undo revision: {fund_revision(FUND_RELEASE_UNDO, fund, releases)}")
+    print(f"Terms revision: {fund_revision(FUND_TERMS, fund, releases)}")
+    print(f"Undo revision: {fund_revision(FUND_UNDO, fund, releases)}")
     print("To change its terms from a date, run fund terms. To assign, run fund assign.")
+    return 0
+
+
+def run_fund_release(args) -> int:
+    conn = open_ledger(args.db)
+    release_id = release_tax_reserve(conn, args.fund, args.amount, args.on,
+                                     as_of_text(conn, args.as_of), args.revision)
+    print(f"Release {release_id} recorded: {args.amount} of the tax reserve on {args.on}, "
+          f"{TAX_LABEL}. No money moved.")
+    return 0
+
+
+def run_fund_release_undo(args) -> int:
+    conn = open_ledger(args.db)
+    undo_release(conn, args.fund, args.release_id, args.revision)
+    print(f"Release {args.release_id} undone. It stays on record and no longer applies.")
     return 0
 
 

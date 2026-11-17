@@ -57,12 +57,7 @@ from personal_finance.reconcile.statements import (
     STALE_TRANSACTION_REVISION,
     TRANSACTION_WRONG_ACCOUNT,
 )
-from personal_finance.reports import (
-    allocation_evidence,
-    correction_evidence,
-    decision_evidence,
-    review_evidence,
-)
+from personal_finance.reports import allocation_evidence
 
 LEDGER_TABLES = (*ALL_TABLES, "account", *CATEGORY_TABLES, *CATEGORIZATION_TABLES,
                  *CATEGORY_RULE_TABLES, *HOUSEHOLD_TABLES, *ALLOCATION_TABLES)
@@ -271,7 +266,7 @@ class TestRefusals:  # HB1
         transaction = single(ledger)
         make_stale(ledger)
         self.refused(ledger, STALE_ACCOUNT, transaction, "--member", "Nobody",
-                     revision="t10-0000000000000000")
+                     revision="t11-0000000000000000")
 
     def test_the_same_allocation_again(self, ledger):
         transaction = single(ledger)
@@ -602,11 +597,8 @@ def decided(ledger):
 
 
 class TestTokens:  # HB4
-    def test_the_versions_are_pinned(self):
-        assert review_evidence.REVISION_VERSION == 12
-        assert review_evidence.TRANSACTION_REVISION_VERSION == 10
-        assert decision_evidence.DECISION_REVISION_VERSION == 9
-        assert correction_evidence.CORRECTION_REVISION_VERSION == 5
+    def test_the_version_is_pinned(self):
+        # r, t, d and c moved on since, each pinned by the slice that moved it last (G5).
         assert allocation_evidence.ALLOCATION_REVISION_VERSION == 1
 
     def test_members_shares_and_defaults_change_no_token(self, ledger, decided):

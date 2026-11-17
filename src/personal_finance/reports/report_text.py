@@ -251,6 +251,23 @@ CATEGORIZATION_STATE_EXPLANATIONS = {
 }
 
 
+# What each outcome of a fund consumption means (D-070 point 5).
+CONSUMPTION_STATE_EXPLANATIONS = {
+    FIELD_APPLIED: "paid from the stated fund",
+    FIELD_IN_CONFLICT: (
+        "consumptions disagree, so it is paid from no fund. Undo all but one to settle it"
+    ),
+    FIELD_BASIS_CHANGED: (
+        "a consumption binds records now in several transactions, so it is paid from no fund. "
+        "Undo it, then consume each transaction"
+    ),
+    NOT_SPENDING: (
+        "it is no longer spending, as after its type changed or a transfer was confirmed, so it is "
+        "paid from no fund. Undo the consumption, or what changed"
+    ),
+}
+
+
 # What each outcome of a transfer match means (D-054).
 MATCH_STATE_EXPLANATIONS = {
     MATCH_APPLIED: "both sides are one movement of money between your accounts",
@@ -589,6 +606,7 @@ def add_transaction_evidence(out, entry, shared) -> None:
     add_household(out, entry)
     add_transfers(out, entry)
     add_recurring(out, entry)
+    add_consumptions(out, entry)
 
 
 def _effective_rank_values(record):
@@ -706,6 +724,20 @@ def add_allocations(out, entry) -> None:
                 f"{describe_named_allocation(*allocation.allocation)}, "
                 f"binding {describe_side(allocation.bound_records)}")
     out.add(f"    Allocation: {ALLOCATION_STATE_EXPLANATIONS[entry.allocations[0].state]}")
+
+
+def add_consumptions(out, entry) -> None:
+    """Fund consumptions binding this transaction's records (D-070 point 5): the Paid from
+    section. A transaction none reaches shows nothing here."""
+    if not entry.consumptions:
+        return
+    out.add("  Paid from:")
+    for consumption in entry.consumptions:
+        out.add(f"    Consumption {consumption.consumption_id}: fund {consumption.fund_id} "
+                f"({shown(consumption.fund_name)}), binding "
+                f"{describe_side(consumption.bound_records)}")
+    out.add(f"    Fund: {CONSUMPTION_STATE_EXPLANATIONS[entry.consumptions[0].state]}. Spending "
+            "counts it once, unchanged, and the fund's own figures show the portion consumed")
 
 
 def add_recurring(out, entry) -> None:
@@ -1557,6 +1589,9 @@ def budget_report_lines(conn, month, as_of, member_name=None) -> ReportLines:
         return out
     out.add(f"  Fixed spending, actual, apart from the target: {spent_words(report.fixed_actual)}")
     out.add(f"  Discretionary spending, actual: {spent_words(report.discretionary)}")
+    if report.paid_from_reserves.count:
+        out.add(f"  Paid from reserves, actual, apart from the target: "
+                f"{spent_words(report.paid_from_reserves)}")
     out.add(f"  Possible spending, unclassified, actual, counted until classified: "
             f"{spent_words(report.unclassified)}")
     out.add(f"  Possible spending, unconfirmed transfer kinds, actual, counted until classified: "

@@ -1,7 +1,14 @@
 """Funds stated by a person (D-070 points 1 to 4): goals, the emergency fund, reserves and the tax
-reserve, each with dated terms; assignments of an account's observed balance to a fund; and one
-priority list. Each write runs under one write lock with its fu1 or fa1 token, and changes no
-ledger table (G1). Nothing is ever assigned automatically (point 3).
+reserve, each with dated terms; assignments of an account's observed balance to a fund; one
+priority list; and the tax reserve's releases (point 6). Each write runs under one write lock with
+its fu1 or fa1 token, and changes no ledger table (G1). Nothing is ever assigned automatically
+(point 3).
+
+A consumption (point 5, reconcile/consumptions.py) takes a portion of the fund's assigned amount,
+computed here where it is read and never stored: min(what was spent, what the assignments active
+when it was stated still hold). The portion reduces those assignments as a derived amount, the
+transaction's own account first, then the others by account name, and a refund consumed against
+the fund restores them in the same order. The stored assignment rows are never rewritten.
 
 The required amount of each kind is a pure function here, in integer cents, every division
 rounded up, since a required amount rounds toward protection (G8). Nothing here reads the clock:
@@ -11,6 +18,7 @@ reports/fund_standing.py.
 
 import sqlite3
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -58,6 +66,8 @@ UNDO = "undo"
 PRIORITY = "priority"
 ASSIGN = "assign"
 UNASSIGN = "unassign"
+RELEASE = "release"
+RELEASE_UNDO = "release_undo"
 
 # States of a fund as of a date.
 FUNDED = "funded"
@@ -121,6 +131,25 @@ UNDO_ASSIGNED = (
     "this fund holds assignments on {accounts}. Release each with fund unassign first. Nothing "
     "was changed."
 )
+UNDO_CONSUMED = (
+    "consumptions {consumptions} pay transactions from this fund. Undo each with review "
+    "consumption undo first. Nothing was changed."
+)
+RELEASE_NOT_TAX = "only the tax reserve is released. Nothing was changed."
+RELEASE_BEFORE_START = (
+    "--on must be no earlier than the tax reserve's first terms, from {start}. Nothing was "
+    "changed."
+)
+RELEASE_AFTER_AS_OF = "--on must be no later than --as-of. Nothing was changed."
+RELEASE_CLOSED_MONTH = (
+    "--on falls in a month before --as-of's, which is closed. Nothing was changed."
+)
+RELEASE_BEYOND_REQUIRED = (
+    "releasing {amount} would take the tax reserve below zero: {required} is required as of "
+    "{as_of}. Nothing was changed."
+)
+RELEASE_NOT_FOUND = "release not found, or undone already. Run fund show. Nothing was changed."
+RELEASE_OF_ANOTHER_FUND = "this release belongs to another fund. Nothing was changed."
 PRIORITY_KIND = (
     "fund {fund} is the tax reserve, which is protected first and never ordered by priority. "
     "Nothing was changed."
@@ -222,6 +251,38 @@ class Observation:
 
 
 @dataclass(frozen=True)
+class ConsumedTransaction:
+    """A transaction a consumption applies to, with the effective amount and date (D-057)."""
+
+    transaction_id: str
+    account_id: str
+    fund_id: str
+    effective_date: str
+    # Money out positive, a refund negative.
+    spent_cents: int
+    # When the consumption applying there was stated, which fixes the assignments it reads.
+    stated_at: str
+
+
+@dataclass(frozen=True)
+class ConsumedPortion:
+    consumed: ConsumedTransaction
+    # What the fund paid: positive for a purchase, negative where a refund restores the fund.
+    consumed_cents: int
+    # (assignment ID, cents) taken from each assignment, negative where a refund restores.
+    reductions: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True)
+class Release:
+    release_id: str
+    fund_id: str
+    amount_cents: int
+    released_on: str
+    created_at: str
+
+
+@dataclass(frozen=True)
 class AccountHolding:
     """What an account holds for funds as of a date: its latest observation then, and its active
     assignments."""
@@ -231,7 +292,8 @@ class AccountHolding:
     account_type: str
     as_of: str
     observation: Observation | None
-    # (fund ID, cents) of each active assignment, by fund ID.
+    # (fund ID, cents) of each active assignment, by fund ID, less what consumptions dated by
+    # as_of took from it (point 5).
     assignments: tuple[tuple[str, int], ...]
 
     @property
@@ -292,6 +354,99 @@ def load_assignments(conn: sqlite3.Connection) -> tuple[Assignment, ...]:
            ORDER BY assignment.created_at, assignment.id"""))
 
 
+def load_consumed_transactions(conn: sqlite3.Connection) -> tuple[ConsumedTransaction, ...]:
+    """Every transaction a consumption applies to, with its effective amount and date, and when
+    the newest active consumption applying there was stated."""
+    return tuple(ConsumedTransaction(*row) for row in conn.execute(
+        """SELECT entry.id, entry.account_id, derived.fund_id,
+                  COALESCE(date_fix.corrected_text, entry.transaction_date,
+                           posting_fix.corrected_text, entry.posting_date),
+                  -COALESCE(fix.corrected_amount_cents, entry.amount_cents),
+                  (SELECT MAX(statement.created_at) FROM fund_consumption statement
+                   JOIN fund_consumption_record bound ON bound.consumption_id = statement.id
+                   JOIN transaction_source link ON link.source_record_id = bound.source_record_id
+                   WHERE link.transaction_id = entry.id AND statement.fund_id = derived.fund_id
+                     AND NOT EXISTS (SELECT 1 FROM fund_consumption_event undone
+                                     WHERE undone.consumption_id = statement.id
+                                       AND undone.event = 'undone'))
+           FROM transaction_fund_consumption derived
+           JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+           LEFT JOIN transaction_correction fix
+               ON fix.transaction_id = entry.id AND fix.field = 'amount' AND fix.state = 'applied'
+           LEFT JOIN transaction_correction date_fix
+               ON date_fix.transaction_id = entry.id
+              AND date_fix.field = 'transaction_date' AND date_fix.state = 'applied'
+           LEFT JOIN transaction_correction posting_fix
+               ON posting_fix.transaction_id = entry.id
+              AND posting_fix.field = 'posting_date' AND posting_fix.state = 'applied'
+           WHERE derived.state = 'applied'
+           ORDER BY entry.id"""))
+
+
+def consumed_portions(consumed, assignments, account_names: dict[str, str]
+                      ) -> tuple[ConsumedPortion, ...]:
+    """Each consumption's portion, fund by fund in date order (point 5): a purchase takes
+    min(spent, what the assignments active when it was stated still hold), the transaction's own
+    account first, then the others by account name. A refund restores up to what those
+    assignments gave, in the same order. Pure."""
+    reduced = defaultdict(int)
+    portions = []
+    for item in sorted(consumed, key=lambda item: (item.fund_id, item.effective_date,
+                                                   item.transaction_id)):
+        rows = sorted(
+            (assignment for assignment in assignments
+             if assignment.fund_id == item.fund_id and assignment.created_at <= item.stated_at
+             and (assignment.undone_at is None or assignment.undone_at > item.stated_at)),
+            key=lambda assignment: (assignment.account_id != item.account_id,
+                                    account_names[assignment.account_id],
+                                    assignment.assignment_id))
+        left, taken = abs(item.spent_cents), []
+        for assignment in rows:
+            if item.spent_cents > 0:
+                step = min(left, assignment.amount_cents - reduced[assignment.assignment_id])
+            else:
+                step = min(left, reduced[assignment.assignment_id])
+            if step <= 0:
+                continue
+            sign = 1 if item.spent_cents > 0 else -1
+            reduced[assignment.assignment_id] += sign * step
+            taken.append((assignment.assignment_id, sign * step))
+            left -= step
+        portion = sum(cents for _, cents in taken)
+        portions.append(ConsumedPortion(item, portion, tuple(taken)))
+    return tuple(portions)
+
+
+def load_portions(conn: sqlite3.Connection, assignments=None) -> tuple[ConsumedPortion, ...]:
+    consumed = load_consumed_transactions(conn)
+    if not consumed:
+        return ()
+    assignments = load_assignments(conn) if assignments is None else assignments
+    names = dict(conn.execute("SELECT id, display_name FROM account"))
+    return consumed_portions(consumed, assignments, names)
+
+
+def reductions_as_of(portions, as_of: str) -> dict[str, int]:
+    """What consumptions dated by as_of took from each assignment, by assignment ID."""
+    reduced = defaultdict(int)
+    for portion in portions:
+        if portion.consumed.effective_date <= as_of:
+            for assignment_id, cents in portion.reductions:
+                reduced[assignment_id] += cents
+    return reduced
+
+
+def load_releases(conn: sqlite3.Connection) -> tuple[Release, ...]:
+    """Every active release of the tax reserve, in the order made."""
+    return tuple(Release(*row) for row in conn.execute(
+        """SELECT release.id, release.fund_id, release.amount_cents, release.released_on,
+                  release.created_at
+           FROM tax_reserve_release release
+           WHERE NOT EXISTS (SELECT 1 FROM tax_reserve_release_event undone
+                             WHERE undone.release_id = release.id AND undone.event = 'undone')
+           ORDER BY release.created_at, release.id"""))
+
+
 def latest_observation(conn: sqlite3.Connection, account_id: str,
                        as_of: str) -> Observation | None:
     """The account's latest active balance observation on or before as_of (D-057)."""
@@ -307,11 +462,14 @@ def latest_observation(conn: sqlite3.Connection, account_id: str,
 
 
 def account_holding(conn: sqlite3.Connection, account_id: str, as_of: str,
-                    assignments=None) -> AccountHolding:
+                    assignments=None, reduced=None) -> AccountHolding:
     name, account_type = conn.execute(
         "SELECT display_name, account_type FROM account WHERE id = ?", (account_id,)).fetchone()
     assignments = load_assignments(conn) if assignments is None else assignments
-    held = tuple(sorted((assignment.fund_id, assignment.amount_cents)
+    if reduced is None:
+        reduced = reductions_as_of(load_portions(conn, assignments), as_of)
+    held = tuple(sorted((assignment.fund_id,
+                         assignment.amount_cents - reduced.get(assignment.assignment_id, 0))
                         for assignment in assignments
                         if assignment.applies and assignment.account_id == account_id))
     return AccountHolding(account_id, name, account_type, as_of,
@@ -322,11 +480,13 @@ def account_holdings(conn: sqlite3.Connection, as_of: str) -> tuple[AccountHoldi
     """Every account that can hold a fund's money, and any other holding an assignment, by
     name."""
     assignments = load_assignments(conn)
+    reduced = reductions_as_of(load_portions(conn, assignments), as_of)
     assigned = {assignment.account_id for assignment in assignments if assignment.applies}
     accounts = [account_id for account_id, account_type in conn.execute(
         "SELECT id, account_type FROM account ORDER BY display_name")
         if account_type in ASSIGNABLE_ACCOUNT_TYPES or account_id in assigned]
-    return tuple(account_holding(conn, account_id, as_of, assignments) for account_id in accounts)
+    return tuple(account_holding(conn, account_id, as_of, assignments, reduced)
+                 for account_id in accounts)
 
 
 def active_priority(conn: sqlite3.Connection) -> tuple[str, ...]:
@@ -386,10 +546,12 @@ class Standing:
 
 
 def target_standing(target_cents: int, assigned_cents: int, as_of_month: str, last_month: str,
-                    due: str) -> Standing:
-    """ceil((target − assigned) ÷ months left, including the last month). With no month left
-    and anything outstanding, all of it is needed now and the fund is underfunded."""
-    outstanding = max(0, target_cents - assigned_cents)
+                    due: str, consumed_cents: int = 0) -> Standing:
+    """ceil((target − assigned − consumed) ÷ months left, including the last month), where
+    assigned is what the assignments still hold and consumed what the fund paid in the cycle
+    (point 1). With no month left and anything outstanding, all of it is needed now and the fund
+    is underfunded."""
+    outstanding = max(0, target_cents - assigned_cents - consumed_cents)
     months_left = months_left_including(as_of_month, last_month)
     if outstanding == 0:
         return Standing(FUNDED, assigned_cents, 0, None, 0, due, max(0, months_left))
@@ -414,7 +576,10 @@ class StandingInputs:
     baseline_income_cents: int = 0
     # Fixed commitments planned in as_of's month, non-monthly ones spread (M12).
     monthly_fixed_commitments_cents: int = 0
-    # The tax reserve's accrual through as_of. Payments and releases arrive with M14.2.
+    # What the fund paid in its cycle by as_of: a recurring reserve's since its previous due date,
+    # any other fund's since it started (point 5).
+    consumed_cents: int = 0
+    # The tax reserve's accrual, payments and releases through as_of (point 6).
     tax_accrued_cents: int = 0
     tax_paid_cents: int = 0
     tax_released_cents: int = 0
@@ -431,15 +596,17 @@ def fund_standing(fund: Fund, assigned_cents: int, inputs: StandingInputs) -> St
     if terms.shape == PERCENT and fund.kind == GOAL:
         return Standing(IN_PROGRESS, assigned_cents, ceiling_division(
             inputs.baseline_income_cents * terms.basis_points, 10_000))
+    consumed = inputs.consumed_cents
     if terms.shape == TARGET_BY:
         return target_standing(terms.amount_cents, assigned_cents, as_of_month, terms.by_month,
-                               terms.by_month)
+                               terms.by_month, consumed)
     if terms.shape == DUE:
         return target_standing(terms.amount_cents, assigned_cents, as_of_month,
-                               terms.due_date[:7], terms.due_date)
+                               terms.due_date[:7], terms.due_date, consumed)
     if terms.shape == RECURRING:
         due = next_due_date(terms, inputs.as_of)
-        return target_standing(terms.amount_cents, assigned_cents, as_of_month, due[:7], due)
+        return target_standing(terms.amount_cents, assigned_cents, as_of_month, due[:7], due,
+                               consumed)
     if terms.shape == MINIMUM:
         return held_standing(terms.amount_cents, assigned_cents)
     if terms.shape == MONTHS:
@@ -451,8 +618,29 @@ def fund_standing(fund: Fund, assigned_cents: int, inputs: StandingInputs) -> St
     raise ValueError(f"no formula for a {fund.kind} fund's {terms.shape} terms")
 
 
-def assigned_to_fund(assignments, fund_id: str) -> int:
-    return sum(assignment.amount_cents for assignment in assignments
+def previous_due_date(terms: FundTerms, due: str) -> str | None:
+    """A recurring reserve's due date before due, or None before its anchor."""
+    end = date.fromisoformat(due) - timedelta(days=1)
+    span = 31 * (terms.cadence.months_between + 1)
+    anchor = date.fromisoformat(terms.anchor)
+    earlier = cadence_dates(terms.cadence, anchor, max(anchor, end - timedelta(days=span)), end)
+    return earlier[-1].isoformat() if earlier else None
+
+
+def cycle_start(fund: Fund, as_of: str) -> str | None:
+    """The last day before the cycle holding as_of: a recurring reserve's previous due date, else
+    None, where every consumption since the fund started counts (point 5's cycles)."""
+    terms = fund.terms_on(as_of)
+    if terms is None or terms.shape != RECURRING:
+        return None
+    return previous_due_date(terms, next_due_date(terms, as_of))
+
+
+def assigned_to_fund(assignments, fund_id: str, reduced=None) -> int:
+    """What a fund's active assignments still hold, less what consumptions took (point 5)."""
+    reduced = {} if reduced is None else reduced
+    return sum(assignment.amount_cents - reduced.get(assignment.assignment_id, 0)
+               for assignment in assignments
                if assignment.applies and assignment.fund_id == fund_id)
 
 
@@ -577,13 +765,17 @@ def terms_material(terms: FundTerms) -> dict:
             "anchor": terms.anchor}
 
 
-def fund_revision(operation: str, fund: Fund) -> str:
+def fund_revision(operation: str, fund: Fund, releases=()) -> str:
     """fu1 covers the operation, the fund's ID once recorded, its name, kind and every terms
-    row (D-070 point 7)."""
+    row, and the tax reserve's active releases, left out while there are none (D-070 point 7)."""
     material = {"operation": operation, "name": fund.name, "kind": fund.kind,
                 "terms": [terms_material(terms) for terms in fund.terms]}
     if fund.fund_id != PROPOSED_FUND_ID:
         material["fund_id"] = fund.fund_id
+    held = [[release.release_id, release.amount_cents, release.released_on]
+            for release in releases if release.fund_id == fund.fund_id]
+    if held:
+        material["releases"] = held
     return f"fu{FUND_REVISION_VERSION}-{digest(material)}"
 
 
@@ -708,7 +900,8 @@ def _change_terms(conn, fund_id, options, effective_from, as_of, revision) -> Fu
     if effective_from <= latest:
         raise DecisionRefused(TERMS_NOT_LATER.format(latest=latest))
     terms = checked_terms(fund.kind, options, effective_from)
-    refuse_unless_revision(fund_revision(TERMS, fund), revision, STALE_FUND_REVISION)
+    refuse_unless_revision(fund_revision(TERMS, fund, load_releases(conn)), revision,
+                           STALE_FUND_REVISION)
     insert_terms(conn, fund.fund_id, terms)
     return terms
 
@@ -730,7 +923,16 @@ def _undo_fund(conn, fund_id, revision) -> Fund:
         (fund_id,))})
     if held:
         raise DecisionRefused(UNDO_ASSIGNED.format(accounts=", ".join(held)))
-    refuse_unless_revision(fund_revision(UNDO, fund), revision, STALE_FUND_REVISION)
+    consuming = sorted(consumption_id for (consumption_id,) in conn.execute(
+        """SELECT consumption.id FROM fund_consumption consumption
+           WHERE consumption.fund_id = ? AND NOT EXISTS (
+               SELECT 1 FROM fund_consumption_event undone
+               WHERE undone.consumption_id = consumption.id AND undone.event = 'undone')""",
+        (fund_id,)))
+    if consuming:
+        raise DecisionRefused(UNDO_CONSUMED.format(consumptions=", ".join(consuming)))
+    refuse_unless_revision(fund_revision(UNDO, fund, load_releases(conn)), revision,
+                           STALE_FUND_REVISION)
     conn.execute("INSERT INTO fund_event (fund_id, event) VALUES (?, 'undone')", (fund_id,))
     return fund
 
