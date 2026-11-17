@@ -1008,3 +1008,35 @@ M8 is D-062, complete on 2026-11-09, verified by the owner in a browser.
 M5.1 is `0f01eaa`, M5.2 `46c6d20`, its second amendment `c314c21`, M5.3 `67d2457`, its acceptance
 `c8bdb4a`, point 7's amendment `fc76cd2`, M5.4 `5e6e05e`, its docs `7a0d446`, M5.5 `4548b12`, its
 docs `df53e65`, and M5's acceptance the commit after it.
+
+## The overnight session of 2026-11-15 and 16: M12.2, M12.3 and migration 0026
+
+Moved from the handoff on 2026-11-16, unchanged. The owner approved M12.2 and M12.3 the same day, and the next session finished M13.
+
+**What the overnight session did, for the owner's review, in order:**
+
+1. **M12.2, recurring obligations** (`f3f46cb` migration 0025, `261f8f9` the `entries.py` and
+   `schedules.py` extraction, `3bd3631` obligations, IB1 to IB5). Built without its own slice
+   plan, on the owner's instruction, applying M12.1's slice plan where it carries over. Its
+   departures are in "How M12.2 was implemented" under D-068: the dismissal's own event table,
+   three commands beyond D-068's list (`obligation preview`, `obligation dismissals`,
+   `obligation dismissal undo`), the class on the terms, and `obligation proposals` printing a
+   dismiss revision.
+2. **M12.3, `pf report income`,** its `/income` page and the `--recurring` benchmark row
+   (`09483c1`, records in `79e839f`). Departures in "How M12.3 was implemented": `--as-of`
+   required until M13.1, default months starting at the first pay or due date when earlier.
+3. **M13.1's migration 0026** (`bb60fd8`): settings and budget plans' tables, with G10's tests.
+   The rest of M13.1 (setting and budget commands, `st1`, `bp1`, today from the household
+   timezone) is **not built**: drafts are under `build/m13/draft/` (`settings.py`, `budgets.py`),
+   unreviewed and untested. The next session finishes M13.1 from them or from scratch.
+
+**Not done, and why:** M13.2 to M21 were not reached. When they are, two limits from the kickoff
+still hold and were not lifted by the overnight instruction: **M17's browser writes** (a security
+change) and **M20** (the `segno` dependency, network to install it, and a listener beyond
+loopback) need the owner's explicit approval in a session that allows them. Everything else in
+M13 to M19 needs no new permission beyond the approved plans.
+
+**Latest results:** M12.2's full-suite gate, 3,119 passed (`3bd3631`). G6 for M12.2, 89,273 of
+89,323 runs identical, the rest the two stamped ledgers. Breaks: M12.2 27 applied, 24 caught, two
+gaps closed, one equivalent; M12.3 15 applied, 14 caught, one gap closed. `--recurring`: every
+target met, stopping rule not met (see [benchmarks.md](benchmarks.md)).

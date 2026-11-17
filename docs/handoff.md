@@ -1,41 +1,31 @@
-# Session Handoff: M12 Built, M13.1 Started, Awaiting Review
+# Session Handoff: M13 Built, Awaiting Review
 
-For a fresh session. Written 2026-11-16 at the end of an overnight session the owner ran without
-stopping between slices. **M1 to M11 are complete and accepted, and M12.1 was accepted on
-2026-11-15 as built, both departures included.** `main` holds M1 to M9 at `19ee858`. M10 to M12
-and M13.1's first commit are on `feature/m10-rules`, not merged and not pushed.
+For a fresh session. Written 2026-11-16. **M1 to M12 are complete and accepted:** the owner
+approved M12.2 and M12.3 on 2026-11-16, as built. `main` holds M1 to M9 at `19ee858`. M10 to M13
+are on `feature/m10-rules`, not merged and not pushed.
 
-**What the overnight session did, for the owner's review, in order:**
+**M13 is built, for the owner's review,** under D-069, without stopping between its slices, on the
+owner's instruction:
 
-1. **M12.2, recurring obligations** (`f3f46cb` migration 0025, `261f8f9` the `entries.py` and
-   `schedules.py` extraction, `3bd3631` obligations, IB1 to IB5). Built without its own slice
-   plan, on the owner's instruction, applying M12.1's slice plan where it carries over. Its
-   departures are in "How M12.2 was implemented" under D-068: the dismissal's own event table,
-   three commands beyond D-068's list (`obligation preview`, `obligation dismissals`,
-   `obligation dismissal undo`), the class on the terms, and `obligation proposals` printing a
-   dismiss revision.
-2. **M12.3, `pf report income`,** its `/income` page and the `--recurring` benchmark row
-   (`09483c1`, records in `79e839f`). Departures in "How M12.3 was implemented": `--as-of`
-   required until M13.1, default months starting at the first pay or due date when earlier.
-3. **M13.1's migration 0026** (`bb60fd8`): settings and budget plans' tables, with G10's tests.
-   The rest of M13.1 (setting and budget commands, `st1`, `bp1`, today from the household
-   timezone) is **not built**: drafts are under `build/m13/draft/` (`settings.py`, `budgets.py`),
-   unreviewed and untested. The next session finishes M13.1 from them or from scratch.
+1. **M13.1** (`6d0123a`, with migration 0026 at `bb60fd8`): `pf setting`, `pf budget preview`,
+   `set`, `show` and `undo`, `pf budgets`, `st1` and `bp1`, and today read from the household
+   timezone, with `--as-of` optional on M12's commands and the `/income` page.
+2. **M13.2** (`84d98e0`): `pf report budget`, its `/budget` page and the `--budget` benchmark row.
 
-**Not done, and why:** M13.2 to M21 were not reached. When they are, two limits from the kickoff
-still hold and were not lifted by the overnight instruction: **M17's browser writes** (a security
-change) and **M20** (the `segno` dependency, network to install it, and a listener beyond
-loopback) need the owner's explicit approval in a session that allows them. Everything else in
-M13 to M19 needs no new permission beyond the approved plans.
+Their departures and choices are in "How M13.1 was implemented" and "How M13.2 was implemented"
+under D-069: `budget preview` beyond D-069's list, one setting revision per key, closed months
+decided by the months a write changes (so an undo touching one is refused), no two applying plans
+from one month, every member named in a divided plan, category caps counting subcategories, and
+how a corrected closed month is disclosed.
 
-**Latest results:** M12.2's full-suite gate, 3,119 passed (`3bd3631`). G6 for M12.2, 89,273 of
-89,323 runs identical, the rest the two stamped ledgers. Breaks: M12.2 27 applied, 24 caught, two
-gaps closed, one equivalent; M12.3 15 applied, 14 caught, one gap closed. `--recurring`: every
-target met, stopping rule not met (see [benchmarks.md](benchmarks.md)).
+**Latest results:** the full-suite gate, 3,254 passed, chained to this handoff's commit. G6 for M13: 108,865 of 108,865 runs identical. Breaks: M13.1 25
+applied, 23 caught, two equivalent; M13.2 25 applied, 21 caught, one equivalent, three gaps closed.
+`--budget`: every target met, stopping rule not met (see [benchmarks.md](benchmarks.md)).
 
 **M10, M11 and M12 are not yet on the real ledger.** It stays at version 20 until the owner makes
-a verified backup and runs `pf migrate`: 21, then 22 and 23 (D-065 point 7), then 24 and 25 once
-M12 is accepted, then 26 with M13 (G10: one milestone at a time).
+a verified backup and runs `pf migrate`: 21, then 22 and 23 (D-065 point 7), then 24 and 25 for
+M12, then 26 once M13 is accepted (G10: one milestone at a time). After 26, the owner sets the
+household timezone with `pf setting set` before any command that needs today.
 
 The owner's members, share and defaults are entered with the `household` commands, which nothing
 here has run on real data. No security control changed, no dependency was added, and the UI stays
@@ -54,19 +44,24 @@ them here.
 
 Rewritten by each session for the next. The kickoff prompt carries only the owner's notes.
 
-- **Task:** finish M13.1 under D-069 (BA1 to BA4): the setting and budget commands, `st1`, `bp1`,
-  today read from the household timezone, and `--as-of` made optional on the M12 commands that
-  require it (`income source show`, `income terms`, `obligation show`, `obligation terms`,
-  `report income` and the `/income` page; M12.1 slice plan point 1).
-- **Read first:** D-067's G1 to G13 and D-069 points 1, 2 and 6 in
-  [decisions-m12-m21.md](decisions-m12-m21.md); BA1 to BA4 in [plan.md](plan.md); "How M12.2 was
-  implemented" and "How M12.3 was implemented" under D-068; then the M13.1 bullet under "Read
-  first" below.
-- **Warnings:** migration 0026 is committed. The drafts in `build/m13/draft/` are unreviewed and
-  untested: finish from them or from scratch. Before changing `src/`, keep the suite's ledgers with
-  `--basetemp` from a `git archive` export of the latest commit, for G6.
-- **Done when:** M13.1 is built, gated on the full suite, with 20 to 25 breaks by G12 reported.
-  Unless the owner's notes extend the scope, stop for review there.
+- **First, the owner's review of M13.** Its departures and choices are listed above and under
+  D-069. A change the owner asks for is the next task, before anything else.
+- **Then M14.1, funds and fund assignments,** under D-070, once the owner approves it and renews
+  commit permission. D-070 is approved, so no new plan is needed, but its inputs are the owner's:
+  the goals, the emergency minimum, annual expenses, the tax percentage, the priority (house
+  against debt) and current assignments. M14.1's criteria move into [plan.md](plan.md) when it
+  starts.
+- **Read first:** D-067's G1 to G13 and D-070 in full, in
+  [decisions-m12-m21.md](decisions-m12-m21.md); "How M13.1 was implemented" for the settings, the
+  plan chain and the closed-month rule M14's funds will reuse; `planning/entries.py`,
+  `planning/budgets.py`; then the M14 bullet under "Read first" below.
+- **Warnings:** M14.1 adds migration 0027, so every older migration test's set-back grows (the "A
+  new migration" bullet below). M14.2 moves `r`, `t`, `d` and `c` once (G5). Before changing
+  `src/`, keep the suite's ledgers with `--basetemp` from a `git archive` export of the latest
+  commit, for G6. Another session may be running pytest in this repository: check before a
+  benchmark, which needs a quiet machine.
+- **Done when:** the slice the owner approves is built, gated on the full suite, with 20 to 25
+  breaks reported. Stop for review there unless the owner's notes extend the scope.
 
 ## Current state
 
@@ -75,7 +70,7 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `main` holds everything through M9 at `19ee858`. M10 and M11 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
 | Latest commit | Run `git log -1`. M9's acceptance is `19ee858`. On `feature/m10-rules`: M10 `a294d64` to `871cdad`, the M11 plan and approvals to `b61d85d`, one commit per M11 slice, the review's changes `e9745ec`, the types and categories refusal fix `b47b308`, M11's acceptance record `aacbe47`, M12.1's approved slice plan `181c8cf`, and M12.1 itself. Earlier commits are in the archive |
-| Latest gating run | Full suite, exit code 0, chained to M12.2's commit `3bd3631`. About 16 minutes, 3,119 tests. Later commits gated on their slice's files |
+| Latest gating run | Full suite, exit code 0, chained to M13's review commit, after `84d98e0`. About 18.5 minutes, 3,254 tests, beside another session's pytest run. Earlier M13 commits gated on their slice's files |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -131,11 +126,17 @@ Then only what the task needs:
 - For M12 to M21: D-067's guardrails G1 to G13 in [decisions-m12-m21.md](decisions-m12-m21.md)
   first, then the milestone's own decision, D-068 to D-077, and the decisions it names. Each
   milestone's criteria move into [plan.md](plan.md) when it starts.
-- For M13.1's remaining work: D-069 points 1, 2 and 6 and BA1 to BA4 in [plan.md](plan.md),
-  migration 0026, `tests/scenarios/test_budget_migration.py`, `planning/entries.py`, and the
-  drafts in `build/m13/draft/`. Making `--as-of` optional on the M12 commands that take it
-  (`income source show`, `income terms`, `obligation show`, `obligation terms`, `report income`
-  and the `/income` page) is part of M13.1 (M12.1 slice plan point 1).
+- For changes to M13: D-069 with "How M13.1 was implemented" and "How M13.2 was implemented",
+  BA1 to BB6 in [plan.md](plan.md), `planning/settings.py`, `budgets.py`, `budget_pace.py`,
+  `reports/budget_report.py`, the budget lines in `reports/report_text.py`, `current_utc_time`,
+  `household_today` and the setting and budget handlers in `cli.py`, `answer_budget` in
+  `ui/server.py`, migration 0026, and `tests/scenarios/test_budget_plans.py`,
+  `test_budget_report.py`, `test_budget_migration.py` and `tests/unit/test_budget_pace.py`. The
+  test ledger `BudgetLedger` names its helpers `plan_preview*`: `IncomeLedger` already has
+  `preview`. G6's scripts are `build/m13/g6/` (`capture.py --budget`, `compare.py`), and the
+  breaks `build/m13/breaks/`.
+- For M14: D-070 first, then M13's notes above. Unused capacity from `report budget`'s closed
+  months is what M14's priority order takes.
 - For changes to M12.2 or M12.3: "How M12.2 was implemented" and "How M12.3 was implemented"
   under D-068, `planning/schedules.py`, `entries.py`, `obligation_effects.py`, `obligations.py`,
   `obligation_proposals.py`, `reports/obligation_evidence.py`, `obligation_spending.py`,
@@ -216,16 +217,17 @@ F1 and F4 are fixed, and recorded in the archive.
   throwaway ledger, with the owner, at the final review.
 - [real-data-readiness.md](real-data-readiness.md) names the backup volume `CommonCentsBackups`.
   The owner's is `/Volumes/CommonCentsBackup`. A doc fix, not made.
-- **The review of M12.2 and M12.3,** both built without their own slice plans under the overnight
-  instruction, with their departures listed under D-068. Then whether M13.1 continues from the
-  drafts, and renewed commit permission for it.
+- **The review of M13.1 and M13.2,** with their departures listed under D-069. Then renewed commit
+  permission for M14.
 - The household timezone, the monthly allowance, members' parts and any category allowances
-  (D-069's inputs), and the bills to confirm first (D-068's).
+  (D-069's inputs), and the bills to confirm first (D-068's), entered by the owner on the real
+  ledger once it reaches 26.
+- M14's inputs (D-070), before M14.1 starts.
 - A delivery deadline, if any (D-066).
 - Each milestone's own inputs, listed in its decision, when it starts.
 - On the real ledger, a verified backup, then `pf migrate` to version 21 for M10, verified, then
-  22 and 23 for M11, then the owner's members `Michael` and `M`, the 50/50 share and each
-  account's default, entered by the owner.
+  22 and 23 for M11, then the owner's members, the 50/50 share and each account's default,
+  entered by the owner, then 24 and 25 for M12, then 26 once M13 is accepted.
 - Merging `feature/m10-rules` into `main`. Needs the owner's approval.
 - Pushing. Not authorized from here.
 
@@ -233,9 +235,9 @@ F1 and F4 are fixed, and recorded in the archive.
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits | Approved on 2026-11-15 for M12.2, then by the owner's overnight instruction for each later slice through M20, without stopping for review, on `feature/m10-rules`. Used through `bb60fd8` and this handoff's commit | **Must be renewed** for any later change |
+| Local commits | Approved on 2026-11-16 for M13 on `feature/m10-rules`. Used through `84d98e0` and this handoff's commit | **Must be renewed** for any later change |
 | M11 | Accepted on 2026-11-10. Not yet on the real ledger | The real-ledger migrations 21, 22 and 23, each after a verified backup |
-| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes. M12.1 accepted on 2026-11-15. M12.2 and M12.3 built on 2026-11-15 and 16 without slice plans, on the owner's instruction. M13.1's migration built | M12.2's and M12.3's review. M17's browser writes and M20 need the owner's approval in a session whose kickoff allows a security change, a dependency and network. Installing `segno` still needs its pinned version and hash, and W1's check |
+| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes. M12 accepted on 2026-11-16. M13 built on 2026-11-16 | M13's review. M17's browser writes and M20 need the owner's approval in a session whose kickoff allows a security change, a dependency and network. Installing `segno` still needs its pinned version and hash, and W1's check |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |

@@ -509,3 +509,27 @@ dates missed or expected exactly as left unpaid, 19 extra paychecks received, 2,
 one session, the planning layer adds nothing measurable to `totals`, which reads no planning table,
 and about 0.2s to an import, which rewrites both derived outcomes. `report income` reads only the
 accounts of sources and obligations, so it stays far below its target.
+
+
+**Budgets on the same shape (M13.2, BB6, D-069 point 7),** measured 2026-11-16 with
+`measure_reconciliation.py --scale --budget`, nothing else running. Output in
+`build/m13/benchmark-budget.log`, which is ignored and may not survive.
+
+`--recurring`'s shape plus an account, Spend, holding 3,000 purchases in June 2026, each reached by
+one of 12 category rules: 107,100 transactions. Three members share 34/33/33, Spend is shared, and
+one plan from 2022-01 divides the allowance among them with 12 category allowances. The shape
+asserts its counts: 3,466 discretionary transactions in the month for the household, every member
+at least 3,000 by their parts, every category allowance reached, and members' actuals adding to
+the household's.
+
+| Operation | First run, right after the build | Provisional target |
+|---|---|---|
+| `pf report budget`, the household | 0.388s | Below 2s: met |
+| `pf report budget --member`, each of three | 0.538s, 0.454s, 0.450s | Below 2s: met |
+| `budget set`, under the write lock | 0.001s | Below 2s and 2× an import: met |
+| One import of one row | 2.989s | No budget outcome is derived, so none is added |
+
+**G9's stopping rule is not met.** `report budget` reads one month's transactions and never runs
+the transfer candidate search. A member's view adds attributing the month's counted transactions.
+Plans bind no records and derive nothing, so an import, a classification and `totals` pay nothing
+for them.

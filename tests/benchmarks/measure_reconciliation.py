@@ -2471,9 +2471,11 @@ def measure_budget() -> None:
                          "VALUES (?, ?, ?)", (f"d-{account}", account, member))
             conn.execute("INSERT INTO account_attribution_event (attribution_id, event) "
                          "VALUES (?, 'made')", (f"d-{account}",))
-        for number, letter in enumerate(BUDGET_STORES, start=1):
-            conn.execute("INSERT INTO category (id, name) VALUES (?, ?)",
-                         (number, f"Store {letter}"))
+        store_categories = []
+        for letter in BUDGET_STORES:
+            number = conn.execute("INSERT INTO category (name) VALUES (?)",
+                                  (f"Store {letter}",)).lastrowid
+            store_categories.append(number)
             conn.execute("""INSERT INTO category_rule (id, account_id, category_id,
                                                        description_contains,
                                                        normalization_version)
@@ -2487,7 +2489,7 @@ def measure_budget() -> None:
         conn.executemany("INSERT INTO budget_plan_member_part VALUES ('plan0', ?, 1000000)",
                          [(1,), (2,), (3,)])
         conn.executemany("INSERT INTO budget_plan_category VALUES ('plan0', ?, 100000)",
-                         [(number,) for number in range(1, 13)])
+                         [(number,) for number in store_categories])
         conn.execute("INSERT INTO budget_plan_event (plan_id, event) VALUES ('plan0', 'made')")
         write_transfer_effects(conn)
         conn.execute("COMMIT")
