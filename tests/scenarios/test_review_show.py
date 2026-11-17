@@ -50,6 +50,7 @@ LEDGER_TABLES = (
     "fund_priority_event", "fund_priority",
     "fund_consumption", "fund_consumption_record", "fund_consumption_event",
     "transaction_fund_consumption", "tax_reserve_release", "tax_reserve_release_event",
+    "account_link", "account_link_event",
 )
 
 

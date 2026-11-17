@@ -67,6 +67,8 @@ def test_new_database_is_at_the_latest_version(conn):
 def test_new_database_has_the_expected_tables(conn):
     assert table_names(conn) == {
         "account",
+        "account_link",
+        "account_link_event",
         "account_attribution",
         "account_attribution_event",
         "account_reconciliation",
