@@ -310,11 +310,13 @@ class TestEachStepRefusesAlone:  # WA1
 
     @pytest.mark.parametrize("change", ["repeat", "unknown", "missing", "bad_escape",
                                         "bad_utf8", "too_many", "option_like", "no_equals"])
+    # A repeat with the same value would succeed if repeats were kept, so only the repeat
+    # refuses it.
     def test_step_7_a_body_not_parsed_strictly(self, ledger, browser, change):
         fields = reject_fields(browser, ledger)
         body = encoded(fields)
         if change == "repeat":
-            body += b"&pairs=x"
+            body += b"&" + encoded({"pairs": fields["pairs"]})
         elif change == "unknown":
             body += b"&extra=1"
         elif change == "missing":
@@ -324,7 +326,7 @@ class TestEachStepRefusesAlone:  # WA1
         elif change == "bad_utf8":
             body = body.replace(b"pairs=", b"pairs=%FF")
         elif change == "too_many":
-            body += b"".join(b"&f%d=1" % number for number in range(writes.MAXIMUM_FIELD_COUNT))
+            body += b"".join(b"&f%d=1" % number for number in range(50))
         elif change == "option_like":
             body = encoded({**fields, "item": "--db"})
         elif change == "no_equals":
@@ -341,6 +343,25 @@ class TestEachStepRefusesAlone:  # WA1
         before = unchanged_state(ledger.path)
         assert browser.post("/review/reject", fields).status == 400
         assert unchanged_state(ledger.path) == before
+
+
+class TestDecoding:  # WA1, step 7's decoder and step 9's lists, each alone
+    @pytest.mark.parametrize("part", [b"%zz", b"%4", b"a%", b"%%41", b"%FF", b"%C3"])
+    def test_a_malformed_escape_or_utf_8_is_refused(self, part):
+        with pytest.raises((ValueError, UnicodeDecodeError)):
+            writes.decoded_form_part(part)
+
+    def test_escapes_and_plus_decode_as_a_browser_encodes(self):
+        assert writes.decoded_form_part(b"a+b%2Bc%25d%C3%A9") == "a b+c%d\u00e9"
+
+    @pytest.mark.parametrize("text", ["a b c", "a", "a b\nc"])
+    def test_a_pair_line_without_exactly_two_ids_is_refused(self, text):
+        assert writes.listed_ids(text, 2) is None
+
+    def test_pair_and_group_lines_as_the_control(self):
+        assert writes.listed_ids("a b\r\n\n c  d ", 2) == [["a", "b"], ["c", "d"]]
+        assert writes.listed_ids("a\nb c d", None) == [["a"], ["b", "c", "d"]]
+        assert writes.listed_ids("\n".join(["a b"] * 51), 2) is None
 
 
 class TestFormToken:  # WA2
@@ -455,6 +476,13 @@ class TestTheBrowserDecidesAsTheTerminal:  # WA3
         response = browser.post("/review/undo", undo)
         assert response.status == 303
         assert canonical_rows(ledger.path, {made}, known) == canonical_rows(copy, {made}, known)
+
+    def test_a_decision_no_longer_in_effect_offers_no_undo(self, ledger, browser):
+        response = browser.post("/review/reject", reject_fields(browser, ledger))
+        location = response.header("Location")
+        undo = post_forms(browser.get(location).body)["/review/undo"]
+        assert browser.post("/review/undo", undo).status == 303
+        assert post_forms(browser.get(location).body) == {}
 
     def test_a_stale_revision_refuses_with_the_clis_message(self, ledger, browser, capsys):
         fields = reject_fields(browser, ledger)

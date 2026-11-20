@@ -2,6 +2,7 @@
 points 1 and 3 to 7). Inputs are test_safe_to_spend_inputs.py."""
 
 import re
+from datetime import date
 
 import pytest
 from local_ui_client import UiClient, page_text
@@ -493,6 +494,25 @@ class TestReadOnly:  # SB7, point 7
                       "Review: 0 open review items, 0 unconfirmed transfer kinds",
                       "  Account A: last covered day 2026-05-02, last import "):
             assert start in out, start
+
+
+def test_the_dashboard_s_income_line_is_the_income_reports(planned):  # SB6, G9
+    """The dashboard reuses the month safe to spend computed: its figures are still the income
+    report's for the month, nonzero here, as the two paychecks of May are planned."""
+    from personal_finance.money import format_cents
+    from personal_finance.reports.income_report import income_report
+
+    conn = planned.conn()
+    try:
+        (month,) = income_report(conn, date.fromisoformat(AS_OF), None, "2026-05",
+                                 "2026-05").months
+    finally:
+        conn.close()
+    planned_cents = month.total("baseline", "planned")
+    assert planned_cents > 0
+    assert (f"Income, 2026-05: baseline received, actual "
+            f"{format_cents(month.total('baseline', 'received'))}, against baseline, planned "
+            f"{format_cents(planned_cents)}") in planned.dashboard()
 
 
 def test_the_page_asks_for_the_timezone(tmp_path, capsys):  # SB7, G7

@@ -228,7 +228,7 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return self.send_page(421, "Refused", notice=WRONG_HOST)
         if not self.has_session():
             return self.send_page(403, "Signed out", notice=SIGNED_OUT)
-        refusal = (writes.refuse_route("POST", self.path)
+        refusal = (writes.refuse_route(self.path)
                    or writes.refuse_origin(self.headers.get_all("Origin"), server.origin)
                    or writes.refuse_fetch_metadata(self.headers.get_all("Sec-Fetch-Site"),
                                                    self.headers.get_all("Sec-Fetch-Mode")))

@@ -14,7 +14,6 @@ import re
 from typing import NamedTuple
 
 MAXIMUM_BODY_BYTES = 8192
-MAXIMUM_FIELD_COUNT = 50
 FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 FORM_TOKEN_FIELD = "form_token"
 # An account, item, decision or transaction ID, or a revision token: nothing else is accepted.
@@ -59,10 +58,9 @@ WRITE_ROUTES = {
 }
 
 
-def refuse_route(method: str, path: str) -> Refusal | None:
-    """Step 3: a POST to a route on the allowlist. Any other method is 405."""
-    if method != "POST":
-        return Refusal(405, NOT_ALLOWED, (("Allow", "GET, POST"),))
+def refuse_route(path: str) -> Refusal | None:
+    """Step 3: a route on the allowlist. Any method but GET and POST is refused by the server
+    before this, with 405."""
     if path not in WRITE_ROUTES:
         return Refusal(404, NOT_A_WRITE)
     return None
@@ -115,12 +113,10 @@ def decoded_form_part(part: bytes) -> str:
 
 
 def parsed_form(body: bytes, route: WriteRoute) -> Refusal | dict[str, str]:
-    """Step 7: UTF-8, at most 50 fields, each once, exactly the route's fields and the token."""
-    pieces = body.split(b"&") if body else []
-    if len(pieces) > MAXIMUM_FIELD_COUNT:
-        return Refusal(400, UNREADABLE_FORM)
+    """Step 7: UTF-8, each field once, exactly the route's fields and the token. Point 1's limit
+    of 50 fields is met by that: no route has more than five."""
     form = {}
-    for piece in pieces:
+    for piece in body.split(b"&") if body else []:
         raw_name, separator, raw_value = piece.partition(b"=")
         try:
             name, value = decoded_form_part(raw_name), decoded_form_part(raw_value)
