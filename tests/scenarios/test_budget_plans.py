@@ -177,7 +177,8 @@ class TestSettings:  # BA2
     def test_show_lists_the_seeded_key_unset_with_its_revision(self, ledger):
         out = ledger.settings_shown()
         assert "Setting household_timezone: not set\n" in out
-        assert out.rstrip().endswith("Settings: 1 key, 0 set")
+        # 0032 seeds checking_buffer_cents (D-072 point 2).
+        assert out.rstrip().endswith("Settings: 2 keys, 0 set")
 
     def test_set_undo_and_set_again_keeps_every_value(self, ledger):
         assert ledger.set_setting()[0] == 0

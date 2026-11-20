@@ -123,6 +123,31 @@ from personal_finance.planning.funds import (
     undo_fund,
 )
 from personal_finance.planning.fund_releases import release_tax_reserve, undo_release
+from personal_finance.planning.fund_restorations import RESTORATION as FUND_RESTORATION
+from personal_finance.planning.fund_restorations import RESTORATION_UNDO as FUND_RESTORATION_UNDO
+from personal_finance.planning.fund_restorations import (
+    load_restorations,
+    restoration_revision,
+    set_restoration,
+    undo_restoration,
+)
+from personal_finance.planning.coverage import COVERS as OBLIGATION_COVERS
+from personal_finance.planning.coverage import UNCOVER as OBLIGATION_UNCOVER
+from personal_finance.planning.coverage import (
+    cover,
+    coverage_revision,
+    load_coverages,
+    possible_double_reservations,
+    target_words,
+    uncover,
+)
+from personal_finance.planning.liquidity import (
+    LIQUID_ACCOUNT_TYPES,
+    designate,
+    liquidity_revision,
+    load_designations,
+    undo_designation,
+)
 from personal_finance.planning.entries import parsed_amount
 from personal_finance.planning.loans import EXTRA_INVALID as LOAN_EXTRA_INVALID
 from personal_finance.planning.loans import HORIZON_MONTHS as LOAN_HORIZON
@@ -573,6 +598,19 @@ def build_parser() -> argparse.ArgumentParser:
     unlink.add_argument("--subaccount", required=True, help="the subaccount's name or ID")
     unlink.add_argument("--revision", required=True,
                         help="the subaccount's unlink revision from account links")
+    liquidity = account_commands.add_parser(
+        "liquidity", help="show, set or undo which accounts safe-to-spend may draw on")
+    liquidity_commands = liquidity.add_subparsers(dest="liquidity_command", required=True)
+    command("show", liquidity_commands, handler=run_account_liquidity_show,
+            help="list checking and savings accounts, their designations and revisions")
+    for name, handler, words in (
+            ("set", run_account_liquidity_set, "designate a checking or savings account liquid"),
+            ("undo", run_account_liquidity_undo,
+             "stop an account's designation applying, keeping it on record")):
+        sub = command(name, liquidity_commands, handler=handler, help=words)
+        sub.add_argument("--account", required=True, help="the account's name or ID")
+        sub.add_argument("--revision", required=True,
+                         help="the account's revision from account liquidity show")
 
     category = commands.add_parser("category", help="name the categories spending can take")
     category_commands = category.add_subparsers(dest="category_command", required=True)
@@ -822,6 +860,27 @@ def build_parser() -> argparse.ArgumentParser:
     fund_release_undo.add_argument("--fund", required=True, help="the tax reserve's fund ID")
     fund_release_undo.add_argument("--revision", required=True,
                                    help="the release undo revision from fund show")
+    fund_restorations = command("restorations", fund_commands, handler=run_fund_restorations,
+                                help="show the emergency fund's restorations and their revisions")
+    fund_restorations.add_argument("fund_id", help="the emergency fund's ID from funds")
+    fund_restoration = command("restoration", fund_commands, handler=run_fund_restoration,
+                               help="protect a monthly amount toward the emergency fund while "
+                                    "it is underfunded, from a date")
+    fund_restoration.add_argument("--fund", required=True, help="the emergency fund's ID")
+    fund_restoration.add_argument("--monthly", required=True,
+                                  help="the amount a month, such as 200.00")
+    fund_restoration.add_argument("--effective-from", required=True,
+                                  help="the first day it applies, YYYY-MM-DD")
+    fund_restoration.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
+    fund_restoration.add_argument("--revision", required=True,
+                                  help="the restoration revision from fund restorations")
+    fund_restoration_undo = command("restoration-undo", fund_commands,
+                                    handler=run_fund_restoration_undo,
+                                    help="stop the newest restoration applying, keeping it on "
+                                         "record")
+    fund_restoration_undo.add_argument("--fund", required=True, help="the emergency fund's ID")
+    fund_restoration_undo.add_argument("--revision", required=True,
+                                       help="the undo revision from fund restorations")
 
     loan = commands.add_parser("loan", help="state loan terms, project loans and compare payoff "
                                              "orders")
@@ -951,6 +1010,25 @@ def build_parser() -> argparse.ArgumentParser:
     obligation_undo.add_argument("obligation_id", help="an obligation ID from obligations")
     obligation_undo.add_argument("--revision", required=True,
                                  help="the undo revision from obligation show")
+    obligation_coverage = command("coverage", obligation_commands,
+                                  handler=run_obligation_coverage,
+                                  help="list which loan or reserve each obligation covers, the "
+                                       "revisions, and possible double reservations")
+    obligation_coverage.add_argument("--as-of", help=f"{TODAY_HELP}: the next due dates after it")
+    obligation_covers = command("covers", obligation_commands, handler=run_obligation_covers,
+                                help="say an obligation is a loan's payment or a reserve's "
+                                     "purchase, so it is reserved once")
+    obligation_covers.add_argument("obligation_id", help="an obligation ID from obligations")
+    covered = obligation_covers.add_mutually_exclusive_group(required=True)
+    covered.add_argument("--loan", help="the loan account's name or ID")
+    covered.add_argument("--fund", help="the reserve's fund ID")
+    obligation_covers.add_argument("--revision", required=True,
+                                   help="the covers revision from obligation coverage")
+    obligation_uncover = command("uncover", obligation_commands, handler=run_obligation_uncover,
+                                 help="stop an obligation's link applying, keeping it on record")
+    obligation_uncover.add_argument("obligation_id", help="an obligation ID from obligations")
+    obligation_uncover.add_argument("--revision", required=True,
+                                    help="the uncover revision from obligation coverage")
     obligation_dismiss = command("dismiss", obligation_commands, handler=run_obligation_dismiss,
                                  help="withdraw a proposal across imports, until undone")
     obligation_dismiss.add_argument("proposal_key", help="a proposal key from obligation "
@@ -1850,6 +1928,39 @@ def run_account_unlink(args) -> int:
     conn = open_ledger(args.db)
     link = unlink_account(conn, find_account(conn, args.subaccount), args.revision)
     print(f"Link {link.link_id} undone. It stays on record.")
+    return 0
+
+
+def run_account_liquidity_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    designations = load_designations(conn)
+    accounts = conn.execute(
+        "SELECT id, display_name, account_type FROM account WHERE account_type IN (?, ?) "
+        "ORDER BY display_name", LIQUID_ACCOUNT_TYPES).fetchall()
+    for account_id, name, account_type in accounts:
+        designation = designations.get(account_id)
+        state = ("not designated" if designation is None else
+                 f"liquid, designation {designation.designation_id}, made "
+                 f"{designation.created_at}")
+        print(f"Account {shown(name)} ({account_type.replace('_', ' ')}, {account_id}): {state}")
+        print(f"  {'Set' if designation is None else 'Undo'} revision: "
+              f"{liquidity_revision(conn, account_id)}")
+    print(f"Checking and savings accounts: {len(accounts)}, liquid: {len(designations)}")
+    return 0
+
+
+def run_account_liquidity_set(args) -> int:
+    conn = open_ledger(args.db)
+    designation_id = designate(conn, find_account(conn, args.account), args.revision)
+    print(f"Designation {designation_id} recorded: {shown(args.account)} is liquid, so "
+          "safe-to-spend may draw on it.")
+    return 0
+
+
+def run_account_liquidity_undo(args) -> int:
+    conn = open_ledger(args.db)
+    designation = undo_designation(conn, find_account(conn, args.account), args.revision)
+    print(f"Designation {designation.designation_id} undone. It stays on record.")
     return 0
 
 
@@ -3648,6 +3759,61 @@ def run_obligation_undo(args) -> int:
     return 0
 
 
+def run_obligation_coverage(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    as_of = as_of_date(conn, args.as_of)
+    coverages = load_coverages(conn)
+    obligations = load_obligations(conn)
+    linked = {coverage.chain_id: coverage for coverage in coverages}
+    applying_chains = {obligation.chain_id for obligation in obligations if obligation.applies}
+    for obligation in obligations:
+        coverage = linked.get(obligation.chain_id)
+        # Each chain once: its applying obligation, else the one an inert link names.
+        if not obligation.applies and (coverage is None
+                                       or obligation.chain_id in applying_chains
+                                       or coverage.obligation_id != obligation.obligation_id):
+            continue
+        name = shown(obligation.definition.name)
+        if coverage is None:
+            print(f"Obligation {obligation.obligation_id} ({name}): covers nothing")
+            print(f"  Covers revision: {coverage_revision(conn, OBLIGATION_COVERS, obligation)}")
+            continue
+        state = "" if obligation.applies else f", inert: the obligation is {obligation.state}"
+        print(f"Obligation {obligation.obligation_id} ({name}): covers "
+              f"{shown(target_words(conn, *coverage.target))}, link {coverage.coverage_id}"
+              f"{state}")
+        print(f"  Uncover revision: {coverage_revision(conn, OBLIGATION_UNCOVER, obligation)}")
+    alikes = possible_double_reservations(conn, as_of)
+    print(f"Possible double reservations as of {as_of.isoformat()}: {len(alikes) or 'none'}")
+    for alike in alikes:
+        option = "--loan" if alike.target_kind == "loan" else "--fund"
+        target = shown(alike.target_name) if alike.target_kind == "loan" else alike.target_id
+        print(f"  Obligation {alike.obligation_id}, due {alike.obligation_due}, and "
+              f"{alike.target_kind} {shown(alike.target_name)}, due {alike.target_due}, both "
+              f"{shown_amount(alike.amount_cents)}. If they are one payment, run obligation "
+              f"covers {alike.obligation_id} {option} {target}.")
+    print(f"Links: {len(coverages)}")
+    return 0
+
+
+def run_obligation_covers(args) -> int:
+    conn = open_ledger(args.db)
+    loan = None if args.loan is None else find_account(conn, args.loan)
+    coverage_id = cover(conn, args.obligation_id, loan_account_id=loan, fund_id=args.fund,
+                        revision=args.revision)
+    target = f"loan {shown(args.loan)}" if loan else f"reserve {args.fund}"
+    print(f"Link {coverage_id} recorded: obligation {args.obligation_id} covers {target}, so "
+          "safe-to-spend reserves it once.")
+    return 0
+
+
+def run_obligation_uncover(args) -> int:
+    conn = open_ledger(args.db)
+    coverage = uncover(conn, args.obligation_id, args.revision)
+    print(f"Link {coverage.coverage_id} undone. It stays on record.")
+    return 0
+
+
 def run_obligation_dismiss(args) -> int:
     conn = open_ledger(args.db)
     dismissal_id, proposal = dismiss_proposal(conn, args.proposal_key, args.revision)
@@ -5087,6 +5253,43 @@ def run_fund_release_undo(args) -> int:
     conn = open_ledger(args.db)
     undo_release(conn, args.fund, args.release_id, args.revision)
     print(f"Release {args.release_id} undone. It stays on record and no longer applies.")
+    return 0
+
+
+def run_fund_restorations(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    fund = next((fund for fund in load_funds(conn) if fund.fund_id == args.fund_id), None)
+    if fund is None:
+        raise CommandError(FUND_NOT_FOUND.replace(" Nothing was changed.", ""))
+    print(f"Fund {fund.fund_id} ({shown(fund.name)}, {fund.kind}): {fund.state}")
+    restorations = load_restorations(conn, fund.fund_id)
+    for restoration in restorations:
+        print(f"  Restoration {restoration.restoration_id}: from {restoration.effective_from}, "
+              f"planned {shown_amount(restoration.monthly_cents)} a month while underfunded")
+    if not restorations:
+        print("  Restoration: none, so restoring it is recommended but not protected")
+    if fund.applies and fund.kind == "emergency":
+        print(f"  Restoration revision: "
+              f"{restoration_revision(conn, FUND_RESTORATION, fund)}")
+        if restorations:
+            print(f"  Undo revision, for the newest: "
+                  f"{restoration_revision(conn, FUND_RESTORATION_UNDO, fund)}")
+    return 0
+
+
+def run_fund_restoration(args) -> int:
+    conn = open_ledger(args.db)
+    restoration_id = set_restoration(conn, args.fund, args.monthly, args.effective_from,
+                                     as_of_text(conn, args.as_of), args.revision)
+    print(f"Restoration {restoration_id} recorded: from {args.effective_from}, planned "
+          f"{shown(args.monthly)} a month while fund {args.fund} is underfunded. No money moved.")
+    return 0
+
+
+def run_fund_restoration_undo(args) -> int:
+    conn = open_ledger(args.db)
+    restoration = undo_restoration(conn, args.fund, args.revision)
+    print(f"Restoration {restoration.restoration_id} undone. It stays on record.")
     return 0
 
 

@@ -40,6 +40,7 @@ from test_decisions import (
     LINK_TABLES,
     LOAN_TABLES,
     BREAKDOWN_TABLES,
+    LIQUIDITY_TABLES,
     CATEGORY_TABLES,
     CHECKING_HEADER,
     HOUSEHOLD_TABLES,
@@ -66,7 +67,7 @@ LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", *REAL_LEDGER_TABLES, *BAC
                  *HOUSEHOLD_TABLES, *ALLOCATION_TABLES, *INCOME_TABLES, *OBLIGATION_TABLES,
                  *SETTING_KEY_TABLES, *BUDGET_TABLES, *FUND_TABLES, *CONSUMPTION_TABLES,
                  *LINK_TABLES, *LOAN_TABLES,
-                 *BREAKDOWN_TABLES)
+                 *BREAKDOWN_TABLES, *LIQUIDITY_TABLES)
 LEDGER_VOLUME = Path("/Volumes/SyntheticLedger")
 BACKUP_VOLUME = Path("/Volumes/SyntheticBackups")
 
@@ -718,8 +719,18 @@ class TestRestore:
         # The newest migration's tables, dropped, make the copy a ledger of the version before.
         newest = load_migrations()[-1].path.read_text()
         tables = reversed(re.findall(r"^CREATE TABLE (\w+)", newest, re.MULTILINE))
+        # And any setting key it seeds, taken out past its append-only trigger.
+        keys = re.findall(r"^INSERT INTO ledger_setting_key \(setting_key\) VALUES \('(\w+)'\)",
+                          newest, re.MULTILINE)
+        conn = connect(ledger.path)
+        (trigger,) = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name "
+                                  "= 'ledger_setting_key_no_delete'").fetchone()
+        conn.close()
+        unseeded = (["DROP TRIGGER ledger_setting_key_no_delete",
+                     *(f"DELETE FROM ledger_setting_key WHERE setting_key = '{key}'"
+                       for key in keys), trigger] if keys else [])
         change_ledger_copy(backup_folder, *(f"DROP TABLE {table}" for table in tables),
-                           f"PRAGMA user_version = {LATEST - 1}")
+                           *unseeded, f"PRAGMA user_version = {LATEST - 1}")
         rewrite_manifest(backup_folder, digest=True, schema_version=LATEST - 1)
         restored = tmp_path / "restored.db"
         code, out, err = pf(capsys, "backup", "restore", "--from", backup_folder, "--to", restored)
@@ -758,7 +769,8 @@ LISTS = [("documents",), ("transactions",), ("totals",), ("report", "monthly"),
          ("obligation", "proposals"), ("obligation", "dismissals"), ("setting", "show"),
          ("budgets",), ("funds", "--as-of", "2026-03-20"),
          ("report", "funds", "--as-of", "2026-03-20"), ("review", "consumptions"),
-         ("report", "budget", "--month", "2026-03", "--as-of", "2026-03-20")]
+         ("report", "budget", "--month", "2026-03", "--as-of", "2026-03-20"),
+         ("account", "liquidity", "show"), ("obligation", "coverage", "--as-of", "2026-03-20")]
 PER_ACCOUNT = [("totals",), ("report", "monthly"), ("review", "merges"), ("review", "decisions"),
                ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
                ("review", "resolutions"), ("review", "coverage", "history"),
@@ -784,6 +796,7 @@ PER_ID = [
     ("SELECT id FROM budget_plan", [("budget", "show")]),
     ("SELECT id FROM fund", [("fund", "show", "--as-of", "2026-03-31")]),
     ("SELECT id FROM fund_consumption", [("review", "consumption", "show")]),
+    ("SELECT id FROM fund", [("fund", "restorations")]),
 ]
 
 
@@ -876,6 +889,7 @@ def build_rich_ledger(ledger, *, checking_rows, decision, match, one_sided, corr
     build_obligations(ledger)
     build_budgets(ledger)
     build_funds(ledger)
+    build_safe_to_spend_inputs(ledger)
 
     items_before = set(ledger.items())
     ledger.card("p1.csv", CAFE, extra=FIRST_HALF, account="S")
@@ -994,16 +1008,20 @@ def budget_token(out, kind="Revision"):
     return re.search(rf"{kind}: ((?:bp|st)1-[0-9a-f]{{16}})", out)[1]
 
 
+def zone_block(ledger):
+    return ledger.run("setting", "show")[1].split("Setting household_timezone")[1]
+
+
 def build_budgets(ledger):
     """The household timezone set, undone and set again, a plan divided between the members with
     a category allowance, superseded, a later plan undone, and a closed month corrected (D-069)."""
     for zone in ("Europe/Paris", "America/Chicago"):
         code, _, err = ledger.run("setting", "set", "household_timezone", zone, "--revision",
-                                  budget_token(ledger.run("setting", "show")[1]))
+                                  budget_token(zone_block(ledger)))
         assert code == 0, err
         if zone == "Europe/Paris":
             code, _, err = ledger.run("setting", "undo", "household_timezone", "--revision",
-                                      budget_token(ledger.run("setting", "show")[1]))
+                                      budget_token(zone_block(ledger)))
             assert code == 0, err
     as_of = ["--as-of", "2026-03-20"]
     plans = []
@@ -1097,6 +1115,49 @@ def build_funds(ledger):
             code, _, err = ledger.run("review", "consumption", "undo", consumption, "--account",
                                       "A", "--revision", fund_token(shown))
             assert code == 0, err
+
+
+def build_safe_to_spend_inputs(ledger):
+    """S liquid, T designated then undone, an obligation covering the Insurance reserve, an
+    emergency fund with one restoration kept and a later one undone, and the buffer (D-072)."""
+    as_of = ["--as-of", "2026-03-20"]
+    for account, undone in (("S", False), ("T", True)):
+        for operation in ("set", "undo") if undone else ("set",):
+            shown = ledger.run("account", "liquidity", "show")[1]
+            block = shown.split(f"Account {account} (")[1].split("\nAccount ")[0]
+            code, _, err = ledger.run(
+                "account", "liquidity", operation, "--account", account, "--revision",
+                re.search(r"revision: (lq1-[0-9a-f]{16})", block)[1])
+            assert code == 0, err
+    conn = ledger.conn()
+    (reserve,) = conn.execute("SELECT id FROM fund WHERE name = 'Insurance'").fetchone()
+    conn.close()
+    (obligation,) = re.findall(r"^Obligation (\S+) \(", ledger.run(
+        "obligation", "coverage", *as_of)[1], re.MULTILINE)[:1]
+    shown = ledger.run("obligation", "coverage", *as_of)[1]
+    code, _, err = ledger.run("obligation", "covers", obligation, "--fund", reserve, "--revision",
+                              re.search(r"Covers revision: (ob1-[0-9a-f]{16})", shown)[1])
+    assert code == 0, err
+    words = ["--name", "Rainy", "--kind", "emergency", "--minimum", "8000.00", *as_of]
+    code, out, err = ledger.run("fund", "add", *words, "--revision",
+                                fund_token(ledger.run("fund", "preview", *words)[1]))
+    assert code == 0, err
+    emergency = re.search(r"Fund (\S+) recorded", out)[1]
+    for effective_from, monthly in (("2026-03-20", "250.00"), ("2026-04-01", "300.00")):
+        code, _, err = ledger.run(
+            "fund", "restoration", "--fund", emergency, "--monthly", monthly, "--effective-from",
+            effective_from, *as_of, "--revision",
+            fund_token(ledger.run("fund", "restorations", emergency)[1], "Restoration revision"))
+        assert code == 0, err
+    code, _, err = ledger.run(
+        "fund", "restoration-undo", "--fund", emergency, "--revision",
+        fund_token(ledger.run("fund", "restorations", emergency)[1],
+                   "Undo revision, for the newest"))
+    assert code == 0, err
+    code, _, err = ledger.run(
+        "setting", "set", "checking_buffer_cents", "400.00", "--revision",
+        budget_token(ledger.run("setting", "show")[1].split("Setting checking_buffer_cents")[1]))
+    assert code == 0, err
 
 
 def household_token(ledger, *words):

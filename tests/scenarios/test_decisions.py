@@ -131,15 +131,39 @@ BREAKDOWN_TABLES = ("transaction_loan_breakdown", "loan_payment_breakdown_event"
                     "loan_payment_breakdown_record", "loan_payment_breakdown")
 
 
+# Created by 0032, and empty until a person states what safe-to-spend reads (D-072 point 2). 0032
+# also seeds the checking_buffer_cents setting key.
+LIQUIDITY_TABLES = ("fund_restoration_event", "fund_restoration", "obligation_coverage_event",
+                    "obligation_coverage", "account_liquidity_event", "account_liquidity")
+LIQUIDITY_SETTING_KEYS = ("checking_buffer_cents",)
+
+
+def drop_liquidity_tables(conn) -> None:
+    """Undo 0032 on a ledger at the latest version, before setting it back further: its tables,
+    and the key it seeds, which no value may use."""
+    for table in LIQUIDITY_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+    (trigger,) = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'trigger' "
+                              "AND name = 'ledger_setting_key_no_delete'").fetchone()
+    conn.execute("DROP TRIGGER ledger_setting_key_no_delete")
+    for key in LIQUIDITY_SETTING_KEYS:
+        assert conn.execute("SELECT COUNT(*) FROM ledger_setting WHERE setting_key = ?",
+                            (key,)).fetchone()[0] == 0
+        conn.execute("DELETE FROM ledger_setting_key WHERE setting_key = ?", (key,))
+    conn.execute(trigger)
+
+
 def drop_breakdown_tables(conn) -> None:
-    """Undo 0031 on a ledger at the latest version, before setting it back further."""
+    """Undo 0032 and 0031 on a ledger at the latest version, before setting it back further."""
+    drop_liquidity_tables(conn)
     for table in BREAKDOWN_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
 
 
 def drop_loan_tables(conn) -> None:
-    """Undo 0031 and 0030 on a ledger at the latest version, before setting it back further."""
+    """Undo 0032 to 0030 on a ledger at the latest version, before setting it back further."""
     drop_breakdown_tables(conn)
     for table in LOAN_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -147,7 +171,7 @@ def drop_loan_tables(conn) -> None:
 
 
 def drop_link_tables(conn) -> None:
-    """Undo 0031 to 0029 on a ledger at the latest version, before setting it back further."""
+    """Undo 0032 to 0029 on a ledger at the latest version, before setting it back further."""
     drop_loan_tables(conn)
     for table in LINK_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -155,7 +179,7 @@ def drop_link_tables(conn) -> None:
 
 
 def drop_consumption_tables(conn) -> None:
-    """Undo 0031 to 0028 on a ledger at the latest version, before setting it back further."""
+    """Undo 0032 to 0028 on a ledger at the latest version, before setting it back further."""
     drop_link_tables(conn)
     for table in CONSUMPTION_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -163,7 +187,7 @@ def drop_consumption_tables(conn) -> None:
 
 
 def drop_fund_tables(conn) -> None:
-    """Undo 0031 to 0027 on a ledger at the latest version, before setting it back further."""
+    """Undo 0032 to 0027 on a ledger at the latest version, before setting it back further."""
     drop_consumption_tables(conn)
     for table in FUND_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -171,7 +195,7 @@ def drop_fund_tables(conn) -> None:
 
 
 def drop_budget_tables(conn) -> None:
-    """Undo 0031 to 0026 on a ledger at the latest version, before setting it back further."""
+    """Undo 0032 to 0026 on a ledger at the latest version, before setting it back further."""
     drop_fund_tables(conn)
     for table in BUDGET_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -188,7 +212,7 @@ OBLIGATION_TABLES = ("transaction_obligation", "obligation_proposal_dismissal_ev
 
 
 def drop_obligation_tables(conn) -> None:
-    """Undo 0031 to 0025 on a ledger at the latest version, before setting it back further."""
+    """Undo 0032 to 0025 on a ledger at the latest version, before setting it back further."""
     drop_budget_tables(conn)
     for table in OBLIGATION_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -196,7 +220,7 @@ def drop_obligation_tables(conn) -> None:
 
 
 def drop_income_tables(conn) -> None:
-    """Undo 0031 to 0024 on a ledger at the latest version, before setting it back further."""
+    """Undo 0032 to 0024 on a ledger at the latest version, before setting it back further."""
     drop_obligation_tables(conn)
     for table in INCOME_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -204,7 +228,7 @@ def drop_income_tables(conn) -> None:
 
 
 def drop_allocation_tables(conn) -> None:
-    """Undo 0031 to 0023 on a ledger at the latest version, before setting it back further."""
+    """Undo 0032 to 0023 on a ledger at the latest version, before setting it back further."""
     drop_income_tables(conn)
     for table in ALLOCATION_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -212,7 +236,7 @@ def drop_allocation_tables(conn) -> None:
 
 
 def drop_household_tables(conn) -> None:
-    """Undo 0031 to 0022 on a ledger at the latest version, before setting it back further."""
+    """Undo 0032 to 0022 on a ledger at the latest version, before setting it back further."""
     drop_allocation_tables(conn)
     for table in HOUSEHOLD_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -220,7 +244,7 @@ def drop_household_tables(conn) -> None:
 
 
 def drop_category_rule_tables(conn) -> None:
-    """Undo 0031 to 0021 on a ledger at the latest version, before setting it back further."""
+    """Undo 0032 to 0021 on a ledger at the latest version, before setting it back further."""
     drop_household_tables(conn)
     for table in CATEGORY_RULE_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -228,7 +252,7 @@ def drop_category_rule_tables(conn) -> None:
 
 
 def drop_category_tables(conn) -> None:
-    """Undo 0031 to 0019 on a ledger at the latest version, before setting it back further."""
+    """Undo 0032 to 0019 on a ledger at the latest version, before setting it back further."""
     drop_category_rule_tables(conn)
     for table in CATEGORIZATION_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -284,7 +308,8 @@ class Ledger:
                          ["review", "correction"], ["review", "resolution"],
                          ["review", "coverage"], ["review", "classification"],
                          ["review", "transfer"], ["review", "categorization"],
-                         ["review", "allocation"], ["review", "consumption"]):
+                         ["review", "allocation"], ["review", "consumption"],
+                         ["account", "liquidity"]):
             position = 3
         words[position:position] = ["--db", self.db]
         code = main(words)
