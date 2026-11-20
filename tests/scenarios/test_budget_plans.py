@@ -40,6 +40,7 @@ from personal_finance.planning.settings import (
     KEY_UNKNOWN,
     NOT_SET,
     STALE_SETTING_REVISION,
+    STORED_ZONE_UNREADABLE,
     ZONE_UNKNOWN,
     setting_revision,
 )
@@ -367,6 +368,30 @@ class TestToday:  # BA2, G7, M12.1 slice plan point 1
                                   "2026-01-30", "--amount", "90.00", "--revision",
                                   ledger.ob_token(obligation, "Terms"))
         assert code == 2 and "closed" in err
+
+    @pytest.mark.parametrize("stored", [ZONE, "x", "../../etc/passwd", "Not/AZone"])
+    def test_a_stored_name_that_is_not_a_zone_is_refused_clearly(self, ledger, clock, stored):
+        """setting set never stores one. Written straight into the table, as one test does,
+        every command needing today refuses with the clear message, not the unexpected one. A
+        real zone written the same way is the control."""
+        m12_ledger(ledger)
+        conn = ledger.conn()
+        with conn:
+            conn.execute("INSERT INTO ledger_setting (id, setting_key, value) "
+                         "VALUES ('raw', 'household_timezone', ?)", (stored,))
+            conn.execute("INSERT INTO ledger_setting_event (setting_id, event) "
+                         "VALUES ('raw', 'made')")
+        conn.close()
+        before = (ledger.budget_tables(), ledger.evidence())
+        for words in (("report", "income"), ("report", "budget"), ("safe-to-spend",),
+                      ("dashboard",)):
+            code, _, err = ledger.run(*words)
+            if stored == ZONE:
+                assert code == 0, (words, err)
+            else:
+                assert (code, err.strip()) == (2, f"Error: {STORED_ZONE_UNREADABLE}"), words
+        assert stored not in STORED_ZONE_UNREADABLE
+        assert (ledger.budget_tables(), ledger.evidence()) == before
 
     def test_the_income_page_reads_today_once_a_zone_is_set(self, ledger, clock):
         m12_ledger(ledger)

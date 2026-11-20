@@ -33,6 +33,10 @@ ZONE_UNKNOWN = (
     "{value} is not an IANA timezone this Mac knows. Give a name such as America/Chicago. "
     "Nothing was changed."
 )
+STORED_ZONE_UNREADABLE = (
+    "The household timezone stored in this ledger is not a timezone this Mac knows. Set it again "
+    "with setting set household_timezone ZONE. Nothing was changed."
+)
 BUFFER_INVALID = (
     "{key} must be an amount above zero, such as 500.00. It is kept as whole cents. Nothing was "
     "changed."
@@ -84,8 +88,15 @@ def setting_revision(conn: sqlite3.Connection, key: str) -> str:
 
 
 def household_timezone(conn: sqlite3.Connection) -> zoneinfo.ZoneInfo | None:
+    """The zone set, else None. A stored name this Mac cannot read as a zone, which setting set
+    never stores, is refused clearly rather than failing later (owner's decision, 2026-11-20)."""
     active = active_setting(conn, HOUSEHOLD_TIMEZONE)
-    return None if active is None else zoneinfo.ZoneInfo(active.value)
+    if active is None:
+        return None
+    try:
+        return zoneinfo.ZoneInfo(active.value)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+        raise DecisionRefused(STORED_ZONE_UNREADABLE) from None
 
 
 def refuse_unless_known_key(conn: sqlite3.Connection, key: str) -> None:

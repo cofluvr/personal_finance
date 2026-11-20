@@ -97,6 +97,8 @@ class BudgetMonth:
     fixed_actual: Spent = field(default_factory=Spent)
     baseline_income_planned_cents: int = 0
     corrected_after_close: bool = False
+    # The month's income report, which the dashboard reuses rather than computing it again.
+    income_month: object = None
 
     @property
     def actual_cents(self) -> int:
@@ -193,6 +195,7 @@ def budget_report(conn: sqlite3.Connection, month: str, as_of: date,
 
     context = income_report(conn, as_of, None, month, month).months
     if context:
+        report.income_month = context[0]
         report.baseline_income_planned_cents = context[0].total("baseline", "planned")
         report.fixed_planned_cents = context[0].classes["fixed"].due.cents
     if state == FUTURE:

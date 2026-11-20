@@ -150,6 +150,8 @@ class SafeToSpend:
     restoration_set: bool
     reasons: dict = field(default_factory=dict)
     double_reservations: tuple = ()
+    # The month's budget report, as computed here, for the dashboard to reuse (G9).
+    budget: object = None
 
     @property
     def liquidity_evaluated(self) -> bool:
@@ -585,4 +587,4 @@ def safe_to_spend(conn: sqlite3.Connection, as_of: date) -> SafeToSpend:
     return SafeToSpend(as_of.isoformat(), horizon, accounts, tuple(items), daily, weekly,
                        buffer is not None, restoration_set,
                        {reason: reasons[reason] for reason in REASONS if reason in reasons},
-                       alikes)
+                       alikes, budget)

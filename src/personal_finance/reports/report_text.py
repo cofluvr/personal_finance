@@ -2136,9 +2136,10 @@ def amount_or_none(cents) -> str:
     return "not evaluated" if cents is None else format_cents(cents)
 
 
-def safe_to_spend_lines(conn, as_of, explain: bool = False) -> ReportLines:
-    """pf safe-to-spend's lines, and the first part of the dashboard's."""
-    view = safe_to_spend(conn, as_of)
+def safe_to_spend_lines(conn, as_of, explain: bool = False, view=None) -> ReportLines:
+    """pf safe-to-spend's lines, and the first part of the dashboard's, which passes the view it
+    computed so the month is computed once."""
+    view = safe_to_spend(conn, as_of) if view is None else view
     out = ReportLines()
     state = ", provisional" if view.provisional else ""
     if view.today_cents is None:
@@ -2224,9 +2225,11 @@ def add_explanation(out: ReportLines, view) -> None:
 
 def dashboard_lines(conn, as_of) -> ReportLines:
     """pf dashboard's lines, which its UI page renders (D-072 point 7). It never calls totals."""
-    out = safe_to_spend_lines(conn, as_of)
+    view = safe_to_spend(conn, as_of)
+    out = safe_to_spend_lines(conn, as_of, view=view)
     text, month = as_of.isoformat(), as_of.isoformat()[:7]
-    budget = budget_report(conn, month, as_of, None)
+    # The month's budget and income, as safe to spend computed them (G9: computed once).
+    budget = view.budget
     if budget.pace is None:
         out.add(f"Budget pace, {month}: no plan in effect")
     else:
@@ -2250,9 +2253,9 @@ def dashboard_lines(conn, as_of) -> ReportLines:
     oldest = f", oldest valuation {min(dates)}" if dates else ""
     out.add(f"Net worth, observed: {format_cents(worth.total_cents)}, "
             f"{len(worth.not_valued)} not valued{oldest}")
-    months = income_report(conn, as_of, None, month, month).months
-    planned = months[0].total("baseline", "planned") if months else 0
-    received = months[0].total("baseline", "received") if months else 0
+    income_month = budget.income_month
+    planned = income_month.total("baseline", "planned") if income_month else 0
+    received = income_month.total("baseline", "received") if income_month else 0
     out.add(f"Income, {month}: baseline received, actual {format_cents(received)}, against "
             f"baseline, planned {format_cents(planned)}")
     (open_items,) = conn.execute(
