@@ -1,36 +1,36 @@
-# Session Handoff: M14.2 to M15.3 Built, Awaiting Review
+# Session Handoff: M16 Built, Awaiting Review
 
-For a fresh session. Written 2026-11-17. **M1 to M13 and M14.1 are complete and accepted:** the
-owner accepted M14.1 as built on 2026-11-16 and approved the plan for M14.2 to M15.3 (under D-070,
-"M14.2 to M15.3: the implementation plan"), built without a stop between slices. `main` holds M1
-to M9 at `19ee858`. M10 to M15.3 are on `feature/m10-rules`, not merged and not pushed.
+For a fresh session. Written 2026-11-19. **M1 to M15 are complete and accepted:** the owner
+accepted M14.2 to M15.3 as built on 2026-11-19. `main` holds M1 to M9 at `19ee858`. M10 to M16
+are on `feature/m10-rules`, not merged and not pushed.
 
-**M14.2, M14.3, M15.1, M15.2 and M15.3 are built, for the owner's review.** Each slice's choices
-and departures are in its "How M1x.y was implemented" under D-070 and D-071. In brief:
+**M16 is built, for the owner's review,** under D-072, without a stop between its slices, on the
+owner's instruction of 2026-11-19 to keep building:
 
-- **M14.2:** `review consume` (the fourth stated kind), a consumed portion computed where read
-  from the assignments active when stated, the tax reserve's payments and `fund release` and
-  `fund release-undo`, "paid from reserves" in `report budget`, `r13`, `t11`, `d10`, `c6`, `fc1`.
-  Departures: `fund release-undo` spelled so for argparse; `fund show` of a tax reserve gains its
-  release token line; a fund paying for a transaction cannot be undone.
-- **M14.3:** `report funds` and `/funds`, the month's extra down the priority list, the restore
-  test, `--funds`.
-- **M15.1:** `account links`, `link`, `unlink`, `al1`, `report net-worth [--member]` and
-  `/net-worth`. `balance record --from-statement` is not built (no statement balance is stored).
-- **M15.2:** loan terms with dated rate and payment periods, actual against schedule,
-  projections in `Decimal`, payoff orders, `lt1`. Periods may start in a closed month.
-- **M15.3:** `review breakdown` (the fifth stated kind) moving interest and fees into Spending in
-  `totals`, `report monthly` and `report household` where one applies, `r14`, `t12`, `d11`, `c7`,
-  `lb1`, `--loans`. Departure: `review breakdown-show` and `review breakdown-undo`.
+1. **M16.1** (`9a9186a`): migration 0032, `pf account liquidity show`, `set` and `undo` with
+   `lq1`, `pf obligation coverage`, `covers` and `uncover` with `ob1`'s two new operations, `pf fund
+   restorations`, `restoration` and `restoration-undo` with `fu1`'s, and the checking buffer.
+2. **M16.2** (this handoff's commit): `pf safe-to-spend [--explain]`, `pf dashboard`, the
+   `/dashboard` page and the `--safe-to-spend` benchmark row.
 
-**Latest results:** see "Latest gating run" below. Breaks: M14.2 26 (25 + 1 gap closed), M14.3 18
-(14 + 3 gaps + 1 removed guard), M15.1 18 (13 + 3 gaps + 2 equivalent, removed), M15.2 23 (18 + 5
-gaps), M15.3 19 (14 + 4 gaps + 1 equivalent, removed). G6: M14.2 and M14.3 recorded under D-070;
-M15 under D-071.
+Their departures and choices are in "How M16.1 was implemented" and "How M16.2 was implemented"
+under D-072. In brief: three read commands show the new tokens; `setting show` gains the seeded
+key; a bill still within its tolerance is reserved, a loan payment only when due in the horizon;
+this month's plan is computed from the assignments held at the month's start; a card's payment
+obligation is found by the card's name.
+
+**Also written, for the owner's review:** D-079, the iOS companion's plan, in
+[decisions-ios.md](decisions-ios.md), with screen mock-ups in
+[ios-mockups/index.html](ios-mockups/index.html). Nothing of it is built: it needs approval, and its
+data comes from M19 and M20.
+
+**Latest results:** see "Latest gating run" below. Breaks: M16.1 25 applied, 19 caught, 4 gaps
+closed, 1 equivalent kept, 1 unreachable guard removed; M16.2 25 applied, 17 caught, 8 gaps
+closed. G6: 159,929 of 163,076 runs identical, the rest expected. **`--safe-to-spend` meets G9's stopping rule:** `dashboard` takes 1.02s against 1.0s, because it computes the month's budget and income reports more than once (D-072, SB7's benchmark row). Not optimized.
 
 **Nothing from M10 on is on the real ledger.** It stays at version 20 until the owner makes a
 verified backup and runs `pf migrate` one milestone at a time (G10): 21 (M10), 22 and 23 (M11),
-24 and 25 (M12), 26 (M13), then 27 and 28 once M14 is accepted, then 29 to 31 once M15 is. After
+24 and 25 (M12), 26 (M13), 27 and 28 (M14), 29 to 31 (M15), then 32 once M16 is accepted. After
 26, the owner sets the household timezone with `pf setting set` before any command that needs
 today.
 
@@ -46,19 +46,29 @@ Standing rules are in [CLAUDE.md](../CLAUDE.md), loaded automatically. Do not re
 
 Rewritten by each session for the next. The kickoff prompt carries only the owner's notes.
 
-- **First, the owner's review of M14.2 to M15.3,** with the choices and departures listed under
-  D-070 and D-071. A change the owner asks for is the next task, before anything else.
-- **Then M16, safe-to-spend and the cash-flow constraint,** under D-072, once the owner approves
-  its slices and renews commit permission. Its criteria move into [plan.md](plan.md) when it
-  starts.
-- **Read first:** D-072, D-067's G5, G6, G9 and G10, and the "How implemented" sections of
-  M14.2 to M15.3; `planning/funds.py` (consumed portions, effective assignments),
-  `reports/fund_standing.py`, `planning/net_worth.py`, `planning/loans.py`.
-- **Warnings:** M16 adds migration 0032: `drop_breakdown_tables` now runs first in
-  `drop_loan_tables`, so the next set-back joins before it. M16 moves no `r`, `t`, `d` or `c`
-  token (G5: `lq1` only). G6's scripts for this run are `build/m14_2/g6/` and `build/m15/g6/`
-  (`capture.py --m15`, `compare.py`, `migrate_copies.py` from 28). A capture alongside a test run
-  slows both a lot: run them apart.
+- **First, the owner's review of M16,** with the choices and departures under D-072, and of D-079
+  with the iOS mock-ups and their open questions. A change the owner asks for is the next task.
+  Two findings need the owner's decision: whether to make `dashboard` compute the month once
+  (G9's stopping rule, met at 1.02s), and whether a stored timezone that is not a zone should be
+  refused clearly rather than end in the unexpected-problem message (D-072, "Compared as G6").
+- **Then, by the owner's choice:**
+  - **M17** (D-073) needs a kickoff that explicitly allows its security change (browser writes).
+    M17.3 (search, tags, visuals) and M17.4 (CSV export) change no control, but D-073 orders
+    them after M17.1's pipeline.
+  - **M18** (D-074, scenarios) changes no control and can be built in the terminal first, its
+    pages waiting for M17. It would take migration 0033, moving M17.3's to the next free number.
+  - **M19** (D-075, snapshots) is what the iOS app's I1 and I2 need.
+  - **D-079's I1**, once approved.
+- **Read first:** D-072's "How M16.n was implemented", then the chosen milestone's decision and
+  D-067's G5, G6, G9 and G10. `reports/safe_to_spend.py` is the engine; `planning/coverage.py`,
+  `liquidity.py` and `fund_restorations.py` hold M16.1.
+- **Warnings:** a new migration joins the set-backs before `drop_liquidity_tables`, which also
+  deletes the seeded `checking_buffer_cents` key past its append-only trigger. G6's scripts for
+  this run are `build/m16/g6/` (`capture.py --m15 --m16`, `compare.py`, `migrate_copies.py` from
+  31), captured in four shards (`--shard=K/4`) and merged. Breaks run on a copy of the tree with
+  `build/m16/breaks/run_breaks.py`. A capture alongside a test run slows both: run them apart.
+  Test ledgers built on `LoanLedger` and `BudgetLedger` together clash on `set_plan`: call
+  `BudgetLedger.set_plan` explicitly, as `SafeLedger.budget_plan_ok` does.
 - **Done when:** the slice the owner approves is built, gated on the full suite, with 20 to 25
   breaks reported. Stop for review there unless the owner's notes extend the scope.
 
@@ -67,9 +77,9 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `main` holds everything through M9 at `19ee858`. M10 to M15.3 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
-| Latest commit | Run `git log -1`. M14.2: migration `f8cff73`, slice `3ba745d`. M14.3 `91422e9`. M15.1: migration `8d93ec7`, slice `fa0259d`. M15.2: migration `49ee826`, slice `abea91a`. M15.3: migration `a9de224`, slice `145969c`. Then the records. Earlier commits are in the archive |
-| Latest gating run | The full suite, slow tests included, on M14.2 to M15.3 with their records: 3,608 passed in 0:13:01, exit code 0, chained to this handoff's commit |
+| Branch | `main` holds everything through M9 at `19ee858`. M10 to M16 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
+| Latest commit | Run `git log -1`. M16.1 `9a9186a`, M16.2 and the records this handoff's commit. Earlier commits are in the archive |
+| Latest gating run | The full suite, slow tests included, on M16.2 with its records: 3,718 passed in 0:14:27, exit code 0, chained to this handoff's commit |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -152,6 +162,13 @@ Then only what the task needs:
   `divided_by_parts`), migrations 0029 to 0031, and `test_net_worth.py`, `test_loans.py`,
   `test_breakdowns.py`, their migration tests, `tests/unit/test_net_worth_counting.py` and
   `test_loan_math.py`. Test ledgers: `NetWorthLedger`, `LoanLedger`, `BreakdownLedger`.
+- For changes to M16: D-072's "How M16.1 was implemented" and "How M16.2 was implemented", SA1
+  to SB7 in [plan.md](plan.md), `planning/liquidity.py`, `coverage.py`, `fund_restorations.py`,
+  `CHECKING_BUFFER` in `planning/settings.py`, `reports/safe_to_spend.py`,
+  `safe_to_spend_lines` and `dashboard_lines` in `reports/report_text.py`, `/dashboard` in
+  `ui/server.py`, migration 0032, `build_safe_to_spend_inputs` in `test_backups.py`, and
+  `tests/scenarios/test_liquidity_migration.py`, `test_safe_to_spend_inputs.py` and
+  `test_safe_to_spend.py`. Test ledgers: `InputsLedger`, `SafeLedger`.
 - For changes to M14.1: D-070 with "How M14.1 was implemented", GA1 to GA5 in [plan.md](plan.md),
   `planning/funds.py`, `reports/fund_standing.py`, the fund handlers in `cli.py`, migration 0027,
   and `tests/scenarios/test_funds.py`, `test_fund_migration.py` and
@@ -181,7 +198,8 @@ Then only what the task needs:
 - **A new migration** breaks every older migration test's set-back: `drop_category_tables` in
   `test_decisions.py` drops 0026 to 0019 through `drop_category_rule_tables`,
   `drop_household_tables`, `drop_allocation_tables`, `drop_income_tables`,
-  `drop_obligation_tables` and `drop_budget_tables`, and grows with each later migration's tables.
+  `drop_obligation_tables` and `drop_budget_tables`, and grows with each later migration's tables,
+  down to `drop_liquidity_tables` for 0032.
   Also add the tables to `tests/unit/test_migrations.py`, `planning_digest.py`'s
   `PLANNING_TABLES`,
   `test_review_show.py`'s and `test_backups.py`'s `LEDGER_TABLES`, and the hand-added migrations of
@@ -237,8 +255,13 @@ F1 and F4 are fixed, and recorded in the archive.
   throwaway ledger, with the owner, at the final review.
 - [real-data-readiness.md](real-data-readiness.md) names the backup volume `CommonCentsBackups`.
   The owner's is `/Volumes/CommonCentsBackup`. A doc fix, not made.
-- **The review of M14.2 to M15.3,** with their departures listed under D-070 and D-071. Then
-  renewed commit permission for M16.
+- **The review of M16,** with its departures under D-072, and of D-079 and the iOS mock-ups.
+  Then renewed commit permission for the next milestone.
+- M16's inputs (D-072): the checking buffer, which accounts are liquid, the links between
+  obligations and loans or reserves, and the emergency restoration amount, entered once the real
+  ledger reaches 32. Naming each card's payment obligation after the card, or saying how else to
+  tie them.
+- Whether M17's security change may be built, in a kickoff that allows it.
 - M15's inputs (D-071): graduated-loan documents (redacted), aggregates and subaccounts, any
   ownership differing from attribution, and the payoff extra or the debt goal, entered once the
   real ledger reaches 31.
@@ -253,7 +276,8 @@ F1 and F4 are fixed, and recorded in the archive.
 - Each milestone's own inputs, listed in its decision, when it starts.
 - On the real ledger, a verified backup, then `pf migrate` to version 21 for M10, verified, then
   22 and 23 for M11, then the owner's members, the 50/50 share and each account's default,
-  entered by the owner, then 24 and 25 for M12, then 26 for M13, then 27 and 28 once M14 is accepted, then 29 to 31 once M15 is.
+  entered by the owner, then 24 and 25 for M12, then 26 for M13, then 27 and 28 for M14, then 29
+  to 31 for M15, then 32 once M16 is accepted.
 - Merging `feature/m10-rules` into `main`. Needs the owner's approval.
 - Pushing. Not authorized from here.
 
@@ -261,9 +285,10 @@ F1 and F4 are fixed, and recorded in the archive.
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits | Approved on 2026-11-16 for M14.2 to M15.3 on `feature/m10-rules`. Used for every commit from `f8cff73` to this handoff's | **Must be renewed** for any later change |
+| Local commits | Approved on 2026-11-19 for M16 on `feature/m10-rules`, with the instruction to keep building. Used for `9a9186a` and this handoff's commit | **Must be renewed** for any later change |
 | M11 | Accepted on 2026-11-10. Not yet on the real ledger | The real-ledger migrations 21, 22 and 23, each after a verified backup |
-| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes. M12, M13 and M14.1 accepted. M14.2 to M15.3 built on 2026-11-16 and 17 | Their review. M17's browser writes and M20 need the owner's approval in a session whose kickoff allows a security change, a dependency and network. Installing `segno` still needs its pinned version and hash, and W1's check |
+| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes. M12 to M15 accepted. M16 built on 2026-11-19 | Its review. M17's browser writes and M20 need the owner's approval in a session whose kickoff allows a security change, a dependency and network. Installing `segno` still needs its pinned version and hash, and W1's check |
+| iOS (D-079) | Proposed on 2026-11-19, with mock-ups. Not built | Approval of the plan before any of it is built |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |

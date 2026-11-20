@@ -579,3 +579,27 @@ loan observed, and a custom payoff plan with an extra. The shape asserts its cou
 
 **G9's stopping rule is not met, and `totals` stays below 2.0s** with 5,000 breakdowns, which it
 reads in the same query as each transaction's type and category.
+
+**Safe to spend on the same shape (M16.2, SB7, D-072 point 8),** measured 2026-11-20 with
+`measure_reconciliation.py --scale --safe-to-spend`, nothing else running. Output in
+`build/m16/benchmark-safe-to-spend.log` and, for the attribution, `build/m16/attrib/attrib.log`,
+both ignored and may not survive.
+
+`--recurring`'s shape with a budget plan, a tax reserve, a reserve, an emergency fund restored
+monthly, a goal, two loans with terms (one covered by a bill), three liquidity accounts observed
+monthly, high in odd months and low in even ones, and a buffer: 104,100 transactions. The shape
+asserts its counts: every protected row reached, and both the budget and liquidity constraints
+limiting at some date. Each command is timed at 12 as-of dates and the slowest reported.
+
+| Operation | Slowest of 12 dates | Provisional target |
+|---|---|---|
+| `pf safe-to-spend` | 0.376s | Below 1.0s: met |
+| `pf dashboard` | 1.021s | Below 1.0s: **missed** |
+
+**G9's stopping rule is met by `dashboard`.** Rerun three times at each date on one kept ledger,
+it takes 0.98s to 1.06s, and `safe-to-spend` 0.36s to 0.38s. A profile at 2026-11-14 attributes
+the cost to repeated work: each dashboard runs `income_report` three times and `budget_report`
+twice, since `safe_to_spend` already computes the month's budget report and `dashboard_lines`
+computes it and the income report again. Each income report matches obligations over the
+shape's payments anew, 212,400 matches with their text normalization, 0.66s of the 1.7s profile.
+Not optimized: the remedy is for the owner's decision.

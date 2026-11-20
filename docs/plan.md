@@ -703,8 +703,8 @@ between slices. No security control changes. `r`, `t`, `d` and `c` move once, in
 | Slice | Scope | Status |
 |---|---|---|
 | M14.1 | Funds, assignments and priority: migration 0027, `pf fund preview`, `add`, `terms`, `undo`, `show`, `assign`, `unassign`, `priority`, `pf funds`, the four kinds' required amounts, the assignability guard, planned contributions, `fu1`, `fa1` | Accepted 2026-11-16 |
-| M14.2 | Consumption and the tax reserve: migration 0028, `review consume`, tax payments and releases, `fc1`, `r13`, `t11`, `d10`, `c6` | Built, for review |
-| M14.3 | `pf report funds`, extra income and unused capacity by priority, "paid from reserves" (built in M14.2), the page, the restore test, `--funds` | Built, for review |
+| M14.2 | Consumption and the tax reserve: migration 0028, `review consume`, tax payments and releases, `fc1`, `r13`, `t11`, `d10`, `c6` | Accepted 2026-11-19 |
+| M14.3 | `pf report funds`, extra income and unused capacity by priority, "paid from reserves" (built in M14.2), the page, the restore test, `--funds` | Accepted 2026-11-19 |
 
 ### M14.1 acceptance criteria
 
@@ -748,9 +748,9 @@ built. No security control changes. `r`, `t`, `d` and `c` move once, in M15.3.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M15.1 | Net worth: migration 0029, `pf account links`, `link`, `unlink`, `al1`, valuation dates and warnings, retirement and investment history, `pf report net-worth [--member]`, its page | Built, for review |
-| M15.2 | Loan terms and planning: migration 0030, rate and payment periods, actual against schedule, projections, payoff orders, `pf report loans`, `loan project`, `loan payoff`, `lt1` | Built, for review |
-| M15.3 | Principal and interest: migration 0031, `review breakdown`, interest in Spending by amount, `r14`, `t12`, `d11`, `c7`, `lb1`, `--loans` | Built, for review |
+| M15.1 | Net worth: migration 0029, `pf account links`, `link`, `unlink`, `al1`, valuation dates and warnings, retirement and investment history, `pf report net-worth [--member]`, its page | Accepted 2026-11-19 |
+| M15.2 | Loan terms and planning: migration 0030, rate and payment periods, actual against schedule, projections, payoff orders, `pf report loans`, `loan project`, `loan payoff`, `lt1` | Accepted 2026-11-19 |
+| M15.3 | Principal and interest: migration 0031, `review breakdown`, interest in Spending by amount, `r14`, `t12`, `d11`, `c7`, `lb1`, `--loans` | Accepted 2026-11-19 |
 
 ### M15.1 acceptance criteria
 
@@ -786,6 +786,43 @@ built. No security control changes. `r`, `t`, `d` and `c` move once, in M15.3.
 Lender-exact accrual, fees inside projections, statement balances read automatically, investment
 performance or prices, a separate ownership table, and loans in scenarios (M18), as D-071 lists
 them.
+
+## M16 plan
+
+Approved by the owner on 2026-11-10 as D-072, with A to I, in
+[decisions-m12-m21.md](decisions-m12-m21.md). The owner allowed it to be built on 2026-11-19,
+with local commits on `feature/m10-rules`. No security control changes, and no `r`, `t`, `d` or
+`c` token moves.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M16.1 | Inputs: migration 0032, `pf account liquidity show`, `set`, `undo`, `pf obligation coverage`, `covers`, `uncover`, `pf fund restorations`, `restoration`, `restoration-undo`, the checking buffer, `lq1` | Built, for review |
+| M16.2 | The engine: the horizon, the liquid balance, protected funds, the two constraints, provisional reasons, `pf safe-to-spend`, `pf dashboard`, its page, `--safe-to-spend` | Built, for review |
+
+### M16.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| SA1 | Migration 0032 meets G10 and seeds `checking_buffer_cents`. Designation refuses non-checking and non-savings accounts and a stale `lq1`. Coverage links refuse a second link on either side and a stale `ob1` |
+| SA2 | Possible double reservations are found exactly at the 3-day edges, for loans and for reserves, and a link clears each |
+| SA3 | `evidence_digest` is unchanged by every M16 write. Every existing command is byte for byte as before |
+
+### M16.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| SB1 | The horizon: N for weekly, biweekly and semimonthly sources at month ends, a payday equal to `as_of`, an unreceived paycheck within its tolerance, and no source |
+| SB2 | The liquid balance is the observation plus activity, with pending outflows in and pending inflows out, and `activity_incomplete` and `stale_observation` fire exactly at their edges |
+| SB3 | Each protected row computed by hand. No entry appears in two rows, over plans with links, unlinked look-alikes, reserves covered by obligations and loans covered by obligations |
+| SB4 | Money assigned this month is counted once, as an assignment or as an outstanding contribution, never both: assigning the planned amount mid-month leaves the protected total unchanged |
+| SB5 | Safe to spend is the lower of the two constraints, with the constraint named, ties to liquidity, a shortfall shown with safe to spend 0, and every provisional reason produced and cleared by its stated action |
+| SB6 | Third paycheck: the extra changes neither the budget constraint nor the horizon's protected amounts. It reaches liquidity only as money actually received |
+| SB7 | `safe-to-spend` and `dashboard` open read-only, call no candidate search (a test replaces it with a failure), and the dashboard page equals the command line for line. `--safe-to-spend` records its figures under G9. Every earlier criterion still passes |
+
+### Not in M16
+
+Safe to spend per member, intra-day timing, forecasts beyond the next paycheck (M18), automatic
+linking of duplicate reservations, and notifications, as D-072 lists them.
 
 ## Backlog benchmarks
 

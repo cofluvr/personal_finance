@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`, which holds everything through M9. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
+Last updated: 2026-11-19. Branch: `feature/m10-rules`, from `main` at `19ee858`, which holds everything through M9. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
 
 | Milestone | Status |
 |---|---|
@@ -70,12 +70,15 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M13.2: the budget report, its page, the benchmark row | Accepted on 2026-11-16 as built, its departures included (D-069) |
 | **M13 overall** | **Complete and accepted** on 2026-11-16. Not on the real ledger, which takes 26 after M12's migrations, each after a verified backup |
 | M14.1: funds, assignments and the priority list | Accepted on 2026-11-16 as built, its departures included (D-070) |
-| M14.2: consumption, tax payments and releases | Built on 2026-11-16 (D-070, "How M14.2 was implemented"), awaiting the owner's review |
-| M14.3: `report funds`, the extra by priority, its page, the restore test, `--funds` | Built on 2026-11-16 (D-070, "How M14.3 was implemented"), awaiting the owner's review |
-| M15.1: net worth, account links, its page | Built on 2026-11-16 (D-071, "How M15.1 was implemented"), awaiting the owner's review |
-| M15.2: loan terms, actual against schedule, projections, payoff orders | Built on 2026-11-17 (D-071, "How M15.2 was implemented"), awaiting the owner's review |
-| M15.3: principal and interest, interest in Spending, `--loans` | Built on 2026-11-17 (D-071, "How M15.3 was implemented"), awaiting the owner's review |
-| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12, M13 and M14.1 accepted, M14.2 to M15.3 built for review |
+| M14.2: consumption, tax payments and releases | Accepted on 2026-11-19 as built, its departures included (D-070) |
+| M14.3: `report funds`, the extra by priority, its page, the restore test, `--funds` | Accepted on 2026-11-19 as built, its departures included (D-070) |
+| M15.1: net worth, account links, its page | Accepted on 2026-11-19 as built, its departures included (D-071) |
+| M15.2: loan terms, actual against schedule, projections, payoff orders | Accepted on 2026-11-19 as built, its departures included (D-071) |
+| M15.3: principal and interest, interest in Spending, `--loans` | Accepted on 2026-11-19 as built, its departures included (D-071) |
+| **M14 and M15 overall** | **Complete and accepted** on 2026-11-19. Not on the real ledger, which takes 27 and 28, then 29 to 31, after the earlier milestones' migrations, each after a verified backup |
+| M16.1: liquidity designations, coverage links, restoration, the buffer | Built on 2026-11-19 (D-072, "How M16.1 was implemented"), awaiting the owner's review |
+| M16.2: safe to spend, the dashboard, its page, `--safe-to-spend` | Built on 2026-11-19 (D-072, "How M16.2 was implemented"), awaiting the owner's review |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 to M15 accepted, M16 built for review |
 
 ## What exists
 
@@ -221,6 +224,9 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `report net-worth`, `loan terms add`, `loan terms show`, `loan terms undo`, `loan rate`,
   `loan payment`, `loan plan set`, `report loans`, `loan project`, `loan payoff`,
   `review breakdown`, `review breakdowns`, `review breakdown-show`, `review breakdown-undo`,
+  `account liquidity show`, `account liquidity set`, `account liquidity undo`,
+  `obligation coverage`, `obligation covers`, `obligation uncover`, `fund restorations`,
+  `fund restoration`, `fund restoration-undo`, `safe-to-spend`, `dashboard`,
   `totals`,
   `report monthly`, `report household`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
@@ -367,8 +373,15 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
 - A breakdown (M15.3) is the only change of M12 to M21 to `totals`, `report monthly` and
   `report household`: only where one applies, interest and fees move from confirmed transfers to
   spending, and each divided payment is counted in both groups, disclosed by count.
-- The local UI is read-only, and shows eleven commands' output only, `report funds` and
-  `report net-worth` the last two. It searches nothing, imports
+- Safe to spend (M16) is an estimate until the next salary paycheck, never a balance: the
+  latest observation of each liquidity account plus its activity since, with pending and
+  unknown-status inflows left out. It is provisional while any of D-072 point 6's reasons holds,
+  each printed with what clears it, and it refuses without the household timezone. A card's
+  payment obligation is recognised by the card's name in the obligation's name or matcher. A
+  loan payment due before `as_of` is not reserved. Nothing is linked automatically: a possible
+  double reservation is a warning until `obligation covers` links the pair.
+- The local UI is read-only, and shows twelve commands' output only, `report funds`,
+  `report net-worth` and `dashboard` the last three. It searches nothing, imports
   nothing, exports nothing and shows no `trace` or decision history, which carry creation
   timestamps (F2). Decisions are made with `pf review` in the terminal (D-062).
 - `pf ui` cannot stop what the browser keeps: history (addresses with IDs and months, a fixed

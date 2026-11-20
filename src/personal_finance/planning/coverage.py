@@ -48,8 +48,8 @@ FUND = "reserve"
 LOOK_ALIKE_DAYS = 3
 
 NOT_A_SCHEDULED_LOAN = (
-    "{account} is not a loan account with loan terms and a scheduled payment: only such a loan is "
-    "covered. Nothing was changed."
+    "{account} is not a loan account with loan terms: only such a loan, with its scheduled "
+    "payment, is covered. Nothing was changed."
 )
 NOT_A_RESERVE = "fund {fund} is not a reserve: only a reserve is covered. Nothing was changed."
 CHAIN_COVERS_ALREADY = (
@@ -145,7 +145,8 @@ def _cover(conn, obligation_id, loan_account_id, fund_id, revision) -> str:
         OBLIGATION_REFUSALS)
     if loan_account_id is not None:
         terms = load_loan_terms(conn).get(loan_account_id)
-        if terms is None or terms.account_type != "loan" or not terms.payments:
+        # A loan's terms always hold a payment period (PAYMENT_REQUIRED).
+        if terms is None or terms.account_type != "loan":
             name = conn.execute("SELECT display_name FROM account WHERE id = ?",
                                 (loan_account_id,)).fetchone()[0]
             raise DecisionRefused(NOT_A_SCHEDULED_LOAN.format(account=name))
@@ -209,11 +210,11 @@ def fixed_dates_near(obligation, due: date, amount_cents: int) -> list[date]:
 
 def scheduled_targets(conn: sqlite3.Connection,
                       as_of: date) -> list[tuple[str, str, str, int, date]]:
-    """Every loan with a scheduled payment and every active reserve, as (kind, ID, name, amount,
-    next due date on or after as_of)."""
+    """Every loan with a scheduled payment and every active reserve started by as_of, as (kind,
+    ID, name, amount, next due date on or after as_of)."""
     found = []
     for account_id, terms in load_loan_terms(conn).items():
-        if terms.account_type != "loan" or not terms.payments:
+        if terms.account_type != "loan":
             continue
         due = next_loan_due_date(terms.due_day, as_of - timedelta(days=1))
         payment = terms.payment_on(due.isoformat())
@@ -222,7 +223,9 @@ def scheduled_targets(conn: sqlite3.Connection,
     for fund in load_funds(conn):
         if not fund.applies or fund.kind != RESERVE:
             continue
-        terms = fund.terms_on(as_of.isoformat()) or fund.terms[0]
+        terms = fund.terms_on(as_of.isoformat())
+        if terms is None:
+            continue  # not started by as_of, so nothing is due yet (D-070's not_started)
         due = terms.due_date if terms.shape == DUE else next_due_date(terms, as_of.isoformat())
         found.append((FUND, fund.fund_id, fund.name, terms.amount_cents, date.fromisoformat(due)))
     return found

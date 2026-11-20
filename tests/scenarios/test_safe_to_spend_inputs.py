@@ -174,6 +174,12 @@ class TestLiquidity:  # SA1
                        STALE_LIQUIDITY_REVISION)
 
 
+    def test_one_account_s_token_never_designates_another_of_its_type(self, ledger):
+        ledger.add_typed_account("B", "checking")
+        ledger.refused(lambda: ledger.liquid("A", revision=ledger.liquidity_token("B")),
+                       STALE_LIQUIDITY_REVISION)
+
+
 class TestCoverage:  # SA1
     def test_covers_a_loan_and_a_reserve_and_uncovers(self, ledger):
         ledger.covers_ok(ledger.mortgage_bill, "--loan", "Mortgage")
@@ -241,6 +247,14 @@ class TestCoverage:  # SA1
                                                   ledger.mortgage_bill)),
                        STALE_COVERAGE_REVISION)
 
+    def test_an_uncover_token_names_what_the_link_covers(self, ledger):
+        ledger.covers_ok(ledger.mortgage_bill, "--loan", "Mortgage")
+        token = ledger.coverage_token(ledger.mortgage_bill, "Uncover")
+        assert ledger.uncover(ledger.mortgage_bill)[0] == 0
+        ledger.covers_ok(ledger.mortgage_bill, "--fund", ledger.reserve)
+        ledger.refused(lambda: ledger.uncover(ledger.mortgage_bill, revision=token),
+                       STALE_COVERAGE_REVISION)
+
     def test_a_supersession_keeps_the_link(self, ledger):
         ledger.covers_ok(ledger.mortgage_bill, "--loan", "Mortgage")
         newer = ledger.ob_add_ok(name="Mortgage bill 2", match="synthetic mortgage", cadence=None,
@@ -272,6 +286,31 @@ class TestLookAlikes:  # SA2
         ledger.covers_ok(ledger.insurance_bill, "--fund", ledger.reserve)
         assert ledger.alikes() == []
         assert "Possible double reservations as of 2026-05-01: none" in ledger.coverage_shown()
+
+    def test_a_linked_side_looks_like_nothing_else(self, ledger):
+        ledger.covers_ok(ledger.mortgage_bill, "--loan", "Mortgage")
+        # A reserve like the linked bill, and a second bill like the linked loan.
+        ledger.add_fund_ok(name="Like the bill", kind="reserve", target="1500.00",
+                           due="2026-05-05", as_of=AS_OF)
+        other = ledger.ob_add_ok(name="Like the loan", match="synthetic lender",
+                                 cadence="monthly:5", anchor="2026-01-05", amount="1500.00")
+        found = ledger.alikes()
+        assert not [alike for alike in found if alike[0] == ledger.mortgage_bill]
+        assert not [alike for alike in found if alike[0] == other and alike[2] == "loan"]
+        assert [alike for alike in found if alike[0] == other and alike[2] == "reserve"]
+
+    def test_a_reserve_not_started_looks_like_nothing(self, ledger):
+        later = ledger.add_fund_ok(name="Later", kind="reserve", target="1500.00",
+                                   due="2026-07-05", effective_from="2026-06-01", as_of=AS_OF)
+        assert not [alike for alike in ledger.alikes() if alike[0] == ledger.mortgage_bill
+                    and alike[2] == "reserve"]
+        # A reserve with no terms row at all, as a ledger written directly can hold.
+        conn = ledger.conn()
+        conn.execute("INSERT INTO fund (id, name, kind) VALUES ('bare', 'Bare', 'reserve')")
+        conn.execute("INSERT INTO fund_event (fund_id, event) VALUES ('bare', 'made')")
+        conn.close()
+        assert ledger.coverage_shown()
+        assert later
 
     @pytest.mark.parametrize("day, found", [(2, True), (8, True), (1, False), (9, False)])
     def test_the_loan_edges_are_three_days(self, ledger, day, found):

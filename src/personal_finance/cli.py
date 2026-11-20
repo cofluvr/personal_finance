@@ -327,7 +327,9 @@ from personal_finance.reports.report_text import (
     TAX_LABEL,
     fund_standing_lines,
     fund_terms_sentence,
+    dashboard_lines,
     funds_report_lines,
+    safe_to_spend_lines,
     net_worth_report_lines,
     loan_payoff_lines,
     loan_projection_lines,
@@ -1050,6 +1052,16 @@ def build_parser() -> argparse.ArgumentParser:
     dismissal_undo.add_argument("dismissal_id", help="a dismissal ID from obligation dismissals")
     dismissal_undo.add_argument("--revision", required=True,
                                 help="the undo revision from obligation dismissals")
+    safe = command("safe-to-spend", commands, handler=run_safe_to_spend,
+                   help="the lower of budget capacity and liquidity until the next paycheck, "
+                        "with the constraint that limits it")
+    safe.add_argument("--as-of", help=TODAY_HELP)
+    safe.add_argument("--explain", action="store_true",
+                      help="also list each liquidity account's estimate and every protected item")
+    dashboard = command("dashboard", commands, handler=run_dashboard,
+                        help="safe to spend, budget pace, funds, net worth, income, review counts "
+                             "and freshness on one page")
+    dashboard.add_argument("--as-of", help=TODAY_HELP)
     obligations_command = command("obligations", commands, handler=run_obligations,
                                   help="list obligations, and spending by class")
     obligations_command.add_argument("--account", help="only this account's obligations")
@@ -3479,6 +3491,12 @@ def run_income_source_show(args) -> int:
     return 0
 
 
+# Safe to spend reads months and assignment events in the household's zone, so --as-of alone is
+# not enough (D-072 point 6, G7).
+SAFE_TO_SPEND_TIMEZONE = (
+    "safe to spend needs the household's timezone, which is not set. Run setting set "
+    "household_timezone ZONE with the revision from setting show."
+)
 TIMEZONE_NEEDED = (
     "this needs today's date in the household's timezone, which is not set. Run setting set "
     "household_timezone ZONE with the revision from setting show, or give --as-of YYYY-MM-DD."
@@ -4946,6 +4964,28 @@ def run_report_budget(args) -> int:
     if args.member is not None and load_household(conn).find_member(args.member) is None:
         raise CommandError("household member not found. Run household members.")
     print_report(budget_report_lines(conn, month or as_of.isoformat()[:7], as_of, args.member))
+    return 0
+
+
+def safe_to_spend_as_of(args):
+    """Both commands open read-only and refuse without the household timezone (G7)."""
+    if args.as_of is not None:
+        checked_as_of(args.as_of)
+    conn = open_ledger(args.db, read_only=True)
+    if household_timezone(conn) is None:
+        raise CommandError(SAFE_TO_SPEND_TIMEZONE)
+    return conn, as_of_date(conn, args.as_of)
+
+
+def run_safe_to_spend(args) -> int:
+    conn, as_of = safe_to_spend_as_of(args)
+    print_report(safe_to_spend_lines(conn, as_of, args.explain))
+    return 0
+
+
+def run_dashboard(args) -> int:
+    conn, as_of = safe_to_spend_as_of(args)
+    print_report(dashboard_lines(conn, as_of))
     return 0
 
 

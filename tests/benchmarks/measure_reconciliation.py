@@ -2718,6 +2718,127 @@ def measure_funds() -> None:
               flush=True)
 
 
+SAFE_AS_OF_DATES = [date(2026, month, 3 + month) for month in range(1, 13)]
+
+
+def measure_safe_to_spend() -> None:
+    """Safe to spend on M12's shape (D-072 point 8, SB7): the --recurring shape's sources and
+    bills, with a budget plan, a tax reserve, a reserve, an emergency fund restored monthly and a
+    goal, 2 loans with terms (one covered by a bill), 3 liquidity accounts observed monthly, high
+    in odd months and low in even ones, and a buffer. Times safe-to-spend and dashboard at 12
+    as-of dates and reports the slowest. Asserts every protected row is reached and each
+    constraint limits at some date. Stops, as G9 says, if either misses one second."""
+    from personal_finance.reports.safe_to_spend import BUDGET, LIQUIDITY, ROWS, safe_to_spend
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _ = recurring_ledger(root, side_tax_eligible=True)
+        conn.execute("BEGIN")
+        conn.execute("INSERT INTO ledger_setting (id, setting_key, value) "
+                     "VALUES ('zone', 'household_timezone', 'America/Chicago')")
+        conn.execute("INSERT INTO ledger_setting_event (setting_id, event) VALUES ('zone', 'made')")
+        conn.execute("INSERT INTO ledger_setting (id, setting_key, value) "
+                     "VALUES ('buffer', 'checking_buffer_cents', '50000')")
+        conn.execute("INSERT INTO ledger_setting_event (setting_id, event) "
+                     "VALUES ('buffer', 'made')")
+        conn.execute("INSERT INTO budget_plan (id, effective_from, allowance_cents, "
+                     "corrected_closed_month) VALUES ('plan', '2022-01', 300000, 0)")
+        conn.execute("INSERT INTO budget_plan_event (plan_id, event) VALUES ('plan', 'made')")
+        liquid = ("bills", "checking", "savings")
+        for number, account in enumerate(liquid):
+            conn.execute("INSERT INTO account_liquidity (id, account_id) VALUES (?, ?)",
+                         (f"lq{number}", account))
+            conn.execute("INSERT INTO account_liquidity_event (designation_id, event) "
+                         "VALUES (?, 'made')", (f"lq{number}",))
+            for month in range(1, 13):
+                observation = f"sobs{number}-{month}"
+                balance = 5_000_000 if month % 2 else 100_000
+                conn.execute("INSERT INTO balance_observation (id, account_id, observed_on, "
+                             "balance_cents) VALUES (?, ?, ?, ?)",
+                             (observation, account, f"2026-{month:02}-01", balance))
+                conn.execute("INSERT INTO balance_observation_event "
+                             "(balance_observation_id, event) VALUES (?, 'made')",
+                             (observation,))
+        funds = (("tax", "tax", "percent", {"basis_points": 2500}),
+                 ("reserve", "reserve", "recurring",
+                  {"amount_cents": 120_000, "cadence": "annual", "first_day": 15,
+                   "anchor": "2022-03-15"}),
+                 ("rainy", "emergency", "minimum", {"amount_cents": 2_000_000}),
+                 ("goal", "goal", "monthly", {"amount_cents": 40_000}))
+        for fund_id, kind, shape, terms in funds:
+            conn.execute("INSERT INTO fund (id, name, kind) VALUES (?, ?, ?)",
+                         (fund_id, f"Fund {fund_id}", kind))
+            columns = ", ".join(terms)
+            conn.execute(f"INSERT INTO fund_terms (fund_id, effective_from, shape, {columns}) "
+                         f"VALUES (?, '2022-01-01', ?, {', '.join('?' for _ in terms)})",
+                         (fund_id, shape, *terms.values()))
+            conn.execute("INSERT INTO fund_event (fund_id, event) VALUES (?, 'made')",
+                         (fund_id,))
+            if kind != "tax":
+                conn.execute("INSERT INTO fund_assignment (id, fund_id, account_id, "
+                             "amount_cents, created_at) VALUES (?, ?, 'savings', 10000, "
+                             "'2022-01-01T00:00:00.000Z')", (f"sa{fund_id}", fund_id))
+                conn.execute("INSERT INTO fund_assignment_event (assignment_id, event) "
+                             "VALUES (?, 'made')", (f"sa{fund_id}",))
+        conn.execute("INSERT INTO fund_restoration (id, fund_id, effective_from, monthly_cents) "
+                     "VALUES ('restore', 'rainy', '2022-01-01', 25000)")
+        conn.execute("INSERT INTO fund_restoration_event (restoration_id, event) "
+                     "VALUES ('restore', 'made')")
+        for number in range(2):
+            account = f"sloan{number}"
+            conn.execute("INSERT INTO account (id, display_name, account_type) "
+                         "VALUES (?, ?, 'loan')", (account, f"Safe loan {number}"))
+            conn.execute("INSERT INTO loan_terms (id, account_id, due_day) VALUES (?, ?, ?)",
+                         (f"st{number}", account, 5 + number * 10))
+            conn.execute("INSERT INTO loan_terms_event (terms_id, event) VALUES (?, 'made')",
+                         (f"st{number}",))
+            conn.execute("INSERT INTO loan_rate_period (terms_id, effective_from, "
+                         "rate_millionths) VALUES (?, '2022-01-01', 6875000)", (f"st{number}",))
+            conn.execute("INSERT INTO loan_payment_period (terms_id, effective_from, "
+                         "payment_cents) VALUES (?, '2022-01-01', ?)",
+                         (f"st{number}", 150_000 + number))
+        # Bill 00, on the 1st, covers the first loan.
+        conn.execute("INSERT INTO obligation_coverage (id, obligation_id, loan_account_id) "
+                     "VALUES ('cover', 'ob0', 'sloan0')")
+        conn.execute("INSERT INTO obligation_coverage_event (coverage_id, event) "
+                     "VALUES ('cover', 'made')")
+        conn.execute("COMMIT")
+        build_seconds = time.perf_counter() - started
+
+        rows_reached, limiting = set(), set()
+        for as_of in SAFE_AS_OF_DATES:
+            view = safe_to_spend(conn, as_of)
+            rows_reached |= {item.row for item in view.items}
+            limiting.add(view.limiting)
+            assert not any(item.entry_kind == "loan" and item.entry_id == "sloan0"
+                           for item in view.items)
+            entries = [(item.entry_kind, item.entry_id) for item in view.items]
+            assert len(entries) == len(set(entries))
+        (transactions,) = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()
+        print(f"shape transactions={transactions} liquid={len(liquid)} funds={len(funds)} "
+              f"loans=2 rows_reached={len(rows_reached)} limiting={sorted(limiting)} "
+              f"build={build_seconds:.1f}s", flush=True)
+        # The shape reaches the cost it claims.
+        assert transactions >= 100_000
+        assert rows_reached == set(ROWS), set(ROWS) - rows_reached
+        assert limiting == {BUDGET, LIQUIDITY}
+        conn.close()
+
+        database = str(path)
+        slowest = {"safe-to-spend": (0.0, None), "dashboard": (0.0, None)}
+        for as_of in SAFE_AS_OF_DATES:
+            for command in slowest:
+                seconds = timed_command(command, "--db", database, "--as-of", as_of.isoformat())
+                if seconds > slowest[command][0]:
+                    slowest[command] = (seconds, as_of.isoformat())
+        print(" ".join(f"{command}={seconds:7.3f}s (as of {as_of})"
+                       for command, (seconds, as_of) in slowest.items()), flush=True)
+        stops = [command for command, (seconds, _) in slowest.items() if seconds > 1]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
 FUNDS_CONSUMPTIONS = 2_000
 
 LOANS_BREAKDOWNS = 5_000
@@ -2886,6 +3007,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--scale", "--loans"]:
         measure_loans()
+        return
+    if sys.argv[1:] == ["--scale", "--safe-to-spend"]:
+        measure_safe_to_spend()
         return
     if sys.argv[1:] == ["--scale", "--household"]:
         measure_household()

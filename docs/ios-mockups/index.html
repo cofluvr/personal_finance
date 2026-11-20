@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iOS Companion Mock-ups</title>
+<style>
+:root {
+  --bg: #e9e9ee; --phone: #f2f2f7; --card: #ffffff; --ink: #1c1c1e; --muted: #6e6e73;
+  --line: #d8d8de; --accent: #0a66d8; --good: #1f8a4c; --warn: #b25e00; --bad: #c4302b;
+  --chip: #e5e5ea; --bar: #dfe7f3; --frame: #1c1c1e; --note: #fffbe6; --note-line: #e9d98f;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111114; --phone: #000000; --card: #1c1c1e; --ink: #f2f2f7; --muted: #98989f;
+    --line: #38383a; --accent: #4c9bff; --good: #3ccf7a; --warn: #ffb040; --bad: #ff6a63;
+    --chip: #2c2c2e; --bar: #1f2a3a; --frame: #3a3a3c; --note: #2a2614; --note-line: #5c5326;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111114; --phone: #000000; --card: #1c1c1e; --ink: #f2f2f7; --muted: #98989f;
+  --line: #38383a; --accent: #4c9bff; --good: #3ccf7a; --warn: #ffb040; --bad: #ff6a63;
+  --chip: #2c2c2e; --bar: #1f2a3a; --frame: #3a3a3c; --note: #2a2614; --note-line: #5c5326;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; }
+header.page { max-width: 1240px; margin: 0 auto; padding: 32px 16px 8px; }
+header.page h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.02em; }
+header.page p { margin: 4px 0; color: var(--muted); max-width: 820px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }
+.legend span { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: var(--chip); }
+.grid { max-width: 1240px; margin: 0 auto; padding: 16px; display: grid; gap: 28px;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
+figure { margin: 0; }
+figcaption { font-size: 13px; color: var(--muted); margin: 10px 4px 0; }
+figcaption b { color: var(--ink); display: block; font-size: 14px; margin-bottom: 2px; }
+.phone { width: 100%; max-width: 360px; aspect-ratio: 390 / 844; margin: 0 auto; border-radius: 46px;
+  border: 10px solid var(--frame); background: var(--phone); overflow: hidden; position: relative;
+  display: flex; flex-direction: column; }
+.status { height: 40px; flex: none; display: flex; justify-content: space-between; align-items: center;
+  padding: 0 24px; font-size: 13px; font-weight: 600; }
+.island { width: 92px; height: 26px; border-radius: 14px; background: #000; }
+.screen { flex: 1; overflow: hidden; padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+.nav { display: flex; justify-content: space-between; align-items: baseline; }
+.nav h2 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+.nav a { color: var(--accent); font-size: 14px; text-decoration: none; }
+.seg { display: flex; background: var(--chip); border-radius: 9px; padding: 2px; font-size: 12px; }
+.seg span { flex: 1; text-align: center; padding: 5px 0; border-radius: 7px; }
+.seg .on { background: var(--card); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.card { background: var(--card); border-radius: 14px; padding: 12px 14px; }
+.card h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+.hero { text-align: center; padding: 16px 14px 12px; }
+.hero .label { font-size: 13px; color: var(--muted); }
+.hero .big { font-size: 46px; font-weight: 700; letter-spacing: -0.03em; margin: 2px 0; font-variant-numeric: tabular-nums; }
+.hero .week { font-size: 15px; }
+.tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--chip); color: var(--muted); }
+.tag.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.tag.bad { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.tag.good { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+.row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; font-size: 13px; }
+.row + .row { border-top: 1px solid var(--line); }
+.row .v { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.row .s { color: var(--muted); font-size: 12px; }
+.meter { height: 8px; border-radius: 4px; background: var(--bar); overflow: hidden; margin: 6px 0 4px; }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.meter i.warn { background: var(--warn); }
+.fresh { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); flex: none; }
+.dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+.banner { border-radius: 12px; padding: 10px 12px; font-size: 12.5px; }
+.banner.warn { background: color-mix(in srgb, var(--warn) 16%, var(--card)); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); }
+.banner.bad { background: color-mix(in srgb, var(--bad) 16%, var(--card)); border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent); }
+.banner b { display: block; font-size: 13px; margin-bottom: 2px; }
+.muted { color: var(--muted); }
+.dim { opacity: .55; }
+.tabbar { flex: none; display: flex; justify-content: space-around; border-top: 1px solid var(--line);
+  background: var(--card); padding: 7px 0 16px; font-size: 10px; color: var(--muted); }
+.tabbar span { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.tabbar svg { width: 22px; height: 22px; }
+.tabbar .on { color: var(--accent); }
+.bars .b { display: grid; grid-template-columns: 92px 1fr 58px; gap: 8px; align-items: center; font-size: 12px; padding: 4px 0; }
+.bars .t { height: 10px; background: var(--bar); border-radius: 5px; overflow: hidden; }
+.bars .t i { display: block; height: 100%; background: var(--accent); }
+.search { background: var(--chip); border-radius: 10px; padding: 8px 10px; font-size: 14px; color: var(--muted); }
+.tx { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 7px 0; font-size: 13px; }
+.tx + .tx { border-top: 1px solid var(--line); }
+.tx .d { color: var(--muted); font-size: 11.5px; }
+.sheet { margin-top: auto; background: var(--card); border-radius: 16px 16px 0 0; padding: 10px 14px; box-shadow: 0 -6px 20px rgba(0,0,0,.18); margin-left: -14px; margin-right: -14px; margin-bottom: -14px; }
+.grab { width: 36px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto 8px; }
+.button { display: block; text-align: center; background: var(--accent); color: #fff; border-radius: 12px; padding: 11px; font-weight: 600; font-size: 15px; }
+.button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+.button.danger { background: transparent; color: var(--bad); border: 1px solid var(--line); }
+.lock { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; }
+.lock .glyph { width: 76px; height: 76px; border-radius: 22px; background: var(--card); display: grid; place-items: center; }
+.note { max-width: 1240px; margin: 8px auto 40px; padding: 0 16px; }
+.note div { background: var(--note); border: 1px solid var(--note-line); border-radius: 12px; padding: 14px 16px; font-size: 13.5px; }
+.note h2 { font-size: 16px; margin: 0 0 6px; }
+.note ul { margin: 6px 0 0; padding-left: 20px; }
+.note li { margin: 3px 0; }
+</style>
+</head>
+<body>
+<header class="page">
+  <h1>iOS companion: screen mock-ups</h1>
+  <p>For review. A read-only iPhone companion to the Mac ledger (PRD-ios.md). Every figure below
+    is invented, and every one is computed on the Mac and carried in a snapshot. The phone
+    computes nothing (PRD §10, shared-contract §2).</p>
+  <p>The labels follow the backend's own: <i>estimated</i>, <i>reserved</i>, <i>planned</i>,
+    <i>actual</i>, <i>budget pace</i>, and the provisional reasons of D-072. A missing value says
+    so, and is never shown as 0.</p>
+  <div class="legend"><span>iPhone 17 Pro, 390 × 844 pt</span><span>Light and dark follow the system</span><span>Synthetic data</span><span>Open questions at the end</span></div>
+</header>
+
+<main class="grid">
+
+<!-- 1. Lock -->
+<figure>
+<div class="phone"><div class="status"><span>9:41</span><span class="island"></span><span>100%</span></div>
+<div class="screen">
+  <div class="lock">
+    <div class="glyph"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+    <div><div style="font-size:22px;font-weight:700">CommonCents</div>
+    <div class="muted" style="font-size:13px;margin-top:4px">Locked. Your finances stay on this phone.</div></div>
+    <span class="button" style="width:220px">Unlock with Face ID</span>
+    <div class="muted" style="font-size:11.5px;max-width:250px">The app-switcher preview is blurred, and the app locks again after 1 minute in the background.</div>
+  </div>
+</div></div>
+<figcaption><b>1. Lock</b>Device authentication before any figure is shown (PRD §9). Nothing financial is visible here or in the app switcher.</figcaption>
+</figure>
+
+<!-- 2. Home, household -->
+<figure>
+<div class="phone"><div class="status"><span>9:41</span><span class="island"></span><span>100%</span></div>
+<div class="screen">
+  <div class="nav"><h2>Today</h2><a>Why?</a></div>
+  <div class="seg"><span class="on">Household</span><span>Alex</span><span>Bea</span></div>
+  <div class="card hero">
+    <div class="label">Safe to spend today</div>
+    <div class="big">$48.00</div>
+    <div class="week">This week <b>$336.00</b></div>
+    <div style="margin-top:8px"><span class="tag">Limited by budget</span> <span class="tag warn">Provisional</span></div>
+  </div>
+  <div class="fresh"><span class="dot"></span>Synced 2 h ago · bank data through Mon 4 May</div>
+  <div class="card">
+    <h3>May budget</h3>
+    <div class="row"><span>Original daily allowance</span><span class="v">$48.38</span></div>
+    <div class="row"><span>Revised daily allowance <span class="s">budget pace</span></span><span class="v">$48.00</span></div>
+    <div class="meter"><i style="width:6.7%"></i></div>
+    <div class="row" style="border:0;padding-top:0"><span class="s">$100.00 spent of $1,500.00, actual</span><span class="s">28 days left</span></div>
+  </div>
+  <div class="card">
+    <h3>Goals</h3>
+    <div class="row"><span>Rainy day <span class="s">emergency</span></span><span class="v">$1,000 / $5,000</span></div>
+    <div class="meter"><i class="warn" style="width:20%"></i></div>
+    <div class="row"><span>Insurance <span class="s">due 10 Jun</span></span><span class="v">$200 / $1,200</span></div>
+    <div class="meter"><i style="width:16.7%"></i></div>
+  </div>
+  <div class="banner warn"><b>1 thing to check</b>Possible spending: 1 transaction this month isn't classified yet. Classify it on the Mac.</div>
+</div>
+<div class="tabbar">
+  <span class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>Today</span>
+  <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>Spending</span>
+  <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>Goals</span>
+  <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h18M3 12h18M3 17h12"/></svg>Accounts</span>
+  <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg>Sync</span>
+</div></div>
+<figcaption><b>2. Today, household</b>PRD §6's order: the two figures, freshness, original against revised allowance, month to date, goals, then warnings. Sync time and bank-data freshness are separate facts.</figcaption>
+</figure>
+
+<!-- 3. Why this number -->
+<figure>
+<div class="phone"><div class="status"><span>9:41</span><span class="island"></span><span>100%</span></div>
+<div class="screen">
+  <div class="nav"><a>‹ Today</a><span></span></div>
+  <div class="nav"><h2>Why $48.00</h2></div>
+  <div class="card">
+    <h3>Two limits, the lower wins</h3>
+    <div class="row"><span>Budget, daily <span class="s">budget pace</span></span><span class="v">$48.00 ✓</span></div>
+    <div class="row"><span>Cash until payday, daily <span class="s">estimated</span></span><span class="v">$120.41</span></div>
+  </div>
+  <div class="card">
+    <h3>Cash until payday · 4 – 7 May</h3>
+    <div class="row"><span>Next paycheck</span><span class="v">Fri 8 May</span></div>
+    <div class="row"><span>Liquid balance <span class="s">estimated</span></span><span class="v">$4,900.00</span></div>
+    <div class="row"><span>Protected <span class="s">reserved</span></span><span class="v">−$4,418.34</span></div>
+    <div class="row"><span><b>Left over</b> <span class="s">estimated</span></span><span class="v">$481.66</span></div>
+  </div>
+  <div class="card">
+    <h3>Protected, in order</h3>
+    <div class="row"><span>1 Side-income tax</span><span class="v">$83.34</span></div>
+    <div class="row"><span>2 Bills and loan payments</span><span class="v">$1,585.00</span></div>
+    <div class="row"><span>3 Annual expenses</span><span class="v">$700.00</span></div>
+    <div class="row"><span>4 Checking buffer</span><span class="v">$500.00</span></div>
+    <div class="row"><span>5 Emergency restoration</span><span class="v">$1,250.00</span></div>
+    <div class="row"><span>6 Savings goals</span><span class="v">$300.00</span></div>
+  </div>
+  <div class="muted" style="font-size:11.5px">Estimated from 1 May's balance and activity since. Offline, the phone can't see new spending.</div>
+</div></div>
+<figcaption><b>3. Why this number</b>D-072's explanation, in plain words: the limiting constraint, the horizon, and the six protected rows, each from one planning entry.</figcaption>
+</figure>
+
+<!-- 4. Stale -->
+<figure>
+<div class="phone"><div class="status"><span>9:41</span><span class="island"></span><span>100%</span></div>
+<div class="screen">
+  <div class="nav"><h2>Today</h2><a>Why?</a></div>
+  <div class="banner bad"><b>Snapshot is 3 days old</b>These figures were calculated on Mon 4 May. Spending since then isn't included. Sync with the Mac to update.</div>
+  <div class="card hero dim">
+    <div class="label">Safe to spend · as of 4 May</div>
+    <div class="big">$48.00</div>
+    <div class="week">That week <b>$336.00</b></div>
+    <div style="margin-top:8px"><span class="tag bad">Not current</span></div>
+  </div>
+  <div class="fresh"><span class="dot bad"></span>Synced Mon 9:12 · bank data through Mon 4 May</div>
+  <span class="button">Sync now</span>
+  <div class="card">
+    <h3>Month boundary</h3>
+    <div class="muted" style="font-size:13px">On 1 June, this screen shows May's final figures labelled "May" and asks for a sync. It never starts June's budget from May's snapshot (PRD §8).</div>
+  </div>
+</div></div>
+<figcaption><b>4. Stale snapshot</b>After 24 hours (configurable) the warning grows, the figures dim and carry their cutoff date, and "today" never means the phone's today.</figcaption>
+</figure>
+
+<!-- 5. Spending -->
+<figure>
+<div class="phone"><div class="status"><span>9:41</span><span class="island"></span><span>100%</span></div>
+<div class="screen">
+  <div class="nav"><h2>Spending</h2><a>May ▾</a></div>
+  <div class="seg"><span class="on">Household</span><span>Alex</span><span>Bea</span></div>
+  <div class="card bars">
+    <h3>By category · actual</h3>
+    <div class="b"><span>Groceries</span><span class="t"><i style="width:82%"></i></span><span class="v" style="text-align:right">$412.18</span></div>
+    <div class="b"><span>Dining</span><span class="t"><i style="width:46%"></i></span><span style="text-align:right">$231.40</span></div>
+    <div class="b"><span>Transport</span><span class="t"><i style="width:30%"></i></span><span style="text-align:right">$150.00</span></div>
+    <div class="b"><span>Household</span><span class="t"><i style="width:21%"></i></span><span style="text-align:right">$104.95</span></div>
+    <div class="b"><span>Uncategorized</span><span class="t"><i style="width:9%;background:var(--warn)"></i></span><span style="text-align:right">$44.12</span></div>
+  </div>
+  <div class="card">
+    <h3>Members · actual</h3>
+    <div class="row"><span>Alex</span><span class="v">$389.27</span></div>
+    <div class="row"><span>Bea</span><span class="v">$509.26</span></div>
+    <div class="row"><span>Unattributed</span><span class="v">$44.12</span></div>
+    <div class="row"><span><b>Household</b></span><span class="v">$942.65</span></div>
+  </div>
+  <div class="muted" style="font-size:11.5px">Members' parts add exactly to the household total.</div>
+</div></div>
+<figcaption><b>5. Spending</b>Category spending and the member comparison. Personal parts reconcile with the household to the cent (PRD acceptance).</figcaption>
+</figure>
+
+<!-- 6. Transactions -->
+<figure>
+<div class="phone"><div class="status"><span>9:41</span><span class="island"></span><span>100%</span></div>
+<div class="screen">
+  <div class="nav"><h2>Transactions</h2><span></span></div>
+  <div class="search">🔍 Search the last 90 days</div>
+  <div class="card" style="padding-top:4px;padding-bottom:4px">
+    <div class="tx"><span>Synthetic Grocer</span><span class="v">−$86.20</span><span class="d">Checking · Sat 2 May · Groceries</span><span class="d">Shared</span></div>
+    <div class="tx"><span>Synthetic Power Co</span><span class="v">−$85.00</span><span class="d">Checking · Fri 1 May · Utilities</span><span class="d">Bill paid</span></div>
+    <div class="tx"><span>Synthetic Cafe</span><span class="v">−$6.50</span><span class="d">Visa · Thu 30 Apr · pending</span><span class="d">Bea</span></div>
+  </div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div style="font-weight:700;font-size:16px">Synthetic Grocer</div>
+    <div class="row"><span>Amount <span class="s">actual</span></span><span class="v">−$86.20</span></div>
+    <div class="row"><span>Account</span><span class="v">Checking</span></div>
+    <div class="row"><span>Posted</span><span class="v">Sat 2 May</span></div>
+    <div class="row"><span>Category</span><span class="v">Groceries <span class="s">by rule</span></span></div>
+    <div class="row"><span>Split</span><span class="v">Alex $43.10 · Bea $43.10</span></div>
+    <div class="muted" style="font-size:11.5px;margin-top:4px">To change it, use the Mac. The phone is read-only.</div>
+  </div>
+</div></div>
+<figcaption><b>6. Transactions</b>Search over the snapshot's window (90 days, configurable), and a detail sheet with where each value came from.</figcaption>
+</figure>
+
+<!-- 7. Goals -->
+<figure>
+<div class="phone"><div class="status"><span>9:41</span><span class="island"></span><span>100%</span></div>
+<div class="screen">
+  <div class="nav"><h2>Goals</h2><span></span></div>
+  <div class="card">
+    <div class="row" style="border:0"><span><b>Rainy day</b> <span class="s">emergency</span></span><span class="tag warn">Underfunded</span></div>
+    <div class="meter"><i class="warn" style="width:20%"></i></div>
+    <div class="row" style="border:0;padding-top:0"><span class="s">$1,000.00 assigned of $5,000.00</span><span class="s">$250.00 a month</span></div>
+  </div>
+  <div class="card">
+    <div class="row" style="border:0"><span><b>Insurance</b> <span class="s">reserve, due 10 Jun</span></span><span class="tag">In progress</span></div>
+    <div class="meter"><i style="width:16.7%"></i></div>
+    <div class="row" style="border:0;padding-top:0"><span class="s">$200.00 of $1,200.00</span><span class="s">$500.00 a month, planned</span></div>
+  </div>
+  <div class="card">
+    <div class="row" style="border:0"><span><b>House</b> <span class="s">goal</span></span><span class="tag">In progress</span></div>
+    <div class="meter"><i style="width:4%"></i></div>
+    <div class="row" style="border:0;padding-top:0"><span class="s">$100.00 assigned</span><span class="s">$300.00 a month, planned</span></div>
+  </div>
+  <div class="card">
+    <div class="row" style="border:0"><span><b>Side-income tax</b> <span class="s">reserve</span></span><span class="tag good">Funded</span></div>
+    <div class="row" style="border:0;padding-top:0"><span class="s">$83.34 required, a planning reserve</span><span class="s"></span></div>
+  </div>
+</div></div>
+<figcaption><b>7. Goals and planned expenses</b>Each fund's state as M14 reports it. An assignment says what a balance already holds; nothing here moves money.</figcaption>
+</figure>
+
+<!-- 8. Net worth and debt -->
+<figure>
+<div class="phone"><div class="status"><span>9:41</span><span class="island"></span><span>100%</span></div>
+<div class="screen">
+  <div class="nav"><h2>Accounts</h2><span></span></div>
+  <div class="card hero" style="padding:12px">
+    <div class="label">Net worth, observed</div>
+    <div class="big" style="font-size:34px">−$89,750.00</div>
+    <div class="muted" style="font-size:12px">Incomplete: 1 account has no balance yet</div>
+  </div>
+  <div class="card">
+    <h3>Balances, with the date each was observed</h3>
+    <div class="row"><span>Checking</span><span class="v">$1,500.00 <span class="s">20 Mar</span></span></div>
+    <div class="row"><span>Savings</span><span class="v">$8,000.00 <span class="s">15 Mar</span></span></div>
+    <div class="row"><span>Brokerage</span><span class="v muted">No balance</span></div>
+    <div class="row"><span>Visa</span><span class="v">−$250.00 <span class="s">25 Mar</span></span></div>
+  </div>
+  <div class="card">
+    <h3>Debt</h3>
+    <div class="row"><span>Mortgage <span class="s">2 parts</span></span><span class="v">−$99,000.00</span></div>
+    <div class="row"><span class="s">Next payment $1,500.00 on 5 Apr · on schedule</span></div>
+    <div class="row"><span class="s">Paid off Jul 2041 at this rate · projection, not lender-exact</span></div>
+  </div>
+</div></div>
+<figcaption><b>8. Net worth and debt</b>Valuation dates on every balance. A missing balance says so and is never counted as 0. Projections are labelled.</figcaption>
+</figure>
+
+<!-- 9. Sync -->
+<figure>
+<div class="phone"><div class="status"><span>9:41</span><span class="island"></span><span>100%</span></div>
+<div class="screen">
+  <div class="nav"><h2>Data status</h2><span></span></div>
+  <span class="button">Sync now</span>
+  <div class="muted" style="font-size:11.5px;text-align:center">The Mac must be awake with sync mode on.</div>
+  <div class="card">
+    <h3>Bank data, per account</h3>
+    <div class="row"><span><span class="dot" style="display:inline-block"></span> Checking</span><span class="v">through 4 May <span class="s">imported 4 May</span></span></div>
+    <div class="row"><span><span class="dot" style="display:inline-block"></span> Savings</span><span class="v">through 30 Apr</span></div>
+    <div class="row"><span><span class="dot warn" style="display:inline-block"></span> Visa</span><span class="v">through 18 Apr</span></div>
+  </div>
+  <div class="card">
+    <h3>Sync history</h3>
+    <div class="row"><span>Today 7:40</span><span class="v" style="color:var(--good)">Installed</span></div>
+    <div class="row"><span>Yesterday 21:02</span><span class="v" style="color:var(--bad)">Failed · Mac not found</span></div>
+    <div class="row"><span class="s" style="font-weight:400">The last valid snapshot was kept.</span></div>
+    <div class="row"><span>Mon 9:12</span><span class="v" style="color:var(--good)">Installed</span></div>
+  </div>
+  <div class="card">
+    <h3>Review on the Mac</h3>
+    <div class="row"><span>Open review items</span><span class="v">2</span></div>
+    <div class="row"><span>Unconfirmed transfers</span><span class="v">1</span></div>
+  </div>
+</div></div>
+<figcaption><b>9. Data status and sync</b>Manual sync, the per-account freshness the dashboard carries, and a history where a failure keeps the previous snapshot.</figcaption>
+</figure>
+
+<!-- 10. Settings -->
+<figure>
+<div class="phone"><div class="status"><span>9:41</span><span class="island"></span><span>100%</span></div>
+<div class="screen">
+  <div class="nav"><h2>Settings</h2><span></span></div>
+  <div class="card">
+    <h3>Paired Mac</h3>
+    <div class="row"><span>Mac</span><span class="v">Paired 12 May</span></div>
+    <div class="row"><span>Fingerprint</span><span class="v" style="font-family:ui-monospace,monospace;font-size:12px">7F3A · 19C2 · 88D0</span></div>
+    <span class="button ghost" style="margin-top:6px">Pair again</span>
+  </div>
+  <div class="card">
+    <h3>View</h3>
+    <div class="row"><span>Default view</span><span class="v">Household ›</span></div>
+    <div class="row"><span>Warn when older than</span><span class="v">24 hours ›</span></div>
+    <div class="row"><span>Lock after</span><span class="v">1 minute ›</span></div>
+  </div>
+  <div class="card">
+    <h3>This phone's data</h3>
+    <div class="row"><span>Snapshot</span><span class="v">412 KB · 4 May</span></div>
+    <span class="button danger" style="margin-top:6px">Delete local data</span>
+    <div class="muted" style="font-size:11.5px;margin-top:6px">Deleting removes the snapshot and the pairing. The Mac's ledger is untouched. Reinstalling the app also removes them.</div>
+  </div>
+</div></div>
+<figcaption><b>10. Settings and pairing</b>Pairing, the stale threshold, the lock, and local-data deletion, with what reinstallation loses (PRD acceptance).</figcaption>
+</figure>
+
+</main>
+
+<section class="note"><div>
+  <h2>Open questions for the owner</h2>
+  <ul>
+    <li><b>The app's name.</b> "CommonCents" is a placeholder taken from the data folder's name.</li>
+    <li><b>Tabs.</b> Five tabs: Today, Spending, Goals, Accounts, Sync. Settings sits under Sync. Or Settings as a tab of its own?</li>
+    <li><b>The member switch</b> on Today: show personal safe to spend? D-072 puts per-member safe to spend out of M16, so a member view could show budget pace only until the backend computes it.</li>
+    <li><b>Warnings on Today:</b> show only the most material one, with the rest under "Why?", or list them all?</li>
+    <li><b>Freshness wording:</b> "bank data through Mon 4 May" against "synced 2 h ago". Are both needed on Today, or only the older one?</li>
+  </ul>
+</div></section>
+</body>
+</html>

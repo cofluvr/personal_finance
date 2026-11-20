@@ -1210,7 +1210,7 @@ through M13, for the owner's review):
 
 ---
 
-## D-070 M14 plan: goals, reserves and the tax reserve — Approved, M14.1 accepted
+## D-070 M14 plan: goals, reserves and the tax reserve — Approved, M14 accepted
 
 M14 meets PRD §13's goals, emergency fund and annual and irregular expenses, and §16's
 lightweight tax reserve. It closes three PRD §21 boxes:
@@ -1683,7 +1683,7 @@ and a monthly or percentage goal shows "no target".
 
 ---
 
-## D-071 M15 plan: net worth and loans — Approved, built for review
+## D-071 M15 plan: net worth and loans — Approved, M15 accepted
 
 M15 meets:
 
@@ -2046,7 +2046,7 @@ planning tables a test drops.
 
 ---
 
-## D-072 M16 plan: safe-to-spend and the cash-flow constraint — Approved
+## D-072 M16 plan: safe-to-spend and the cash-flow constraint — Approved, built for review
 
 M16 meets PRD §12's protected funds and cash-flow constraint, and records shared-contract §6's
 **safe-to-spend calculation details**. It combines M12 (income and obligations), M13 (budget
@@ -2259,6 +2259,85 @@ links between obligations and loans or reserves, and the emergency restoration a
 | SB5 | Safe to spend is the lower of the two constraints, with the constraint named, ties to liquidity, a shortfall shown with safe to spend 0, and every provisional reason produced and cleared by its stated action |
 | SB6 | Third paycheck: the extra changes neither the budget constraint nor the horizon's protected amounts. It reaches liquidity only as money actually received |
 | SB7 | `safe-to-spend` and `dashboard` open read-only, call no candidate search (a test replaces it with a failure), and the dashboard page equals the command line for line. `--safe-to-spend` records its figures under G9. Every earlier criterion still passes |
+
+
+**How M16.1 was implemented** (built on 2026-11-19, within the approved plan):
+
+- **Migration 0032** (`0032_safe_to_spend_inputs.sql`): `account_liquidity` (checking or savings
+  only, by trigger) with its events, `obligation_coverage` (exactly one of a loan account and a
+  reserve, each by trigger) with its events, `fund_restoration` (the emergency fund only, by
+  trigger) with its events, and the seeded `checking_buffer_cents` key. G10's tests are
+  `test_liquidity_migration.py`. Setting it back deletes the seeded key past its append-only
+  trigger (`drop_liquidity_tables`), which joins every older set-back.
+- **`planning/liquidity.py`:** designations, undo then set, `lq1` over the operation, the account,
+  its type and its active designation.
+- **`planning/coverage.py`:** a link from an obligation's chain, so a supersession keeps it, to a
+  loan with terms or to an active reserve. Each chain covers one thing and each loan or reserve is
+  covered once, checked under the write lock. `ob1` gains the operations `covers` and `uncover`,
+  over the obligation by what it says and its ID, and the chain's active link. A link whose chain
+  no longer applies is inert, listed as such, and can still be taken away.
+- **Possible double reservations:** an unlinked applying obligation, with fixed terms whose range
+  holds the amount, and a nominal date within 3 days, both edges included, of a loan's next
+  scheduled payment on or after `as_of` or of a reserve's next due date. Neither side may be
+  linked to anything. A warning only: nothing is linked for the person.
+- **`planning/fund_restorations.py`:** the emergency fund's dated monthly amount, a later
+  `effective_from` taking over, never in a closed month. `fu1` with its own operations
+  `restoration` and `restoration_undo`, over the fund and its active restorations, so no existing
+  `fu1` token moves.
+- **The buffer** is typed as an amount and stored as whole cents, above zero.
+- **Departures, for the owner's review:**
+  - Three read commands show the tokens without changing any existing command's output:
+    `pf account liquidity show`, `pf obligation coverage [--as-of]`, which also lists the possible
+    double reservations with the command that links each, and `pf fund restorations FUND_ID`.
+  - `pf fund restoration-undo`, spelled so for argparse as `fund release-undo`, steps back the
+    newest restoration, so a mistyped amount can be corrected the same month.
+  - `setting show` gains the seeded key's two lines, which seeding the key implies.
+- **Breaks (G12):** 25 applied, 19 caught on the first run. Four were test gaps, closed and
+  caught on the rerun: one checking account's `lq1` used for another, an uncover token taken
+  before the link changed what it covers, a linked obligation still looking like a reserve, and a
+  linked loan still looking like another bill. One was equivalent code and kept: `lq1` without its
+  operation, which the designation already decides, kept because G5 puts the operation in every
+  token. One guard was unreachable and removed: a loan's terms always hold a payment period.
+
+
+**How M16.2 was implemented** (built on 2026-11-19, within the approved plan):
+
+- **`reports/safe_to_spend.py`,** under `reports/` because it combines M12 to M15's figures
+  (CLAUDE.md's import-cycle lesson). Points 1 and 3 to 6 as written, read-only, every figure in
+  cents, a spendable amount rounding down. It refuses without the household timezone, since
+  assignment events are placed in months in that zone.
+- **Commands:** `pf safe-to-spend [--as-of] [--explain]`, whose explanation lists each liquidity
+  account's estimate and every protected item with the entry it comes from, and `pf dashboard
+  [--as-of]`, both from builders in `report_text.py`, with the read-only `/dashboard` page and a
+  navigation link. Neither calls `totals` or the transfer candidate search: the dashboard counts
+  unconfirmed transfer kinds from applied types.
+- **Choices, for the owner's review:**
+  - **A bill due before `as_of` but still within its tolerance** is reserved, as still expected.
+    A missed one is not: it is past. A loan payment is reserved only when due in the horizon, as
+    the plan says, and less what was confirmed paid in its period.
+  - **The planned contribution this month** is computed from the assignments held at the month's
+    start in the household's zone (now less this month's net increase), so assigning the planned
+    amount mid-month leaves the protected total unchanged (SB4). An assignment undone this month
+    counts as a negative increase, so it is owed again.
+  - **The last day an account's documents cover** is the latest coverage end of its documents,
+    each by its declaration in effect, else its claim.
+  - **`open_review_items`** counts open items with a subject transaction on a liquidity account
+    dated after its observation, or an unresolved record of the account.
+  - **`card_without_payment_obligation`:** a card with activity in the last 60 days and no
+    applying obligation on the card, or whose name or matcher holds the card's name, ignoring case.
+    No link ties an obligation to a card, so this is a name match, and it may need the owner's
+    naming.
+  - **Restoration is protected only while the emergency fund is underfunded,** as the month's
+    stated amount less what was assigned to it this month.
+  - **The dashboard's last import date** is the import's UTC date, an institution-data fact, never
+    "now".
+- **Breaks (G12):** 25 applied, 17 caught on the first run. Eight were test gaps, closed and
+  caught on the rerun: a paid bill, a bill within its tolerance before `as_of`, a loan payment
+  already confirmed, part of the plan assigned this month, an assignment undone this month, the
+  tax reserve held on another account, daily rounding on an inexact surplus, and a card named in
+  the obligation's name only.
+- **Compared as G6:** 163,076 command runs on every kept ledger, before on HEAD (`9a9186a`) and after on a copy of the tree, migrated to 32. 159,929 are identical, every token digest unchanged. The 3,147 that differ are expected: 3,063 are `setting show` listing the seeded `checking_buffer_cents` key, and 84 are on two test ledgers HEAD refused as newer than itself. The first run found `obligation coverage` failing on 49 runs, on ledgers holding a reserve with no terms row: fixed, with a test. A sweep of `safe-to-spend --explain`, `dashboard` and `obligation coverage` at three dates on the 3,310 ledgers at 32, each with the household timezone added, found one more ledger failing: its timezone is `x`, written straight into the table by `test_the_token_covers_the_key_and_the_value`. `setting set` refuses such a name, and M14's `report budget` fails the same way on it, so it is not M16's; but a stored name that is not a zone ends in the unexpected-problem message rather than a refusal. Left for the owner.
+- **SB7's benchmark row,** `--scale --safe-to-spend`: **G9's stopping rule is met by `dashboard`.** `safe-to-spend` takes 0.38s at its slowest date and `dashboard` 1.02s, against 1.0s each; three timings at each of the 12 dates on one ledger put the dashboard at 0.98s to 1.06s. The cost, profiled: `dashboard` computes the month's figures more than once. `safe_to_spend` already calls `budget_report`, and `dashboard_lines` calls it again and then `income_report`, so each dashboard runs 3 income reports and 2 budget reports, each matching obligations over the shape's payments anew (0.66s of a 1.7s profile in text normalization). Not optimized, as G9 says: computing the month once and passing it through is the obvious remedy, for the owner's decision. Figures in [benchmarks.md](benchmarks.md).
 
 ---
 

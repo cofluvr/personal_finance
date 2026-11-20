@@ -15,6 +15,7 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from personal_finance.cli import (
+    SAFE_TO_SPEND_TIMEZONE,
     UNEXPECTED_ERROR,
     CommandError,
     checked_as_of,
@@ -28,6 +29,7 @@ from personal_finance.reports.report_text import (
     account_choices,
     document_list_lines,
     budget_report_lines,
+    dashboard_lines,
     funds_report_lines,
     net_worth_report_lines,
     household_report_lines,
@@ -82,6 +84,7 @@ NAVIGATION = (
     ("/budget", "Budget"),
     ("/funds", "Funds"),
     ("/net-worth", "Net worth"),
+    ("/dashboard", "Dashboard"),
     ("/documents", "Import results"),
     ("/transactions", "Transactions"),
     ("/review", "Review queue"),
@@ -97,6 +100,7 @@ PAGE_PARAMETERS = {
     "/budget": {"month", "member", "as_of"},
     "/funds": {"as_of"},
     "/net-worth": {"as_of", "member"},
+    "/dashboard": {"as_of"},
     "/documents": set(),
     "/transactions": set(),
     "/review": set(),
@@ -265,6 +269,8 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return self.answer_funds(conn, parameters)
         if path == "/net-worth":
             return self.answer_net_worth(conn, parameters)
+        if path == "/dashboard":
+            return self.answer_dashboard(conn, parameters)
         first_month = validated_month("from", parameters.get("from") or None)
         last_month = validated_month("to", parameters.get("to") or None)
         if first_month and last_month and first_month > last_month:
@@ -350,6 +356,17 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         lines = net_worth_report_lines(conn, as_of.isoformat(),
                                        None if member_id is None else names[member_id])
         self.send_page(200, "Net worth", lines, form=form)
+
+    def answer_dashboard(self, conn, parameters):
+        """The dashboard as of the date the page is given, else today in the household's
+        timezone (G7). With no timezone set it asks, as pf dashboard refuses."""
+        text = parameters.get("as_of") or None
+        form = as_of_form("/dashboard", text)
+        today = household_today_if_set(conn)
+        if today is None:
+            return self.send_page(200, "Dashboard", notice=SAFE_TO_SPEND_TIMEZONE, form=form)
+        as_of = today if text is None else date.fromisoformat(checked_as_of(text))
+        self.send_page(200, "Dashboard", dashboard_lines(conn, as_of), form=form)
 
     def send_page(self, status, heading, lines=(), *, notice="", form="", after="",
                   extra_headers=()):
@@ -486,7 +503,12 @@ def net_worth_form(conn, member_id, as_of) -> str:
 
 def funds_form(as_of) -> str:
     """A form that reloads the funds page by GET with an as-of date."""
-    return ('<form method="get" action="/funds">'
+    return as_of_form("/funds", as_of)
+
+
+def as_of_form(action, as_of) -> str:
+    """A form that reloads a page by GET with an as-of date."""
+    return (f'<form method="get" action="{action}">'
             '<label>As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
             f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
 

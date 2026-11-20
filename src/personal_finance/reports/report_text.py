@@ -16,7 +16,11 @@ from typing import NamedTuple
 from personal_finance.money import format_cents
 from personal_finance.reconcile.apply import stale_accounts
 from personal_finance.reconcile.categories import UNCATEGORIZED, list_categories
-from personal_finance.reconcile.category_effects import NOT_SPENDING, SPENDING_TYPES
+from personal_finance.reconcile.category_effects import (
+    CONFIRMED_TRANSFER_SQL,
+    NOT_SPENDING,
+    SPENDING_TYPES,
+)
 from personal_finance.reconcile.allocation_effects import AMOUNT_DIFFERS
 from personal_finance.planning.funds import EMERGENCY, TAX
 from personal_finance.planning.schedules import cadence_spec
@@ -58,12 +62,19 @@ from personal_finance.reconcile.transfer_effects import (
     ONE_SIDED_COUNTERPART_COVERED,
     ONE_SIDED_COUNTERPART_FOUND,
     TRANSFER_DATE_WINDOW_DAYS,
+    TRANSFER_TYPES,
 )
 from personal_finance.reports.coverage_evidence import load_document_coverage
 from personal_finance.reports.budget_report import budget_report
 from personal_finance.reports.fund_report import funds_report
 from personal_finance.reports.fund_standing import funds_view
 from personal_finance.reports.net_worth_report import net_worth
+from personal_finance.reports.safe_to_spend import (
+    CLEARS,
+    ROWS,
+    last_covered_day,
+    safe_to_spend,
+)
 from personal_finance.reports import loan_report
 from personal_finance.planning import loans
 from personal_finance.reports.income_report import income_report
@@ -2110,4 +2121,159 @@ def loan_payoff_lines(conn, as_of, order=None, extra_cents=None, custom=()) -> R
         months = outcome.months_to_debt_free
         out.add(f"  Debt-free in {months} months, {label}" if months is not None
                 else f"  Not debt-free within {loans.HORIZON_MONTHS} months, {label}")
+    return out
+
+
+# Safe to spend and the dashboard (D-072 points 5 to 7). Every figure line says which kind it is:
+# estimated, reserved, planned, actual, budget pace or safe to spend (G1).
+
+SAFE_TO_SPEND_NOTICE = (
+    "  The lower of budget capacity and near-term liquidity until the next paycheck. Nothing "
+    "here moves money, and the liquid balance is an estimate, never a balance.")
+
+
+def amount_or_none(cents) -> str:
+    return "not evaluated" if cents is None else format_cents(cents)
+
+
+def safe_to_spend_lines(conn, as_of, explain: bool = False) -> ReportLines:
+    """pf safe-to-spend's lines, and the first part of the dashboard's."""
+    view = safe_to_spend(conn, as_of)
+    out = ReportLines()
+    state = ", provisional" if view.provisional else ""
+    if view.today_cents is None:
+        out.add(f"Safe to spend as of {view.as_of}{state}: not available, neither constraint "
+                "is evaluated")
+    else:
+        out.add(f"Safe to spend as of {view.as_of}{state}: today "
+                f"{format_cents(view.today_cents)}, this week {format_cents(view.week_cents)}")
+    out.add(SAFE_TO_SPEND_NOTICE)
+    limiting = view.limiting
+    if limiting == "liquidity":
+        row = view.largest_row
+        if row is None:
+            out.add("  Limiting constraint: liquidity, with nothing protected")
+        else:
+            item = view.largest_item(row)
+            out.add(f"  Limiting constraint: liquidity, largest protected row {row}, largest "
+                    f"item {shown(item.name)}, reserved {format_cents(item.cents)}")
+    elif limiting == "budget":
+        out.add("  Limiting constraint: budget, the revised allowance of report budget")
+    horizon = view.horizon
+    until = (f"until the next paycheck on {horizon.next_paycheck} "
+             f"({shown(horizon.next_paycheck_source)})" if horizon.next_paycheck
+             else "to the month's end, with no salary pay date to come")
+    out.add(f"  Horizon: {horizon.as_of} to {horizon.last_day}, {horizon.days} "
+            f"{'day' if horizon.days == 1 else 'days'}, {until}")
+    if view.liquidity_evaluated:
+        out.add(f"  Liquid balance, estimated: {format_cents(view.liquid_cents)}")
+        out.add(f"  Protected, reserved: {format_cents(view.protected_cents)}")
+        surplus = view.surplus_cents
+        if surplus < 0:
+            causes = ", ".join(row for row in ROWS if view.row_cents(row))
+            out.add(f"  Short by {format_cents(-surplus)}, estimated, before the next paycheck "
+                    f"on {horizon.next_paycheck or horizon.last_day}: {causes}. Safe to spend "
+                    "is 0.00")
+        else:
+            out.add(f"  Surplus, estimated: {format_cents(surplus)}")
+        out.add(f"  Liquidity daily, safe to spend: {format_cents(view.liquidity_daily_cents)}, "
+                f"weekly {format_cents(view.liquidity_weekly_cents)}")
+    else:
+        out.add("  Liquidity: not evaluated, no account is designated liquid")
+    if view.budget_daily_cents is None:
+        out.add("  Budget: not evaluated, no budget plan in effect for the month")
+    else:
+        out.add(f"  Budget daily, budget pace: {format_cents(view.budget_daily_cents)}, weekly "
+                f"{format_cents(view.budget_weekly_cents)}")
+    if view.reasons:
+        out.add("  Provisional:")
+        for reason, details in view.reasons.items():
+            out.add(f"    {reason}: {'; '.join(shown(detail) for detail in details)}. Clears "
+                    f"when {CLEARS[reason]}")
+    if not view.buffer_set:
+        out.add("  Disclosure: no checking buffer is set, so none is kept back")
+    if not view.restoration_set:
+        out.add("  Disclosure: no emergency restoration is stated, so it is recommended, not "
+                "protected")
+    if explain:
+        add_explanation(out, view)
+    return out
+
+
+def add_explanation(out: ReportLines, view) -> None:
+    out.add("Liquidity accounts:")
+    for account in view.accounts:
+        if account.observed_on is None:
+            out.add(f"  Account {shown(account.name)}: not valued, no observation, left out")
+            continue
+        out.add(f"  Account {shown(account.name)}: estimated "
+                f"{format_cents(account.estimated_cents)} from {account.observed_on}'s "
+                f"observation {format_cents(account.observed_cents)} and activity since, "
+                f"actual {format_cents(account.activity_cents)} ({account.activity_count})")
+        if account.left_out_cents:
+            out.add(f"    Left out, actual: pending or unknown-status inflows "
+                    f"{format_cents(account.left_out_cents)}")
+    out.add("Protected, in order:")
+    for position, row in enumerate(ROWS, start=1):
+        out.add(f"  {position}. {row}, reserved: {format_cents(view.row_cents(row))}")
+        for item in view.items:
+            if item.row == row:
+                out.add(f"    {item.entry_kind.capitalize()} {shown(item.name)} "
+                        f"({item.entry_id}): {format_cents(item.cents)}, {item.detail}")
+
+
+def dashboard_lines(conn, as_of) -> ReportLines:
+    """pf dashboard's lines, which its UI page renders (D-072 point 7). It never calls totals."""
+    out = safe_to_spend_lines(conn, as_of)
+    text, month = as_of.isoformat(), as_of.isoformat()[:7]
+    budget = budget_report(conn, month, as_of, None)
+    if budget.pace is None:
+        out.add(f"Budget pace, {month}: no plan in effect")
+    else:
+        out.add(f"Budget pace, {month}: remaining capacity "
+                f"{format_cents(budget.pace.remaining_capacity_cents)}, revised daily "
+                f"{format_cents(budget.pace.revised_daily_cents)}, against pace "
+                f"{format_cents(budget.pace.against_pace_cents)}")
+    view = funds_view(conn, as_of)
+    active = [fund_view for fund_view in view.funds if fund_view.fund.applies]
+    out.add(f"Funds: {len(active)} active")
+    for fund_view in active:
+        standing = fund_view.standing
+        outstanding = ("" if standing.outstanding_cents is None
+                       else f", outstanding, planned {format_cents(standing.outstanding_cents)}")
+        out.add(f"  Fund {shown(fund_view.fund.name)} ({fund_view.fund.kind}): "
+                f"{standing.state.replace('_', ' ')}, assigned, reserved "
+                f"{format_cents(standing.assigned_cents)}{outstanding}")
+    worth = net_worth(conn, text)
+    dates = [valuation.observation.observed_on for valuation in worth.valued
+             if valuation.how == "counted"]
+    oldest = f", oldest valuation {min(dates)}" if dates else ""
+    out.add(f"Net worth, observed: {format_cents(worth.total_cents)}, "
+            f"{len(worth.not_valued)} not valued{oldest}")
+    months = income_report(conn, as_of, None, month, month).months
+    planned = months[0].total("baseline", "planned") if months else 0
+    received = months[0].total("baseline", "received") if months else 0
+    out.add(f"Income, {month}: baseline received, actual {format_cents(received)}, against "
+            f"baseline, planned {format_cents(planned)}")
+    (open_items,) = conn.execute(
+        "SELECT COUNT(*) FROM review_issue WHERE status = 'open'").fetchone()
+    (transfer_kinds,) = conn.execute(
+        f"""SELECT COUNT(*) FROM ledger_transaction entry
+            JOIN transaction_classification kind
+                ON kind.transaction_id = entry.id AND kind.state = 'applied'
+            WHERE kind.financial_type IN ({", ".join("?" for _ in TRANSFER_TYPES)})
+              AND NOT ({CONFIRMED_TRANSFER_SQL})""", tuple(TRANSFER_TYPES)).fetchone()
+    out.add(f"Review: {open_items} open review items, {transfer_kinds} unconfirmed transfer "
+            "kinds")
+    out.add("Freshness, from institution data:")
+    for account_id, name in conn.execute(
+            "SELECT id, display_name FROM account ORDER BY display_name").fetchall():
+        covered = last_covered_day(conn, account_id)
+        (imported,) = conn.execute(
+            """SELECT MAX(document.imported_at) FROM source_document document
+               WHERE EXISTS (SELECT 1 FROM source_record record
+                             WHERE record.source_document_id = document.id
+                               AND record.account_id = ?)""", (account_id,)).fetchone()
+        out.add(f"  Account {shown(name)}: last covered day {covered or 'none'}, last import "
+                f"{imported[:10] + ' (UTC)' if imported else 'none'}")
     return out
