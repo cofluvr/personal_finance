@@ -56,6 +56,7 @@ LEDGER_TABLES = (
     "loan_payment_breakdown_event", "transaction_loan_breakdown",
     "account_liquidity", "account_liquidity_event", "obligation_coverage",
     "obligation_coverage_event", "fund_restoration", "fund_restoration_event",
+    "tag", "tag_statement", "tag_statement_record", "tag_statement_event", "transaction_tag",
 )
 
 
