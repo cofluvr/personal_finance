@@ -115,6 +115,7 @@ PAGE_PARAMETERS = {
     "/review": set(),
     "/review/item": {"id"},
     "/result": {"id"},
+    "/transaction": {"id"},
     "/style.css": set(),
 }
 QUERY_VALUE = re.compile(r"[A-Za-z0-9_-]{0,100}")
@@ -133,6 +134,11 @@ CHOOSE_AS_OF = (
     "no clock."
 )
 ITEM_NOT_FOUND = "Review item not found. A later import can replace one: see the review queue."
+TRANSACTION_NOT_FOUND = "Transaction not found. See the transactions list."
+SEVERAL_STATEMENTS = (
+    "More than one statement reaches this, so the choice of which to replace is made in the "
+    "terminal, with --supersedes."
+)
 RESULT_NOT_FOUND = "There is no such result in this session. See the review queue."
 COMMAND_UNREADABLE = "This form could not be read as a command. Nothing was changed."
 # The result pages a session keeps, newest last: older ones are forgotten.
@@ -249,27 +255,20 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
                                            server.used_form_tokens)
         if refusal:
             return self.send_refusal(refusal)
-        words = writes.command_words(self.path, form, server.ledger_path)
-        if isinstance(words, writes.Refusal):
-            return self.send_refusal(words)
-        self.run_command(words)
+        self.run_command(writes.command_words(self.path, form, server.ledger_path))
 
     def run_command(self, words):
         """Step 9: the CLI's own command, as the terminal runs it, with what it prints kept in
         memory. A success redirects to its result page (Post/Redirect/Get), and a refusal shows
         the CLI's message, which repeats no input (D-037)."""
-        printed, said = io.StringIO(), io.StringIO()
-        try:
-            with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(said):
-                code = main(words)
-        except SystemExit:
+        code, printed, message = run_in_memory(words)
+        if code is None:
             return self.send_page(400, "Refused", notice=COMMAND_UNREADABLE)
         if code != 0:
-            message = said.getvalue().strip().removeprefix("Error: ")
             return self.send_page(409, "Refused", notice=message or UNEXPECTED_ERROR)
         results = self.server.results
         result_id = secrets.token_urlsafe(16)
-        results[result_id] = printed.getvalue()
+        results[result_id] = printed
         while len(results) > KEPT_RESULT_COUNT:
             del results[next(iter(results))]
         self.send_body(303, b"", "text/plain; charset=utf-8",
@@ -353,6 +352,8 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return self.send_page(200, "Review item", report.lines, after=forms + hint)
         if path == "/result":
             return self.answer_result(conn, parameters.get("id", ""))
+        if path == "/transaction":
+            return self.answer_transaction(conn, parameters.get("id", ""))
         if path == "/budget":
             return self.answer_budget(conn, parameters)
         if path == "/funds":
@@ -391,6 +392,53 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             after = undo_form(self.server.form_secret, recorded.group(1), decision_account_id,
                               revision)
         self.send_page(200, "Result", lines, after=after)
+
+    def answer_transaction(self, conn, transaction_id):
+        """review transaction show's lines, as the terminal prints them, and the forms that
+        state or correct what this transaction is (M17.2a). Each statement already applying is
+        superseded by its own revision from its show command."""
+        db = f"--db={self.server.ledger_path}"
+        code, printed, message = run_in_memory(
+            ["review", "transaction", "show", transaction_id, db])
+        if code is None or not transaction_id:
+            return self.send_page(404, "Not found", notice=TRANSACTION_NOT_FOUND)
+        if code != 0:
+            return self.send_page(404, "Not found", notice=message)
+        lines = ReportLines()
+        for text in printed.splitlines():
+            lines.add(text)
+        account_id = re.search(r"^  Account: .* \(([^()\s]+)\)$", printed, re.MULTILINE)[1]
+        revision = re.search(r"^  Revision: (\S+)$", printed, re.MULTILINE)[1]
+        hidden = {"transaction": transaction_id, "account": account_id, "revision": revision}
+        secret = self.server.form_secret
+        forms = []
+        for path, kind, label in (("/transaction/classify", "classification", "Financial type"),
+                                  ("/transaction/categorize", "categorization", "Category")):
+            superseding = superseded_statement(printed, kind, db)
+            if superseding is None:
+                forms.append(f'<h3>{label}</h3><p class="notice">{escaped(SEVERAL_STATEMENTS)}'
+                             "</p>")
+                continue
+            forms.append(route_form(secret, path, {**hidden, **superseding}, heading=label))
+        for field in writes.CORRECTABLE_FIELDS:
+            superseding = superseded_correction(printed, field, db)
+            heading = f"Correct the {field.replace('_', ' ')}"
+            if superseding is None:
+                forms.append(f'<h3>{escaped(heading)}</h3><p class="notice">'
+                             f"{escaped(SEVERAL_STATEMENTS)}</p>")
+                continue
+            forms.append(route_form(secret, "/transaction/correct",
+                                    {**hidden, "field": field, **superseding}, heading=heading))
+        forms.append(route_form(secret, "/transaction/separate", hidden,
+                                heading="Separate its records"))
+        accounts = [(choice_id, name) for choice_id, name in account_choices(conn)
+                    if choice_id != account_id]
+        if accounts:
+            forms.append(route_form(secret, "/transaction/one-sided", hidden,
+                                    choices={"counterpart_account": accounts},
+                                    heading="A transfer whose other side is not imported"))
+        self.send_page(200, "Transaction", lines, after="<h2>Deciding this transaction</h2>"
+                       + "".join(forms))
 
     def answer_household(self, conn, parameters, account_id, first_month, last_month):
         """The household report in one view: side by side, one member's by ID, or shared."""
@@ -493,6 +541,52 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+def run_in_memory(words) -> tuple[int | None, str, str]:
+    """A CLI command as the terminal runs it, through the same parser, handler and gate, with
+    what it prints kept in memory: its exit code (None when its arguments could not be read),
+    its output, and its error message without the "Error: " the terminal adds. The server
+    answers one request at a time, so redirecting the process's streams is safe."""
+    printed, said = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(said):
+            code = main(words)
+    except SystemExit:
+        return None, "", ""
+    return code, printed.getvalue(), said.getvalue().strip().removeprefix("Error: ")
+
+
+def superseded_statement(printed, kind, db) -> dict[str, str] | None:
+    """The supersedes fields for a new classification or categorization: empty where none
+    reaches the transaction, the one reaching it and its revision from review <kind> show, or
+    None where several do or its revision cannot be read."""
+    found = re.findall(rf"^    {kind.capitalize()} (\S+): ", printed, re.MULTILINE)
+    return supersedes_fields(found, ["review", kind, "show"], db)
+
+
+def superseded_correction(printed, field, db) -> dict[str, str] | None:
+    """The same for a correction of one field, by its correction show."""
+    found = re.findall(rf"^    Correction (\S+): {field} corrected to ", printed, re.MULTILINE)
+    return supersedes_fields(found, ["review", "correction", "show"], db)
+
+
+def supersedes_fields(found, show_words, db) -> dict[str, str] | None:
+    if not found:
+        return {"supersedes": "", "supersedes_revision": ""}
+    if len(found) > 1:
+        return None
+    revision = printed_revision([*show_words, found[0], db])
+    return None if revision is None else {"supersedes": found[0],
+                                          "supersedes_revision": revision}
+
+
+def printed_revision(words) -> str | None:
+    """The revision a read-only show command prints, as the terminal shows it (M17.2 slice
+    plan point 3), or None when it prints none or refuses."""
+    code, printed, _ = run_in_memory(words)
+    found = re.search(r"^\s*Revision: (\S+)$", printed, re.MULTILINE) if code == 0 else None
+    return found[1] if found else None
+
+
 def same_secret(given: str, expected: str) -> bool:
     # Header and address text arrives decoded as Latin-1, so it always encodes back.
     return hmac.compare_digest(given.encode("latin-1"), expected.encode("latin-1"))
@@ -520,11 +614,12 @@ def escaped(text: str) -> str:
 
 
 def rendered_line(line) -> str:
-    item_id = line.linked_review_item_id
-    if item_id and item_id in line.text:
-        before, _, after = line.text.partition(item_id)
-        link = f'<a href="/review/item?id={escaped(item_id)}">{escaped(item_id)}</a>'
-        return f'<div class="line">{escaped(before)}{link}{escaped(after)}</div>'
+    for linked_id, page in ((line.linked_review_item_id, "/review/item"),
+                            (line.linked_transaction_id, "/transaction")):
+        if linked_id and linked_id in line.text:
+            before, _, after = line.text.partition(linked_id)
+            link = f'<a href="{page}?id={escaped(linked_id)}">{escaped(linked_id)}</a>'
+            return f'<div class="line">{escaped(before)}{link}{escaped(after)}</div>'
     return f'<div class="line">{escaped(line.text)}</div>'
 
 
@@ -622,41 +717,72 @@ def as_of_form(action, as_of) -> str:
             f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
 
 
-def hidden_fields(secret, path, form_id_field, form_id, account_id, revision) -> str:
-    """A form's hidden account, item or decision and revision, and the token that binds them."""
-    token = writes.form_token(secret, path, form_id, account_id, (revision,))
-    return (f'<input type="hidden" name="account" value="{escaped(account_id)}">'
-            f'<input type="hidden" name="{form_id_field}" value="{escaped(form_id)}">'
-            f'<input type="hidden" name="revision" value="{escaped(revision)}">'
-            f'<input type="hidden" name="{writes.FORM_TOKEN_FIELD}" value="{token}">')
+# What each typed field is called on its form, and each route's button.
+FIELD_LABELS = {
+    "pairs": "Pairs that are different events, two transaction IDs a line",
+    "groups": "Groups that are one event each, transaction IDs a line, separated by spaces",
+    "amount": "Amount, such as -12.50, negative for money out",
+    "transaction_date": "Transaction date, YYYY-MM-DD",
+    "posting_date": "Posting date, YYYY-MM-DD",
+    "description": "Description",
+    "type": "Financial type",
+    "category": "Category, a name from category list",
+    "value": "Corrected value",
+    "counterpart_account": "The other account",
+}
+BUTTONS = {
+    "/review/reject": "Reject these pairs",
+    "/review/confirm": "Confirm these groups",
+    "/review/undo": "Undo this decision",
+    "/review/complete": "Complete this row",
+    "/review/dismiss": "Dismiss this row",
+    "/transaction/classify": "Classify",
+    "/transaction/categorize": "Categorize",
+    "/transaction/correct": "Correct",
+    "/transaction/separate": "Separate these groups",
+    "/transaction/one-sided": "Record a one-sided transfer",
+}
+
+
+def route_form(secret, path, hidden, *, choices=None, heading="") -> str:
+    """A route's form: its hidden fields as the page fixes them, the token that binds them, and
+    an input for each typed field. choices gives a typed field's options by name, as a page
+    knows them (an account list), where the route itself fixes none."""
+    route = writes.WRITE_ROUTES[path]
+    token = writes.form_token(secret, path, hidden)
+    parts = [f'<input type="hidden" name="{field.name}" value="{escaped(hidden[field.name])}">'
+             for field in route.hidden]
+    parts.append(f'<input type="hidden" name="{writes.FORM_TOKEN_FIELD}" value="{token}">')
+    for field in route.typed:
+        label = escaped(FIELD_LABELS[field.name])
+        options = (choices or {}).get(field.name) or [(value, value) for value in field.choices]
+        if field.kind in (writes.PAIR_LINES, writes.GROUP_LINES):
+            control = f'<textarea name="{field.name}" rows="3" cols="80"></textarea>'
+        elif options:
+            listed = "".join(f'<option value="{escaped(value)}">{escaped(shown_as)}</option>'
+                             for value, shown_as in options)
+            control = f'<select name="{field.name}">{listed}</select>'
+        else:
+            control = f'<input name="{field.name}" size="40">'
+        parts.append(f"<label>{label}<br>{control}</label><br>")
+    title = f"<h3>{escaped(heading)}</h3>" if heading else ""
+    return (f'{title}<form method="post" action="{path}">{"".join(parts)}'
+            f"<button>{escaped(BUTTONS[path])}</button></form>")
 
 
 def decision_forms(secret, report) -> str:
-    """For a possible duplicate or conflict, the reject and confirm forms, posting what the
-    terminal commands take. An unresolved record is completed or dismissed in the terminal."""
-    if report.kind == "unresolved_record":
-        return ""
-    reject = hidden_fields(secret, "/review/reject", "item", report.item_id, report.account_id,
-                           report.revision)
-    confirm = hidden_fields(secret, "/review/confirm", "item", report.item_id,
-                            report.account_id, report.revision)
-    return (
-        '<h2>Deciding this item</h2>'
-        f'<form method="post" action="/review/reject">{reject}'
-        '<label>Pairs that are different events, two transaction IDs a line<br>'
-        '<textarea name="pairs" rows="3" cols="80"></textarea></label><br>'
-        '<button>Reject these pairs</button></form>'
-        f'<form method="post" action="/review/confirm">{confirm}'
-        '<label>Groups that are one event each, transaction IDs a line, separated by spaces<br>'
-        '<textarea name="groups" rows="3" cols="80"></textarea></label><br>'
-        '<button>Confirm these groups</button></form>'
-    )
+    """The forms that decide a review item, posting what the terminal commands take: reject and
+    confirm for a possible duplicate or conflict, complete and dismiss for an unresolved row."""
+    hidden = {"item": report.item_id, "account": report.account_id, "revision": report.revision}
+    paths = (("/review/complete", "/review/dismiss") if report.kind == "unresolved_record"
+             else ("/review/reject", "/review/confirm"))
+    return "<h2>Deciding this item</h2>" + "".join(
+        route_form(secret, path, hidden) for path in paths)
 
 
 def undo_form(secret, decision_id, account_id, revision) -> str:
-    fields = hidden_fields(secret, "/review/undo", "decision", decision_id, account_id, revision)
-    return (f'<form method="post" action="/review/undo">{fields}'
-            '<button>Undo this decision</button></form>')
+    return route_form(secret, "/review/undo", {"decision": decision_id, "account": account_id,
+                                               "revision": revision})
 
 
 def decision_hint(ledger_path, report) -> str:
@@ -671,6 +797,5 @@ def decision_hint(ledger_path, report) -> str:
         commands = [f"pf review confirm {common} --group T ...",
                     f"pf review reject {common} --pair T1 T2"]
     lines = "".join(f'<div class="hint-line">  {escaped(command)}</div>' for command in commands)
-    heading = "" if report.kind != "unresolved_record" else "<h2>Deciding this item</h2>"
-    return (f'{heading}<p class="notice">In the terminal, run one of these:</p>'
+    return ('<p class="notice">In the terminal, run one of these:</p>'
             f'<div class="report">{lines}</div>')

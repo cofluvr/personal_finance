@@ -2610,6 +2610,58 @@ Tests: `tests/scenarios/test_local_ui_writes.py`, WA1 to WA5, each refusal with 
 | WA4 | Post/Redirect/Get: a reload of the result page writes nothing, and a resubmitted form refuses (UD3). No refusal page repeats a request value, tested with sentinels |
 | WA5 | Each `POST` opens through the gate, and a real ledger whose probe fails refuses with no write (UD4). No request writes to stdout or stderr. Every earlier criterion still passes |
 
+### M17.2 slice plan — Approved by the owner's notes of 2026-11-20
+
+Written before any of it was built, after M17.1. Point 2's allowlist is the owner's input, and
+the owner left the choices to the lead engineer. It is built in two parts, each gated, broken and
+committed on its own:
+
+- **M17.2a, transaction and record writes.** A transaction page, `/transaction?id=T`, showing
+  `review transaction show`'s lines, linked from the transactions list. On it: classify,
+  categorize, correct (one field), separate (groups) and a one-sided transfer. The review item
+  page's unresolved records gain complete and dismiss.
+- **M17.2b, the sections and planning writes.** The accounts and members page (account types,
+  liquidity, links and members), the settings and backups page (settings in effect, `pf storage`,
+  backup records, read-only), and the planning pages already built gain forms: the checking
+  buffer (set and undo), an account's liquidity (set and undo), obligation coverage links
+  (covers and uncover), and the preview-then-add flows for income sources, obligations, budget
+  plans and funds.
+
+**How every route is built,** generalizing M17.1:
+
+1. **A route is declared, not coded.** Each entry of `WRITE_ROUTES` names its CLI words, its
+   positional field, its hidden fields (fixed by the page, bound by the form token) and its
+   typed fields, each with a kind: an ID, a choice from a fixed list, an amount, a date, a month,
+   or text. Step 9 builds the command line from the declaration alone, writing every option as
+   `--name=value`, so no value can be read as an option whatever it holds. A typed field left
+   empty is left out, as an option not given.
+2. **The form token binds the route and every hidden field,** by name and value, not only the
+   revision: changing any hidden value refuses (WA2, widened).
+3. **Revisions come from the terminal's own show commands.** A page that needs a revision it
+   does not print itself (a superseded statement's, a preview's) runs the read-only show or
+   preview command in memory, as step 9 runs a write, and takes the token from its printed
+   `Revision:` line. The page and the terminal can never disagree on a token.
+4. **Superseding.** Where a classification, categorization or correction of the field already
+   applies, the form carries its ID and its revision from `review <kind> show` as hidden fields,
+   so a browser change supersedes exactly as `--supersedes` does. Where statements disagree, the
+   page shows the terminal command instead of a form.
+5. **Text fields** (a description, a name) accept any printable text up to 200 characters, no
+   control or format character, refused otherwise before any command runs. They are escaped as
+   D-040 wherever shown.
+6. **A preview is a POST that writes nothing.** It passes the whole pipeline, runs the CLI's
+   preview, and answers `200` with the preview's lines and the add form, its typed values now
+   hidden and bound with the preview's revision. The add is the write, and redirects (PRG).
+7. **Terminal only, as point 2 lists, and also for now:** allocations, consumptions, breakdowns,
+   transfer matches, coverage declarations, category rules, balance observations, fund
+   assignments and priority, and every undo but review decisions'. Each needs a page of its own
+   or a second transaction's revision. They are left out rather than built thinly: the
+   terminal does each, and none is needed by M18's scenario input. A test asserts that the
+   route table equals the list as built.
+
+Tests: `tests/scenarios/test_local_ui_writes.py` grows WB1 to WB3's cases: each route's write
+equals its CLI command (rows and output), each refusal is the CLI's, and the route table equals
+the list.
+
 ### M17.2 acceptance criteria
 
 | ID | Test |

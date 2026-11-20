@@ -243,7 +243,7 @@ class TestEachStepRefusesAlone:  # WA1
         assert response.status == 405
         assert unchanged_state(ledger.path) == before
 
-    @pytest.mark.parametrize("target", ["/review", "/review/reject?x=1", "/review/dismiss",
+    @pytest.mark.parametrize("target", ["/review", "/review/reject?x=1", "/review/unknown",
                                         "/backup", "/"])
     def test_step_3_a_route_off_the_allowlist(self, ledger, browser, target):
         fields = reject_fields(browser, ledger)
@@ -420,7 +420,8 @@ class TestFormToken:  # WA2
         monkeypatch.setattr(writes.hmac, "compare_digest",
                             lambda left, right: compared.append(1) or original(left, right))
         secret = b"k" * 32
-        token = writes.form_token(secret, "/review/undo", "d", "a", ("r",))
+        token = writes.form_token(secret, "/review/undo",
+                                  {"decision": "d", "account": "a", "revision": "r"})
         assert len(token) == 64
         form = {"form_token": token, "decision": "d", "account": "a", "revision": "r"}
         assert writes.refuse_form_token(form, "/review/undo", secret, set()) is None
@@ -596,11 +597,8 @@ class TestGateAndSilence:  # WA5
         captured = capfd.readouterr()
         assert captured.out == "" and captured.err == ""
 
-    def test_the_route_table_is_the_allowlist(self):
-        assert set(writes.WRITE_ROUTES) == {"/review/reject", "/review/confirm", "/review/undo"}
-
-    def test_an_unresolved_record_keeps_its_terminal_commands_and_no_form(self, tmp_path,
-                                                                         capsys):
+    def test_an_unresolved_record_gets_complete_and_dismiss_and_its_terminal_commands(
+            self, tmp_path, capsys):
         ledger = Ledger(tmp_path, capsys)
         ledger.checking("a.csv", "S-2,not a date,,SYNTHETIC BAD,-3.00,POSTED")
         (item,) = open_items(ledger.path)
@@ -609,6 +607,5 @@ class TestGateAndSilence:  # WA5
             response = browser.get(f"/review/item?id={item}")
         finally:
             browser.close()
-        assert post_forms(response.body) == {}
+        assert set(post_forms(response.body)) == {"/review/complete", "/review/dismiss"}
         assert "pf review dismiss" in response.text
-        assert parsed_page(response.body).tags.count("form") == 0

@@ -108,13 +108,16 @@ class ReportLine(NamedTuple):
     text: str
     # The review item this line names, which the UI links to its page.
     linked_review_item_id: str | None = None
+    # The transaction this line names, which the UI links to its page (M17.2a).
+    linked_transaction_id: str | None = None
 
 
 class ReportLines(list):
     """A report's lines, in order."""
 
-    def add(self, text: str, linked_review_item_id: str | None = None) -> None:
-        self.append(ReportLine(text, linked_review_item_id))
+    def add(self, text: str, linked_review_item_id: str | None = None,
+            linked_transaction_id: str | None = None) -> None:
+        self.append(ReportLine(text, linked_review_item_id, linked_transaction_id))
 
 
 @dataclass(frozen=True)
@@ -1311,7 +1314,8 @@ def transaction_list_lines(conn) -> ReportLines:
         marker += "  (completed by hand)" if completed else ""
         out.add(
             f"{transaction_id}  {when}  {format_cents(cents):>12}  {status:<8}  "
-            f"{shown(description) if description else ''}{marker}"
+            f"{shown(description) if description else ''}{marker}",
+            linked_transaction_id=transaction_id,
         )
     if not rows:
         out.add("No transactions.")

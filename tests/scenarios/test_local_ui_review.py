@@ -149,8 +149,7 @@ class TestItemPage:  # UC3
             for item in open_items(ledger.path):
                 response = client.get(f"/review/item?id={item}")
                 page = parsed_page(response.body)
-                unresolved = "unresolved_record" in page_text(response.body)
-                assert ("form" not in page.tags) == unresolved
+                assert "form" in page.tags
                 revision = ledger.revision(item)
                 common = f"{item} --db {ledger.db} --account {account_id} --revision {revision}"
                 assert response.text.count(common) == 2

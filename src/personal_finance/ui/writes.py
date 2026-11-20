@@ -1,24 +1,33 @@
 """The browser write pipeline (D-073 point 1, M17.1): a security change, approved as one.
 
 Steps 1 and 2, the exact Host and the session cookie, are the server's, shared with every GET.
-W1 is unchanged: the body is decoded here, by a strict decoder of the form encoding, and
-nothing of `urllib` is imported. This module holds steps 3 to 8 as functions over what the request said, so each refuses alone,
-and step 9's command line. Every refusal is a fixed notice that repeats nothing from the request
-(D-037). The write itself is the CLI's own command, run by the server (step 9), so a browser
-decision is the terminal's, refusals included.
+This module holds steps 3 to 8 as functions over what the request said, so each refuses alone,
+and step 9's command line, built from the route's declaration alone (M17.2 slice plan point 1).
+W1 is unchanged: the body is decoded here, by a strict decoder of the form encoding, and nothing
+of `urllib` is imported. Every refusal is a fixed notice that repeats nothing from the request
+(D-037). The write itself is the CLI's own command, run by the server, so a browser decision is
+the terminal's, refusals included.
 """
 
 import hashlib
 import hmac
 import re
+import unicodedata
 from typing import NamedTuple
+
+from personal_finance.reconcile.classification_effects import FINANCIAL_TYPES
+from personal_finance.reconcile.correction_effects import CORRECTABLE_FIELDS
 
 MAXIMUM_BODY_BYTES = 8192
 FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 FORM_TOKEN_FIELD = "form_token"
-# An account, item, decision or transaction ID, or a revision token: nothing else is accepted.
-# The first character is never "-", so no value can be read as a command-line option.
+# An account, item, decision or transaction ID, or a revision token. The first character is
+# never "-", so no value could be read as a command-line option even written apart.
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}")
+AMOUNT = re.compile(r"-?[0-9]{1,12}(\.[0-9]{1,2})?")
+DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+MONTH = re.compile(r"[0-9]{4}-[0-9]{2}")
+MAXIMUM_TEXT_LENGTH = 200
 MAXIMUM_LIST_LINES = 50
 
 NOT_A_WRITE = "This address takes no form."
@@ -31,6 +40,16 @@ FORM_EXPIRED = (
     "This form has already been used, or was not shown in this session. Reload the page for a "
     "current one. Nothing was changed."
 )
+VALUE_REFUSED = (
+    "A value in this form is not one the interface accepts: IDs, amounts such as -12.50, dates "
+    "as YYYY-MM-DD, months as YYYY-MM, and text of up to 200 printable characters. Nothing was "
+    "changed."
+)
+
+# Field kinds.
+ID, CHOICE, AMOUNT_KIND, DATE_KIND, MONTH_KIND, TEXT = (
+    "id", "choice", "amount", "date", "month", "text")
+PAIR_LINES, GROUP_LINES = "pair_lines", "group_lines"
 
 
 class Refusal(NamedTuple):
@@ -39,22 +58,70 @@ class Refusal(NamedTuple):
     extra_headers: tuple = ()
 
 
-class WriteRoute(NamedTuple):
-    # The form's fields, apart from the form token, each required.
-    fields: tuple[str, ...]
-    # The field naming the item or decision the form decides, which the token binds.
-    form_id_field: str
-    # The fields holding revision tokens the form shows, which the token binds.
-    revision_fields: tuple[str, ...]
+class Field(NamedTuple):
+    name: str
+    kind: str
+    # The CLI option it fills, such as "--type", or None for the command's positional argument.
+    option: str | None
+    required: bool = True
+    choices: tuple[str, ...] = ()
 
+
+class WriteRoute(NamedTuple):
+    # The CLI command's words, before its arguments.
+    words: tuple[str, ...]
+    # Fixed by the page and bound by the form token. The first is the positional argument.
+    hidden: tuple[Field, ...]
+    # Typed or chosen by the person.
+    typed: tuple[Field, ...] = ()
+    # Whether a success writes, and so redirects (PRG). A preview writes nothing.
+    writes: bool = True
+
+    @property
+    def field_names(self) -> set[str]:
+        return {field.name for field in (*self.hidden, *self.typed)}
+
+
+def target(name: str) -> Field:
+    return Field(name, ID, None)
+
+
+ACCOUNT = Field("account", ID, "--account")
+REVISION = Field("revision", ID, "--revision")
+SUPERSEDES = (Field("supersedes", ID, "--supersedes", required=False),
+              Field("supersedes_revision", ID, "--supersedes-revision", required=False))
 
 # The allowlist (D-073 point 2), as built so far. Each route runs exactly one CLI command.
 WRITE_ROUTES = {
-    "/review/reject": WriteRoute(("account", "item", "revision", "pairs"), "item",
-                                 ("revision",)),
-    "/review/confirm": WriteRoute(("account", "item", "revision", "groups"), "item",
-                                  ("revision",)),
-    "/review/undo": WriteRoute(("account", "decision", "revision"), "decision", ("revision",)),
+    "/review/reject": WriteRoute(("review", "reject"), (target("item"), ACCOUNT, REVISION),
+                                 (Field("pairs", PAIR_LINES, "--pair"),)),
+    "/review/confirm": WriteRoute(("review", "confirm"), (target("item"), ACCOUNT, REVISION),
+                                  (Field("groups", GROUP_LINES, "--group"),)),
+    "/review/undo": WriteRoute(("review", "undo"), (target("decision"), ACCOUNT, REVISION)),
+    "/review/complete": WriteRoute(
+        ("review", "complete"), (target("item"), ACCOUNT, REVISION),
+        (Field("amount", AMOUNT_KIND, "--amount", required=False),
+         Field("transaction_date", DATE_KIND, "--transaction-date", required=False),
+         Field("posting_date", DATE_KIND, "--posting-date", required=False),
+         Field("description", TEXT, "--description", required=False))),
+    "/review/dismiss": WriteRoute(("review", "dismiss"), (target("item"), ACCOUNT, REVISION)),
+    "/transaction/classify": WriteRoute(
+        ("review", "classify"), (target("transaction"), ACCOUNT, REVISION, *SUPERSEDES),
+        (Field("type", CHOICE, "--type", choices=tuple(FINANCIAL_TYPES)),)),
+    "/transaction/categorize": WriteRoute(
+        ("review", "categorize"), (target("transaction"), ACCOUNT, REVISION, *SUPERSEDES),
+        (Field("category", TEXT, "--category"),)),
+    "/transaction/correct": WriteRoute(
+        ("review", "correct"),
+        (target("transaction"), ACCOUNT, REVISION,
+         Field("field", CHOICE, "--field", choices=CORRECTABLE_FIELDS), *SUPERSEDES),
+        (Field("value", TEXT, "--value"),)),
+    "/transaction/separate": WriteRoute(
+        ("review", "separate"), (target("transaction"), ACCOUNT, REVISION),
+        (Field("groups", GROUP_LINES, "--group"),)),
+    "/transaction/one-sided": WriteRoute(
+        ("review", "transfer", "one-sided"), (target("transaction"), ACCOUNT, REVISION),
+        (Field("counterpart_account", ID, "--counterpart-account"),)),
 }
 
 
@@ -113,8 +180,8 @@ def decoded_form_part(part: bytes) -> str:
 
 
 def parsed_form(body: bytes, route: WriteRoute) -> Refusal | dict[str, str]:
-    """Step 7: UTF-8, each field once, exactly the route's fields and the token. Point 1's limit
-    of 50 fields is met by that: no route has more than five."""
+    """Step 7: UTF-8, each field once, exactly the route's fields and the token, each value of
+    its field's kind. Point 1's limit of 50 fields is met by that: no route has more than ten."""
     form = {}
     for piece in body.split(b"&") if body else []:
         raw_name, separator, raw_value = piece.partition(b"=")
@@ -125,30 +192,60 @@ def parsed_form(body: bytes, route: WriteRoute) -> Refusal | dict[str, str]:
         if not separator or name in form:
             return Refusal(400, UNREADABLE_FORM)
         form[name] = value
-    if set(form) != {*route.fields, FORM_TOKEN_FIELD}:
+    if set(form) != {*route.field_names, FORM_TOKEN_FIELD}:
         return Refusal(400, UNREADABLE_FORM)
-    for name in (route.form_id_field, "account", *route.revision_fields):
-        if not IDENTIFIER.fullmatch(form[name]):
-            return Refusal(400, UNREADABLE_FORM)
+    for field in (*route.hidden, *route.typed):
+        if not acceptable(field, form[field.name]):
+            return Refusal(400, VALUE_REFUSED)
     return form
 
 
-def form_token(secret: bytes, path: str, form_id: str, account_id: str,
-               revisions: tuple[str, ...]) -> str:
-    """HMAC-SHA256 over the route, the form's item or decision, its account and every revision
-    token it shows. A unit separator keeps the parts apart, since none of them may hold one."""
-    message = "\x1f".join((path, form_id, account_id, *revisions)).encode("utf-8")
-    return hmac.new(secret, message, hashlib.sha256).hexdigest()
+def printable_text(text: str) -> bool:
+    """Text a person types: no control or format character, so nothing can hide in it."""
+    return all(unicodedata.category(char) not in ("Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp")
+               for char in text)
+
+
+def acceptable(field: Field, value: str) -> bool:
+    """A value of the field's kind. Empty only where the field is optional, as an option not
+    given."""
+    if value == "":
+        return not field.required
+    if field.kind == ID:
+        return bool(IDENTIFIER.fullmatch(value))
+    if field.kind == CHOICE:
+        return value in field.choices
+    if field.kind == AMOUNT_KIND:
+        return bool(AMOUNT.fullmatch(value))
+    if field.kind == DATE_KIND:
+        return bool(DATE.fullmatch(value))
+    if field.kind == MONTH_KIND:
+        return bool(MONTH.fullmatch(value))
+    if field.kind == TEXT:
+        return len(value) <= MAXIMUM_TEXT_LENGTH and printable_text(value) and (
+            value == value.strip())
+    if field.kind in (PAIR_LINES, GROUP_LINES):
+        return listed_ids(value, 2 if field.kind == PAIR_LINES else None) is not None
+    raise AssertionError(field.kind)
+
+
+def form_token(secret: bytes, path: str, hidden: dict[str, str]) -> str:
+    """HMAC-SHA256 over the route and every hidden field the form shows, by name and value. A
+    unit separator keeps the parts apart, since no accepted value may hold one."""
+    route = WRITE_ROUTES[path]
+    parts = [path]
+    for field in route.hidden:
+        parts += [field.name, hidden[field.name]]
+    return hmac.new(secret, "\x1f".join(parts).encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def refuse_form_token(form: dict[str, str], path: str, secret: bytes,
                       used_tokens: set[str]) -> Refusal | None:
     """Step 8: the token this session's secret gives for the form as shown, never used before.
-    It is spent here, before the write, so a resubmitted form refuses whatever the write did."""
-    route = WRITE_ROUTES[path]
+    It is spent here, before the command runs, so a resubmitted form refuses whatever the
+    command did."""
     given = form[FORM_TOKEN_FIELD]
-    expected = form_token(secret, path, form[route.form_id_field], form["account"],
-                          tuple(form[name] for name in route.revision_fields))
+    expected = form_token(secret, path, form)
     if given in used_tokens or not hmac.compare_digest(given.encode("utf-8"),
                                                        expected.encode("utf-8")):
         return Refusal(403, FORM_EXPIRED)
@@ -173,21 +270,20 @@ def listed_ids(text: str, ids_per_line: int | None) -> list[list[str]] | None:
     return lines
 
 
-def command_words(path: str, form: dict[str, str], ledger_path) -> list[str] | Refusal:
-    """Step 9's command line: the CLI command the route maps to, with the form's values as its
-    arguments. Every value was checked above, so none can be read as an option."""
-    common = ["--db", str(ledger_path), "--account", form["account"], "--revision",
-              form["revision"]]
-    if path == "/review/undo":
-        return ["review", "undo", form["decision"], *common]
-    if path == "/review/reject":
-        pairs = listed_ids(form["pairs"], 2)
-        if pairs is None:
-            return Refusal(400, UNREADABLE_FORM)
-        return ["review", "reject", form["item"], *common,
-                *(word for pair in pairs for word in ("--pair", *pair))]
-    groups = listed_ids(form["groups"], None)
-    if groups is None:
-        return Refusal(400, UNREADABLE_FORM)
-    return ["review", "confirm", form["item"], *common,
-            *(word for group in groups for word in ("--group", *group))]
+def command_words(path: str, form: dict[str, str], ledger_path) -> list[str]:
+    """Step 9's command line, from the route's declaration and the checked form alone. Every
+    option is written as --name=value, so no value can be read as an option whatever it holds,
+    and an empty optional field is an option not given. Lists are IDs, each option repeated."""
+    route = WRITE_ROUTES[path]
+    positional, *options = route.hidden
+    words = [*route.words, form[positional.name], f"--db={ledger_path}"]
+    for field in (*options, *route.typed):
+        value = form[field.name]
+        if value == "":
+            continue
+        if field.kind in (PAIR_LINES, GROUP_LINES):
+            for ids in listed_ids(value, 2 if field.kind == PAIR_LINES else None):
+                words += [field.option, *ids]
+        else:
+            words.append(f"{field.option}={value}")
+    return words
