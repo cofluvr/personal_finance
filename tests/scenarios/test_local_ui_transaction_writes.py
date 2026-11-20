@@ -312,6 +312,45 @@ class TestValuesAndBinding:  # WB3, the slice plan's points 1, 2 and 5
         assert response.status == 403
         assert unchanged_state(ledger.path) == before
 
+    def test_a_choice_off_its_list_is_refused_before_any_command(self, ledger, monkeypatch):
+        (transaction_id,) = transaction_ids(ledger)
+        browser = Browser(ledger.path)
+        try:
+            fields = page_forms(transaction_id)(browser)["/transaction/classify"]
+            ran = []
+            monkeypatch.setattr(ui_server, "main", lambda words: ran.append(words) or 0)
+            response = browser.post("/transaction/classify", {**fields, "type": "gift"})
+        finally:
+            browser.close()
+        assert response.status == 400 and ran == []
+
+    def test_a_correction_supersedes_only_its_own_field(self, ledger):
+        (transaction_id,) = transaction_ids(ledger)
+        assert ledger.run("review", "correct", transaction_id, "--account", "A", "--revision",
+                          revision_of(ledger, transaction_id), "--field", "amount",
+                          "--value=-1.00")[0] == 0
+        browser = Browser(ledger.path)
+        try:
+            forms = {form["fields"]["field"]: form["fields"]
+                     for form in all_post_forms(transaction_page(browser, transaction_id).body)
+                     if form["action"] == "/transaction/correct"}
+        finally:
+            browser.close()
+        assert forms["amount"]["supersedes"]
+        assert {field: forms[field]["supersedes"] for field in
+                ("transaction_date", "posting_date", "description")} == dict.fromkeys(
+                    ("transaction_date", "posting_date", "description"), "")
+
+    def test_the_other_account_is_never_this_one(self, ledger):
+        (transaction_id,) = transaction_ids(ledger)
+        browser = Browser(ledger.path)
+        try:
+            body = transaction_page(browser, transaction_id).body.decode()
+        finally:
+            browser.close()
+        select = body.split('<select name="counterpart_account">')[1].split("</select>")[0]
+        assert account_id(ledger, "B") in select and account_id(ledger, "A") not in select
+
     def test_an_amount_or_date_of_the_wrong_shape_is_refused(self, unresolved_item):
         browser, fields = unresolved_item
         for typed in ({"amount": "12,50"}, {"amount": "1e3"}, {"transaction_date": "5/1/2026"},
@@ -350,7 +389,8 @@ class TestAllowlist:  # WB2
             for words in TERMINAL_ONLY:
                 assert route.words[:len(words)] != words, (route.words, words)
 
-    def test_several_statements_reaching_give_no_form(self):
+    def test_several_statements_reaching_give_no_form(self, monkeypatch):
+        monkeypatch.setattr(ui_server, "printed_revision", lambda words: "r1-0000")
         printed = ("    Classification c1: fee, binding one side\n"
                    "    Classification c2: purchase, binding the other\n")
         assert ui_server.superseded_statement(printed, "classification", "--db=x") is None

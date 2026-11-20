@@ -230,12 +230,9 @@ def acceptable(field: Field, value: str) -> bool:
 
 
 def form_token(secret: bytes, path: str, hidden: dict[str, str]) -> str:
-    """HMAC-SHA256 over the route and every hidden field the form shows, by name and value. A
-    unit separator keeps the parts apart, since no accepted value may hold one."""
-    route = WRITE_ROUTES[path]
-    parts = [path]
-    for field in route.hidden:
-        parts += [field.name, hidden[field.name]]
+    """HMAC-SHA256 over the route and every hidden field the form shows, in the route's fixed
+    order. A unit separator keeps the parts apart, since no accepted value may hold one."""
+    parts = [path, *(hidden[field.name] for field in WRITE_ROUTES[path].hidden)]
     return hmac.new(secret, "\x1f".join(parts).encode("utf-8"), hashlib.sha256).hexdigest()
 
 

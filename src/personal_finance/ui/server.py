@@ -400,7 +400,7 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         db = f"--db={self.server.ledger_path}"
         code, printed, message = run_in_memory(
             ["review", "transaction", "show", transaction_id, db])
-        if code is None or not transaction_id:
+        if code is None:
             return self.send_page(404, "Not found", notice=TRANSACTION_NOT_FOUND)
         if code != 0:
             return self.send_page(404, "Not found", notice=message)
