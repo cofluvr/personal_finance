@@ -25,12 +25,15 @@ ALLOWLIST = {
     "/review/reject", "/review/confirm", "/review/undo", "/review/complete", "/review/dismiss",
     "/transaction/classify", "/transaction/categorize", "/transaction/correct",
     "/transaction/separate", "/transaction/one-sided",
+    "/setting/buffer-set", "/setting/buffer-undo", "/account/liquidity-set",
+    "/account/liquidity-undo", "/obligation/covers-loan", "/obligation/covers-fund",
+    "/obligation/uncover",
 }
 # Terminal only (D-073 point 2, and the M17.2 slice plan point 7): no route runs these.
 TERMINAL_ONLY = [
     ("init",), ("migrate",), ("import",), ("reconcile",), ("account", "add"),
     ("account", "link"), ("backup",), ("archive",), ("storage",), ("export",), ("sync",),
-    ("setting", "set"), ("review", "allocate"), ("review", "consume"), ("review", "breakdown"),
+    ("review", "allocate"), ("review", "consume"), ("review", "breakdown"),
     ("review", "transfer", "match"), ("review", "coverage"), ("category", "rule"),
     ("balance", "record"), ("review", "classification", "undo"),
 ]
@@ -388,6 +391,12 @@ class TestAllowlist:  # WB2
         for route in writes.WRITE_ROUTES.values():
             for words in TERMINAL_ONLY:
                 assert route.words[:len(words)] != words, (route.words, words)
+
+    def test_settings_routes_take_the_buffer_key_alone(self):
+        for route in writes.WRITE_ROUTES.values():
+            if route.words[0] == "setting":
+                (key,) = [field for field in route.hidden if field.name == "key"]
+                assert key.choices == ("checking_buffer_cents",)
 
     def test_several_statements_reaching_give_no_form(self, monkeypatch):
         monkeypatch.setattr(ui_server, "printed_revision", lambda words: "r1-0000")

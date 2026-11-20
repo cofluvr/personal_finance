@@ -97,6 +97,9 @@ NAVIGATION = (
     ("/documents", "Import results"),
     ("/transactions", "Transactions"),
     ("/review", "Review queue"),
+    ("/accounts", "Accounts and members"),
+    ("/obligations", "Obligations"),
+    ("/settings", "Settings and backups"),
 )
 
 # What each page accepts in its address. A value is an ID or a month and nothing else, refused
@@ -116,6 +119,9 @@ PAGE_PARAMETERS = {
     "/review/item": {"id"},
     "/result": {"id"},
     "/transaction": {"id"},
+    "/accounts": set(),
+    "/obligations": {"as_of"},
+    "/settings": set(),
     "/style.css": set(),
 }
 QUERY_VALUE = re.compile(r"[A-Za-z0-9_-]{0,100}")
@@ -354,6 +360,8 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return self.answer_result(conn, parameters.get("id", ""))
         if path == "/transaction":
             return self.answer_transaction(conn, parameters.get("id", ""))
+        if path in SECTIONS:
+            return self.answer_section(conn, path, parameters)
         if path == "/budget":
             return self.answer_budget(conn, parameters)
         if path == "/funds":
@@ -392,6 +400,28 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             after = undo_form(self.server.form_secret, recorded.group(1), decision_account_id,
                               revision)
         self.send_page(200, "Result", lines, after=after)
+
+    def answer_section(self, conn, path, parameters):
+        """A section of PRD §18 as its commands print it, one after another, without creation
+        times (F2, D-073 point 3), and the forms point 2 allows there."""
+        heading, commands = SECTIONS[path]
+        db = f"--db={self.server.ledger_path}"
+        as_of = parameters.get("as_of") or None
+        if as_of is not None:
+            checked_as_of(as_of)
+        lines, printed_by_command = ReportLines(), {}
+        for key, words in commands:
+            dated = ["--as-of", as_of] if as_of and key == "coverage" else []
+            code, printed, message = run_in_memory([*words, db, *dated])
+            printed = without_creation_times(printed if code == 0
+                                             else f"Not available: {message}\n")
+            printed_by_command[key] = printed
+            for text in printed.splitlines():
+                lines.add(text)
+        secret = self.server.form_secret
+        forms = SECTION_FORMS[path](secret, printed_by_command, account_choices(conn))
+        form = as_of_form(path, as_of) if path == "/obligations" else ""
+        self.send_page(200, heading, lines, form=form, after=forms)
 
     def answer_transaction(self, conn, transaction_id):
         """review transaction show's lines, as the terminal prints them, and the forms that
@@ -553,6 +583,71 @@ def run_in_memory(words) -> tuple[int | None, str, str]:
     except SystemExit:
         return None, "", ""
     return code, printed.getvalue(), said.getvalue().strip().removeprefix("Error: ")
+
+
+CREATION_TIME = re.compile(r", made \d{4}-\d{2}-\d{2}T[0-9:.]+Z")
+LIQUIDITY_ROW = re.compile(
+    r"^Account (?P<name>.*) \((?:checking|savings), (?P<id>[0-9a-f-]{36})\): .*\n"
+    r"  (?P<kind>Undo|Set) revision: (?P<revision>\S+)$", re.MULTILINE)
+BUFFER_ROW = re.compile(
+    r"^Setting checking_buffer_cents: (?P<state>.*)\n  Revision: (?P<revision>\S+)$",
+    re.MULTILINE)
+COVERAGE_ROW = re.compile(
+    r"^Obligation (?P<id>[0-9a-f-]{36}) \((?P<name>.*)\): .*\n"
+    r"  (?P<kind>Covers|Uncover) revision: (?P<revision>\S+)$", re.MULTILINE)
+
+
+def without_creation_times(printed: str) -> str:
+    """A command's lines with each ", made <time>" left out: no page shows a creation time
+    (F2, D-073 point 3). The one way a section page's text differs from its commands'."""
+    return CREATION_TIME.sub("", printed)
+
+
+def accounts_forms(secret, printed, accounts) -> str:
+    forms = []
+    for row in LIQUIDITY_ROW.finditer(printed.get("liquidity", "")):
+        path = "/account/liquidity-undo" if row["kind"] == "Undo" else "/account/liquidity-set"
+        forms.append(route_form(secret, path, {"account": row["id"],
+                                               "revision": row["revision"]},
+                                heading=f"Account {row['name']}"))
+    return "<h2>Liquidity</h2>" + "".join(forms) if forms else ""
+
+
+def settings_forms(secret, printed, accounts) -> str:
+    row = BUFFER_ROW.search(printed.get("setting", ""))
+    if row is None:
+        return ""
+    path = "/setting/buffer-set" if row["state"] == "not set" else "/setting/buffer-undo"
+    return "<h2>Checking buffer</h2>" + route_form(
+        secret, path, {"key": "checking_buffer_cents", "revision": row["revision"]})
+
+
+def obligations_forms(secret, printed, accounts) -> str:
+    forms = []
+    for row in COVERAGE_ROW.finditer(printed.get("coverage", "")):
+        hidden = {"obligation": row["id"], "revision": row["revision"]}
+        heading = f"Obligation {row['name']}"
+        if row["kind"] == "Uncover":
+            forms.append(route_form(secret, "/obligation/uncover", hidden, heading=heading))
+            continue
+        forms.append(route_form(secret, "/obligation/covers-loan", hidden,
+                                choices={"loan": accounts}, heading=heading))
+        forms.append(route_form(secret, "/obligation/covers-fund", hidden))
+    return "<h2>What each obligation covers</h2>" + "".join(forms) if forms else ""
+
+
+# Each section: its heading, the commands it shows in order, and its forms.
+SECTIONS = {
+    "/accounts": ("Accounts and members", (
+        ("liquidity", ("account", "liquidity", "show")), ("links", ("account", "links")),
+        ("members", ("household", "members")), ("share", ("household", "share", "show")))),
+    "/obligations": ("Obligations", (("obligations", ("obligations",)),
+                                     ("coverage", ("obligation", "coverage")))),
+    "/settings": ("Settings and backups", (("setting", ("setting", "show")),
+                                           ("storage", ("storage",)))),
+}
+SECTION_FORMS = {"/accounts": accounts_forms, "/obligations": obligations_forms,
+                 "/settings": settings_forms}
 
 
 def superseded_statement(printed, kind, db) -> dict[str, str] | None:
@@ -729,6 +824,9 @@ FIELD_LABELS = {
     "category": "Category, a name from category list",
     "value": "Corrected value",
     "counterpart_account": "The other account",
+    "buffer": "Checking buffer, an amount such as 500.00",
+    "loan": "Covers this loan's payment",
+    "fund": "Covers this reserve's purchase, by its fund ID",
 }
 BUTTONS = {
     "/review/reject": "Reject these pairs",
@@ -741,6 +839,13 @@ BUTTONS = {
     "/transaction/correct": "Correct",
     "/transaction/separate": "Separate these groups",
     "/transaction/one-sided": "Record a one-sided transfer",
+    "/setting/buffer-set": "Set the buffer",
+    "/setting/buffer-undo": "Undo the buffer",
+    "/account/liquidity-set": "Designate liquid",
+    "/account/liquidity-undo": "Undo the designation",
+    "/obligation/covers-loan": "Link to the loan",
+    "/obligation/covers-fund": "Link to the reserve",
+    "/obligation/uncover": "Undo the link",
 }
 
 

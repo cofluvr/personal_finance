@@ -2623,9 +2623,16 @@ committed on its own:
 - **M17.2b, the sections and planning writes.** The accounts and members page (account types,
   liquidity, links and members), the settings and backups page (settings in effect, `pf storage`,
   backup records, read-only), and the planning pages already built gain forms: the checking
-  buffer (set and undo), an account's liquidity (set and undo), obligation coverage links
-  (covers and uncover), and the preview-then-add flows for income sources, obligations, budget
-  plans and funds.
+  buffer (set and undo), an account's liquidity (set and undo), and obligation coverage links
+  (covers and uncover). The obligations section shows `obligations` and `obligation coverage`.
+- **Amended while building M17.2b:** the preview-then-add flows for income sources,
+  obligations, budget plans and funds are left in the terminal for now. M18's scenario inputs
+  have their own forms (D-074 point 5) and need none of them, and each flow has many typed
+  options better built with a page of its own. Point 6 below stands for when they are built.
+- **Section pages show no creation time.** `setting show`, `account liquidity show`,
+  `obligations` and `household share show` print `, made <time>`. D-073 point 3 says no page
+  shows one (F2), so a section page shows its commands' lines with that clause left out, and
+  its parity test asserts exactly that.
 
 **How every route is built,** generalizing M17.1:
 
@@ -2653,7 +2660,8 @@ committed on its own:
    hidden and bound with the preview's revision. The add is the write, and redirects (PRG).
 7. **Terminal only, as point 2 lists, and also for now:** allocations, consumptions, breakdowns,
    transfer matches, coverage declarations, category rules, balance observations, fund
-   assignments and priority, and every undo but review decisions'. Each needs a page of its own
+   assignments and priority, the preview-then-add flows, and every undo but review decisions',
+   the buffer's, liquidity's and coverage links'. Each needs a page of its own
    or a second transaction's revision. They are left out rather than built thinly: the
    terminal does each, and none is needed by M18's scenario input. A test asserts that the
    route table equals the list as built.

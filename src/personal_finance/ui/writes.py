@@ -70,7 +70,8 @@ class Field(NamedTuple):
 class WriteRoute(NamedTuple):
     # The CLI command's words, before its arguments.
     words: tuple[str, ...]
-    # Fixed by the page and bound by the form token. The first is the positional argument.
+    # Fixed by the page and bound by the form token. A field with no option is positional, and
+    # positionals follow the words in the order declared, hidden before typed.
     hidden: tuple[Field, ...]
     # Typed or chosen by the person.
     typed: tuple[Field, ...] = ()
@@ -88,6 +89,7 @@ def target(name: str) -> Field:
 
 ACCOUNT = Field("account", ID, "--account")
 REVISION = Field("revision", ID, "--revision")
+BUFFER_KEY = Field("key", CHOICE, None, choices=("checking_buffer_cents",))
 SUPERSEDES = (Field("supersedes", ID, "--supersedes", required=False),
               Field("supersedes_revision", ID, "--supersedes-revision", required=False))
 
@@ -122,6 +124,20 @@ WRITE_ROUTES = {
     "/transaction/one-sided": WriteRoute(
         ("review", "transfer", "one-sided"), (target("transaction"), ACCOUNT, REVISION),
         (Field("counterpart_account", ID, "--counterpart-account"),)),
+    # M17.2b. The buffer is the one setting the browser may make: the timezone changes what
+    # "today" means, so it stays in the terminal (point 2).
+    "/setting/buffer-set": WriteRoute(
+        ("setting", "set"), (BUFFER_KEY, REVISION), (Field("buffer", AMOUNT_KIND, None),)),
+    "/setting/buffer-undo": WriteRoute(("setting", "undo"), (BUFFER_KEY, REVISION)),
+    "/account/liquidity-set": WriteRoute(("account", "liquidity", "set"), (ACCOUNT, REVISION)),
+    "/account/liquidity-undo": WriteRoute(("account", "liquidity", "undo"), (ACCOUNT, REVISION)),
+    "/obligation/covers-loan": WriteRoute(
+        ("obligation", "covers"), (target("obligation"), REVISION),
+        (Field("loan", ID, "--loan"),)),
+    "/obligation/covers-fund": WriteRoute(
+        ("obligation", "covers"), (target("obligation"), REVISION),
+        (Field("fund", ID, "--fund"),)),
+    "/obligation/uncover": WriteRoute(("obligation", "uncover"), (target("obligation"), REVISION)),
 }
 
 
@@ -211,6 +227,9 @@ def acceptable(field: Field, value: str) -> bool:
     given."""
     if value == "":
         return not field.required
+    if field.option is None and value.startswith("-"):
+        # A positional is written apart, so it could be read as an option.
+        return False
     if field.kind == ID:
         return bool(IDENTIFIER.fullmatch(value))
     if field.kind == CHOICE:
@@ -272,11 +291,12 @@ def command_words(path: str, form: dict[str, str], ledger_path) -> list[str]:
     option is written as --name=value, so no value can be read as an option whatever it holds,
     and an empty optional field is an option not given. Lists are IDs, each option repeated."""
     route = WRITE_ROUTES[path]
-    positional, *options = route.hidden
-    words = [*route.words, form[positional.name], f"--db={ledger_path}"]
-    for field in (*options, *route.typed):
+    fields = (*route.hidden, *route.typed)
+    words = [*route.words, *(form[field.name] for field in fields if field.option is None),
+             f"--db={ledger_path}"]
+    for field in fields:
         value = form[field.name]
-        if value == "":
+        if value == "" or field.option is None:
             continue
         if field.kind in (PAIR_LINES, GROUP_LINES):
             for ids in listed_ids(value, 2 if field.kind == PAIR_LINES else None):
