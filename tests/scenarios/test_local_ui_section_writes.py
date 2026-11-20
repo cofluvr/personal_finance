@@ -183,6 +183,26 @@ class TestTerminalOnly:  # WB2
         assert response.status == 400
         assert unchanged_state(planned.path) == before
 
+    def test_a_covers_form_offers_the_loan_by_choice(self, planned):
+        browser = Browser(planned.path)
+        try:
+            body = browser.get(f"/obligations?as_of={AS_OF}").text
+        finally:
+            browser.close()
+        out = planned.run("account", "links")[1]
+        mortgage = re.search(r"^Loan Mortgage \(([0-9a-f-]{36})\)", out, re.MULTILINE)[1]
+        select = body.split('<select name="loan">')[1].split("</select>")[0]
+        assert f'value="{mortgage}"' in select
+
+    @pytest.mark.parametrize("target", ["/settings?x=1", "/accounts?as_of=2026-05-04",
+                                        "/obligations?as_of=2026-05-04&x=1"])
+    def test_a_section_refuses_a_parameter_it_does_not_take(self, planned, target):
+        browser = Browser(planned.path)
+        try:
+            assert browser.get(target).status == 400
+        finally:
+            browser.close()
+
     @pytest.mark.parametrize("page", list(SECTION_COMMANDS))
     def test_section_pages_leave_the_ledger_unchanged(self, planned, page):
         before = unchanged_state(planned.path)
