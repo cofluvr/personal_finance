@@ -1,14 +1,19 @@
-"""The local review UI: read-only pages served on 127.0.0.1 alone (D-062).
+"""The local review UI: pages served on 127.0.0.1 alone (D-062), and the forms on them that
+make review decisions (D-073 point 1, M17.1).
 
 Every page shows the lines of the same builder its CLI command prints, so the UI computes nothing
 of its own. Nothing here writes a file, logs a request or prints: only the CLI prints (D-037).
-Every request opens the ledger read-only through open_ledger, so a real ledger's gate runs on each
-one (D-058). W1 allows this module, and no other, to import from `http`, and only these two
-classes (D-062 point 1).
+Every GET opens the ledger read-only through open_ledger, so a real ledger's gate runs on each
+one (D-058). A POST passes the write pipeline in ui/writes.py, then runs the CLI's own command,
+whose output is kept in memory for the result page: the command opens through the gate for
+writing, and refuses exactly as in the terminal. W1 allows this module, and no other, to import
+from `http`, and only these two classes (D-062 point 1).
 """
 
+import contextlib
 import hmac
 import html
+import io
 import re
 import secrets
 from datetime import date
@@ -18,14 +23,17 @@ from personal_finance.cli import (
     SAFE_TO_SPEND_TIMEZONE,
     UNEXPECTED_ERROR,
     CommandError,
+    active_decision_undo,
     checked_as_of,
     household_today_if_set,
     explained_error,
     find_account,
+    main,
     open_ledger,
     validated_month,
 )
 from personal_finance.reports.report_text import (
+    ReportLines,
     account_choices,
     document_list_lines,
     budget_report_lines,
@@ -41,6 +49,7 @@ from personal_finance.reports.report_text import (
     totals_report_lines,
     transaction_list_lines,
 )
+from personal_finance.ui import writes
 
 LOOPBACK_ADDRESS = "127.0.0.1"
 
@@ -105,6 +114,7 @@ PAGE_PARAMETERS = {
     "/transactions": set(),
     "/review": set(),
     "/review/item": {"id"},
+    "/result": {"id"},
     "/style.css": set(),
 }
 QUERY_VALUE = re.compile(r"[A-Za-z0-9_-]{0,100}")
@@ -115,7 +125,6 @@ SIGNED_OUT = (
 )
 WRONG_HOST = "This server answers only at the address pf ui printed."
 FOREIGN_ORIGIN = "Requests from other sites are refused."
-READ_ONLY = "This interface is read-only. Decisions are made with pf review in the terminal."
 NOT_FOUND = "There is no such page."
 BAD_ADDRESS = "This address holds a value the interface does not accept."
 UNREADABLE = "This request could not be read."
@@ -124,6 +133,11 @@ CHOOSE_AS_OF = (
     "no clock."
 )
 ITEM_NOT_FOUND = "Review item not found. A later import can replace one: see the review queue."
+RESULT_NOT_FOUND = "There is no such result in this session. See the review queue."
+COMMAND_UNREADABLE = "This form could not be read as a command. Nothing was changed."
+# The result pages a session keeps, newest last: older ones are forgotten.
+KEPT_RESULT_COUNT = 20
+RECORDED_DECISION = re.compile(r"Decision (\S+) recorded:")
 
 
 class LoopbackServer(HTTPServer):
@@ -137,6 +151,12 @@ class LoopbackServer(HTTPServer):
         self.launch_key = secrets.token_urlsafe(32)
         self.launch_key_used = False
         self.session_value = secrets.token_urlsafe(32)
+        # The form tokens' key and the tokens spent, for this launch's one session, in memory
+        # only (D-073 point 1, step 8).
+        self.form_secret = secrets.token_bytes(32)
+        self.used_form_tokens = set()
+        # What each successful write printed, by a random result ID, for Post/Redirect/Get.
+        self.results = {}
         super().__init__((LOOPBACK_ADDRESS, 0), ReviewRequestHandler)
 
     def server_bind(self):
@@ -183,14 +203,81 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         self.send_page(code, "Refused", notice=UNREADABLE)
 
     def __getattr__(self, name):
-        # http.server looks up do_<METHOD> for each request. Every method but GET is refused,
-        # its body unread, so nothing can be written through this server.
+        # http.server looks up do_<METHOD> for each request. Every method but GET and POST is
+        # refused, its body unread.
         if name.startswith("do_"):
             return self.refuse_method
         raise AttributeError(name)
 
     def refuse_method(self):
-        self.send_page(405, "Refused", notice=READ_ONLY, extra_headers=(("Allow", "GET"),))
+        self.send_page(405, "Refused", notice=writes.NOT_ALLOWED,
+                       extra_headers=(("Allow", "GET, POST"),))
+
+    def do_POST(self):
+        try:
+            self.answer_post()
+        except Exception as error:
+            message = explained_error(error)
+            self.send_page(500 if message == UNEXPECTED_ERROR else 400, "Refused", notice=message)
+
+    def answer_post(self):
+        """D-073 point 1's pipeline, in its order. Nothing is read from the body, and no ledger
+        is opened, until every step before the form has passed."""
+        server = self.server
+        if self.headers.get_all("Host") != [f"{LOOPBACK_ADDRESS}:{server.server_port}"]:
+            return self.send_page(421, "Refused", notice=WRONG_HOST)
+        if not self.has_session():
+            return self.send_page(403, "Signed out", notice=SIGNED_OUT)
+        refusal = (writes.refuse_route("POST", self.path)
+                   or writes.refuse_origin(self.headers.get_all("Origin"), server.origin)
+                   or writes.refuse_fetch_metadata(self.headers.get_all("Sec-Fetch-Site"),
+                                                   self.headers.get_all("Sec-Fetch-Mode")))
+        if refusal:
+            return self.send_refusal(refusal)
+        length = writes.checked_body_length(self.headers.get_all("Content-Type"),
+                                            self.headers.get_all("Content-Length"),
+                                            self.headers.get_all("Transfer-Encoding"))
+        if isinstance(length, writes.Refusal):
+            return self.send_refusal(length)
+        body = self.rfile.read(length)
+        if len(body) != length:
+            return self.send_page(400, "Refused", notice=UNREADABLE)
+        form = writes.parsed_form(body, writes.WRITE_ROUTES[self.path])
+        if isinstance(form, writes.Refusal):
+            return self.send_refusal(form)
+        refusal = writes.refuse_form_token(form, self.path, server.form_secret,
+                                           server.used_form_tokens)
+        if refusal:
+            return self.send_refusal(refusal)
+        words = writes.command_words(self.path, form, server.ledger_path)
+        if isinstance(words, writes.Refusal):
+            return self.send_refusal(words)
+        self.run_command(words)
+
+    def run_command(self, words):
+        """Step 9: the CLI's own command, as the terminal runs it, with what it prints kept in
+        memory. A success redirects to its result page (Post/Redirect/Get), and a refusal shows
+        the CLI's message, which repeats no input (D-037)."""
+        printed, said = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(said):
+                code = main(words)
+        except SystemExit:
+            return self.send_page(400, "Refused", notice=COMMAND_UNREADABLE)
+        if code != 0:
+            message = said.getvalue().strip().removeprefix("Error: ")
+            return self.send_page(409, "Refused", notice=message or UNEXPECTED_ERROR)
+        results = self.server.results
+        result_id = secrets.token_urlsafe(16)
+        results[result_id] = printed.getvalue()
+        while len(results) > KEPT_RESULT_COUNT:
+            del results[next(iter(results))]
+        self.send_body(303, b"", "text/plain; charset=utf-8",
+                       extra_headers=(("Location", f"/result?id={result_id}"),))
+
+    def send_refusal(self, refusal):
+        self.send_page(refusal.status, "Refused", notice=refusal.notice,
+                       extra_headers=refusal.extra_headers)
 
     def do_GET(self):
         try:
@@ -261,8 +348,11 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             report = review_item_report(conn, parameters.get("id", ""))
             if report is None:
                 return self.send_page(404, "Not found", notice=ITEM_NOT_FOUND)
+            forms = decision_forms(self.server.form_secret, report)
             hint = decision_hint(self.server.ledger_path, report)
-            return self.send_page(200, "Review item", report.lines, after=hint)
+            return self.send_page(200, "Review item", report.lines, after=forms + hint)
+        if path == "/result":
+            return self.answer_result(conn, parameters.get("id", ""))
         if path == "/budget":
             return self.answer_budget(conn, parameters)
         if path == "/funds":
@@ -282,6 +372,25 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         form = account_form(conn, "/monthly", account_id, first_month, last_month)
         lines = monthly_report_lines(conn, account_id, first_month, last_month)
         self.send_page(200, "Monthly report", lines, form=form)
+
+    def answer_result(self, conn, result_id):
+        """What a write printed, and for a decision still in effect, a form that undoes it with
+        its current revision, as review decision show gives it. Reloading writes nothing."""
+        kept = self.server.results.get(result_id)
+        if kept is None:
+            return self.send_page(404, "Not found", notice=RESULT_NOT_FOUND)
+        printed = kept
+        lines = ReportLines()
+        for text in printed.splitlines():
+            lines.add(text)
+        recorded = RECORDED_DECISION.match(printed)
+        after = ""
+        undo = recorded and active_decision_undo(conn, recorded.group(1))
+        if undo:
+            decision_account_id, revision = undo
+            after = undo_form(self.server.form_secret, recorded.group(1), decision_account_id,
+                              revision)
+        self.send_page(200, "Result", lines, after=after)
 
     def answer_household(self, conn, parameters, account_id, first_month, last_month):
         """The household report in one view: side by side, one member's by ID, or shared."""
@@ -513,9 +622,46 @@ def as_of_form(action, as_of) -> str:
             f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
 
 
+def hidden_fields(secret, path, form_id_field, form_id, account_id, revision) -> str:
+    """A form's hidden account, item or decision and revision, and the token that binds them."""
+    token = writes.form_token(secret, path, form_id, account_id, (revision,))
+    return (f'<input type="hidden" name="account" value="{escaped(account_id)}">'
+            f'<input type="hidden" name="{form_id_field}" value="{escaped(form_id)}">'
+            f'<input type="hidden" name="revision" value="{escaped(revision)}">'
+            f'<input type="hidden" name="{writes.FORM_TOKEN_FIELD}" value="{token}">')
+
+
+def decision_forms(secret, report) -> str:
+    """For a possible duplicate or conflict, the reject and confirm forms, posting what the
+    terminal commands take. An unresolved record is completed or dismissed in the terminal."""
+    if report.kind == "unresolved_record":
+        return ""
+    reject = hidden_fields(secret, "/review/reject", "item", report.item_id, report.account_id,
+                           report.revision)
+    confirm = hidden_fields(secret, "/review/confirm", "item", report.item_id,
+                            report.account_id, report.revision)
+    return (
+        '<h2>Deciding this item</h2>'
+        f'<form method="post" action="/review/reject">{reject}'
+        '<label>Pairs that are different events, two transaction IDs a line<br>'
+        '<textarea name="pairs" rows="3" cols="80"></textarea></label><br>'
+        '<button>Reject these pairs</button></form>'
+        f'<form method="post" action="/review/confirm">{confirm}'
+        '<label>Groups that are one event each, transaction IDs a line, separated by spaces<br>'
+        '<textarea name="groups" rows="3" cols="80"></textarea></label><br>'
+        '<button>Confirm these groups</button></form>'
+    )
+
+
+def undo_form(secret, decision_id, account_id, revision) -> str:
+    fields = hidden_fields(secret, "/review/undo", "decision", decision_id, account_id, revision)
+    return (f'<form method="post" action="/review/undo">{fields}'
+            '<button>Undo this decision</button></form>')
+
+
 def decision_hint(ledger_path, report) -> str:
     """The terminal commands that decide this item, with its account ID, item ID and revision
-    token. The interface decides nothing (D-062 point 3), so D-043's checks stay in pf review."""
+    token. D-043's checks are the same from either place."""
     common = (f"{report.item_id} --db {ledger_path} --account {report.account_id} "
               f"--revision {report.revision}")
     if report.kind == "unresolved_record":
@@ -525,5 +671,6 @@ def decision_hint(ledger_path, report) -> str:
         commands = [f"pf review confirm {common} --group T ...",
                     f"pf review reject {common} --pair T1 T2"]
     lines = "".join(f'<div class="hint-line">  {escaped(command)}</div>' for command in commands)
-    return ('<h2>Deciding this item</h2><p class="notice">This interface is read-only. To decide, '
-            f'run one of these in the terminal:</p><div class="report">{lines}</div>')
+    heading = "" if report.kind != "unresolved_record" else "<h2>Deciding this item</h2>"
+    return (f'{heading}<p class="notice">In the terminal, run one of these:</p>'
+            f'<div class="report">{lines}</div>')

@@ -286,7 +286,7 @@ class TestPage:  # LA5
                 assert page_text(client.get(f"/net-worth?as_of={as_of}").body) == cli_output(
                     ledger.capsys, "report", "net-worth", "--db", ledger.db, "--as-of", as_of)
             assert client.get("/net-worth?member=99&as_of=2026-03-01").status == 400
-            assert client.request("POST", "/net-worth").status in (403, 405)
+            assert client.request("POST", "/net-worth").status == 404  # off the allowlist
         finally:
             client.close()
 

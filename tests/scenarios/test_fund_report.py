@@ -122,7 +122,7 @@ class TestPage:  # GC2
                 assert page_text(client.get(f"/funds?as_of={as_of}").body) == cli_output(
                     ledger.capsys, "report", "funds", "--db", ledger.db, "--as-of", as_of)
             assert client.get("/funds?as_of=2026-13-01").status == 400
-            assert client.request("POST", "/funds").status in (403, 405)
+            assert client.request("POST", "/funds").status == 404  # off the allowlist
         finally:
             client.close()
 

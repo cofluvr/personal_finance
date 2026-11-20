@@ -2553,6 +2553,53 @@ terminal-only list is right.
 - **H.** The `--ui` benchmark row (point 8).
 - **I.** The slices M17.1 to M17.4, in that order.
 
+### M17.1 slice plan — Approved by the owner's notes of 2026-11-20
+
+Written before any of it was built. The owner's notes of 2026-11-20 accepted M16 and D-079, and
+gave standing approval to continue through the milestones on the lead engineer's choices, which
+is taken as point A's approval of browser writes as one security change.
+
+1. **A write module beside the server.** `ui/writes.py` holds the pipeline's steps 3 to 8 as pure
+   functions over the request's method, path, headers and body, each returning a refusal or the
+   parsed form, so WA1 tests each step alone. `ui/server.py` keeps steps 1 and 2 (shared with
+   `GET`), calls the pipeline, then step 9.
+2. **Step 9 runs the CLI's own command,** `main(["review", "reject", …])`, with the arguments
+   built from the strictly parsed form, its output captured in memory with
+   `contextlib.redirect_stdout` and `redirect_stderr` (the server is one request at a time). No
+   value can start with `-`, so none is read as an option. The handler opens through the gate with a write connection, checks staleness and the
+   revision under D-043's lock, and refuses exactly as the terminal does, so WA3's equality is by
+   construction and tested. Nothing reaches stdout or stderr (WA5).
+3. **The allowlist for M17.1:** `/review/reject`, `/review/confirm` and `/review/undo`. Point 2
+   lists `separate` too, but it decides a transaction, and the UI has no transaction page until
+   M17.3's search: it joins the allowlist there. A test asserts the route table equals the list.
+4. **Forms without script.** The review item page adds forms above its terminal hint: a
+   possible-duplicate or conflict item gets a reject form (pairs, one `T1 T2` per line) and a
+   confirm form (groups, one space-separated group per line). Hidden fields: account, item ID,
+   revision, form token. An unresolved-record item keeps its terminal hint: completing and
+   dismissing are M17.2's corrections and completions. The textareas are parsed strictly: IDs of
+   the ledger's form only, at most 50 lines.
+5. **The form token** is HMAC-SHA256 over the session's 32-byte secret, the route, the form ID
+   (the item or decision ID), the account and every revision token the form shows, in hex. The
+   server keeps the set of used tokens for the session. The secret is made at launch alongside
+   the session value, in memory only.
+6. **Post/Redirect/Get.** Success stores the captured CLI text under a fresh random result ID in
+   the session's memory (at most the last 20) and answers `303` to `/result?id=…`. The result
+   page shows that text, and for a reject or confirm an undo form carrying the new decision's ID
+   and its current revision (computed by the same function `review decision show` uses). A
+   refusal by the command answers `409` with the CLI's refusal text, which by D-037 repeats no
+   input, checked with sentinels (WA4).
+7. **CSP** already holds `form-action 'self'`. No change.
+8. **A departure from point 1: no `urllib.parse`.** W1 refuses every `urllib` import, and its test
+   names `import urllib.parse` in the server as a refusal. So the body is decoded by a strict
+   decoder of the form encoding in `ui/writes.py` (`+`, `%XX`, then strict UTF-8), and W1 stays
+   unchanged as point 1 requires.
+9. **Server imports.** The server still imports only from `cli` and `report_text`, plus its own
+   `ui.writes`. The undo form's revision comes from `active_decision_undo` in `cli.py`, which
+   uses what `review decision show` uses.
+10. **Not in M17.1:** `separate` (M17.3), every other write (M17.2), the `--ui` benchmark (M17.4).
+
+Tests: `tests/scenarios/test_local_ui_writes.py`, WA1 to WA5, each refusal with its control.
+
 ### M17.1 acceptance criteria
 
 | ID | Test |

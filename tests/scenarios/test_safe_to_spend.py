@@ -480,7 +480,7 @@ class TestReadOnly:  # SB7, point 7
                 assert page_text(client.get(f"/dashboard?as_of={as_of}").body) == cli_output(
                     planned.capsys, "dashboard", "--db", planned.db, "--as-of", as_of)
             assert client.get("/dashboard?as_of=nonsense").status == 400
-            assert client.request("POST", "/dashboard").status in (403, 405)
+            assert client.request("POST", "/dashboard").status == 404  # off the allowlist
         finally:
             client.close()
 

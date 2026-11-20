@@ -243,17 +243,27 @@ class TestSession:  # UB4
         assert source.count("same_secret(") == 3
 
 
-class TestReadOnly:  # UB5
-    @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD",
+class TestReadOnly:  # UB5, as M17.1 narrows it: a POST writes only on its allowlist
+    @pytest.mark.parametrize("method", ["PUT", "PATCH", "DELETE", "OPTIONS", "HEAD",
                                         "TRACE", "CONNECT", "FOO"])
-    def test_every_method_but_get_is_refused_and_changes_nothing(self, ledger, client, method,
-                                                                 monkeypatch):
+    def test_every_method_but_get_and_post_is_refused_and_changes_nothing(
+            self, ledger, client, method, monkeypatch):
         before = unchanged_state(ledger.path)
         opened = []
         monkeypatch.setattr(ui_server, "open_ledger", lambda *args, **kwargs: opened.append(1))
         response = client.request(method, "/", body=b"account=x&confirm=1")
         assert response.status == 405
-        assert response.header("Allow") == "GET"
+        assert response.header("Allow") == "GET, POST"
+        assert opened == []
+        assert unchanged_state(ledger.path) == before
+
+    def test_a_post_to_a_page_is_not_found_and_changes_nothing(self, ledger, client,
+                                                               monkeypatch):
+        before = unchanged_state(ledger.path)
+        opened = []
+        monkeypatch.setattr(ui_server, "open_ledger", lambda *args, **kwargs: opened.append(1))
+        response = client.request("POST", "/", body=b"account=x&confirm=1")
+        assert response.status == 404
         assert opened == []
         assert unchanged_state(ledger.path) == before
 
@@ -296,7 +306,8 @@ def every_kind_of_response(client):
         "not found": client.get("/no-such-page"),
         "bad address": client.get("/?account=a%20b"),
         "unknown account": client.get("/?account=nope"),
-        "method": client.request("POST", "/"),
+        "method": client.request("PUT", "/"),
+        "post": client.request("POST", "/"),
         "host": client.get("/", host="attacker.example"),
         "unreadable": client.exchange(b"GARBAGE\r\n\r\n"),
     }
@@ -311,7 +322,7 @@ class TestHeadersAndAssets:  # UB6
             assert {name: response.status for name, response in responses.items()} == {
                 "page": 403, "stylesheet": 403, "redirect": 303, "signed out": 403,
                 "not found": 403, "bad address": 403, "unknown account": 403, "method": 405,
-                "host": 421, "unreadable": 400}
+                "post": 403, "host": 421, "unreadable": 400}
             client.server.launch_key_used = False
             client.sign_in()
             responses = every_kind_of_response(client)
@@ -320,7 +331,7 @@ class TestHeadersAndAssets:  # UB6
         assert {name: response.status for name, response in responses.items()} == {
             "page": 200, "stylesheet": 200, "redirect": 403, "signed out": 403,
             "not found": 404, "bad address": 400, "unknown account": 400, "method": 405,
-            "host": 421, "unreadable": 400}
+            "post": 404, "host": 421, "unreadable": 400}
         for name, response in responses.items():
             for header, value in SECURITY_HEADERS.items():
                 assert response.header(header) == value, (name, header)
@@ -511,5 +522,6 @@ class TestPagesEqualTheCli:  # UB8
         tree = ast.parse(Path(ui_server.__file__).read_text())
         imported = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
         assert {module for module in imported if module.startswith("personal_finance")} == {
-            "personal_finance.cli", "personal_finance.reports.report_text"}
+            "personal_finance.cli", "personal_finance.reports.report_text",
+            "personal_finance.ui"}
         assert "SELECT" not in Path(ui_server.__file__).read_text()

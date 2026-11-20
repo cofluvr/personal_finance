@@ -2850,6 +2850,15 @@ def run_review_decision_show(args) -> int:
     return 0
 
 
+def active_decision_undo(conn, decision_id) -> tuple[str, str] | None:
+    """A decision still in effect: its account and the revision review decision show gives for
+    undoing it, for the UI's undo form. None for any other decision, or none."""
+    decision = load_decision(conn, decision_id)
+    if decision is None or decision.state != STATE_ACTIVE:
+        return None
+    return decision.account_id, undo_outlook(conn, decision, DEFAULT_RULES).revision
+
+
 def run_review_undo(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
@@ -5373,7 +5382,8 @@ def run_ui(args) -> int:
     # Through the gate before any port opens, so an unsafe ledger is refused first (D-058).
     open_ledger(args.db, read_only=True).close()
     server = LoopbackServer(args.db)
-    print(f"Serving {args.db} read-only, on 127.0.0.1 only. Open this address once:")
+    print(f"Serving {args.db} on 127.0.0.1 only. Review decisions can be made from its pages. "
+          "Open this address once:")
     print(f"  {server.launch_address}")
     print("It works once, in one browser. Use a private window, so the browser keeps no history "
           "of these pages. Stop with Ctrl-C.")
