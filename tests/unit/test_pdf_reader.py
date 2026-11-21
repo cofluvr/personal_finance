@@ -148,10 +148,16 @@ class TestPinnedVersion:
         declared = tomllib.loads((PROJECT_FOLDER / "pyproject.toml").read_text())
         assert pypdf.__version__ == pinned
         assert EXTRACTOR_VERSION == f"pypdf-{pinned}"
-        assert declared["project"]["dependencies"] == [f"pypdf=={pinned}"]
+        segno_pinned = re.search(r"^segno==(\S+)",
+                                 (PROJECT_FOLDER / "requirements.txt").read_text(), re.MULTILINE)[1]
+        assert declared["project"]["dependencies"] == [f"pypdf=={pinned}",
+                                                       f"segno=={segno_pinned}"]
 
-    def test_the_pin_carries_a_hash(self):
-        assert re.search(r"--hash=sha256:[0-9a-f]{64}", (PROJECT_FOLDER / "requirements.txt").read_text())
+    def test_each_pin_carries_a_hash(self):
+        text = (PROJECT_FOLDER / "requirements.txt").read_text()
+        for name in ("pypdf", "segno"):
+            assert re.search(rf"^{name}==\S+ \\\n    --hash=sha256:[0-9a-f]{{64}}$", text,
+                             re.MULTILINE), name
 
 
 class TestPdfTextCommand:

@@ -3526,6 +3526,90 @@ alternative, and approval of the security change.
 - **H.** Point 9's proposal and point 10's threat model.
 - **I.** The slices M20.1 to M20.3, in that order.
 
+### M20 slice plans — Approved by the owner's notes of 2026-11-21
+
+Written before any of M20 was built, after M19. The owner's notes of 2026-11-21 give sign-off on
+everything not specifically excepted, which this session takes as approving M20's network use
+(fetching `segno` once), the dependency, and these choices. These fix what D-076 leaves to build
+time.
+
+**Learnt first, from real runs** (the handoff's lesson):
+
+- `/usr/bin/openssl` is LibreSSL 3.3.6. **Point 2's command as written gives a P-256 key and
+  certificate with the curve's explicit parameters,** not its name (a 381-byte key), which TLS
+  stacks such as the phone's refuse. Adding `-pkeyopt ec_param_enc:named_curve` names the curve
+  (prime256v1's OID, a 138-byte key), and a test pins both. It writes both files `0644` under the
+  usual umask, and prints a progress line to stderr. Python's `ssl` (OpenSSL 3.0.15, TLS 1.3)
+  loads the pair.
+- `segno` 1.6.6 (pure Python, BSD-3, sha256
+  `28c7d081ed0cf935e0411293a465efd4d500704072cdb039778a2ab8736190c7`) **does not pass W1 bare.**
+  W1 finds seven uses, none on a path M20 takes: `webbrowser` and `urllib.request` in
+  `QRCode.show` (opens a viewer), `importlib` in `QRCode.__getattr__` (loads `to_*` plugins),
+  `ctypes` in `write_terminal_win` (Windows only), and `urllib.parse.quote`, a string function,
+  in `helpers.py` and `writers.py`. As pypdf's JBIG2 allowance, each is allowed **only inside the
+  function or the one import line named**, so a release that uses any of them elsewhere fails W1
+  and is reviewed before adoption. M20 calls `segno.make_qr(...)` and reads `.matrix` only: it
+  never shows, saves, writes or converts through segno, and draws the terminal code itself.
+
+**M20.1, identity and pairing (migration 0036).**
+
+1. **Tables.** `sync_identity` (ID, certificate SHA-256) and `sync_identity_event` (`retired`):
+   added to point 7's list, so the ledger knows which identity is current and `dv1` can cover it.
+   `pairing_window` (ID, identity, secret SHA-256, address, port, closing time) with
+   `pairing_window_event` (`failed`, many; `used` and `closed`, once each). `paired_device` (ID,
+   name, secret SHA-256, identity, the window it came from) with `paired_device_event`
+   (`revoked`): the row itself is the pairing, so no `paired` event. `sync_delivery` (device,
+   snapshot, digest) once per device and snapshot, and `sync_acknowledgement` once per delivery.
+   All append-only by trigger.
+2. **The identity** lives in `sync/<identity ID>/` beside the ledger, the folder `0700` and
+   `key.pem` and `certificate.pem` `0600`. openssl writes into a new `0700` partial folder, the
+   files are set `0600` there, the folder is renamed into place, then the row is inserted; a
+   failure removes the partial folder. The fingerprint is the SHA-256 of the certificate's DER,
+   decoded from the PEM with `base64`, so `ssl` stays in `sync/server.py` alone. openssl runs with
+   an empty environment, stdin, stdout and stderr closed, a 30-second timeout. On a real ledger
+   the `sync/` folder passes the originals folder's rules (no link, yours, `0700`).
+3. **Rotation** (`dv1` over the identity and every device's state) makes a new identity, retires
+   the old and revokes every active device in one transaction, then deletes the old key.
+4. **The pairing payload** is `commoncents-pair:v1?address=A&port=P&fingerprint=F&secret=S`, the
+   secret 32 bytes base64url without padding. The manual fallback is the address, port and secret
+   as 38 bytes in base32, grouped by four, beside the fingerprint's first 16 hex digits to compare.
+5. **The device name** is the owner's `--name` on the Mac (1 to 64 characters, escaped as D-040
+   wherever printed), not a name the phone posts: `POST /v1/pair`'s body is exactly
+   `{"pairing_secret": S}`. A departure from point 3, so a phone never names itself.
+6. **One pair or serve at a time** by an `fcntl` lock on `sync/sync.lock`, released if the process
+   dies. A window left unclosed by a crash counts as closed after its 120 seconds.
+7. **The address** must be a private IPv4 address (`ipaddress`'s `is_private`, IPv4, not
+   loopback, link-local, unspecified, multicast or reserved). The port is `--port`, 1024 to
+   65535, 8443 by default, and every `serve` shows a QR code of the address, port and fingerprint
+   with no secret. A departure from point 4: no stored port setting, since the phone learns the
+   port from either code.
+8. **The test-only loopback hook** is a subclass in `tests/` overriding the server's address
+   check. Nothing in `src/` can bind loopback.
+
+**M20.2, serving.**
+
+1. `serve` builds the snapshot in one read transaction (M19's `build_in_one_read`), checks it
+   with `files.verified`, and holds its bytes in memory. The first `GET` that succeeds records
+   the snapshot in `snapshot_record` and the delivery, in one write; a later one for the same
+   device and snapshot records nothing new.
+2. **Answers.** `200` with `Content-Type: application/json` and `Snapshot-SHA256` (the SHA-256 of
+   the bytes sent); `204` for an acknowledgement; `401` `{"error":"unauthorized"}`; `404`
+   `{"error":"not_found"}`; `409` `{"error":"unsupported_snapshot_major","supported_majors":[1]}`
+   after authentication, when `Accept-Snapshot-Major` names no supported major; `400`
+   `{"error":"bad_request"}` for a bad body or header, and for an acknowledgement matching no
+   delivery to that device; `413` for a body over 4 KB or headers over 8 KB. Every body is fixed.
+3. **Authentication** is checked before anything else on each request, against the ledger, so a
+   revocation applies on the next request. Ten `401`s stop the session.
+4. **Counts only** on exit: snapshots served, acknowledgements, requests refused.
+
+**M20.3, the protocol, the client and the threat model.**
+
+1. `tests/sync_reference_client.py` does point 8's steps in Python, over any connected socket.
+   The suite drives it over `socket.socketpair()`, as the local UI's client does, so the suite's
+   socket guard stays. The benchmark `--sync` drives it over real loopback TCP.
+2. `docs/sync-protocol.md` (for the iOS side) and `docs/sync-runbook.md` (for the owner).
+3. The real-phone delivery (YC2) is the owner's, and stays open until recorded.
+
 ### M20 acceptance criteria
 
 | ID | Test |

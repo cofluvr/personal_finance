@@ -152,15 +152,28 @@ SCENARIO_TABLES = ("scenario_promotion_entry", "scenario_promotion_event", "scen
 SNAPSHOT_TABLES = ("snapshot_record",)
 
 
+# Created by 0036, and empty until an identity is made or a phone paired (D-076 point 7).
+SYNC_TABLES = ("sync_acknowledgement", "sync_delivery", "paired_device_event", "paired_device",
+               "pairing_window_event", "pairing_window", "sync_identity_event", "sync_identity")
+
+
+def drop_sync_tables(conn) -> None:
+    """Undo 0036 on a ledger at the latest version, before setting it back further."""
+    for table in SYNC_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
 def drop_snapshot_tables(conn) -> None:
-    """Undo 0035 on a ledger at the latest version, before setting it back further."""
+    """Undo 0036 and 0035 on a ledger at the latest version, before setting it back further."""
+    drop_sync_tables(conn)
     for table in SNAPSHOT_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
 
 
 def drop_scenario_tables(conn) -> None:
-    """Undo 0035 and 0034 on a ledger at the latest version, before setting it back further."""
+    """Undo 0036 to 0034 on a ledger at the latest version, before setting it back further."""
     drop_snapshot_tables(conn)
     for table in SCENARIO_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -168,7 +181,7 @@ def drop_scenario_tables(conn) -> None:
 
 
 def drop_tag_tables(conn) -> None:
-    """Undo 0035 to 0033 on a ledger at the latest version, before setting it back further."""
+    """Undo 0036 to 0033 on a ledger at the latest version, before setting it back further."""
     drop_scenario_tables(conn)
     for table in TAG_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -342,6 +355,8 @@ class Ledger:
             position = 3 if words[1] == "dismissal" else 2
         if words[0] == "scenario":
             position = 3 if words[1] in ("input", "promotion") else 2
+        if words[0] == "sync":
+            position = 3 if words[1] == "identity" else 2
         if words[0] == "household":
             position = 2 if words[1] == "members" else 3
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],

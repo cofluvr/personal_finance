@@ -59,6 +59,8 @@ LEDGER_TABLES = (
     "tag", "tag_statement", "tag_statement_record", "tag_statement_event", "transaction_tag",
     "scenario", "scenario_event", "scenario_input", "scenario_input_event", "scenario_promotion",
     "scenario_promotion_event", "scenario_promotion_entry", "snapshot_record",
+    "sync_identity", "sync_identity_event", "pairing_window", "pairing_window_event",
+    "paired_device", "paired_device_event", "sync_delivery", "sync_acknowledgement",
 )
 
 
