@@ -425,8 +425,10 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         """pf transactions with the filters given, run in memory, so the page and the command
         never differ (D-073 point 4), and a form that searches by GET."""
         form = search_form(conn, parameters)
+        after = export_hint(self.server.ledger_path, parameters)
         if not parameters:
-            return self.send_page(200, "Transactions", transaction_list_lines(conn), form=form)
+            return self.send_page(200, "Transactions", transaction_list_lines(conn), form=form,
+                                  after=after)
         words = ["transactions", f"--db={self.server.ledger_path}",
                  *(f"--{name}={value}" for name, value in parameters.items())]
         code, printed, message = run_in_memory(words)
@@ -436,7 +438,7 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         for text in printed.splitlines():
             found = TRANSACTION_ROW.match(text)
             lines.add(text, linked_transaction_id=found and found[1])
-        self.send_page(200, "Transactions", lines, form=form)
+        self.send_page(200, "Transactions", lines, form=form, after=after)
 
     def answer_section(self, conn, path, parameters):
         """A section of PRD §18 as its commands print it, one after another, without creation
@@ -753,6 +755,17 @@ def search_parameters(query: str) -> dict[str, str] | None:
             return None
         parameters[name] = value
     return {name: value for name, value in parameters.items() if value != ""}
+
+
+def export_hint(ledger_path, parameters) -> str:
+    """The terminal command that exports these transactions. The page offers no download: one
+    would land in Downloads, unencrypted and perhaps synced (D-073 point 7)."""
+    scope = "".join(f" --{name} {value}" for name, value in parameters.items()
+                    if name in ("account", "from", "to"))
+    command = f"pf export transactions --db {ledger_path} --out FILE.csv{scope}"
+    return ('<p class="notice">To export transactions as CSV, to a private folder outside any '
+            'synced or git folder, run in the terminal:</p>'
+            f'<div class="report"><div class="hint-line">  {escaped(command)}</div></div>')
 
 
 def search_form(conn, parameters) -> str:

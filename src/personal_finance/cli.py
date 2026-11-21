@@ -30,6 +30,9 @@ from personal_finance.db.migrate import (
     migrate,
     schema_version,
 )
+from personal_finance.db.exports import ExportRefused, csv_text, write_export
+from personal_finance.reports.export_rows import AMOUNT_COLUMNS as EXPORT_AMOUNT_COLUMNS
+from personal_finance.reports.export_rows import TRANSACTION_COLUMNS, transaction_export_rows
 from personal_finance.db.originals import (
     originals_folder_beside,
     prepare_originals_folder,
@@ -628,6 +631,28 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--account", required=True, help="the account's name or ID")
         sub.add_argument("--revision", required=True,
                          help="the account's revision from account liquidity show")
+
+    export = commands.add_parser("export", help="write transactions or a report as CSV")
+    export_commands = export.add_subparsers(dest="export_command", required=True)
+    export_transactions = command(
+        "transactions", export_commands, handler=run_export_transactions,
+        help="write transactions with their effective values, type, category and tags as CSV")
+    export_transactions.add_argument("--out", type=Path, required=True,
+                                     help="a new file in a private folder, never replaced")
+    export_transactions.add_argument("--account", help="account name or ID")
+    export_transactions.add_argument("--from", dest="first_date", help="the first date, "
+                                     "YYYY-MM-DD")
+    export_transactions.add_argument("--to", dest="last_date", help="the last date, YYYY-MM-DD")
+    export_report = command(
+        "report", export_commands, handler=run_export_report,
+        help="write a report's lines as CSV, one line a row")
+    export_report.add_argument("--out", type=Path, required=True,
+                               help="a new file in a private folder, never replaced")
+    export_report.add_argument("report_name", choices=tuple(EXPORTED_REPORTS),
+                               help="the report, taking its own options after its name, so "
+                                    "--out comes before it")
+    export_report.add_argument("report_options", nargs=argparse.REMAINDER,
+                               help="the report's options, as its own command takes them")
 
     tag = commands.add_parser("tag", help="name the tags a transaction can carry")
     tag_commands = tag.add_subparsers(dest="tag_command", required=True)
@@ -2047,12 +2072,17 @@ def run_account_liquidity_undo(args) -> int:
     return 0
 
 
-def run_report_net_worth(args) -> int:
+def net_worth_report_lines_of(args) -> ReportLines:
+    """What report net worth prints, which pf export report writes too."""
     conn = open_ledger(args.db, read_only=True)
     if args.member is not None and load_household(conn).find_member(args.member) is None:
         raise CommandError("household member not found. Run household members.")
-    print_report(net_worth_report_lines(conn, as_of_date(conn, args.as_of).isoformat(),
-                                       args.member))
+    return net_worth_report_lines(conn, as_of_date(conn, args.as_of).isoformat(),
+                                       args.member)
+
+
+def run_report_net_worth(args) -> int:
+    print_report(net_worth_report_lines_of(args))
     return 0
 
 
@@ -4505,6 +4535,50 @@ TAGGING_PREVIEW_STATES = {
 }
 
 
+# Each report pf export report writes: the words of its own command, and what gives its lines.
+EXPORTED_REPORTS = {
+    "totals": (("totals",), lambda args: totals_report_lines_of(args)),
+    "monthly": (("report", "monthly"), lambda args: monthly_report_lines_of(args)),
+    "budget": (("report", "budget"), lambda args: budget_report_lines_of(args)),
+    "funds": (("report", "funds"), lambda args: funds_report_lines_of(args)),
+    "net-worth": (("report", "net-worth"), lambda args: net_worth_report_lines_of(args)),
+    "household": (("report", "household"), lambda args: household_report_lines_of(args)),
+}
+EXPORT_NOTICE = (
+    "The file is not encrypted and holds financial data: keep it private, and delete it when "
+    "done. Formula-like text cells start with an apostrophe."
+)
+
+
+def run_export_transactions(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    first = None if args.first_date is None else checked_date(args.first_date, "--from")
+    last = None if args.last_date is None else checked_date(args.last_date, "--to")
+    if first and last and first > last:
+        raise CommandError("--from is after --to. Nothing was written.")
+    rows = transaction_export_rows(conn, account_id, first, last)
+    written = write_export(args.out, csv_text(TRANSACTION_COLUMNS, rows, EXPORT_AMOUNT_COLUMNS),
+                           is_real_ledger(conn))
+    print(f"Exported {len(rows)} transactions to {args.out}: {written} bytes.")
+    print(f"  {EXPORT_NOTICE}")
+    return 0
+
+
+def run_export_report(args) -> int:
+    """The report's own command parses its options, so they mean what they mean there."""
+    words, lines_of = EXPORTED_REPORTS[args.report_name]
+    report_args = build_parser().parse_args([*words, "--db", str(args.db),
+                                             *args.report_options])
+    lines = lines_of(report_args)
+    conn = open_ledger(args.db, read_only=True)
+    written = write_export(args.out, csv_text(("line",), [(line.text,) for line in lines]),
+                           is_real_ledger(conn))
+    print(f"Exported {len(lines)} lines of {args.report_name} to {args.out}: {written} bytes.")
+    print(f"  {EXPORT_NOTICE}")
+    return 0
+
+
 def run_tag_add(args) -> int:
     conn = open_ledger(args.db)
     tag = add_tag(conn, args.name)
@@ -5018,10 +5092,15 @@ def run_review_coverage_undo(args) -> int:
     return 0
 
 
-def run_totals(args) -> int:
+def totals_report_lines_of(args) -> ReportLines:
+    """What totals prints, which pf export report writes too."""
     conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
-    print_report(totals_report_lines(conn, account_id))
+    return totals_report_lines(conn, account_id)
+
+
+def run_totals(args) -> int:
+    print_report(totals_report_lines_of(args))
     return 0
 
 
@@ -5161,18 +5240,24 @@ def validated_month(option, text) -> str | None:
     return text
 
 
-def run_report_monthly(args) -> int:
+def monthly_report_lines_of(args) -> ReportLines:
+    """What report monthly prints, which pf export report writes too."""
     first_month = validated_month("--from", args.first_month)
     last_month = validated_month("--to", args.last_month)
     if first_month and last_month and first_month > last_month:
         raise CommandError("--from is after --to. Nothing was changed.")
     conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
-    print_report(monthly_report_lines(conn, account_id, first_month, last_month))
+    return monthly_report_lines(conn, account_id, first_month, last_month)
+
+
+def run_report_monthly(args) -> int:
+    print_report(monthly_report_lines_of(args))
     return 0
 
 
-def run_report_household(args) -> int:
+def household_report_lines_of(args) -> ReportLines:
+    """What report household prints, which pf export report writes too."""
     first_month = validated_month("--from", args.first_month)
     last_month = validated_month("--to", args.last_month)
     if first_month and last_month and first_month > last_month:
@@ -5185,8 +5270,12 @@ def run_report_household(args) -> int:
         if member is None:
             raise CommandError("household member not found. Run household members.")
         member_id = member.member_id
-    print_report(household_report_lines(conn, account_id, first_month, last_month, member_id,
-                                        args.shared))
+    return household_report_lines(conn, account_id, first_month, last_month, member_id,
+                                        args.shared)
+
+
+def run_report_household(args) -> int:
+    print_report(household_report_lines_of(args))
     return 0
 
 
@@ -5204,7 +5293,8 @@ def run_report_income(args) -> int:
     return 0
 
 
-def run_report_budget(args) -> int:
+def budget_report_lines_of(args) -> ReportLines:
+    """What report budget prints, which pf export report writes too."""
     month = validated_month("--month", args.month)
     if args.as_of is not None:
         checked_as_of(args.as_of)
@@ -5212,7 +5302,11 @@ def run_report_budget(args) -> int:
     as_of = as_of_date(conn, args.as_of)
     if args.member is not None and load_household(conn).find_member(args.member) is None:
         raise CommandError("household member not found. Run household members.")
-    print_report(budget_report_lines(conn, month or as_of.isoformat()[:7], as_of, args.member))
+    return budget_report_lines(conn, month or as_of.isoformat()[:7], as_of, args.member)
+
+
+def run_report_budget(args) -> int:
+    print_report(budget_report_lines_of(args))
     return 0
 
 
@@ -5238,11 +5332,16 @@ def run_dashboard(args) -> int:
     return 0
 
 
-def run_report_funds(args) -> int:
+def funds_report_lines_of(args) -> ReportLines:
+    """What report funds prints, which pf export report writes too."""
     if args.as_of is not None:
         checked_as_of(args.as_of)
     conn = open_ledger(args.db, read_only=True)
-    print_report(funds_report_lines(conn, as_of_date(conn, args.as_of)))
+    return funds_report_lines(conn, as_of_date(conn, args.as_of))
+
+
+def run_report_funds(args) -> int:
+    print_report(funds_report_lines_of(args))
     return 0
 
 
@@ -5656,7 +5755,8 @@ def main(argv: list[str] | None = None) -> int:
 def explained_error(error: Exception) -> str:
     """What an error may say, the same in the CLI and the local UI. Expected errors keep their
     sanitized messages, and any other says only that something went wrong (D-037)."""
-    if isinstance(error, (CommandError, DecisionRefused, UnsafeLocation, BackupRefused)):
+    if isinstance(error, (CommandError, DecisionRefused, UnsafeLocation, BackupRefused,
+                          ExportRefused)):
         return str(error)
     if isinstance(error, sqlite3.OperationalError):
         return BUSY_EXPLANATION if "locked" in str(error) else "database error"

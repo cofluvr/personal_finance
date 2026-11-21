@@ -309,7 +309,7 @@ class Ledger:
             position = 3
         if words[0] == "income":
             position = 3 if words[1] == "source" else 2
-        if words[0] in ("setting", "budget", "fund", "loan", "tag"):
+        if words[0] in ("setting", "budget", "fund", "loan", "tag", "export"):
             position = 2
         if words[:2] in (["loan", "terms"], ["loan", "plan"]):
             position = 3
