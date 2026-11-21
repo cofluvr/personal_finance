@@ -3,6 +3,7 @@ synthetic data only. Pairing's own rows (a second use, an expired window, a sixt
 test_sync_pairing.py, and revocation's in test_sync_serve.py; the rows here are those of the
 connection and the request."""
 
+import json
 import ssl
 from datetime import date
 
@@ -153,11 +154,35 @@ class TestMalformedRequests:
             body=b"{}"))
         assert status_of(received) == 400
 
+    def valid_ack(self, serving) -> bytes:
+        return json.dumps({"snapshot_id": serving.document["snapshot_id"],
+                           "content_sha256": serving.document["content_sha256"]}).encode()
+
     @pytest.mark.parametrize("extra", ["Transfer-Encoding: chunked", "Content-Length: 12abc"])
     def test_framing_other_than_one_content_length_is_refused(self, ledger, serving, extra):
+        """With an acknowledgement that would otherwise be recorded, as the control shows."""
+        ledger.client.fetch()
+        body = self.valid_ack(serving)
+        length = "" if extra.startswith("Content-Length") else f"Content-Length: {len(body)}\r\n"
         request = (f"POST /v1/ack HTTP/1.1\r\nHost: h\r\n{authorized(ledger)[0]}\r\n"
-                   f"Content-Type: application/json\r\n{extra}\r\n\r\n").encode()
+                   f"Content-Type: application/json\r\n{length}{extra}\r\n\r\n").encode() + body
         assert status_of(self.send(ledger, serving, request)) == 400
+        assert ledger.table("sync_acknowledgement") == []
+        assert status_of(self.send(ledger, serving, self.ack_request(ledger, body))) == 204
+
+    @pytest.mark.parametrize("shape", ["extra", "repeated"])
+    def test_valid_values_in_a_wrong_shape_are_refused(self, ledger, serving, shape):
+        """Every value would be accepted alone, so only the shape can refuse it."""
+        ledger.client.fetch()
+        document = serving.document
+        pairs = (f'"snapshot_id": "{document["snapshot_id"]}", '
+                 f'"content_sha256": "{document["content_sha256"]}"')
+        body = ("{" + pairs + ', "extra": "c"}' if shape == "extra" else
+                "{" + f'"snapshot_id": "{document["snapshot_id"]}", ' + pairs + "}").encode()
+        assert status_of(self.send(ledger, serving, self.ack_request(ledger, body))) == 400
+        assert ledger.table("sync_acknowledgement") == []
+        assert status_of(self.send(ledger, serving,
+                                   self.ack_request(ledger, self.valid_ack(serving)))) == 204
 
     @pytest.mark.parametrize("method, path", [
         ("PUT", "/v1/ack"), ("DELETE", "/v1/snapshot/latest"), ("HEAD", "/v1/snapshot/latest"),

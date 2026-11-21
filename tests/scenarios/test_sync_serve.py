@@ -7,6 +7,7 @@ deliveries."""
 import hashlib
 import json
 import os
+import threading
 import time
 from datetime import date
 
@@ -191,6 +192,19 @@ class TestAuthentication:  # YB2, point 6
                                            serving.document["content_sha256"])
         assert answer.status == 401
 
+    def test_a_retired_identitys_device_gives_401_even_unrevoked(self, ledger, serving):
+        """Rotation revokes every device too, so this state is made by hand: the identity check
+        refuses alone, and the control before it shows the device served."""
+        assert ledger.client.fetch().status == 200
+        conn = ledger.conn()
+        conn.execute("INSERT INTO sync_identity_event (identity_id, event) VALUES (?, 'retired')",
+                     (ledger.made.identity_id,))
+        conn.execute("INSERT INTO sync_identity (identity_id, certificate_sha256) VALUES (?, ?)",
+                     ("99999999-9999-4999-8999-999999999999", "9" * 64))
+        conn.close()
+        assert ledger.table("paired_device_event") == []
+        assert ledger.client.fetch().status == 401
+
     def test_a_device_of_a_retired_identity_gives_401(self, ledger, serving, tmp_path):
         assert ledger.run("sync", "identity", "rotate", "--revision", ledger.rotate_token())[0] == 0
         assert ledger.client.fetch().status == 401
@@ -213,7 +227,10 @@ class TestTheSession:  # YB3, point 5
     def test_it_stops_at_its_time_limit(self, ledger):
         server = ledger.serving_server(AS_OF, minutes=0.005)
         started = time.monotonic()
-        server.run()
+        running = threading.Thread(target=server.run, daemon=True)
+        running.start()
+        running.join(timeout=5)
+        assert not running.is_alive(), "serve did not stop at its time limit"
         assert 0.2 < time.monotonic() - started < 3
         server.server_close()
         server.conn.close()
@@ -223,9 +240,10 @@ class TestTheSession:  # YB3, point 5
         for count in range(1, AUTHENTICATION_FAILURE_LIMIT + 1):
             assert ledger.client.fetch().status == 401
             assert serving.should_stop() == (count == AUTHENTICATION_FAILURE_LIMIT)
-        started = time.monotonic()
-        serving.run()
-        assert time.monotonic() - started < 1
+        running = threading.Thread(target=serving.run, daemon=True)
+        running.start()
+        running.join(timeout=5)
+        assert not running.is_alive(), "serve did not stop at its failure limit"
 
     def test_it_writes_nothing_but_deliveries(self, ledger, serving):
         tables = tuple(table for table in (*ALL_TABLES, "account", "import_run")

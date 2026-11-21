@@ -254,15 +254,14 @@ class NewDevice:
 
 
 def window_state(conn: sqlite3.Connection, window_id: str, now: datetime) -> tuple[bool, int]:
-    """(open, failures): open while not used, not closed, not past its time and under its
-    failure limit."""
+    """(open, failures): open while not used, not closed and not past its time. The failure
+    that reaches the limit closes the window in its own transaction."""
     closes_at, = conn.execute("SELECT closes_at FROM pairing_window WHERE window_id = ?",
                               (window_id,)).fetchone()
     events = [event for event, in conn.execute(
         "SELECT event FROM pairing_window_event WHERE window_id = ?", (window_id,))]
     failures = events.count("failed")
-    is_open = ("used" not in events and "closed" not in events and utc_text(now) < closes_at
-               and failures < PAIRING_FAILURE_LIMIT)
+    is_open = "used" not in events and "closed" not in events and utc_text(now) < closes_at
     return is_open, failures
 
 

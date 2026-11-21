@@ -229,3 +229,14 @@ class TestTheTables:  # YA1, G2
     def test_a_device_and_snapshot_are_delivered_once(self, recorded, changes):
         with pytest.raises(sqlite3.DatabaseError, match="append-only|UNIQUE"):
             inserted(recorded, "sync_delivery", changes)
+
+    def test_a_delivery_is_not_replaced_under_a_new_id(self, recorded):
+        """INSERT OR REPLACE with a new ID but the same device and snapshot would delete the
+        first delivery without its trigger firing."""
+        before = recorded.dump(SYNC_TABLES)
+        conn = recorded.conn()
+        with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+            conn.execute(ROWS["sync_delivery"][0].replace("INSERT", "INSERT OR REPLACE"),
+                         {**ROWS["sync_delivery"][1], "delivery_id": second(DELIVERY, "9")})
+        conn.close()
+        assert recorded.dump(SYNC_TABLES) == before

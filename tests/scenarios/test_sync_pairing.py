@@ -3,6 +3,7 @@ plan points 4 to 8). A window pairs once inside 120 seconds and refuses a second
 window, a wrong secret and a sixth attempt; only hashes are stored; the QR code encodes point 3's
 fields; and --address takes only a private IPv4 address."""
 
+import json
 import socket
 
 import pytest
@@ -120,6 +121,14 @@ class TestPairing:  # YA2
         assert received.split(b"\r\n")[0] in (b"HTTP/1.0 401 Unauthorized",
                                               b"HTTP/1.0 400 Bad Request")
         assert ledger.table("paired_device") == []
+
+    @pytest.mark.parametrize("secret", ["short", "A" * 44, "!" * 43, ""])
+    def test_a_secret_of_the_wrong_shape_is_a_counted_failure(self, ledger, window, secret):
+        body = json.dumps({"pairing_secret": secret}).encode()
+        received = raw_exchange(window, request_bytes("POST", "/v1/pair", "host", body=body),
+                                client_context())
+        assert received.startswith(b"HTTP/1.0 401 Unauthorized")
+        assert [event for _, _, event, _ in ledger.table("pairing_window_event")] == ["failed"]
 
     def test_in_pair_mode_nothing_else_answers(self, ledger, window):
         for request in (request_bytes("GET", "/v1/snapshot/latest", "host"),

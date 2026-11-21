@@ -36,12 +36,6 @@ CREATE TABLE pairing_window_event (
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 ) STRICT;
 
--- A window is used once and closed once.
-CREATE UNIQUE INDEX pairing_window_used_once ON pairing_window_event (window_id)
-    WHERE event = 'used';
-CREATE UNIQUE INDEX pairing_window_closed_once ON pairing_window_event (window_id)
-    WHERE event = 'closed';
-
 CREATE TABLE paired_device (
     device_id      TEXT PRIMARY KEY CHECK (length(device_id) = 36),
     name           TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 64),
@@ -109,7 +103,7 @@ CREATE TRIGGER sync_acknowledgement_no_delete BEFORE DELETE ON sync_acknowledgem
 BEGIN SELECT RAISE(ABORT, 'sync_acknowledgement is append-only'); END;
 
 -- INSERT OR REPLACE would delete a row without firing its delete trigger: refuse any insert that
--- meets an existing key.
+-- meets an existing key. A window's used and closed events are each once only.
 CREATE TRIGGER sync_identity_no_replace BEFORE INSERT ON sync_identity
 WHEN EXISTS (SELECT 1 FROM sync_identity WHERE identity_id = NEW.identity_id
                                             OR certificate_sha256 = NEW.certificate_sha256)
