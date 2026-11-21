@@ -3201,6 +3201,57 @@ institution names may appear on the phone.
   0035).
 - **G.** The slices M19.1 and M19.2, in that order.
 
+### M19 slice plans — Approved by the owner's notes of 2026-11-20
+
+Written before any of M19 was built, after M18. The owner's notes of 2026-11-20 approve the lead
+engineer's choices, the snapshot's destination included, gated as `pf export`'s is. These fix
+what D-075 leaves to build time.
+
+**M19.1, the builder and the format.**
+
+1. **The package** `personal_finance/snapshot/`: `canonical.py` (canonical bytes, refusing any
+   float, NaN or non-string key), `builder.py` (each section from one connection it is given,
+   and the envelope), `schema_v1.json` (the schema document) and `validate.py` (its validator).
+   It imports reports and planning; nothing imports it but the CLI.
+2. **Sections,** as point 2's table: `cutoff`, `period`, `household`, `accounts`, `months`,
+   `budget`, `safe_to_spend`, `funds`, `loans`, `net_worth`, `transactions`, `warnings`,
+   `review` and `assumptions`. Each figure is taken from the report its command prints, never
+   computed again. Where a figure needs the household timezone (budget pace, safe to spend) and
+   none is set, its section is `null` and a warning says so: a snapshot never assumes a zone.
+3. **Accounts** are referenced by `account_index`, their position in the snapshot's account list
+   by display name then ID, with the display name and type only.
+4. **Transactions** in the window are those whose reporting date (D-057's effective transaction
+   date, else posting date) falls in the last `window_days` days through `as_of`, inclusive, in
+   date then ID order. Each has its ledger transaction ID (not a record or external ID).
+5. **The schema document** is JSON in a small, stated subset: each node a `type` (`object`,
+   `array`, `string`, `integer`, `boolean`), objects their `fields`, each `required` and
+   `nullable` stated, arrays their `items`, strings an optional `enum` or `pattern` (a full
+   match), and every field whose name ends `_cents` a `value_kind` of `actual`, `projected`,
+   `reserved` or `allocated`. Unknown fields in a snapshot are ignored by the validator (the
+   compatibility policy's consumer rule), but the builder's output is checked to have none.
+6. **Golden fixtures** under `tests/fixtures/synthetic/snapshots/v1.0/`, built from fixed
+   synthetic ledgers with every generated ID made deterministic in the test (`uuid.uuid4`
+   replaced by a counter), so the bytes are pinned. A test fails if the builder's output differs
+   from a fixture, and another if the fixture's `schema_version` is not the schema's.
+
+**M19.2, creating, verifying and listing (migration 0035).**
+
+1. **`pf snapshot create --out PATH [--as-of] [--window-days N]`** opens the ledger read-only,
+   begins one read transaction, builds every section on that connection, and commits. Then it
+   writes the file by point 7's steps to a destination refused exactly as `pf export` refuses
+   one (`db/exports.py`'s checks: no symbolic link, not in a git work tree or synced folder, a
+   private folder, and on a real ledger an encrypted disk image), the file `0600`. Then it
+   records `snapshot_record` on a separate write connection. A recording failure leaves the file
+   and is reported with exit code 2.
+2. **`snapshot_record`** (migration 0035): `snapshot_id`, `schema_version`, `as_of`,
+   `window_days`, `generated_at` and `content_sha256`, with `created_at`. Append-only, no path.
+3. **`pf snapshot verify PATH [--db DB]`** reads the file and checks, in order: canonical bytes,
+   the envelope, the digest, the schema, point 6's reconciliations and point 3's excluded keys.
+   It writes nothing. With `--db` it also needs a record with the same ID and digest.
+4. **`pf snapshots --db DB`** lists the records.
+5. **The benchmark row** `--snapshot` on `--safe-to-spend`'s shape, timing create and verify and
+   recording the file's size.
+
 ### M19 acceptance criteria
 
 | ID | Test |
