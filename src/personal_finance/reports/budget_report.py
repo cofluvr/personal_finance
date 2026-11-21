@@ -9,6 +9,9 @@ target, conservatively, with budget pace and revised allowances, for the househo
   amounts count against the household only, and mark every member's figures provisional.
 - Category allowances compare a category's discretionary spending, its subcategories included,
   effective category first (D-064), against its cap.
+- A discretionary transaction paid from a fund (D-070 point 5) leaves discretionary actual by the
+  portion the fund paid, on a "paid from reserves" line of its own, and only its excess stays
+  discretionary. totals and its category still count it once, unchanged.
 - No input is actual income (point 5): M12's baseline income is shown as planned context only.
 
 Read only. Nothing here reads the clock: as_of is an argument (G7). Never calls the transfer
@@ -22,6 +25,7 @@ from datetime import date, datetime
 
 from personal_finance.planning.budget_pace import BudgetPace, budget_pace
 from personal_finance.planning.budgets import BudgetPlan, load_plans, plan_in_effect
+from personal_finance.planning.funds import load_portions
 from personal_finance.planning.settings import household_timezone
 from personal_finance.reconcile.category_effects import CONFIRMED_TRANSFER_SQL, SPENDING_TYPES
 from personal_finance.reconcile.household_effects import (
@@ -78,6 +82,8 @@ class BudgetMonth:
     # a plan that does not divide the allowance.
     target_cents: int | None
     discretionary: Spent = field(default_factory=Spent)
+    # The portion of discretionary spending a fund paid, apart from the target (D-070 point 5).
+    paid_from_reserves: Spent = field(default_factory=Spent)
     unclassified: Spent = field(default_factory=Spent)
     transfer_kinds: Spent = field(default_factory=Spent)
     # Of the three above, what is pending.
@@ -91,6 +97,8 @@ class BudgetMonth:
     fixed_actual: Spent = field(default_factory=Spent)
     baseline_income_planned_cents: int = 0
     corrected_after_close: bool = False
+    # The month's income report, which the dashboard reuses rather than computing it again.
+    income_month: object = None
 
     @property
     def actual_cents(self) -> int:
@@ -187,6 +195,7 @@ def budget_report(conn: sqlite3.Connection, month: str, as_of: date,
 
     context = income_report(conn, as_of, None, month, month).months
     if context:
+        report.income_month = context[0]
         report.baseline_income_planned_cents = context[0].total("baseline", "planned")
         report.fixed_planned_cents = context[0].classes["fixed"].due.cents
     if state == FUTURE:
@@ -208,6 +217,9 @@ def budget_report(conn: sqlite3.Connection, month: str, as_of: date,
         elif cents < 0 and financial_type is None:
             counted[transaction_id] = "unclassified"
 
+    paid_by_fund = {portion.consumed.transaction_id: portion.consumed_cents
+                    for portion in load_portions(conn)
+                    if counted.get(portion.consumed.transaction_id) == "discretionary"}
     shares = {transaction_id: None for transaction_id in counted}
     if member is not None:
         for entry in attributed_transactions(conn, household, None, list(counted)):
@@ -218,37 +230,55 @@ def budget_report(conn: sqlite3.Connection, month: str, as_of: date,
         if group is None:
             continue
         spent = -cents
+        paid = paid_by_fund.get(transaction_id, 0)
         if member is not None:
             entry = shares[transaction_id]
             if entry.attribution.kind == UNATTRIBUTED:
-                report.unattributed.add(spent)
+                report.unattributed.add(spent - paid)
                 continue
             mine = [part for member_id, part in entry.attribution.parts
                     if member_id == member.member_id]
             if not mine:
                 continue
+            paid = member_part_paid(paid, -sum(mine), spent)
             spent = -sum(mine)
-        getattr(report, group).add(spent)
-        if transaction_id in pending_ids:
-            report.pending.add(spent)
+        if paid:
+            report.paid_from_reserves.add(paid)
+        if spent - paid or not paid:
+            getattr(report, group).add(spent - paid)
+            if transaction_id in pending_ids:
+                report.pending.add(spent - paid)
 
     if member is None and plan is not None:
-        report.categories = category_allowances(conn, plan, facts, counted)
+        report.categories = category_allowances(conn, plan, facts, counted, paid_by_fund)
     if target is not None:
         if state == CURRENT:
             report.pace = budget_pace(target, report.actual_cents, month_end(month).day,
                                       as_of.day)
         if target - report.actual_cents < 0:
             report.largest = tuple(sorted(
-                (SpendingItem(row[0], row[7], row[8], -row[1]) for row in facts
-                 if counted.get(row[0]) == "discretionary"),
+                (SpendingItem(row[0], row[7], row[8], -row[1] - paid_by_fund.get(row[0], 0))
+                 for row in facts
+                 if counted.get(row[0]) == "discretionary"
+                 and -row[1] - paid_by_fund.get(row[0], 0)),
                 key=lambda item: (-item.spent_cents, item.effective_date,
                                   item.transaction_id))[:LARGEST_SHOWN])
     return report
 
 
-def category_allowances(conn, plan: BudgetPlan, facts, counted) -> tuple[CategoryAllowance, ...]:
-    """Each capped category's discretionary spending, its subcategories included."""
+def member_part_paid(paid_cents: int, member_cents: int, spent_cents: int) -> int:
+    """A member's part of what a fund paid, in proportion to their part of the spending, rounded
+    toward zero so their spending is never understated (G8)."""
+    if not paid_cents or not spent_cents:
+        return 0
+    magnitude = abs(paid_cents) * abs(member_cents) // abs(spent_cents)
+    return magnitude if paid_cents > 0 else -magnitude
+
+
+def category_allowances(conn, plan: BudgetPlan, facts, counted,
+                        paid_by_fund) -> tuple[CategoryAllowance, ...]:
+    """Each capped category's discretionary spending, its subcategories included, less what a
+    fund paid."""
     names = {category_id: name for category_id, name in conn.execute(
         "SELECT id, name FROM category")}
     parent_of = dict(conn.execute("SELECT id, parent_id FROM category"))
@@ -256,8 +286,9 @@ def category_allowances(conn, plan: BudgetPlan, facts, counted) -> tuple[Categor
     for transaction_id, cents, _, _, category_id, *_ in facts:
         if counted.get(transaction_id) != "discretionary" or category_id is None:
             continue
-        by_name[names[category_id]] -= cents
+        spent = -cents - paid_by_fund.get(transaction_id, 0)
+        by_name[names[category_id]] += spent
         if parent_of[category_id] is not None:
-            by_name[names[parent_of[category_id]]] -= cents
+            by_name[names[parent_of[category_id]]] += spent
     return tuple(CategoryAllowance(name, cents, by_name[name])
                  for name, cents in plan.category_allowances)

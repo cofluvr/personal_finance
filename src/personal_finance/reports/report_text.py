@@ -9,14 +9,22 @@ report rather than truncating it.
 
 import json
 from dataclasses import dataclass
+from datetime import date
 from itertools import islice
 from typing import NamedTuple
 
+from personal_finance.reconcile.category_rule_effects import normalized_text
 from personal_finance.money import format_cents
 from personal_finance.reconcile.apply import stale_accounts
 from personal_finance.reconcile.categories import UNCATEGORIZED, list_categories
-from personal_finance.reconcile.category_effects import NOT_SPENDING, SPENDING_TYPES
+from personal_finance.reconcile.category_effects import (
+    CONFIRMED_TRANSFER_SQL,
+    NOT_SPENDING,
+    SPENDING_TYPES,
+)
 from personal_finance.reconcile.allocation_effects import AMOUNT_DIFFERS
+from personal_finance.planning.funds import EMERGENCY, TAX
+from personal_finance.planning.schedules import cadence_spec
 from personal_finance.reconcile.household_effects import (
     ALLOCATED,
     BY_MEMBER,
@@ -55,9 +63,21 @@ from personal_finance.reconcile.transfer_effects import (
     ONE_SIDED_COUNTERPART_COVERED,
     ONE_SIDED_COUNTERPART_FOUND,
     TRANSFER_DATE_WINDOW_DAYS,
+    TRANSFER_TYPES,
 )
 from personal_finance.reports.coverage_evidence import load_document_coverage
 from personal_finance.reports.budget_report import budget_report
+from personal_finance.reports.fund_report import funds_report
+from personal_finance.reports.fund_standing import funds_view
+from personal_finance.reports.net_worth_report import net_worth
+from personal_finance.reports.safe_to_spend import (
+    CLEARS,
+    ROWS,
+    last_covered_day,
+    safe_to_spend,
+)
+from personal_finance.reports import loan_report
+from personal_finance.planning import loans
 from personal_finance.reports.income_report import income_report
 from personal_finance.reports.household import (
     ONE_MEMBER,
@@ -72,7 +92,9 @@ from personal_finance.reports.review_evidence import (
     review_revision,
     rows_sharing_a_document,
 )
+from personal_finance.reports.visuals import visuals
 from personal_finance.reports.totals import (
+    LOAN_INTEREST,
     GroupTotal,
     account_movement,
     category_rule_outcomes,
@@ -88,13 +110,16 @@ class ReportLine(NamedTuple):
     text: str
     # The review item this line names, which the UI links to its page.
     linked_review_item_id: str | None = None
+    # The transaction this line names, which the UI links to its page (M17.2a).
+    linked_transaction_id: str | None = None
 
 
 class ReportLines(list):
     """A report's lines, in order."""
 
-    def add(self, text: str, linked_review_item_id: str | None = None) -> None:
-        self.append(ReportLine(text, linked_review_item_id))
+    def add(self, text: str, linked_review_item_id: str | None = None,
+            linked_transaction_id: str | None = None) -> None:
+        self.append(ReportLine(text, linked_review_item_id, linked_transaction_id))
 
 
 @dataclass(frozen=True)
@@ -247,6 +272,23 @@ CATEGORIZATION_STATE_EXPLANATIONS = {
     NOT_SPENDING: (
         "it is no longer spending, as after its type changed or a transfer was confirmed, so it is "
         "uncategorized. Undo the categorization, or what changed"
+    ),
+}
+
+
+# What each outcome of a fund consumption means (D-070 point 5).
+CONSUMPTION_STATE_EXPLANATIONS = {
+    FIELD_APPLIED: "paid from the stated fund",
+    FIELD_IN_CONFLICT: (
+        "consumptions disagree, so it is paid from no fund. Undo all but one to settle it"
+    ),
+    FIELD_BASIS_CHANGED: (
+        "a consumption binds records now in several transactions, so it is paid from no fund. "
+        "Undo it, then consume each transaction"
+    ),
+    NOT_SPENDING: (
+        "it is no longer spending, as after its type changed or a transfer was confirmed, so it is "
+        "paid from no fund. Undo the consumption, or what changed"
     ),
 }
 
@@ -589,6 +631,29 @@ def add_transaction_evidence(out, entry, shared) -> None:
     add_household(out, entry)
     add_transfers(out, entry)
     add_recurring(out, entry)
+    add_consumptions(out, entry)
+    add_breakdowns(out, entry)
+    add_tags(out, entry)
+
+
+TAG_STATE_EXPLANATIONS = {
+    "applied": "these apply",
+    "conflict": "none apply, the statements disagree or are several",
+    "basis_changed": "none apply, its records were regrouped since it was made",
+}
+
+
+def add_tags(out, entry) -> None:
+    """Tag statements binding this transaction's records (D-073 point 5): the Tags section. A
+    transaction none reaches shows nothing here."""
+    if not entry.tags:
+        return
+    out.add("  Tags:")
+    for statement in entry.tags:
+        names = ", ".join(shown(name) for name in statement.tags) or "none"
+        out.add(f"    Tag statement {statement.tag_statement_id}: {names}, binding "
+                f"{describe_side(statement.bound_records)}")
+    out.add(f"    Tags: {TAG_STATE_EXPLANATIONS[entry.tags[0].state]}")
 
 
 def _effective_rank_values(record):
@@ -708,6 +773,49 @@ def add_allocations(out, entry) -> None:
     out.add(f"    Allocation: {ALLOCATION_STATE_EXPLANATIONS[entry.allocations[0].state]}")
 
 
+def add_consumptions(out, entry) -> None:
+    """Fund consumptions binding this transaction's records (D-070 point 5): the Paid from
+    section. A transaction none reaches shows nothing here."""
+    if not entry.consumptions:
+        return
+    out.add("  Paid from:")
+    for consumption in entry.consumptions:
+        out.add(f"    Consumption {consumption.consumption_id}: fund {consumption.fund_id} "
+                f"({shown(consumption.fund_name)}), binding "
+                f"{describe_side(consumption.bound_records)}")
+    out.add(f"    Fund: {CONSUMPTION_STATE_EXPLANATIONS[entry.consumptions[0].state]}. Spending "
+            "counts it once, unchanged, and the fund's own figures show the portion consumed")
+
+
+# What each outcome of a loan payment breakdown means (D-071 point 7).
+BREAKDOWN_STATE_EXPLANATIONS = {
+    FIELD_APPLIED: "the stated interest and fees count in spending, the principal in transfers",
+    FIELD_IN_CONFLICT: "breakdowns disagree, so none applies. Undo all but one to settle it",
+    FIELD_BASIS_CHANGED: (
+        "a breakdown binds records now in several transactions, so none applies. Undo it, then "
+        "break down each transaction"
+    ),
+    "does_not_fit": (
+        "it is no longer a confirmed loan payment, or its interest and fees are more than its "
+        "amount, so none applies. Undo the breakdown, or what changed"
+    ),
+}
+
+
+def add_breakdowns(out, entry) -> None:
+    """Loan payment breakdowns binding this transaction's records (D-071 point 7): the Principal
+    and interest section. A transaction none reaches shows nothing here."""
+    if not entry.breakdowns:
+        return
+    out.add("  Principal and interest:")
+    for breakdown in entry.breakdowns:
+        out.add(f"    Breakdown {breakdown.breakdown_id}: interest "
+                f"{format_cents(breakdown.interest_cents)}, fees "
+                f"{format_cents(breakdown.fees_cents)}, binding "
+                f"{describe_side(breakdown.bound_records)}")
+    out.add(f"    Breakdown: {BREAKDOWN_STATE_EXPLANATIONS[entry.breakdowns[0].state]}")
+
+
 def add_recurring(out, entry) -> None:
     """Income sources and obligations reaching this transaction (D-068 point 7). A transaction
     none reaches shows nothing here."""
@@ -803,12 +911,14 @@ def out_and_in(group) -> str:
 
 
 def categories_in_use(conn):
-    """The category list while a categorization or a category rule's outcome reaches some
-    transaction, else None, so that a ledger never categorized, or with every categorization and
-    rule undone, reports as before (D-063, D-064)."""
+    """The category list while a categorization, a category rule's outcome or an applied loan
+    payment breakdown reaches some transaction, else None, so that a ledger never categorized, or
+    with every categorization, rule and breakdown undone, reports as before (D-063, D-064,
+    D-071)."""
     if conn.execute(
         """SELECT 1 FROM transaction_category
-           UNION ALL SELECT 1 FROM transaction_rule_category LIMIT 1"""
+           UNION ALL SELECT 1 FROM transaction_rule_category
+           UNION ALL SELECT 1 FROM transaction_loan_breakdown WHERE state = 'applied' LIMIT 1"""
     ).fetchone() is None:
         return None
     return list_categories(conn)
@@ -861,6 +971,9 @@ def add_income_and_spending_groups(out, groups, categories=None) -> None:
         out.add(f"    {financial_type}: {out_and_in(group)}")
     out.add(f"  Of a transfer kind, not confirmed: {out_and_in(groups.unconfirmed_transfer_kinds)}")
     out.add(f"  Unclassified: {out_and_in(groups.unclassified)}")
+    if groups.divided_loan_payments:
+        out.add(f"  Loan payments a breakdown divides, counted in spending and in confirmed "
+                f"transfers: {groups.divided_loan_payments}")
 
 
 def add_month(out, month, categories=None) -> None:
@@ -1183,13 +1296,14 @@ def document_list_lines(conn) -> ReportLines:
     return out
 
 
-def transaction_list_lines(conn) -> ReportLines:
-    # Effective values: a corrected value where one applies, else the source value (D-049).
-    rows = conn.execute(
-        """SELECT entry.id,
+# Every transaction with its effective values: a corrected value where one applies, else the
+# source value (D-049). Its columns are the ID, the date shown, the amount, the status, the
+# description, whether corrected, whether completed by hand, and the account.
+TRANSACTION_LIST_SQL = """SELECT entry.id,
                   COALESCE(fixed_transaction_date.corrected_text, entry.transaction_date,
                            fixed_posting_date.corrected_text, entry.posting_date) AS shown_date,
-                  COALESCE(fixed_amount.corrected_amount_cents, entry.amount_cents),
+                  COALESCE(fixed_amount.corrected_amount_cents, entry.amount_cents)
+                      AS amount_cents,
                   entry.settlement_status,
                   COALESCE(fixed_description.corrected_text, entry.description),
                   EXISTS (SELECT 1 FROM transaction_correction fix
@@ -1199,7 +1313,8 @@ def transaction_list_lines(conn) -> ReportLines:
                             AND completion.kind = 'completed'
                             AND NOT EXISTS (SELECT 1 FROM record_resolution_event undone
                                             WHERE undone.resolution_id = completion.id
-                                              AND undone.event = 'undone'))
+                                              AND undone.event = 'undone')),
+                  entry.account_id
            FROM ledger_transaction entry
            LEFT JOIN transaction_correction fixed_amount
                ON fixed_amount.transaction_id = entry.id AND fixed_amount.field = 'amount'
@@ -1215,19 +1330,132 @@ def transaction_list_lines(conn) -> ReportLines:
            LEFT JOIN transaction_correction fixed_description
                ON fixed_description.transaction_id = entry.id
               AND fixed_description.field = 'description'
-              AND fixed_description.state = 'applied'
-           ORDER BY shown_date, entry.id"""
-    ).fetchall()
+              AND fixed_description.state = 'applied'"""
+# The most transactions a filtered list shows (D-073 point 4). The rest are counted.
+FILTERED_LIST_CAP = 500
+
+
+@dataclass(frozen=True)
+class TransactionFilters:
+    """pf transactions' filters, each already checked, and how each reads when shown back.
+    Different filters combine with AND (D-073 point 4)."""
+
+    search: str | None = None
+    account_id: str | None = None
+    first_date: str | None = None
+    last_date: str | None = None
+    category_id: int | None = None
+    tag_id: int | None = None
+    minimum_cents: int | None = None
+    maximum_cents: int | None = None
+    # (name, value as typed) for each filter given, for the header line.
+    shown: tuple[tuple[str, str], ...] = ()
+
+
+def transaction_list_lines(conn, filters: TransactionFilters | None = None) -> ReportLines:
+    """Every transaction, or with filters those matching, at most 500 with the rest counted.
+    With no filter the lines are exactly as before M17.3."""
+    if filters is None:
+        rows = conn.execute(TRANSACTION_LIST_SQL + " ORDER BY shown_date, entry.id").fetchall()
+    else:
+        rows = filtered_transaction_rows(conn, filters)
     out = ReportLines()
-    for transaction_id, when, cents, status, description, corrected, completed in rows:
+    if filters is not None:
+        described = ", ".join(f"{name} {shown(value)}" for name, value in filters.shown)
+        out.add(f"Transactions matching {described}:")
+    for (transaction_id, when, cents, status, description, corrected, completed,
+         _) in rows[:FILTERED_LIST_CAP] if filters is not None else rows:
         marker = "  (corrected)" if corrected else ""
         marker += "  (completed by hand)" if completed else ""
         out.add(
             f"{transaction_id}  {when}  {format_cents(cents):>12}  {status:<8}  "
-            f"{shown(description) if description else ''}{marker}"
+            f"{shown(description) if description else ''}{marker}",
+            linked_transaction_id=transaction_id,
         )
-    if not rows:
+    if filters is not None:
+        hidden = len(rows) - FILTERED_LIST_CAP
+        if not rows:
+            out.add("No transactions match.")
+        elif hidden > 0:
+            out.add(f"Matching: {len(rows)}, the first {FILTERED_LIST_CAP} shown. "
+                    f"{hidden} more match: narrow the filters to see them.")
+        else:
+            out.add(f"Matching: {len(rows)}")
+    elif not rows:
         out.add("No transactions.")
+    return out
+
+
+def filtered_transaction_rows(conn, filters: TransactionFilters) -> list[tuple]:
+    """The transactions every given filter selects, in the list's order. Dates bound the date
+    shown, inclusive; amounts bound the effective amount in cents, inclusive; a category is the
+    one in effect, a person's before a rule's (D-064); a tag is one applying; and text is found
+    in the effective description as D-064's rules compare it, ignoring case and repeated
+    spaces."""
+    conditions, arguments = [], []
+    if filters.account_id is not None:
+        conditions.append("listed.account_id = ?")
+        arguments.append(filters.account_id)
+    if filters.first_date is not None:
+        conditions.append("listed.shown_date >= ?")
+        arguments.append(filters.first_date)
+    if filters.last_date is not None:
+        conditions.append("listed.shown_date <= ?")
+        arguments.append(filters.last_date)
+    if filters.minimum_cents is not None:
+        conditions.append("listed.amount_cents >= ?")
+        arguments.append(filters.minimum_cents)
+    if filters.maximum_cents is not None:
+        conditions.append("listed.amount_cents <= ?")
+        arguments.append(filters.maximum_cents)
+    if filters.category_id is not None:
+        conditions.append(
+            """COALESCE((SELECT by_person.category_id FROM transaction_category by_person
+                         WHERE by_person.transaction_id = listed.id
+                           AND by_person.state = 'applied'),
+                        (SELECT by_rules.category_id FROM transaction_rule_category by_rules
+                         WHERE by_rules.transaction_id = listed.id
+                           AND by_rules.state = 'applied')) = ?""")
+        arguments.append(filters.category_id)
+    if filters.tag_id is not None:
+        conditions.append(
+            # Only an applied row holds tags (its CHECK), so the others never match.
+            """EXISTS (SELECT 1 FROM transaction_tag tagged
+                       WHERE tagged.transaction_id = listed.id
+                         AND ',' || tagged.tags || ',' LIKE '%,' || ? || ',%')""")
+        arguments.append(filters.tag_id)
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    rows = conn.execute(
+        f"""SELECT * FROM ({TRANSACTION_LIST_SQL}) listed {where}
+            ORDER BY listed.shown_date, listed.id""", arguments).fetchall()
+    if filters.search is not None:
+        wanted = normalized_text(filters.search)
+        rows = [row for row in rows if wanted in normalized_text(row[4] or "")]
+    return rows
+
+
+def chart_value_lines(chart) -> list[str]:
+    """Each row of a chart as its table prints it: the label, then each series and value, then
+    any note. The UI's marks carry these same words (D-073 point 6)."""
+    found = []
+    for row in chart.rows:
+        values = ", ".join(f"{name} {format_cents(value)}"
+                           for name, value in zip(chart.series, row.values))
+        note = f" ({row.note})" if row.note else ""
+        found.append(f"  {shown(row.label)}: {values}{note}")
+    return found
+
+
+def visual_lines(conn, as_of, charts=None) -> ReportLines:
+    """pf report visuals: each of the eight visuals' figures as a table (D-073 point 6). The
+    page passes the charts it draws, so they are computed once."""
+    out = ReportLines()
+    for chart in visuals(conn, as_of) if charts is None else charts:
+        out.add(f"{chart.title}:")
+        for line in chart_value_lines(chart):
+            out.add(line)
+        if chart.notice:
+            out.add(f"  ({chart.notice})")
     return out
 
 
@@ -1374,7 +1602,7 @@ def _add_household_table(out, columns, categories) -> None:
     row("Net account movement", net)
     flows("Income", lambda groups: groups.income)
     flows("Spending", lambda groups: groups.spending)
-    types = [financial_type for financial_type in SPENDING_TYPES
+    types = [financial_type for financial_type in (*SPENDING_TYPES, LOAN_INTEREST)
              if any(by_type(column.groups, financial_type).transactions for column in columns)]
     for financial_type in types:
         flows(f"  {financial_type}", lambda groups, kind=financial_type: by_type(groups, kind))
@@ -1392,6 +1620,9 @@ def _add_household_table(out, columns, categories) -> None:
     row("Transactions", lambda groups: str(sum(
         part.transactions for part in (groups.income, groups.spending, groups.confirmed_transfers,
                                        groups.unconfirmed_transfer_kinds, groups.unclassified))))
+    if any(column.groups.divided_loan_payments for column in columns):
+        row("  Divided loan payments, counted twice",
+            lambda groups: str(groups.divided_loan_payments))
 
     headings = [shown(column.heading) for column in columns]
     label_width = max(len(label) for label, _ in rows)
@@ -1557,6 +1788,9 @@ def budget_report_lines(conn, month, as_of, member_name=None) -> ReportLines:
         return out
     out.add(f"  Fixed spending, actual, apart from the target: {spent_words(report.fixed_actual)}")
     out.add(f"  Discretionary spending, actual: {spent_words(report.discretionary)}")
+    if report.paid_from_reserves.count:
+        out.add(f"  Paid from reserves, actual, apart from the target: "
+                f"{spent_words(report.paid_from_reserves)}")
     out.add(f"  Possible spending, unclassified, actual, counted until classified: "
             f"{spent_words(report.unclassified)}")
     out.add(f"  Possible spending, unconfirmed transfer kinds, actual, counted until classified: "
@@ -1611,4 +1845,579 @@ def budget_report_lines(conn, month, as_of, member_name=None) -> ReportLines:
         out.add(f"  Category {shown(allowance.name)}: allowance, planned "
                 f"{format_cents(allowance.allowance_cents)}, spent, actual "
                 f"{format_cents(allowance.spent_cents)}, budget pace {state}")
+    return out
+
+
+# Funds (D-070): the lines pf funds, pf fund show and pf report funds share.
+
+FUND_STATE_WORDS = {"funded": "funded", "underfunded": "underfunded",
+                    "in_progress": "in progress", "not_started": "not started"}
+TAX_LABEL = "a planning reserve, not a calculated tax liability"
+
+
+def fund_terms_sentence(fund, terms) -> str:
+    """A terms row as words, each figure labelled with what it is (G1)."""
+    if terms.shape == "monthly":
+        return f"{shown_amount(terms.amount_cents)} a month, planned"
+    if terms.shape == "percent" and fund.kind == TAX:
+        return f"{format_percent(terms.basis_points)} of tax-eligible income received, {TAX_LABEL}"
+    if terms.shape == "percent":
+        return f"{format_percent(terms.basis_points)} of baseline income a month, planned"
+    if terms.shape == "target_by":
+        return f"target {shown_amount(terms.amount_cents)} by the end of {terms.by_month}, planned"
+    if terms.shape == "minimum":
+        return f"minimum {shown_amount(terms.amount_cents)} held, required"
+    if terms.shape == "months":
+        return f"{terms.month_count} months of fixed commitments held, required"
+    if terms.shape == "due":
+        return f"target {shown_amount(terms.amount_cents)} due {terms.due_date}, planned"
+    return (f"target {shown_amount(terms.amount_cents)} due "
+            f"{cadence_spec(terms.cadence, terms.anchor)} from {terms.anchor}, planned")
+
+
+def add_fund_standing(out, view) -> None:
+    """A fund's figures as of the date, each labelled planned, required or assigned (G1)."""
+    fund, standing = view.fund, view.standing
+    if standing.state == "not_started":
+        out.add(f"  State: not started, its terms apply from {fund.terms[0].effective_from}")
+        return
+    if view.baseline_income_cents is not None:
+        out.add(f"  Baseline income this month, planned: {shown_amount(view.baseline_income_cents)}")
+    if view.monthly_fixed_commitments_cents is not None:
+        out.add(f"  Fixed commitments a month, planned: "
+              f"{shown_amount(view.monthly_fixed_commitments_cents)}")
+    if view.tax_accrual is not None:
+        accrual, payments = view.tax_accrual, view.tax_payments
+        out.add(f"  Tax reserve, {TAX_LABEL}: accrued {shown_amount(accrual.cents)} from "
+              f"{accrual.occurrences} received {'occurrence' if accrual.occurrences == 1 else 'occurrences'}, "
+              f"paid {shown_amount(payments.paid_cents)}, released "
+              f"{shown_amount(payments.released_cents)}")
+        if view.paid_beyond_reserve_cents:
+            out.add(f"  Paid beyond the reserve, {TAX_LABEL}: "
+                  f"{shown_amount(view.paid_beyond_reserve_cents)}")
+    if view.consumed_count and fund.kind != TAX:
+        cycle = f" since {view.consumed_since}" if view.consumed_since else ""
+        out.add(f"  Paid from this fund{cycle}: {shown_amount(view.consumed_cents)} in "
+              f"{view.consumed_count} {'transaction' if view.consumed_count == 1 else 'transactions'}"
+              ", taken from its assignments")
+    if standing.required_held_cents is not None:
+        out.add(f"  Required held: {shown_amount(standing.required_held_cents)}")
+    accounts = ", ".join(f"{shown(name)} {shown_amount(cents)}"
+                         for name, cents in view.assigned_by_account)
+    out.add(f"  Assigned: {shown_amount(standing.assigned_cents)}"
+          + (f" ({accounts})" if accounts else ""))
+    if standing.due is not None and standing.outstanding_cents:
+        if standing.months_left:
+            out.add(f"  Outstanding: {shown_amount(standing.outstanding_cents)}, due {standing.due}, "
+                  f"{standing.months_left} {'month' if standing.months_left == 1 else 'months'} "
+                  "left including it")
+        else:
+            out.add(f"  Outstanding: {shown_amount(standing.outstanding_cents)}, due {standing.due}, "
+                  "which has passed: all of it is needed now")
+    if standing.planned_contribution_cents is not None:
+        out.add(f"  Planned contribution this month: "
+              f"{shown_amount(standing.planned_contribution_cents)}")
+    if standing.required_held_cents is not None and standing.outstanding_cents:
+        what = "Restoration recommended" if fund.kind == EMERGENCY else "To assign"
+        out.add(f"  {what}, planned: {shown_amount(standing.outstanding_cents)}")
+    out.add(f"  State: {FUND_STATE_WORDS[standing.state]}")
+    if view.not_backed_on:
+        out.add("  Assignment not backed: "
+              + ", ".join(shown(name) for name in view.not_backed_on)
+              + " holds more in funds than its balance observed")
+    if view.provisional_on:
+        out.add("  Provisional: the balance of "
+              + ", ".join(shown(name) for name in view.provisional_on)
+              + " was observed more than 31 days before")
+
+
+def add_holding(out, holding, indent="  ") -> None:
+    observation = holding.observation
+    if observation is None:
+        out.add(f"{indent}Account {shown(holding.account_name)}: no balance observation on or "
+              f"before {holding.as_of}, assigned {shown_amount(holding.assigned_cents)}")
+    else:
+        out.add(f"{indent}Account {shown(holding.account_name)}: balance observed "
+              f"{shown_amount(observation.balance_cents)} on {observation.observed_on}, assigned "
+              f"{shown_amount(holding.assigned_cents)}, unassigned "
+              f"{shown_amount(max(0, holding.unassigned_cents))}")
+    if holding.over_assigned_cents:
+        out.add(f"{indent}  Over-assigned by {shown_amount(holding.over_assigned_cents)}: new "
+              "assignments here are refused until assignments are released or a higher balance "
+              "is observed")
+    if holding.provisional:
+        out.add(f"{indent}  Provisional: observed more than 31 days before {holding.as_of}")
+
+
+def fund_standing_lines(view) -> ReportLines:
+    out = ReportLines()
+    add_fund_standing(out, view)
+    return out
+
+
+def holding_lines(holding, indent="  ") -> ReportLines:
+    out = ReportLines()
+    add_holding(out, holding, indent)
+    return out
+
+
+FUNDS_NOTICE = (
+    "Funds as a plan: planned contributions, required amounts and the extra's allocation are "
+    "planned figures, never transfers and never assignments. Assigned amounts say what an "
+    "account's observed balance already holds, less what a fund has paid."
+)
+
+
+def funds_report_lines(conn, as_of) -> ReportLines:
+    """pf report funds' lines, which its UI page renders (D-070 point 8)."""
+    report = funds_report(conn, as_of)
+    view, extra = report.view, report.extra
+    out = ReportLines()
+    out.add(f"Funds as of {view.as_of}")
+    out.add(FUNDS_NOTICE)
+    for fund_view in view.funds:
+        fund = fund_view.fund
+        if not fund.applies:
+            continue
+        terms = fund.terms_on(view.as_of) or fund.terms[0]
+        out.add(f"Fund {fund.fund_id}: {shown(fund.name)}, {fund.kind}")
+        out.add(f"  Terms: from {terms.effective_from}, {fund_terms_sentence(fund, terms)}")
+        add_fund_standing(out, fund_view)
+        out.add(f"  Target reached at the planned rate: {report.reached[fund.fund_id]}")
+    undone = sum(not fund_view.fund.applies for fund_view in view.funds)
+    if undone:
+        out.add(f"Undone funds, not shown: {undone}. Run funds.")
+    out.add(f"Extra in {extra.month}, planned allocation by priority, not a transfer:")
+    out.add(f"  Extra paychecks received, actual: {format_cents(extra.extra_paychecks_cents)}")
+    if extra.side_tax_accrual_cents is None:
+        out.add(f"  Side income received, actual: {format_cents(extra.side_income_cents)}, no "
+                "tax reserve in effect")
+    else:
+        out.add(f"  Side income received, actual: {format_cents(extra.side_income_cents)}, less "
+                f"its tax reserve accrual {format_cents(extra.side_tax_accrual_cents)}, "
+                f"{TAX_LABEL}")
+    if extra.unused_capacity_cents is None:
+        out.add(f"  Unused capacity of {extra.closed_month}: none, no budget target applies")
+    else:
+        out.add(f"  Unused capacity of {extra.closed_month}, planned: "
+                f"{format_cents(extra.unused_capacity_cents)}")
+    out.add(f"  Extra to allocate, planned: {format_cents(extra.total_cents)}")
+    for position, allocation in enumerate(report.allocations, start=1):
+        need = ("no target, takes none" if allocation.need_cents is None
+                else f"needs {format_cents(allocation.need_cents)}")
+        out.add(f"  {position}. {shown(allocation.name)} ({allocation.fund_id}): {need}, "
+                f"planned {format_cents(allocation.allocated_cents)}")
+    if not report.allocations:
+        out.add("  No priority list: run fund priority to order the funds")
+    out.add(f"  Unallocated extra, planned: {format_cents(report.unallocated_cents)}")
+    out.add("Accounts holding funds:")
+    for holding in view.holdings:
+        add_holding(out, holding)
+    if not view.holdings:
+        out.add("  none: add a checking, savings or investment account")
+    not_backed = [holding for holding in view.holdings if holding.over_assigned_cents]
+    provisional = [holding for holding in view.holdings if holding.provisional]
+    out.add("Disclosures:")
+    out.add(f"  Accounts holding more in funds than their balance observed: {len(not_backed)}")
+    out.add(f"  Accounts whose balance was observed more than 31 days before: {len(provisional)}")
+    return out
+
+
+NET_WORTH_NOTICE = (
+    "Net worth from balance observations, never transaction totals: each account's latest "
+    "observation on or before the date, what is owed negative. An account with none is not "
+    "valued, never counted as zero."
+)
+
+
+def net_worth_report_lines(conn, as_of, member_name=None) -> ReportLines:
+    """pf report net-worth's lines, which its UI page renders (D-071 points 1 to 3)."""
+    report = net_worth(conn, as_of, member_name)
+    out = ReportLines()
+    out.add(f"Net worth as of {report.as_of}")
+    out.add(NET_WORTH_NOTICE)
+    for valuation in report.valued:
+        account = f"  Account {shown(valuation.name)} ({valuation.account_type.replace('_', ' ')})"
+        if valuation.observation is None:
+            out.add(f"{account}: not valued, no observation on or before {report.as_of}")
+            continue
+        words = "" if valuation.how == "counted" else f", {valuation.how}"
+        out.add(f"{account}: {format_cents(valuation.observation.balance_cents)}, observed "
+                f"{valuation.observation.observed_on}{words}")
+    incomplete = ""
+    if report.not_valued:
+        count = len(report.not_valued)
+        incomplete = (f", incomplete: {count} {'account' if count == 1 else 'accounts'} not "
+                      "valued")
+    out.add(f"Net worth, observed: {format_cents(report.total_cents)}{incomplete}")
+    if report.not_valued:
+        out.add("  Not valued: " + ", ".join(shown(name) for name in report.not_valued))
+    if report.mixed_dates:
+        out.add("  Mixed dates: the valuations counted span more than 31 days, or some are "
+                "older than 31 days: " + ", ".join(shown(name) for name in report.mixed_dates))
+    if report.histories:
+        out.add("Retirement and investment history:")
+        for history in report.histories:
+            out.add(f"  Account {shown(history.name)} ({history.account_type})")
+            observed = ", ".join(f"{day} {format_cents(cents)}"
+                                 for day, cents in history.observations) or "none"
+            out.add(f"    Observed: {observed}")
+            contributed = ", ".join(f"{month} {format_cents(cents)} ({count})"
+                                    for month, cents, count in history.contributions) or "none"
+            out.add(f"    Contributions in, applied investment contributions, actual: "
+                    f"{contributed}")
+        out.add("  Payroll contributions never appear as take-home deposits, so nothing here is "
+                "subtracted twice.")
+    if member_name is not None:
+        mine = next(part for part in report.parts if part.name == member_name)
+        out.add(f"Net worth of {shown(member_name)}, by account attribution, observed: "
+                f"{format_cents(mine.cents)}")
+        out.add("  Every part, by account attribution, adding to net worth:")
+        for part in report.parts:
+            out.add(f"    {shown(part.name)}: {format_cents(part.cents)}")
+    return out
+
+
+# Loans (D-071 points 4 to 6).
+
+LOANS_NOTICE = (
+    "Loan terms as stated, and actual payments against the schedule: only transfers confirmed "
+    "into a loan count as paid, and anything else is listed apart until confirmed."
+)
+
+
+def loan_terms_lines(conn, account_id) -> ReportLines:
+    """pf loan terms show's lines: the account's terms and each operation's lt1 token."""
+    name, account_type = loans.account_kind(conn, account_id)
+    terms = loans.load_loan_terms(conn).get(account_id)
+    out = ReportLines()
+    out.add(f"Loan terms of {shown(name)} ({account_type.replace('_', ' ')})")
+    if terms is None:
+        out.add("  No loan terms.")
+        out.add(f"Add revision: {loans.terms_revision(loans.ADD, account_id, None)}")
+        return out
+    remaining = ("not stated" if terms.remaining_months is None
+                 else f"{terms.remaining_months}, as the lender states")
+    out.add(f"  Due day: {terms.due_day}. Remaining months: {remaining}")
+    for start, rate in terms.rates:
+        out.add(f"  Rate from {start}: {loans.format_rate(rate)}")
+    for start, payment in terms.payments:
+        out.add(f"  Payment from {start}, scheduled: {format_cents(payment)}")
+    if not terms.payments:
+        out.add("  No scheduled payment: a card's rate is for interest projection only")
+    out.add(f"Rate revision: {loans.terms_revision(loans.RATE, account_id, terms)}")
+    if account_type == "loan":
+        out.add(f"Payment revision: {loans.terms_revision(loans.PAYMENT, account_id, terms)}")
+    out.add(f"Undo revision: {loans.terms_revision(loans.UNDO, account_id, terms)}")
+    return out
+
+
+def describe_plan(conn, plan) -> str:
+    if plan is None:
+        return "none"
+    names = dict(conn.execute("SELECT id, display_name FROM account"))
+    order = plan.order_kind
+    if plan.custom_order:
+        order += " " + ", ".join(shown(names[account]) for account in plan.custom_order)
+    if plan.extra_cents is not None:
+        return f"{order}, extra {format_cents(plan.extra_cents)} a month, planned"
+    if plan.extra_fund_id is not None:
+        fund = conn.execute("SELECT name FROM fund WHERE id = ?",
+                            (plan.extra_fund_id,)).fetchone()[0]
+        return f"{order}, extra from goal {shown(fund)}'s planned contribution"
+    return f"{order}, no extra"
+
+
+def loans_report_lines(conn, as_of) -> ReportLines:
+    """pf report loans' lines (D-071 points 4 and 6)."""
+    view = loan_report.loans_view(conn, as_of)
+    out = ReportLines()
+    out.add(f"Loans as of {view.as_of}")
+    out.add(LOANS_NOTICE)
+    for loan in view.loans:
+        terms = loan.terms
+        out.add(f"Loan {shown(terms.account_name)} ({terms.account_type.replace('_', ' ')}): due "
+                f"day {terms.due_day}")
+        rate = terms.rate_on(view.as_of)
+        out.add("  Rate in effect: " + (loans.format_rate(rate) if rate is not None
+                                         else f"none before {terms.rates[0][0]}"))
+        if terms.payments:
+            out.add(f"  Payment in effect, scheduled: "
+                    f"{format_cents(terms.payment_on(view.as_of))}")
+        else:
+            out.add("  No scheduled payment: a card's rate is for interest projection only")
+        if loan.observed is None:
+            out.add(f"  No balance observation on or before {view.as_of}: no projection")
+        else:
+            out.add(f"  Balance observed: {format_cents(loan.observed[1])} owed on "
+                    f"{loan.observed[0]}")
+        for period in loan.periods:
+            excess = (f", extra {format_cents(period.paid_cents - period.due_cents)}"
+                      if period.state == loans.EXTRA else "")
+            out.add(f"  Due {period.due}: due {format_cents(period.due_cents)}, scheduled, paid "
+                    f"{format_cents(period.paid_cents)}, actual, {period.state}{excess}")
+        if loan.broken_down_count:
+            out.add(f"  Interest and fees paid, actual, as breakdowns state them: "
+                    f"{loan.broken_down_count}, {format_cents(loan.broken_down_cents)}")
+        if loan.unconfirmed_count:
+            out.add(f"  Money in not confirmed as a payment, not counted until confirmed: "
+                    f"{loan.unconfirmed_count}, {format_cents(loan.unconfirmed_cents)}")
+    if not view.loans:
+        out.add("No loan terms. Run loan terms add.")
+    count, cents = view.unconfirmed_payments
+    out.add(f"Loan payments not confirmed to any loan, not counted until confirmed: {count}, "
+            f"{format_cents(cents)}")
+    plan = loans.active_plan(conn)
+    out.add(f"Payoff plan: {describe_plan(conn, plan)}")
+    out.add(f"  Plan revision: {loans.plan_revision(plan)}")
+    return out
+
+
+def add_assumptions(out) -> None:
+    out.add("Assumptions, projection, not lender-exact:")
+    for assumption in loans.ASSUMPTIONS:
+        out.add(f"  {assumption}")
+
+
+def loan_projection_lines(conn, account_id, as_of, extra_cents=0,
+                          months=loans.HORIZON_MONTHS) -> ReportLines:
+    """pf loan project's lines (D-071 point 5)."""
+    name, _ = loans.account_kind(conn, account_id)
+    terms = loans.load_loan_terms(conn).get(account_id)
+    out = ReportLines()
+    label = loans.PROJECTION_LABEL
+    out.add(f"Projection for {shown(name)} as of {as_of}, {label}")
+    if terms is None:
+        out.add("  No loan terms: no projection. Run loan terms add.")
+        return out
+    observed = loan_report.owed_as_of(conn, account_id, as_of)
+    if observed is None:
+        out.add(f"  No balance observation on or before {as_of}: no projection")
+        return out
+    add_assumptions(out)
+    if extra_cents:
+        out.add(f"  Extra assumed each month: {format_cents(extra_cents)}")
+    projection = loans.project(terms, observed[1], observed[0], extra_cents, months)
+    out.add(f"Start: {format_cents(observed[1])} owed, observed on {observed[0]}")
+    for month in projection.months:
+        flag = ", negative amortization" if month.negative_amortization else ""
+        out.add(f"  Due {month.due}: rate {loans.format_rate(month.rate_millionths)}, payment "
+                f"{format_cents(month.payment_cents)}, interest {format_cents(month.interest_cents)}, "
+                f"principal {format_cents(month.principal_cents)}, balance "
+                f"{format_cents(month.balance_cents)}, {label}{flag}")
+    if projection.paid_off:
+        out.add(f"Paid off on {projection.paid_off}, {label}")
+    else:
+        out.add(f"Not paid off within {len(projection.months)} months, {label}")
+    out.add(f"Total interest: {format_cents(projection.total_interest_cents)}, {label}")
+    if projection.negative_amortization:
+        out.add("Negative amortization: in some months the interest is above the payment, so "
+                "what is owed grows")
+    return out
+
+
+def payoff_extra(conn, as_of, extra_cents):
+    """The extra a month: as typed, else the plan's, else the planned contribution of the plan's
+    debt goal (D-070 point 4), else none. Returns the cents and where they come from."""
+    if extra_cents is not None:
+        return extra_cents, "as typed"
+    plan = loans.active_plan(conn)
+    if plan is None:
+        return 0, "no payoff plan"
+    if plan.extra_cents is not None:
+        return plan.extra_cents, "the payoff plan's"
+    if plan.extra_fund_id is not None:
+        view = next(fund_view for fund_view in funds_view(conn, date.fromisoformat(as_of)).funds
+                    if fund_view.fund.fund_id == plan.extra_fund_id)
+        planned = view.standing.planned_contribution_cents or 0
+        return planned, f"goal {shown(view.fund.name)}'s planned contribution"
+    return 0, "the payoff plan names none"
+
+
+def loan_payoff_lines(conn, as_of, order=None, extra_cents=None, custom=()) -> ReportLines:
+    """pf loan payoff's lines: each order side by side (D-071 point 6)."""
+    extra, source = payoff_extra(conn, as_of, extra_cents)
+    debts, outcomes = loan_report.payoff_orders(conn, date.fromisoformat(as_of), extra, order,
+                                                custom)
+    label = loans.PROJECTION_LABEL
+    names = {debt.terms.account_id: debt.terms.account_name for debt in debts}
+    out = ReportLines()
+    out.add(f"Payoff orders as of {as_of}, {label}")
+    if not debts:
+        out.add("  No loan with terms and a balance owed: nothing to order")
+        return out
+    out.add(f"  Monthly budget: every scheduled payment in effect, paid off or not, plus extra "
+            f"{format_cents(extra)}, {source}")
+    for debt in debts:
+        out.add(f"  Loan {shown(debt.terms.account_name)}: {format_cents(debt.owed_cents)} owed, "
+                f"rate {loans.format_rate(debt.rate_millionths)}")
+    add_assumptions(out)
+    for outcome in outcomes:
+        out.add(f"Order {outcome.order}: " + ", ".join(shown(names[account])
+                                                       for account in outcome.sequence))
+        for account in outcome.sequence:
+            paid_off = outcome.payoff_by_account[account] or "not within the horizon"
+            out.add(f"  Loan {shown(names[account])}: paid off {paid_off}, interest "
+                    f"{format_cents(outcome.interest_by_account[account])}, {label}")
+        months = outcome.months_to_debt_free
+        out.add(f"  Debt-free in {months} months, {label}" if months is not None
+                else f"  Not debt-free within {loans.HORIZON_MONTHS} months, {label}")
+    return out
+
+
+# Safe to spend and the dashboard (D-072 points 5 to 7). Every figure line says which kind it is:
+# estimated, reserved, planned, actual, budget pace or safe to spend (G1).
+
+SAFE_TO_SPEND_NOTICE = (
+    "  The lower of budget capacity and near-term liquidity until the next paycheck. Nothing "
+    "here moves money, and the liquid balance is an estimate, never a balance.")
+
+
+def amount_or_none(cents) -> str:
+    return "not evaluated" if cents is None else format_cents(cents)
+
+
+def safe_to_spend_lines(conn, as_of, explain: bool = False, view=None) -> ReportLines:
+    """pf safe-to-spend's lines, and the first part of the dashboard's, which passes the view it
+    computed so the month is computed once."""
+    view = safe_to_spend(conn, as_of) if view is None else view
+    out = ReportLines()
+    state = ", provisional" if view.provisional else ""
+    if view.today_cents is None:
+        out.add(f"Safe to spend as of {view.as_of}{state}: not available, neither constraint "
+                "is evaluated")
+    else:
+        out.add(f"Safe to spend as of {view.as_of}{state}: today "
+                f"{format_cents(view.today_cents)}, this week {format_cents(view.week_cents)}")
+    out.add(SAFE_TO_SPEND_NOTICE)
+    limiting = view.limiting
+    if limiting == "liquidity":
+        row = view.largest_row
+        if row is None:
+            out.add("  Limiting constraint: liquidity, with nothing protected")
+        else:
+            item = view.largest_item(row)
+            out.add(f"  Limiting constraint: liquidity, largest protected row {row}, largest "
+                    f"item {shown(item.name)}, reserved {format_cents(item.cents)}")
+    elif limiting == "budget":
+        out.add("  Limiting constraint: budget, the revised allowance of report budget")
+    horizon = view.horizon
+    until = (f"until the next paycheck on {horizon.next_paycheck} "
+             f"({shown(horizon.next_paycheck_source)})" if horizon.next_paycheck
+             else "to the month's end, with no salary pay date to come")
+    out.add(f"  Horizon: {horizon.as_of} to {horizon.last_day}, {horizon.days} "
+            f"{'day' if horizon.days == 1 else 'days'}, {until}")
+    if view.liquidity_evaluated:
+        out.add(f"  Liquid balance, estimated: {format_cents(view.liquid_cents)}")
+        out.add(f"  Protected, reserved: {format_cents(view.protected_cents)}")
+        surplus = view.surplus_cents
+        if surplus < 0:
+            causes = ", ".join(row for row in ROWS if view.row_cents(row))
+            out.add(f"  Short by {format_cents(-surplus)}, estimated, before the next paycheck "
+                    f"on {horizon.next_paycheck or horizon.last_day}: {causes}. Safe to spend "
+                    "is 0.00")
+        else:
+            out.add(f"  Surplus, estimated: {format_cents(surplus)}")
+        out.add(f"  Liquidity daily, safe to spend: {format_cents(view.liquidity_daily_cents)}, "
+                f"weekly {format_cents(view.liquidity_weekly_cents)}")
+    else:
+        out.add("  Liquidity: not evaluated, no account is designated liquid")
+    if view.budget_daily_cents is None:
+        out.add("  Budget: not evaluated, no budget plan in effect for the month")
+    else:
+        out.add(f"  Budget daily, budget pace: {format_cents(view.budget_daily_cents)}, weekly "
+                f"{format_cents(view.budget_weekly_cents)}")
+    if view.reasons:
+        out.add("  Provisional:")
+        for reason, details in view.reasons.items():
+            out.add(f"    {reason}: {'; '.join(shown(detail) for detail in details)}. Clears "
+                    f"when {CLEARS[reason]}")
+    if not view.buffer_set:
+        out.add("  Disclosure: no checking buffer is set, so none is kept back")
+    if not view.restoration_set:
+        out.add("  Disclosure: no emergency restoration is stated, so it is recommended, not "
+                "protected")
+    if explain:
+        add_explanation(out, view)
+    return out
+
+
+def add_explanation(out: ReportLines, view) -> None:
+    out.add("Liquidity accounts:")
+    for account in view.accounts:
+        if account.observed_on is None:
+            out.add(f"  Account {shown(account.name)}: not valued, no observation, left out")
+            continue
+        out.add(f"  Account {shown(account.name)}: estimated "
+                f"{format_cents(account.estimated_cents)} from {account.observed_on}'s "
+                f"observation {format_cents(account.observed_cents)} and activity since, "
+                f"actual {format_cents(account.activity_cents)} ({account.activity_count})")
+        if account.left_out_cents:
+            out.add(f"    Left out, actual: pending or unknown-status inflows "
+                    f"{format_cents(account.left_out_cents)}")
+    out.add("Protected, in order:")
+    for position, row in enumerate(ROWS, start=1):
+        out.add(f"  {position}. {row}, reserved: {format_cents(view.row_cents(row))}")
+        for item in view.items:
+            if item.row == row:
+                out.add(f"    {item.entry_kind.capitalize()} {shown(item.name)} "
+                        f"({item.entry_id}): {format_cents(item.cents)}, {item.detail}")
+
+
+def dashboard_lines(conn, as_of) -> ReportLines:
+    """pf dashboard's lines, which its UI page renders (D-072 point 7). It never calls totals."""
+    view = safe_to_spend(conn, as_of)
+    out = safe_to_spend_lines(conn, as_of, view=view)
+    text, month = as_of.isoformat(), as_of.isoformat()[:7]
+    # The month's budget and income, as safe to spend computed them (G9: computed once).
+    budget = view.budget
+    if budget.pace is None:
+        out.add(f"Budget pace, {month}: no plan in effect")
+    else:
+        out.add(f"Budget pace, {month}: remaining capacity "
+                f"{format_cents(budget.pace.remaining_capacity_cents)}, revised daily "
+                f"{format_cents(budget.pace.revised_daily_cents)}, against pace "
+                f"{format_cents(budget.pace.against_pace_cents)}")
+    view = funds_view(conn, as_of)
+    active = [fund_view for fund_view in view.funds if fund_view.fund.applies]
+    out.add(f"Funds: {len(active)} active")
+    for fund_view in active:
+        standing = fund_view.standing
+        outstanding = ("" if standing.outstanding_cents is None
+                       else f", outstanding, planned {format_cents(standing.outstanding_cents)}")
+        out.add(f"  Fund {shown(fund_view.fund.name)} ({fund_view.fund.kind}): "
+                f"{standing.state.replace('_', ' ')}, assigned, reserved "
+                f"{format_cents(standing.assigned_cents)}{outstanding}")
+    worth = net_worth(conn, text)
+    dates = [valuation.observation.observed_on for valuation in worth.valued
+             if valuation.how == "counted"]
+    oldest = f", oldest valuation {min(dates)}" if dates else ""
+    out.add(f"Net worth, observed: {format_cents(worth.total_cents)}, "
+            f"{len(worth.not_valued)} not valued{oldest}")
+    income_month = budget.income_month
+    planned = income_month.total("baseline", "planned") if income_month else 0
+    received = income_month.total("baseline", "received") if income_month else 0
+    out.add(f"Income, {month}: baseline received, actual {format_cents(received)}, against "
+            f"baseline, planned {format_cents(planned)}")
+    (open_items,) = conn.execute(
+        "SELECT COUNT(*) FROM review_issue WHERE status = 'open'").fetchone()
+    (transfer_kinds,) = conn.execute(
+        f"""SELECT COUNT(*) FROM ledger_transaction entry
+            JOIN transaction_classification kind
+                ON kind.transaction_id = entry.id AND kind.state = 'applied'
+            WHERE kind.financial_type IN ({", ".join("?" for _ in TRANSFER_TYPES)})
+              AND NOT ({CONFIRMED_TRANSFER_SQL})""", tuple(TRANSFER_TYPES)).fetchone()
+    out.add(f"Review: {open_items} open review items, {transfer_kinds} unconfirmed transfer "
+            "kinds")
+    out.add("Freshness, from institution data:")
+    for account_id, name in conn.execute(
+            "SELECT id, display_name FROM account ORDER BY display_name").fetchall():
+        covered = last_covered_day(conn, account_id)
+        (imported,) = conn.execute(
+            """SELECT MAX(document.imported_at) FROM source_document document
+               WHERE EXISTS (SELECT 1 FROM source_record record
+                             WHERE record.source_document_id = document.id
+                               AND record.account_id = ?)""", (account_id,)).fetchone()
+        out.add(f"  Account {shown(name)}: last covered day {covered or 'none'}, last import "
+                f"{imported[:10] + ' (UTC)' if imported else 'none'}")
     return out

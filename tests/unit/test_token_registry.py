@@ -18,15 +18,22 @@ KIND = re.compile(r"[a-z]{1,2}")
 # Each kind and the constant holding its version. Each later slice adds its own (G5's table).
 REGISTRY = {
     "a": "ATTRIBUTION_REVISION_VERSION",
+    "al": "LINK_REVISION_VERSION",
     "b": "OBSERVATION_REVISION_VERSION",
     "bp": "BUDGET_REVISION_VERSION",
     "c": "CORRECTION_REVISION_VERSION",
     "d": "DECISION_REVISION_VERSION",
     "f": "CLASSIFICATION_REVISION_VERSION",
+    "fa": "ASSIGNMENT_REVISION_VERSION",
+    "fc": "CONSUMPTION_REVISION_VERSION",
+    "fu": "FUND_REVISION_VERSION",
     "g": "CATEGORIZATION_REVISION_VERSION",
     "h": "SHARE_REVISION_VERSION",
     "in": "INCOME_REVISION_VERSION",
     "k": "DECLARATION_REVISION_VERSION",
+    "lb": "BREAKDOWN_REVISION_VERSION",
+    "lq": "LIQUIDITY_REVISION_VERSION",
+    "lt": "LOAN_REVISION_VERSION",
     "m": "MATCH_REVISION_VERSION",
     "o": "ONE_SIDED_REVISION_VERSION",
     "ob": "OBLIGATION_REVISION_VERSION",
@@ -34,8 +41,11 @@ REGISTRY = {
     "q": "RULE_UNDO_REVISION_VERSION",
     "r": "REVISION_VERSION",
     "s": "ALLOCATION_REVISION_VERSION",
+    "sc": "SCENARIO_REVISION_VERSION",
+    "sp": "PROMOTION_REVISION_VERSION",
     "st": "SETTING_REVISION_VERSION",
     "t": "TRANSACTION_REVISION_VERSION",
+    "tg": "TAGGING_REVISION_VERSION",
     "u": "RESOLUTION_REVISION_VERSION",
     "v": "DOCUMENT_COVERAGE_REVISION_VERSION",
 }
@@ -78,7 +88,7 @@ def test_a_reused_or_unregistered_kind_fails():
 
 def test_a_single_letter_and_a_version_never_read_as_two_letters():
     assert not KIND.fullmatch("t1")
-    assert re.fullmatch(r"([a-z]{1,2})(\d+)-[0-9a-f]{16}", "t10-0123456789abcdef").groups() == (
-        "t", "10")
+    assert re.fullmatch(r"([a-z]{1,2})(\d+)-[0-9a-f]{16}", "t12-0123456789abcdef").groups() == (
+        "t", "12")
     assert re.fullmatch(r"([a-z]{1,2})(\d+)-[0-9a-f]{16}", "in1-0123456789abcdef").groups() == (
         "in", "1")

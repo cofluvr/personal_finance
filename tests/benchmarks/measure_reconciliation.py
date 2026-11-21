@@ -2060,7 +2060,7 @@ def scale_allocations(conn) -> dict[str, int]:
         conn.execute(
             """INSERT INTO allocation_statement (id, account_id, allocation,
                                                  target_transaction_id, target_revision)
-               VALUES (?, ?, ?, ?, 't10-0')""", (allocation_id, account, value, transaction))
+               VALUES (?, ?, ?, ?, 't13-0')""", (allocation_id, account, value, transaction))
         conn.executemany("INSERT INTO allocation_statement_part VALUES (?, ?, ?)",
                          [(allocation_id, member, part) for member, part in parts])
         conn.execute("INSERT INTO allocation_statement_record VALUES (?, ?)",
@@ -2240,10 +2240,11 @@ RECURRING_BILLS = 59
 RECURRING_CONFLICTS = 600
 
 
-def recurring_ledger(root: Path):
+def recurring_ledger(root: Path, side_tax_eligible: bool = False):
     """The scale ledger plus a checking account, Bills, holding the six sources' paychecks and
     the bills, one file a month with complete coverage, typed directly, then 6 sources and 60
-    obligations written directly and derived once."""
+    obligations written directly and derived once. side_tax_eligible makes the side sources
+    tax-eligible (D-070's --funds row)."""
     from personal_finance.planning.schedules import Cadence, ScheduleTerms, scheduled_dates
 
     conn, path = scale_ledger(root)
@@ -2293,8 +2294,8 @@ def recurring_ledger(root: Path):
             """INSERT INTO income_source (id, account_id, name, kind, description_contains,
                                           normalization_version, tolerance_days,
                                           amount_tolerance_cents, tax_eligible, chain_id)
-               VALUES (?, 'bills', ?, ?, ?, 1, 3, 0, 0, ?)""",
-            (source_id, name, kind, text, source_id))
+               VALUES (?, 'bills', ?, ?, ?, 1, 3, 0, ?, ?)""",
+            (source_id, name, kind, text, int(side_tax_eligible and kind == "side"), source_id))
         conn.execute(
             """INSERT INTO income_source_terms (chain_id, effective_from, cadence, first_day,
                                                 second_day, interval_months, anchor,
@@ -2552,6 +2553,707 @@ def measure_budget() -> None:
               flush=True)
 
 
+FUNDS_ACCOUNTS = ("checking", "savings", "fund1", "fund2", "fund3", "fund4")
+FUNDS_AS_OF = date(2026, 6, 20)
+
+
+def measure_funds() -> None:
+    """Funds on M12's shape (D-070 point 9, GC4): 20 funds of every kind, 6 accounts holding
+    assignments (one over-assigned), 2,000 consumptions of the bills, and 60 months of
+    tax-eligible side income. Times report funds, report budget, fund assign, review consume
+    and a one-row import. Stops, as G9 says, if a report misses two seconds or a write costs
+    more than twice the import of one row, or above two seconds."""
+    from personal_finance.planning.funds import (
+        account_holding,
+        assign,
+        assignment_revision,
+        load_assignments,
+    )
+    from personal_finance.reconcile.consumptions import consume_transaction
+    from personal_finance.reports.fund_report import funds_report
+    from personal_finance.reports.review_evidence import load_merge_evidence, transaction_revision
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _ = recurring_ledger(root, side_tax_eligible=True)
+        conn.execute("BEGIN")
+        for number in range(1, 5):
+            conn.execute("INSERT INTO account (id, display_name, account_type) "
+                         "VALUES (?, ?, 'savings')", (f"fund{number}", f"Fund {number}"))
+        for number, account in enumerate(FUNDS_ACCOUNTS):
+            # fund4 is observed below what is assigned to it, so it is over-assigned.
+            balance = 50_000 if account == "fund4" else 5_000_000
+            conn.execute("INSERT INTO balance_observation (id, account_id, observed_on, "
+                         "balance_cents) VALUES (?, ?, '2026-06-01', ?)",
+                         (f"obs{number}", account, balance))
+            conn.execute("INSERT INTO balance_observation_event (balance_observation_id, event) "
+                         "VALUES (?, 'made')", (f"obs{number}",))
+        funds = [("e0", "emergency", "months", {"month_count": 3}),
+                 ("x0", "tax", "percent", {"basis_points": 2500})]
+        for number in range(9):
+            shape = ("monthly", "percent", "target_by")[number % 3]
+            terms = ({"amount_cents": 20_000}, {"basis_points": 500},
+                     {"amount_cents": 1_000_000, "by_month": "2027-12"})[number % 3]
+            funds.append((f"g{number}", "goal", shape, terms))
+        for number in range(9):
+            if number % 3 == 0:
+                funds.append((f"r{number}", "reserve", "due",
+                              {"amount_cents": 300_000, "due_date": "2026-12-01"}))
+            else:
+                funds.append((f"r{number}", "reserve", "recurring",
+                              {"amount_cents": 150_000, "cadence": "annual",
+                               "first_day": 1 + number, "anchor": f"2022-{number:02}-"
+                                                                  f"{1 + number:02}"}))
+        for fund_id, kind, shape, terms in funds:
+            conn.execute("INSERT INTO fund (id, name, kind) VALUES (?, ?, ?)",
+                         (fund_id, f"Fund {fund_id}", kind))
+            columns = ", ".join(terms)
+            conn.execute(f"INSERT INTO fund_terms (fund_id, effective_from, shape, {columns}) "
+                         f"VALUES (?, '2022-01-01', ?, {', '.join('?' for _ in terms)})",
+                         (fund_id, shape, *terms.values()))
+            conn.execute("INSERT INTO fund_event (fund_id, event) VALUES (?, 'made')",
+                         (fund_id,))
+        for number, (fund_id, kind, _, _) in enumerate(funds):
+            account = FUNDS_ACCOUNTS[number % len(FUNDS_ACCOUNTS)]
+            conn.execute("INSERT INTO fund_assignment (id, fund_id, account_id, amount_cents, "
+                         "created_at) VALUES (?, ?, ?, 100000, '2022-01-01T00:00:00.000Z')",
+                         (f"a{number}", fund_id, account))
+            conn.execute("INSERT INTO fund_assignment_event (assignment_id, event) "
+                         "VALUES (?, 'made')", (f"a{number}",))
+        # The emergency fund is never consumed, so its assignment on fund4, beyond fund4's
+        # balance, keeps that account over-assigned whatever the consumptions take.
+        conn.execute("INSERT INTO fund_assignment (id, fund_id, account_id, amount_cents, "
+                     "created_at) VALUES ('over', 'e0', 'fund4', 300000, "
+                     "'2022-01-01T00:00:00.000Z')")
+        conn.execute("INSERT INTO fund_assignment_event (assignment_id, event) "
+                     "VALUES ('over', 'made')")
+        conn.execute("INSERT INTO fund_priority_event (list_id, event) VALUES ('p0', 'made')")
+        conn.executemany("INSERT INTO fund_priority (list_id, position, fund_id) "
+                         "VALUES ('p0', ?, ?)",
+                         [(position, fund_id) for position, (fund_id, kind, _, _)
+                          in enumerate((fund for fund in funds if fund[1] != "tax"), start=1)])
+        bills = conn.execute(
+            """SELECT link.transaction_id, link.source_record_id FROM transaction_source link
+               JOIN ledger_transaction entry ON entry.id = link.transaction_id
+               JOIN transaction_classification kind ON kind.transaction_id = entry.id
+               WHERE entry.account_id = 'bills' AND kind.financial_type = 'purchase'
+               ORDER BY entry.external_id""").fetchall()
+        consumed = [fund for fund in funds if fund[1] != "emergency"]
+        for number, (transaction_id, record_id) in enumerate(bills[:FUNDS_CONSUMPTIONS]):
+            consumption_id = f"c{number}"
+            conn.execute("INSERT INTO fund_consumption (id, account_id, fund_id, "
+                         "target_transaction_id, target_revision) VALUES (?, 'bills', ?, ?, "
+                         "'t13-0')", (consumption_id, consumed[number % len(consumed)][0],
+                                      transaction_id))
+            conn.execute("INSERT INTO fund_consumption_record (consumption_id, source_record_id) "
+                         "VALUES (?, ?)", (consumption_id, record_id))
+            conn.execute("INSERT INTO fund_consumption_event (consumption_id, event) "
+                         "VALUES (?, 'made')", (consumption_id,))
+        write_transfer_effects(conn)
+        conn.execute("COMMIT")
+        build_seconds = time.perf_counter() - started
+
+        report = funds_report(conn, FUNDS_AS_OF)
+        applied = conn.execute("SELECT COUNT(*) FROM transaction_fund_consumption "
+                               "WHERE state = 'applied'").fetchone()[0]
+        tax = next(view for view in report.view.funds if view.fund.kind == "tax")
+        over = [holding for holding in report.view.holdings if holding.over_assigned_cents]
+        holding_accounts = {holding.account_id for holding in report.view.holdings
+                            if holding.assignments}
+        print(f"shape funds={len(report.view.funds)} accounts_holding={len(holding_accounts)} "
+              f"over_assigned={len(over)} consumptions={applied} "
+              f"tax_occurrences={tax.tax_accrual.occurrences} build={build_seconds:.1f}s",
+              flush=True)
+        # The shape reaches the cost it claims.
+        assert len(report.view.funds) == 20
+        assert {fund.fund.kind for fund in report.view.funds} == {"goal", "emergency", "reserve",
+                                                                  "tax"}
+        assert holding_accounts == set(FUNDS_ACCOUNTS) and len(over) == 1
+        assert applied == FUNDS_CONSUMPTIONS
+        assert tax.tax_accrual.occurrences >= 60
+        conn.close()
+
+        database = str(path)
+        as_of = FUNDS_AS_OF.isoformat()
+        report_seconds = timed_command("report", "funds", "--db", database, "--as-of", as_of)
+        budget_seconds = timed_command("report", "budget", "--db", database, "--month",
+                                       as_of[:7], "--as-of", as_of)
+
+        conn = connect(path)
+        conn.execute("INSERT INTO fund (id, name, kind) VALUES ('late', 'Late', 'goal')")
+        conn.execute("INSERT INTO fund_terms (fund_id, effective_from, shape, amount_cents) "
+                     "VALUES ('late', '2026-06-01', 'monthly', 1000)")
+        conn.execute("INSERT INTO fund_event (fund_id, event) VALUES ('late', 'made')")
+        conn.commit()
+        assignments = load_assignments(conn)
+        revision = assignment_revision(account_holding(conn, "savings", as_of, assignments),
+                                       "late", assignments)
+        started = time.perf_counter()
+        assign(conn, "late", "savings", "10.00", as_of, revision)
+        assign_seconds = time.perf_counter() - started
+        (transaction_id, _) = bills[FUNDS_CONSUMPTIONS]
+        revision = transaction_revision(load_merge_evidence(conn, transaction_id))
+        started = time.perf_counter()
+        consume_transaction(conn, "bills", transaction_id, revision, "r0")
+        consume_seconds = time.perf_counter() - started
+        later = root / "later.csv"
+        later.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+                         "LATER,2026-12-30,2026-12-30,SYNTHETIC LATER,-9.00,POSTED\n")
+        started = time.perf_counter()
+        (result,) = import_files(conn, [later], account_id="savings",
+                                 layout=SYNTHETIC_CHECKING_V1)
+        import_seconds = time.perf_counter() - started
+        assert result.outcome == "imported"
+        conn.close()
+        print(f"report_funds={report_seconds:7.3f}s report_budget={budget_seconds:7.3f}s "
+              f"fund_assign={assign_seconds:7.3f}s review_consume={consume_seconds:7.3f}s "
+              f"one_import={import_seconds:7.3f}s", flush=True)
+        stops = [name for name, seconds in (("report funds", report_seconds),
+                                            ("report budget", budget_seconds)) if seconds > 2]
+        stops += [name for name, seconds in (("fund assign", assign_seconds),
+                                             ("review consume", consume_seconds))
+                  if seconds > 2 * import_seconds or seconds > 2]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
+SAFE_AS_OF_DATES = [date(2026, month, 3 + month) for month in range(1, 13)]
+
+
+def safe_to_spend_ledger(root: Path):
+    """--safe-to-spend's shape: --recurring's, with every input safe to spend reads, the
+    household timezone and a buffer set. Returns the connection, the path, and the numbers of
+    liquid accounts and funds."""
+    conn, path, _ = recurring_ledger(root, side_tax_eligible=True)
+    conn.execute("BEGIN")
+    conn.execute("INSERT INTO ledger_setting (id, setting_key, value) "
+                 "VALUES ('zone', 'household_timezone', 'America/Chicago')")
+    conn.execute("INSERT INTO ledger_setting_event (setting_id, event) VALUES ('zone', 'made')")
+    conn.execute("INSERT INTO ledger_setting (id, setting_key, value) "
+                 "VALUES ('buffer', 'checking_buffer_cents', '50000')")
+    conn.execute("INSERT INTO ledger_setting_event (setting_id, event) "
+                 "VALUES ('buffer', 'made')")
+    conn.execute("INSERT INTO budget_plan (id, effective_from, allowance_cents, "
+                 "corrected_closed_month) VALUES ('plan', '2022-01', 300000, 0)")
+    conn.execute("INSERT INTO budget_plan_event (plan_id, event) VALUES ('plan', 'made')")
+    liquid = ("bills", "checking", "savings")
+    for number, account in enumerate(liquid):
+        conn.execute("INSERT INTO account_liquidity (id, account_id) VALUES (?, ?)",
+                     (f"lq{number}", account))
+        conn.execute("INSERT INTO account_liquidity_event (designation_id, event) "
+                     "VALUES (?, 'made')", (f"lq{number}",))
+        for month in range(1, 13):
+            observation = f"sobs{number}-{month}"
+            balance = 5_000_000 if month % 2 else 100_000
+            conn.execute("INSERT INTO balance_observation (id, account_id, observed_on, "
+                         "balance_cents) VALUES (?, ?, ?, ?)",
+                         (observation, account, f"2026-{month:02}-01", balance))
+            conn.execute("INSERT INTO balance_observation_event "
+                         "(balance_observation_id, event) VALUES (?, 'made')",
+                         (observation,))
+    funds = (("tax", "tax", "percent", {"basis_points": 2500}),
+             ("reserve", "reserve", "recurring",
+              {"amount_cents": 120_000, "cadence": "annual", "first_day": 15,
+               "anchor": "2022-03-15"}),
+             ("rainy", "emergency", "minimum", {"amount_cents": 2_000_000}),
+             ("goal", "goal", "monthly", {"amount_cents": 40_000}))
+    for fund_id, kind, shape, terms in funds:
+        conn.execute("INSERT INTO fund (id, name, kind) VALUES (?, ?, ?)",
+                     (fund_id, f"Fund {fund_id}", kind))
+        columns = ", ".join(terms)
+        conn.execute(f"INSERT INTO fund_terms (fund_id, effective_from, shape, {columns}) "
+                     f"VALUES (?, '2022-01-01', ?, {', '.join('?' for _ in terms)})",
+                     (fund_id, shape, *terms.values()))
+        conn.execute("INSERT INTO fund_event (fund_id, event) VALUES (?, 'made')",
+                     (fund_id,))
+        if kind != "tax":
+            conn.execute("INSERT INTO fund_assignment (id, fund_id, account_id, "
+                         "amount_cents, created_at) VALUES (?, ?, 'savings', 10000, "
+                         "'2022-01-01T00:00:00.000Z')", (f"sa{fund_id}", fund_id))
+            conn.execute("INSERT INTO fund_assignment_event (assignment_id, event) "
+                         "VALUES (?, 'made')", (f"sa{fund_id}",))
+    conn.execute("INSERT INTO fund_restoration (id, fund_id, effective_from, monthly_cents) "
+                 "VALUES ('restore', 'rainy', '2022-01-01', 25000)")
+    conn.execute("INSERT INTO fund_restoration_event (restoration_id, event) "
+                 "VALUES ('restore', 'made')")
+    for number in range(2):
+        account = f"sloan{number}"
+        conn.execute("INSERT INTO account (id, display_name, account_type) "
+                     "VALUES (?, ?, 'loan')", (account, f"Safe loan {number}"))
+        conn.execute("INSERT INTO loan_terms (id, account_id, due_day) VALUES (?, ?, ?)",
+                     (f"st{number}", account, 5 + number * 10))
+        conn.execute("INSERT INTO loan_terms_event (terms_id, event) VALUES (?, 'made')",
+                     (f"st{number}",))
+        conn.execute("INSERT INTO loan_rate_period (terms_id, effective_from, "
+                     "rate_millionths) VALUES (?, '2022-01-01', 6875000)", (f"st{number}",))
+        conn.execute("INSERT INTO loan_payment_period (terms_id, effective_from, "
+                     "payment_cents) VALUES (?, '2022-01-01', ?)",
+                     (f"st{number}", 150_000 + number))
+    # Bill 00, on the 1st, covers the first loan.
+    conn.execute("INSERT INTO obligation_coverage (id, obligation_id, loan_account_id) "
+                 "VALUES ('cover', 'ob0', 'sloan0')")
+    conn.execute("INSERT INTO obligation_coverage_event (coverage_id, event) "
+                 "VALUES ('cover', 'made')")
+    conn.execute("COMMIT")
+    return conn, path, len(liquid), len(funds)
+
+
+def measure_safe_to_spend() -> None:
+    """Safe to spend on M12's shape (D-072 point 8, SB7): the --recurring shape's sources and
+    bills, with a budget plan, a tax reserve, a reserve, an emergency fund restored monthly and a
+    goal, 2 loans with terms (one covered by a bill), 3 liquidity accounts observed monthly, high
+    in odd months and low in even ones, and a buffer. Times safe-to-spend and dashboard at 12
+    as-of dates and reports the slowest. Asserts every protected row is reached and each
+    constraint limits at some date. Stops, as G9 says, if either misses one second."""
+    from personal_finance.reports.safe_to_spend import BUDGET, LIQUIDITY, ROWS, safe_to_spend
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, liquid_count, fund_count = safe_to_spend_ledger(root)
+        build_seconds = time.perf_counter() - started
+
+        rows_reached, limiting = set(), set()
+        for as_of in SAFE_AS_OF_DATES:
+            view = safe_to_spend(conn, as_of)
+            rows_reached |= {item.row for item in view.items}
+            limiting.add(view.limiting)
+            assert not any(item.entry_kind == "loan" and item.entry_id == "sloan0"
+                           for item in view.items)
+            entries = [(item.entry_kind, item.entry_id) for item in view.items]
+            assert len(entries) == len(set(entries))
+        (transactions,) = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()
+        print(f"shape transactions={transactions} liquid={liquid_count} funds={fund_count} "
+              f"loans=2 rows_reached={len(rows_reached)} limiting={sorted(limiting)} "
+              f"build={build_seconds:.1f}s", flush=True)
+        # The shape reaches the cost it claims.
+        assert transactions >= 100_000
+        assert rows_reached == set(ROWS), set(ROWS) - rows_reached
+        assert limiting == {BUDGET, LIQUIDITY}
+        conn.close()
+
+        database = str(path)
+        slowest = {"safe-to-spend": (0.0, None), "dashboard": (0.0, None)}
+        for as_of in SAFE_AS_OF_DATES:
+            for command in slowest:
+                seconds = timed_command(command, "--db", database, "--as-of", as_of.isoformat())
+                if seconds > slowest[command][0]:
+                    slowest[command] = (seconds, as_of.isoformat())
+        print(" ".join(f"{command}={seconds:7.3f}s (as of {as_of})"
+                       for command, (seconds, as_of) in slowest.items()), flush=True)
+        stops = [command for command, (seconds, _) in slowest.items() if seconds > 1]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
+SCENARIO_AS_OF = date(2026, 7, 15)
+# Ten templates cycled four to a scenario, so the 40 inputs hold every kind, replacements of a
+# source, an obligation and a reserve, and a home purchase (D-074 point 8).
+SCENARIO_TEMPLATES = (
+    dict(kind="income", from_date="2026-08-01", amount="2600.00", cadence="biweekly",
+         anchor="2026-08-07", replaces="src0"),
+    dict(kind="expense", from_date="2026-08-01", amount="90.00", cadence="monthly:10",
+         replaces="ob1"),
+    dict(kind="annual_expense", from_date="2026-08-01", amount="1500.00", cadence="annual:03-15",
+         replaces="reserve"),
+    dict(kind="home_purchase", from_date="2026-09-10", price="300000.00",
+         down_payment="60000.00", closing_costs="6000.00", loan_rate="6.5", loan_months="360",
+         ownership_costs="450.00"),
+    dict(kind="bonus", from_date="2026-12-15", amount="3000.00", confirmed=True),
+    dict(kind="purchase", from_date="2026-10-01", amount="1800.00"),
+    dict(kind="loan_payoff", from_date="2026-09-01", amount="5000.00", loan_account_id="sloan1"),
+    dict(kind="borrowing", from_date="2026-09-01", amount="10000.00", loan_rate="9.5",
+         loan_months="48"),
+    dict(kind="income", from_date="2026-08-01", amount="400.00", cadence="monthly:20",
+         account_id="bills", match="synthetic tutoring"),
+    dict(kind="expense", from_date="2026-08-01", amount="45.00", cadence="monthly:25",
+         account_id="bills", match="synthetic gym", uncertain=True),
+)
+
+
+def measure_scenarios() -> None:
+    """Scenarios on --safe-to-spend's shape (D-074 point 8, XC2): 10 scenarios with 40 inputs of
+    every kind. Times scenario compare at 24 months for each and at 120 for three, and promote
+    and its undo for the first. Stops, as G9 says, if compare misses 2.0s at 24 months or 5.0s
+    at 120."""
+    from personal_finance.planning import scenarios
+    from personal_finance.planning.promotions import (
+        active_promotion,
+        promotion_revision,
+        promotion_undo_revision,
+    )
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _, _ = safe_to_spend_ledger(root)
+        build_seconds = time.perf_counter() - started
+        scenario_ids = []
+        for number in range(10):
+            scenario_id = scenarios.add_scenario(conn, f"Scenario {number}", number % 2 == 1)
+            scenario_ids.append(scenario_id)
+            for step in range(4):
+                template = SCENARIO_TEMPLATES[(number * 4 + step) % len(SCENARIO_TEMPLATES)]
+                scenario = scenarios.find_scenario(conn, scenario_id)
+                scenarios.add_input(conn, scenario_id, scenarios.InputRequest(**template),
+                                    scenarios.scenario_revision(scenario, scenarios.ADD_INPUT))
+        kinds = {kind for (kind,) in conn.execute("SELECT kind FROM scenario_input")}
+        (inputs,) = conn.execute("SELECT COUNT(*) FROM scenario_input").fetchone()
+        (replacing,) = conn.execute(
+            "SELECT COUNT(DISTINCT replaces_kind) FROM scenario_input").fetchone()
+        (transactions,) = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()
+        print(f"shape transactions={transactions} scenarios=10 inputs={inputs} "
+              f"kinds={len(kinds)} replaced_kinds={replacing} build={build_seconds:.1f}s",
+              flush=True)
+        # The shape reaches the cost it claims.
+        assert transactions >= 100_000 and inputs == 40
+        assert kinds == set(scenarios.KINDS) and replacing == 3
+        first = scenarios.find_scenario(conn, scenario_ids[0])
+        promote_token = promotion_revision(conn, first)
+        conn.close()
+
+        database = str(path)
+        as_of = SCENARIO_AS_OF.isoformat()
+        # The first command after a long build runs slow: it is run and not counted.
+        timed_command("scenario", "compare", scenario_ids[0], "--db", database, "--as-of", as_of)
+        at_24 = [timed_command("scenario", "compare", scenario_id, "--db", database, "--as-of",
+                               as_of) for scenario_id in scenario_ids]
+        at_120 = [timed_command("scenario", "compare", scenario_id, "--db", database, "--as-of",
+                                as_of, "--months", "120") for scenario_id in scenario_ids[:3]]
+        promote_seconds = timed_command("scenario", "promote", scenario_ids[0], "--db", database,
+                                        "--as-of", as_of, "--revision", promote_token)
+        conn = connect(path)
+        promotion = active_promotion(conn, scenario_ids[0])
+        made = len(promotion.entries)
+        undo_token = promotion_undo_revision(scenarios.find_scenario(conn, scenario_ids[0]),
+                                             promotion)
+        conn.close()
+        undo_seconds = timed_command("scenario", "promotion", "undo", scenario_ids[0], "--db",
+                                     database, "--revision", undo_token)
+        print(f"compare 24 months: slowest={max(at_24):7.3f}s median="
+              f"{sorted(at_24)[len(at_24) // 2]:7.3f}s; 120 months: slowest={max(at_120):7.3f}s; "
+              f"promote={promote_seconds:7.3f}s making {made} entries; "
+              f"promotion undo={undo_seconds:7.3f}s", flush=True)
+        stops = [name for name, seconds, target in (("compare at 24", max(at_24), 2.0),
+                                                     ("compare at 120", max(at_120), 5.0),
+                                                     ("promote", promote_seconds, 2.0),
+                                                     ("promotion undo", undo_seconds, 2.0))
+                 if seconds > target]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
+SNAPSHOT_AS_OF = date(2026, 12, 20)
+
+
+def measure_snapshot() -> None:
+    """A snapshot on --safe-to-spend's shape (D-075, VB4): generation in one read transaction
+    with a 90-day window, the file's size, and verify. The gated write is not timed: build/ is
+    inside the git work tree, which the destination check refuses, and it is one fsynced write.
+    Stops, as G9 says, if generation misses 5.0s or the file 5 MB."""
+    from personal_finance.snapshot import files
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _, _ = safe_to_spend_ledger(root)
+        build_seconds = time.perf_counter() - started
+        (transactions,) = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()
+        (months,) = conn.execute(
+            "SELECT COUNT(DISTINCT substr(COALESCE(transaction_date, posting_date), 1, 7)) "
+            "FROM ledger_transaction").fetchone()
+        conn.close()
+        reader = connect(path, read_only=True)
+        # The first read after a long build runs slow: it is run and not counted.
+        files.build_in_one_read(reader, SNAPSHOT_AS_OF, 90,
+                                "00000000-0000-4000-8000-000000000001",
+                                "2026-12-20T12:00:00.000Z")
+        started = time.perf_counter()
+        data = files.build_in_one_read(reader, SNAPSHOT_AS_OF, 90,
+                                       "00000000-0000-4000-8000-000000000002",
+                                       "2026-12-20T12:00:00.000Z")
+        generate_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        document = files.verified(data)
+        verify_seconds = time.perf_counter() - started
+        reader.close()
+        window = len(document["content"]["transactions"])
+        print(f"shape transactions={transactions} months={months} window_transactions={window} "
+              f"build={build_seconds:.1f}s", flush=True)
+        assert transactions >= 100_000 and months >= 60 and window >= 4_000
+        megabytes = len(data) / 1_000_000
+        print(f"generate={generate_seconds:7.3f}s size={len(data)} bytes ({megabytes:.2f} MB) "
+              f"verify={verify_seconds:7.3f}s", flush=True)
+        stops = [name for name, missed in (("generation", generate_seconds > 5.0),
+                                           ("size", len(data) > 5_000_000)) if missed]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
+FUNDS_CONSUMPTIONS = 2_000
+
+LOANS_BREAKDOWNS = 5_000
+LOANS_AS_OF = date(2026, 12, 20)
+LOAN_MONTHS = [f"{2017 + number // 12}-{1 + number % 12:02}" for number in range(120)]
+
+
+def measure_loans() -> None:
+    """Loans on M12's shape (D-071 point 9, LC4): 8 loans (2 graduated with 6 steps each, 1
+    aggregate with 3 subaccounts), 120 months of payments, 5,000 of them confirmed and broken
+    down. Times report net-worth, report loans, loan payoff with all three orders, totals and
+    review breakdown. Stops, as G9 says, if a report misses two seconds, if totals crosses 2.0s
+    (D-071 point 9), or if review breakdown costs more than twice the import of one row."""
+    from personal_finance.reconcile.breakdowns import break_down
+    from personal_finance.reports.review_evidence import load_merge_evidence, transaction_revision
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _ = recurring_ledger(root)
+        loans = [f"loan{number}" for number in range(8)]
+        conn.execute("INSERT INTO account (id, display_name, account_type) "
+                     "VALUES ('payer', 'Payer', 'checking')")
+        for loan in loans:
+            conn.execute("INSERT INTO account (id, display_name, account_type) "
+                         "VALUES (?, ?, 'loan')", (loan, loan.capitalize()))
+        rows, cents_by_row = [], {}
+        for number in range(LOANS_BREAKDOWNS + 1):
+            month = LOAN_MONTHS[number % len(LOAN_MONTHS)]
+            day = 1 + number % 28
+            cents = 50_000 + number % 1_000
+            rows.append(f"L{number},{month}-{day:02},{month}-{day:02},SYNTHETIC LOAN "
+                        f"{number % 8},-{cents // 100}.{cents % 100:02},POSTED\n")
+            cents_by_row[f"L{number}"] = cents
+        source = root / "payer.csv"
+        source.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,"
+                          "Status\n" + "".join(rows))
+        (result,) = import_files(conn, [source], account_id="payer", layout=SYNTHETIC_CHECKING_V1)
+        assert result.outcome == "imported", result
+        links = {external_id: (transaction_id, record_id)
+                 for external_id, transaction_id, record_id in conn.execute(
+                     """SELECT entry.external_id, link.transaction_id, link.source_record_id
+                        FROM transaction_source link
+                        JOIN ledger_transaction entry ON entry.id = link.transaction_id
+                        WHERE entry.account_id = 'payer'""")}
+        conn.execute("BEGIN")
+        classify_directly(conn, "payer", [(*links[f"L{number}"], "loan_payment")
+                                          for number in range(LOANS_BREAKDOWNS + 1)])
+        for number in range(LOANS_BREAKDOWNS + 1):
+            transaction_id, record_id = links[f"L{number}"]
+            statement_id = f"ol{number:06}"
+            conn.execute("""INSERT INTO one_sided_transfer (id, account_id, counterpart_account_id,
+                                                         target_transaction_id, target_revision)
+                            VALUES (?, 'payer', ?, ?, 't13-0')""",
+                         (statement_id, loans[number % 8], transaction_id))
+            conn.execute("INSERT INTO one_sided_transfer_record VALUES (?, ?)",
+                         (statement_id, record_id))
+            conn.execute("INSERT INTO one_sided_transfer_event (one_sided_transfer_id, event) "
+                         "VALUES (?, 'made')", (statement_id,))
+            if number == LOANS_BREAKDOWNS:
+                continue  # left for the timed review breakdown
+            breakdown_id = f"lb{number:06}"
+            conn.execute("""INSERT INTO loan_payment_breakdown (id, account_id, breakdown,
+                                                             target_transaction_id,
+                                                             target_revision)
+                            VALUES (?, 'payer', ?, ?, 't13-0')""",
+                         (breakdown_id, f"{cents_by_row[f'L{number}'] // 5}:{number % 3 * 100}",
+                          transaction_id))
+            conn.execute("INSERT INTO loan_payment_breakdown_record VALUES (?, ?)",
+                         (breakdown_id, record_id))
+            conn.execute("INSERT INTO loan_payment_breakdown_event (breakdown_id, event) "
+                         "VALUES (?, 'made')", (breakdown_id,))
+        for number, loan in enumerate(loans):
+            conn.execute("INSERT INTO loan_terms (id, account_id, due_day) VALUES (?, ?, ?)",
+                         (f"t{number}", loan, 1 + number))
+            conn.execute("INSERT INTO loan_terms_event (terms_id, event) VALUES (?, 'made')",
+                         (f"t{number}",))
+            steps = 6 if number < 2 else 1
+            for step in range(steps):
+                start = f"{2017 + step}-01-01"
+                conn.execute("INSERT INTO loan_rate_period (terms_id, effective_from, "
+                             "rate_millionths) VALUES (?, ?, ?)",
+                             (f"t{number}", start, 3_000_000 + number * 500_000 + step * 10_000))
+                conn.execute("INSERT INTO loan_payment_period (terms_id, effective_from, "
+                             "payment_cents) VALUES (?, ?, ?)",
+                             (f"t{number}", start, 40_000 + step * 2_000))
+            conn.execute("INSERT INTO balance_observation (id, account_id, observed_on, "
+                         "balance_cents) VALUES (?, ?, '2026-12-01', ?)",
+                         (f"lo{number}", loan, -(5_000_000 + number * 1_000_000)))
+            conn.execute("INSERT INTO balance_observation_event (balance_observation_id, event) "
+                         "VALUES (?, 'made')", (f"lo{number}",))
+        # loan7 is the aggregate of loan4 to loan6.
+        for number, sub in enumerate(("loan4", "loan5", "loan6")):
+            conn.execute("INSERT INTO account_link (id, subaccount_id, aggregate_id) "
+                         "VALUES (?, ?, 'loan7')", (f"k{number}", sub))
+            conn.execute("INSERT INTO account_link_event (link_id, event) VALUES (?, 'made')",
+                         (f"k{number}",))
+        conn.execute("INSERT INTO payoff_plan (id, order_kind, custom_order, extra_cents) "
+                     "VALUES ('p0', 'custom', ?, 50000)", (",".join(reversed(loans)),))
+        conn.execute("INSERT INTO payoff_plan_event (plan_id, event) VALUES ('p0', 'made')")
+        write_transfer_effects(conn)
+        conn.execute("COMMIT")
+        build_seconds = time.perf_counter() - started
+
+        applied = conn.execute("SELECT COUNT(*) FROM transaction_loan_breakdown "
+                               "WHERE state = 'applied'").fetchone()[0]
+        graduated = conn.execute("SELECT COUNT(*) FROM (SELECT terms_id FROM loan_payment_period "
+                                 "GROUP BY terms_id HAVING COUNT(*) = 6)").fetchone()[0]
+        transactions = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()[0]
+        print(f"shape transactions={transactions} loans={len(loans)} graduated={graduated} "
+              f"links=3 breakdowns={applied} build={build_seconds:.1f}s", flush=True)
+        # The shape reaches the cost it claims.
+        assert transactions > 107_000
+        assert applied == LOANS_BREAKDOWNS and graduated == 2
+        conn.close()
+
+        database = str(path)
+        as_of = LOANS_AS_OF.isoformat()
+        net_worth_seconds = timed_command("report", "net-worth", "--db", database, "--as-of",
+                                          as_of)
+        loans_seconds = timed_command("report", "loans", "--db", database, "--as-of", as_of)
+        payoff_seconds = timed_command("loan", "payoff", "--db", database, "--as-of", as_of)
+        totals_seconds = timed_command("totals", "--db", database)
+
+        conn = connect(path)
+        transaction_id, _ = links[f"L{LOANS_BREAKDOWNS}"]
+        revision = transaction_revision(load_merge_evidence(conn, transaction_id))
+        started = time.perf_counter()
+        break_down(conn, "payer", transaction_id, revision, "57.25")
+        breakdown_seconds = time.perf_counter() - started
+        later = root / "later.csv"
+        later.write_text("Transaction ID,Transaction Date,Posted Date,Description,Amount,Status\n"
+                         "LATER,2026-12-30,2026-12-30,SYNTHETIC LATER,-9.00,POSTED\n")
+        started = time.perf_counter()
+        (result,) = import_files(conn, [later], account_id="savings",
+                                 layout=SYNTHETIC_CHECKING_V1)
+        import_seconds = time.perf_counter() - started
+        assert result.outcome == "imported"
+        conn.close()
+        print(f"report_net_worth={net_worth_seconds:7.3f}s report_loans={loans_seconds:7.3f}s "
+              f"loan_payoff={payoff_seconds:7.3f}s totals={totals_seconds:7.3f}s "
+              f"review_breakdown={breakdown_seconds:7.3f}s one_import={import_seconds:7.3f}s",
+              flush=True)
+        stops = [name for name, seconds in (("report net-worth", net_worth_seconds),
+                                            ("report loans", loans_seconds),
+                                            ("loan payoff", payoff_seconds),
+                                            ("totals", totals_seconds)) if seconds > 2]
+        if breakdown_seconds > 2 * import_seconds or breakdown_seconds > 2:
+            stops.append("review breakdown")
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
+UI_POST_COUNT = 50
+
+
+def measure_ui() -> None:
+    """The local UI on --safe-to-spend's shape (D-073 point 8, WD2): every page timed once each,
+    after one warm-up request, as the real handler answers it over a socket pair, and 50
+    sequential POST writes through the whole pipeline, timed per request, against the same CLI
+    write. The writes are the checking buffer's undo and set, alternately: the shape holds no
+    review item, and the buffer's two routes pass every pipeline step and the CLI's own command,
+    as a review decision does. Stops, as G9 says, if a page misses 2.0s or a write's median is
+    more than 0.1s above the CLI's."""
+    import re
+    import statistics
+
+    sys.path[:0] = [str(Path(__file__).resolve().parents[1] / "scenarios"),
+                    str(Path(__file__).resolve().parents[1])]
+    from local_ui_client import UiClient
+    from test_local_ui_transaction_writes import all_post_forms
+    from test_local_ui_writes import encoded
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _, _ = safe_to_spend_ledger(root)
+        (transactions,) = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()
+        (first,) = conn.execute("SELECT id FROM ledger_transaction ORDER BY id LIMIT 1").fetchone()
+        conn.close()
+        assert transactions >= 100_000
+        print(f"shape transactions={transactions} build={time.perf_counter() - started:.1f}s",
+              flush=True)
+        as_of = SAFE_AS_OF_DATES[-1].isoformat()
+        pages = ["/", "/monthly", "/household", f"/income?as_of={as_of}",
+                 f"/budget?as_of={as_of}", f"/funds?as_of={as_of}", f"/net-worth?as_of={as_of}",
+                 f"/dashboard?as_of={as_of}", "/documents", "/transactions",
+                 "/transactions?search=synthetic&from=2026-01-01", "/review",
+                 f"/transaction?id={first}", "/accounts", f"/obligations?as_of={as_of}",
+                 "/settings", f"/visuals?as_of={as_of}"]
+        client = UiClient(path)
+        client.sign_in()
+        try:
+            assert client.get("/").status == 200
+            timings = {}
+            for page in pages:
+                page_started = time.perf_counter()
+                response = client.get(page)
+                timings[page] = time.perf_counter() - page_started
+                assert response.status == 200, (page, response.text[:300])
+            for page, seconds in sorted(timings.items(), key=lambda item: -item[1]):
+                print(f"page {page}: {seconds:.3f}s", flush=True)
+            # What the visuals page costs, by the reports its rows come from (G9's attribution).
+            from personal_finance.db.migrate import connect as open_read
+            from personal_finance.reports import visuals as visual_rows
+
+            reading = open_read(path, read_only=True)
+            for name, call in (
+                    ("monthly_report", lambda: visual_rows.monthly_report(reading)),
+                    ("household_report", lambda: visual_rows.household_report(reading)),
+                    ("budget_report", lambda: visual_rows.budget_report(
+                        reading, as_of[:7], SAFE_AS_OF_DATES[-1], None)),
+                    ("funds_view", lambda: visual_rows.funds_view(reading, SAFE_AS_OF_DATES[-1])),
+                    ("net_worth", lambda: visual_rows.net_worth(reading, as_of))):
+                part_started = time.perf_counter()
+                call()
+                print(f"visuals part {name}: {time.perf_counter() - part_started:.3f}s",
+                      flush=True)
+            reading.close()
+
+            post_seconds = []
+            for number in range(UI_POST_COUNT):
+                forms = [form for form in all_post_forms(client.get("/settings").body)
+                         if form["action"].startswith("/setting/buffer-")]
+                (form,) = forms
+                fields = form["fields"]
+                if form["action"] == "/setting/buffer-set":
+                    fields = {**fields, "buffer": f"{400 + number}.00"}
+                body = encoded(fields)
+                headers = [("Origin", client.server.origin), ("Sec-Fetch-Site", "same-origin"),
+                           ("Sec-Fetch-Mode", "navigate"),
+                           ("Content-Type", "application/x-www-form-urlencoded")]
+                post_started = time.perf_counter()
+                response = client.request("POST", form["action"], headers=headers, body=body)
+                post_seconds.append(time.perf_counter() - post_started)
+                assert response.status == 303, (response.status, re.findall(
+                    r'<p class="notice">(.*?)</p>', response.text))
+        finally:
+            client.close()
+
+        database = str(path)
+        cli_seconds = []
+        for number in range(10):
+            shown = io.StringIO()
+            with contextlib.redirect_stdout(shown):
+                assert cli_main(["setting", "show", "--db", database]) == 0
+            revision = re.search(r"Setting checking_buffer_cents: (.*)\n  Revision: (\S+)",
+                                 shown.getvalue())
+            words = (["setting", "set", "checking_buffer_cents", f"{500 + number}.00"]
+                     if revision[1] == "not set" else ["setting", "undo",
+                                                       "checking_buffer_cents"])
+            cli_seconds.append(timed_command(*words, "--db", database, "--revision",
+                                             revision[2]))
+        post_median, cli_median = statistics.median(post_seconds), statistics.median(cli_seconds)
+        print(f"posts={len(post_seconds)} median={post_median:.3f}s "
+              f"p95={sorted(post_seconds)[int(0.95 * len(post_seconds)) - 1]:.3f}s "
+              f"max={max(post_seconds):.3f}s; cli write median={cli_median:.3f}s", flush=True)
+        slow_pages = [page for page, seconds in timings.items() if seconds > 2.0]
+        stops = slow_pages + (["writes"] if post_median - cli_median > 0.1 else [])
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
 def main() -> None:
     if sys.argv[1:] == ["--scale"]:
         measure_scale()
@@ -2561,6 +3263,24 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--scale", "--budget"]:
         measure_budget()
+        return
+    if sys.argv[1:] == ["--scale", "--funds"]:
+        measure_funds()
+        return
+    if sys.argv[1:] == ["--scale", "--loans"]:
+        measure_loans()
+        return
+    if sys.argv[1:] == ["--scale", "--safe-to-spend"]:
+        measure_safe_to_spend()
+        return
+    if sys.argv[1:] == ["--scale", "--snapshot"]:
+        measure_snapshot()
+        return
+    if sys.argv[1:] == ["--scale", "--scenarios"]:
+        measure_scenarios()
+        return
+    if sys.argv[1:] == ["--scale", "--ui"]:
+        measure_ui()
         return
     if sys.argv[1:] == ["--scale", "--household"]:
         measure_household()

@@ -22,8 +22,8 @@ with it. Nothing else does.
 |---|---|---|
 | D-067 | Cross-milestone guardrails for M12 to M21 | Approved |
 | D-068 | M12 Income and recurring obligations | Approved, accepted on 2026-11-16 |
-| D-069 | M13 Budgets and spending allowances | Approved, built for review |
-| D-070 | M14 Goals, reserves and the tax reserve | Approved |
+| D-069 | M13 Budgets and spending allowances | Approved, accepted on 2026-11-16 |
+| D-070 | M14 Goals, reserves and the tax reserve | Approved, M14.1 built for review |
 | D-071 | M15 Net worth and loans | Approved |
 | D-072 | M16 Safe-to-spend and the cash-flow constraint | Approved |
 | D-073 | M17 The local UI completed, with browser writes (security change) | Approved |
@@ -934,7 +934,7 @@ its own slice plan, for the owner's review):
 
 ---
 
-## D-069 M13 plan: budgets and spending allowances — Approved
+## D-069 M13 plan: budgets and spending allowances — Approved, M13 accepted
 
 M13 meets PRD §12's budget structure and required outputs, without safe-to-spend, which is M16
 (D-066 point 2):
@@ -1210,7 +1210,7 @@ through M13, for the owner's review):
 
 ---
 
-## D-070 M14 plan: goals, reserves and the tax reserve — Approved
+## D-070 M14 plan: goals, reserves and the tax reserve — Approved, M14 accepted
 
 M14 meets PRD §13's goals, emergency fund and annual and irregular expenses, and §16's
 lightweight tax reserve. It closes three PRD §21 boxes:
@@ -1457,9 +1457,233 @@ current assignments.
 | GC3 | Backup and restore keep funds, assignments, priority, consumptions and releases, compared as HB5 |
 | GC4 | `--funds` asserts its counts and records its figures under G9. Every earlier criterion still passes |
 
+**How M14.1 was implemented** (built on 2026-11-16, for the owner's review):
+
+- **Migration 0027** was built first, in its own commit (`3fbcc7a`), with G10's tests in
+  `tests/scenarios/test_fund_migration.py`. `fund` holds a name and a kind. `fund_terms` holds
+  dated terms by **shape** (`monthly`, `percent`, `target_by`, `minimum`, `months`, `due`,
+  `recurring`), each shape's columns enforced by CHECKs, and a trigger refuses a shape its fund's
+  kind does not take. `fund_assignment` and its events hold assignments. The priority list is
+  `fund_priority_event`, one row per list made, and `fund_priority`, its positions.
+- `planning/funds.py` holds the model, point 1's formulas as pure functions in integer cents,
+  every division rounded up (G8), the writes under one write lock, and `fu1` and `fa1`.
+  `reports/fund_standing.py` gathers what the formulas read from M12, as of a date: baseline
+  income planned in the month (from `report income`'s builder), fixed commitments planned in the
+  month (each applying obligation's terms in effect at the month's end, a range's HIGH, spread as
+  ceil(amount × occurrences per year ÷ 12)), and the tax accrual.
+- **Commands:** `fund preview` (beyond D-070's list, as `budget preview`, since `fund add
+  --revision` needs one), `fund add`, `fund terms`, `fund undo`, `fund show`, `fund assign`,
+  `fund unassign`, `fund priority` and `funds`. Each command reading a date takes `--as-of`, else
+  today in the household zone (G7).
+- **Figures shown, each labelled:** a goal's or reserve's *planned contribution this month*, the
+  emergency fund's and tax reserve's *required held* amount with the *restoration recommended* or
+  *to assign* shortfall, *assigned* by account, a target's *outstanding* amount with the months
+  left including its last, and the tax reserve's accrual labelled "a planning reserve, not a
+  calculated tax liability" (PRD §16).
+- **States:** `funded`, `underfunded` and two of this slice's own, for the owner's review:
+  `in progress` (a target with months left and something outstanding, and every monthly or
+  percentage goal, which has no target to reach) and `not started` (before the first terms row).
+  `over_assigned` and `provisional` are marks on accounts, carried to every fund assigned there as
+  "Assignment not backed" and "Provisional", as point 2 says.
+- **`fa1`** covers the operation valid now (a fund holding an assignment on the account can only
+  release it, as `st1`), the fund and account, the account's latest observation on or before the
+  date, the account's active assignments and the fund's. `fund show` prints one per account. The
+  amount typed is not in it: the guard checks it under the write lock.
+- **`fu1`** covers the operation, the fund's ID once recorded, its name, kind and every terms row;
+  over the priority list, the list as it applies.
+- **Departures and choices, for the owner's review:**
+  - **No supersession of a fund.** D-070's command list has none, so a fund's terms change with
+    `fund terms` from a date (every value of its kind typed again), and a new name or kind is undo
+    then add. G4's chain for funds is not built until it is needed (principle 1).
+  - **A fund holding an assignment cannot be undone,** naming the accounts to release first, so
+    no money is left assigned to a fund that no longer applies. A priority list skips a fund
+    undone since it was made.
+  - **One emergency fund and one tax reserve at a time,** since point 1 speaks of "the"
+    emergency fund, and two tax reserves would accrue the same income twice.
+  - **A fund's start defaults to `--as-of`,** for every kind, and like its later terms cannot fall
+    in a closed month. So the tax reserve cannot start before this month: a correction flag, as
+    D-069's, is not built until the owner needs one.
+  - **The tax accrual counts `received` occurrences only,** as point 6 says, so a deposit paired
+    as `amount_changed` accrues nothing until its source's terms match it. It counts each one
+    from the fund's first `effective_from` through `as_of`, by the deposit's date, under the terms
+    in effect that day. Payments and releases arrive with M14.2 and show as 0.00.
+  - **An annual reserve's anchor** is its first date on or after the fund's start, and an
+    every-N-months reserve needs `--anchor` on its cadence. A recurring reserve's next due date
+    is the first on or after `as_of`, so on its due day it still needs its outstanding amount
+    that month.
+  - **An account with no observation on or before the date** shows every assigned cent as
+    over-assigned, since nothing backs it.
+  - **An assignment checks the account is current** (G3 step 3), as M12's writes do, though it
+    reads no transaction.
+- **Tests:** `tests/unit/test_fund_required.py` (GA2 by hand: each kind at a deadline month,
+  mid-term and past due, rounding up, terms in effect by date) and `tests/scenarios/test_funds.py`
+  (GA2 to GA5 end to end; a stale token for each input of `fu1` and `fa1`, a race and a fault after
+  the first insert, as G3). The registry pins `fu` and `fa` (G5).
+- **Breaks (G12):** 25 applied, 24 caught on the first run, each by a relevant test. One was a test
+  gap, closed and caught on the rerun: tax accrued on income that is not tax-eligible.
+- **Compared as G6:** the suite's ledgers, kept with `--basetemp` from a `git archive` export of
+  `d6b453d`, read by that code, and copies migrated to 27 read by a frozen copy of M14.1's `src/`.
+  Of 124,128 runs, 124,060 are identical, with no token version moved. The other 68 are the two
+  ledgers a failed-migration test stamps at 27 without its tables, which the old code refused as
+  newer. `funds` ran on all 3,126 ledgers: it exits 0 where `budgets` does and refuses with the
+  same words, apart from those two stamped ledgers and the M13 test ledger whose planning tables
+  are dropped, each explained by the tables it lacks.
+- **No benchmark row:** `--funds` is M14.3's (point 9).
+
+**M14.1 accepted, as built, by the owner on 2026-11-16,** with every departure and choice above.
+
+### M14.2 to M15.3: the implementation plan — Approved
+
+Approved by the owner on 2026-11-16, with local commits on `feature/m10-rules` for all five
+slices, built in order without a stop between them, and one review after M15.3. The lead
+engineer's recommendation stands wherever discretion is needed. Each slice keeps the routine
+(migration first, gated commits, 20 to 25 breaks, G6, records). A missed G9 target is recorded
+with its cost and not optimized, and the work goes on, except `totals` above 2.0s in M15.3, which
+stops the work (D-071 point 9). A failure twice the same way, a contradiction in a decision, or
+anything needing a security change, a dependency or the network still stops it.
+
+**M14.2's choices:**
+
+1. **`fund release undo RELEASE_ID --revision fu1-…`,** beyond point 7's list, as `fund preview`
+   was: G4's undo needs a command.
+2. **Which assignment a consumption reduces:** the assignments active when the consumption was
+   stated, the transaction's own account first, then the others by account name. A refund
+   consumed against the fund restores them in the same order. An assignment released later takes
+   its reduction with it, and one made later starts whole, so no later assignment rewrites a
+   consumed portion.
+3. **The tax reserve's "paid" is the whole payment.** The cap of point 5 (the assigned amount not
+   yet consumed) decides only the portion leaving discretionary actual and the reduction of the
+   assignment.
+4. **A recurring reserve's cycle** runs from the day after its previous due date through its next
+   due date on or after `as_of`.
+5. **A refund restores a fund only when it is itself consumed against the fund,** as point 5 says,
+   never inferred.
+6. **M13's "paid from reserves" line lands in M14.2,** not M14.3, since GB2 tests the change to
+   discretionary actual.
+
+**M14.3's choices:** the states stay as M14.1 built them, with `in progress` and `not started`. A
+target's "reached" month is the first month whose planned contributions cover what is outstanding,
+and a monthly or percentage goal shows "no target".
+
+**M15's choices (D-071):**
+
+- **M15.1: `balance record --from-statement` is not built.** D-071 point 1 assumes D-060 stores
+  each PDF statement's closing balance, but D-060 as amended for U.S. Bank's printout built no
+  statement balances (migration 0019 for balances was never written), so there is nothing to read.
+  LA4's second half falls away. A later decision may add it if a statement layout arrives.
+  `--member` divides by M11's attribution (D-071 C), since no ownership input differs.
+- **M15.2:** a due day from 1 to 28 only, with no month-end clamping. The payoff plan names its
+  debt goal explicitly, `loan plan set --extra-from-fund FUND_ID`, since D-070 never defines how
+  to tell which goal is the debt goal. A card takes rate terms only, for interest projection, and
+  is refused in `loan payment` and in payoff orders.
+
+
+**How M14.2 was implemented** (built on 2026-11-16, within the approved plan):
+
+- **Migration 0028** first, in its own commit (`f8cff73`), with G10's tests in
+  `tests/scenarios/test_consumption_migration.py`: `fund_consumption`, its records and events, the
+  derived `transaction_fund_consumption` (`applied`, `conflict`, `basis_changed`, `not_spending`),
+  and `tax_reserve_release` with its events. Triggers refuse a consumption of the emergency fund
+  or of a fund not on record, and a release of any fund but the tax reserve.
+- **The fourth stated kind.** `reconcile/consumption_effects.py` is D-063's `StatedField` for
+  consumptions, its value the fund's ID, fitting only D-056's spending group (as a category does),
+  so a transaction reclassified or confirmed as a transfer holds it as `not_spending`. Its effects
+  are written after allocations in `write_transfer_effects`. `reconcile/consumptions.py` makes and
+  undoes one through `reconcile/statements.py`, refusing an unknown or undone fund, the emergency
+  fund (D-070 point 5 names a reserve, a goal or the tax fund) and a transaction not in spending.
+  Confirming or separating refuses where it would leave a consumption unsettled, as for
+  allocations, and a decision's undo says how many it leaves paid from no fund.
+- **The portion is computed where it is read, never stored** (`planning/funds.py`,
+  `consumed_portions`), since it turns on assignments, which change without a derive. Choice 2
+  fixes which assignments it reads, so a later assignment or release rewrites no portion.
+  Assignments are shown, guarded (`fund assign`) and tokened (`fa1`) at what they still hold, less
+  the portions of consumptions dated by `as_of`.
+- **Required amounts** take the consumed portion: a target's or reserve's outstanding amount is
+  target − what the assignments still hold − what the fund paid in its cycle, so a purchase paid
+  from a reserve leaves its need for the cycle unchanged and moves the money from "assigned" to
+  "paid from this fund". A recurring reserve's cycle starts after its previous due date, never
+  before its anchor (choice 4).
+- **The tax reserve.** Payments are the whole of each transaction consumed against it (choice 3),
+  a refund consumed against it reducing them. `fund release` and `fund release-undo`
+  (`planning/fund_releases.py`) record and undo a release: on a day from the reserve's first terms
+  through `--as-of`, in no closed month, and never beyond the required amount as of `--as-of`.
+  `fu1` covers the tax reserve's active releases, left out while there are none, and `fund show`
+  prints the tax reserve's release token. Required is accrued − paid − released, never below
+  zero, and "Paid beyond the reserve" is shown when payments and releases exceed the accrual.
+- **M13's "paid from reserves"** (choice 6). `report budget` takes each discretionary
+  transaction's portion out of discretionary actual, its category's spending and the largest list,
+  on a line of its own shown only where one applies. A member's part of the portion is in
+  proportion to their part of the spending, rounded toward zero so their spending is never
+  understated (G8).
+- **Tokens.** `r13`, `t11`, `d10` and `c6`: the item and transaction evidence carry each active
+  consumption binding a record, left out while empty; the decision undo token carries the
+  consumptions in scope with and without it; the correction undo token carries, for an amount, the
+  consumption outcomes on its transactions. `fc1` covers the fund, the transactions holding the
+  bound records and their outcome with and without it. `review show` and `review transaction
+  show` gain "Paid from" where a consumption reaches.
+- **Departures, for the owner's review:**
+  - **`fund release-undo RELEASE_ID --fund FUND_ID`,** not `fund release undo` as the plan wrote
+    it: argparse cannot hang a subcommand under a command with its own required options.
+  - **`fund show` of the tax reserve gains its release token line,** "Release revision", on every
+    ledger holding a tax reserve, since `fund release` needs one shown. G6 strips it.
+  - **A fund paying for any transaction cannot be undone** until each consumption naming it is
+    undone, as for assignments.
+  - **GB2's "outstanding falls by the consumed portion"** is met as what the fund holds: its
+    assignments fall by exactly the portion, and its need for the cycle does not change, since the
+    purchase is the cycle's own spending.
+- **Breaks (G12):** 26 applied, 25 caught on the first run. One was a test gap, closed and caught
+  on the rerun: a category allowance counting the consumed portion.
+- **Compared as G6:** the suite's ledgers, kept with `--basetemp` from a `git archive` export of
+  `2c5d9a1`, read by that code, and copies migrated to 28 read by a frozen copy of M14.2's `src/`,
+  with `r12:r13,t10:t11,d9:d10,c5:c6` read as token bumps. Of 130,691 runs, 130,618 are identical.
+  The other 73: 70 on the two ledgers a failed-migration test stamps at the newest version, which
+  the old code refused as newer; 3 where a test typed a token-shaped `t10-0000…` into a
+  description, which the comparison's own bump rewrites. Five `fund show` runs of a tax reserve
+  gain only the "Release revision" line, taken out as the one intended addition. `review
+  consumptions` ran on all 3,219 ledgers, refusing exactly where `review allocations` does, apart
+  from the two stamped ledgers.
+
+
+**How M14.3 was implemented** (built on 2026-11-16, within the approved plan):
+
+- **`pf report funds [--as-of]`** (`reports/fund_report.py`, `funds_report_lines` in
+  `reports/report_text.py`) and its read-only `/funds` page, which renders the same lines (GC2).
+  The lines `pf funds` and `pf fund show` printed moved to `report_text.py` as builders shared by
+  all three, their output byte for byte as before (principle 2).
+- **Each active fund's block** is M14.1's standing with its terms, plus "Target reached at the
+  planned rate": as_of's month plus ceil(outstanding ÷ planned contribution) months, counting
+  as_of's own; "reached" when nothing is outstanding; "no target" for a monthly or percentage
+  goal; "a held amount, no planned rate" for an emergency fund or tax reserve still short; "not at
+  the planned rate" for a target with no contribution left to plan.
+- **The month's extra** (point 4) is as_of's month: M12's extra paychecks received, plus side
+  income received less the tax reserve's accrual on side income received that month, plus the
+  unused capacity of the month before, the latest closed one, from `report budget` (none where no
+  target applies). Each fund on the priority list takes up to its outstanding amount (an emergency
+  fund its shortfall), and a goal with no target takes none, so its line says so. What is left is
+  "Unallocated extra". Every line is labelled planned and the notice says no allocation is a
+  transfer or an assignment.
+- **Choices, for the owner's review:** side income is placed in its month by its nominal date (as
+  `report income` does) and its accrual by the deposit's date (as the tax reserve does), so a
+  deposit on the edge of a month can fall apart by a day. Only the latest closed month's unused
+  capacity is offered, once, in the month after it.
+- **GC3:** the rich ledger of `test_backups.py` gains savings observed, a reserve and a goal
+  assigned (one released), a priority list, a tax reserve over tax-eligible side income with one
+  release kept and one undone, and a bill paid from the reserve with a second consumption undone.
+  Its comparison runs `funds`, `report funds`, `report budget`, `review consumptions` and every
+  `fund show` and `review consumption show`.
+- **GC4:** `--scale --funds` in `tests/benchmarks/measure_reconciliation.py`, figures in
+  [benchmarks.md](benchmarks.md).
+- **Breaks (G12):** 18 applied, 14 caught on the first run. Three were test gaps, closed and
+  caught on the rerun: a month over target offering capacity, salary in the side accrual, and
+  earlier months in it. One guard was unreachable and removed: the extra is never negative, since
+  an accrual never exceeds the side income it comes from.
+- **Compared as G6:** M14.3's code, frozen at `91422e9`, over the same copies migrated to 28 that
+  M14.2's after-capture read, against that capture: all 133,910 runs identical, `pf funds` and
+  `pf fund show` included, so moving their lines into `report_text.py` changed nothing.
+
 ---
 
-## D-071 M15 plan: net worth and loans — Approved
+## D-071 M15 plan: net worth and loans — Approved, M15 accepted
 
 M15 meets:
 
@@ -1704,9 +1928,125 @@ differs from its spending attribution; the payoff plan's extra amount, or the de
 | LC3 | Without breakdowns, `totals`, `report monthly` and `report household` are byte for byte as before. `r14`, `t12`, `d11` and `c7` keep every digest, with `lb1` pinned |
 | LC4 | `--loans` asserts its counts and records its figures, `totals` among them, under G9. Every earlier criterion still passes |
 
+
+**How M15.1 was implemented** (built on 2026-11-16, within the approved plan):
+
+- **Migration 0029** first, in its own commit (`8d93ec7`): `account_link` (both sides loans by
+  trigger, never itself) and its events, with G10's tests in `test_link_migration.py`.
+- **`planning/net_worth.py`:** valuations at each account's latest observation on or before
+  `as_of` (M14.1's `latest_observation`), point 2's counting rule as a pure function, the
+  mixed-date accounts (every counted one when they span more than 31 days, else those older than
+  31 days at `as_of`), and the link writes. `al1` covers the operation, the aggregate, to unlink
+  the subaccount, and the latest observation of the aggregate and of each account linked to it,
+  whose keys name its links.
+- **Commands:** `pf account links` (beyond D-071's list, as `fund preview`: it shows each loan's
+  link and unlink tokens), `pf account link`, `pf account unlink`, and `pf report net-worth
+  [--as-of] [--member]` with its read-only `/net-worth` page.
+- **Choices, for the owner's review:**
+  - **A valued subaccount of an unvalued aggregate, beside an unvalued subaccount,** is "not
+    counted: aggregate not valued", so the debt is not counted in part. A subaccount with no
+    observation under a valued aggregate is "not counted: aggregate valued".
+  - **Retirement and investment history** is every active observation through `as_of` and, by
+    month of the money out, the applied `investment_contribution` transfers into the account:
+    matches whose inflow is there, and one-sided transfers naming it.
+  - **By member** divides each counted valuation by the account's default attribution (M11), a
+    shared account by the share through `allocate_cents`. Every member's part and the
+    unattributed part are listed, adding exactly to net worth.
+  - **`--from-statement` is not built** (the plan's correction): nothing stores a statement
+    balance.
+- **Breaks (G12):** 18 applied, 13 caught on the first run. Three were test gaps, closed and
+  caught on the rerun: one subaccount's unlink token used for another, a member's part from an
+  account not counted, and a matched contribution into another account. Two were equivalent code,
+  both redundant and removed: `al1`'s separate list of links (its observations already name
+  them), and skipping uncounted accounts in member parts (they count 0.00).
+
+
+**How M15.2 was implemented** (built on 2026-11-17, within the approved plan):
+
+- **Migration 0030** first, in its own commit (`49ee826`): `loan_terms` (due day 1 to 28, optional
+  remaining months, on a loan or card by trigger) and its events, `loan_rate_period` (millionths
+  of a percent, 0 to 100%), `loan_payment_period` (a loan's only, by trigger), and `payoff_plan`
+  with its events, the plan made last applying.
+- **`planning/loans.py`:** the model, the writes under one write lock with `lt1` (the operation,
+  the account, and its due day, remaining months and every rate and payment period; over the
+  payoff plan, the plan as it applies), and the pure math: due dates, point 6's states, point 5's
+  projection in `Decimal` (the context's `divide`, since the G8 check refuses the `/` operator in
+  planning modules) and the payoff orders. `reports/loan_report.py` gathers actual payments and
+  each order's debts.
+- **Commands:** `pf loan terms add | show | undo`, `pf loan rate`, `pf loan payment`, `pf loan plan
+  set`, `pf report loans`, `pf loan project` and `pf loan payoff`. `loan terms show` is beyond
+  D-071's list in that it prints each operation's token, the add token included before any terms.
+- **Choices, for the owner's review:**
+  - **Periods may start on any day from the terms' first one,** closed months included: a loan's
+    schedule is the lender's contract, not a plan, so a graduated loan entered late can still be
+    checked against its past steps. A day already holding a period of the same kind is refused.
+  - **A card's terms take `--rate` and `--due-day` only;** `--payment` and `loan payment` are
+    refused on a card, and payoff orders leave cards out (choice 3 of the plan).
+  - **The debt goal is named, never guessed:** `loan plan set --extra-from-fund GOAL_ID`, whose
+    planned contribution as of the date is the extra. `--extra` on `loan payoff` overrides the
+    plan's.
+  - **Actual payments** are the confirmed transfers into the loan, dated by the transaction that
+    holds them (a match's inflow, a one-sided transfer's outflow), in the period after the previous
+    due date through this one, from the first due date on or after the first payment period
+    through the next due date after `as_of`. Money in on the loan with no confirmed transfer is
+    listed per loan, and payments typed `loan_payment` that no transfer confirms are listed
+    once, both "not counted until confirmed".
+  - **States:** a due date on or after `as_of` with less paid is `upcoming`, even when partly paid.
+  - **A projection** starts at the first due date after the latest observation, each month a full
+    month's interest. **Payoff orders** start the month after `as_of`, from each loan's latest
+    observation by then, at its rate in effect on `as_of`, which fixes the order; each month's
+    budget is every loan's scheduled payment in effect, paid off or not, plus the extra.
+- **Breaks (G12):** 23 applied, 18 caught on the first run. Five were test gaps, closed and caught
+  on the rerun: a rate step within a month, a snowball tie broken by rate, a paid-off loan's
+  payment rolling over (by hand), and one token input each for the rates and the plan's order.
+
+
+**How M15.3 was implemented** (built on 2026-11-17, within the approved plan):
+
+- **Migration 0031** first, in its own commit (`a9de224`): `loan_payment_breakdown` (canonical
+  `interest:fees` in cents, never `0:0`), its records and events, and the derived
+  `transaction_loan_breakdown` (`applied`, `conflict`, `basis_changed`, `does_not_fit`).
+- **The fifth stated kind** (`reconcile/breakdown_effects.py`, `breakdowns.py`,
+  `reports/breakdown_evidence.py`), written after consumptions in `write_transfer_effects`. It
+  fits a confirmed loan payment: money out typed `loan_payment` that an applied match or
+  one-sided transfer confirms (D-054's fit rule lands it only on a loan), with interest and fees
+  no more than its effective amount. Confirming or separating refuses where it would leave one
+  unsettled.
+- **Totals, monthly and household** (point 7): the tally takes an applied breakdown's interest
+  and fees out of the payment's confirmed transfer into Spending, on a "loan interest and fees
+  within loan payments" line and under "Interest and financial fees", and counts the divided
+  payments on a line of their own, so each cent is in one group and the count explains the
+  payments counted in both. A shared payment's members each take a share of the interest and fees
+  in proportion to their part, by largest remainder. The category list now also shows where only
+  a breakdown applies. D-055's warning counts only payments holding no applied breakdown.
+- **Tokens:** `r14`, `t12`, `d11` and `c7`, each leaving breakdowns out while none reaches. `lb1`
+  covers the transactions holding the bound records, their outcome with and without it, and the
+  stated value; it is pinned by being the same in two ledgers built alike (no random ID enters
+  it).
+- **`report loans`** shows each loan's "Interest and fees paid, actual, as breakdowns state them"
+  where any applies. Breakdowns never edit a balance.
+- **Departure, for the owner's review:** `review breakdown-show` and `review breakdown-undo`,
+  not `review breakdown show` and `undo`, since `review breakdown TRANSACTION_ID` makes the
+  statement and argparse cannot also hang subcommands under it (as `fund release-undo`).
+- **Breaks (G12):** 19 applied, 14 caught on the first run. Four were test gaps, closed and caught
+  on the rerun: a plain transfer confirmed to a loan, negative fees, `lb1`'s outcome, and another
+  loan's breakdowns in `report loans`. One was equivalent code and removed: `totals` filtering on
+  `applied`, when a breakdown that does not apply stores no value.
+
+**M15 compared as G6, once for the three slices** (a departure from G6's "before each slice", for
+the time each capture takes: about three hours here). M15.3's code, frozen at `145969c`, read
+copies of M14's migrated ledgers brought from 28 to 31, against M14.3's capture of the same
+ledgers at 28, with `r13:r14,t11:t12,d10:d11,c6:c7` read as token bumps: all 133,910 runs
+identical, so no command changed where no breakdown applies, and no digest moved. The new
+commands (`report funds`, `account links`, `report net-worth`, `report loans`, `loan payoff`,
+`review breakdowns`) ran on all 3,219 ledgers and refuse exactly where `funds` does, apart from
+two: `report funds` and `report budget` alike stop on a test ledger holding a household timezone
+of "x", written into the table by hand (`setting set` refuses it), and on the M13 ledger whose
+planning tables a test drops.
+
 ---
 
-## D-072 M16 plan: safe-to-spend and the cash-flow constraint — Approved
+## D-072 M16 plan: safe-to-spend and the cash-flow constraint — Approved, M16 accepted
 
 M16 meets PRD §12's protected funds and cash-flow constraint, and records shared-contract §6's
 **safe-to-spend calculation details**. It combines M12 (income and obligations), M13 (budget
@@ -1920,9 +2260,93 @@ links between obligations and loans or reserves, and the emergency restoration a
 | SB6 | Third paycheck: the extra changes neither the budget constraint nor the horizon's protected amounts. It reaches liquidity only as money actually received |
 | SB7 | `safe-to-spend` and `dashboard` open read-only, call no candidate search (a test replaces it with a failure), and the dashboard page equals the command line for line. `--safe-to-spend` records its figures under G9. Every earlier criterion still passes |
 
+
+**How M16.1 was implemented** (built on 2026-11-19, within the approved plan):
+
+- **Migration 0032** (`0032_safe_to_spend_inputs.sql`): `account_liquidity` (checking or savings
+  only, by trigger) with its events, `obligation_coverage` (exactly one of a loan account and a
+  reserve, each by trigger) with its events, `fund_restoration` (the emergency fund only, by
+  trigger) with its events, and the seeded `checking_buffer_cents` key. G10's tests are
+  `test_liquidity_migration.py`. Setting it back deletes the seeded key past its append-only
+  trigger (`drop_liquidity_tables`), which joins every older set-back.
+- **`planning/liquidity.py`:** designations, undo then set, `lq1` over the operation, the account,
+  its type and its active designation.
+- **`planning/coverage.py`:** a link from an obligation's chain, so a supersession keeps it, to a
+  loan with terms or to an active reserve. Each chain covers one thing and each loan or reserve is
+  covered once, checked under the write lock. `ob1` gains the operations `covers` and `uncover`,
+  over the obligation by what it says and its ID, and the chain's active link. A link whose chain
+  no longer applies is inert, listed as such, and can still be taken away.
+- **Possible double reservations:** an unlinked applying obligation, with fixed terms whose range
+  holds the amount, and a nominal date within 3 days, both edges included, of a loan's next
+  scheduled payment on or after `as_of` or of a reserve's next due date. Neither side may be
+  linked to anything. A warning only: nothing is linked for the person.
+- **`planning/fund_restorations.py`:** the emergency fund's dated monthly amount, a later
+  `effective_from` taking over, never in a closed month. `fu1` with its own operations
+  `restoration` and `restoration_undo`, over the fund and its active restorations, so no existing
+  `fu1` token moves.
+- **The buffer** is typed as an amount and stored as whole cents, above zero.
+- **Departures, for the owner's review:**
+  - Three read commands show the tokens without changing any existing command's output:
+    `pf account liquidity show`, `pf obligation coverage [--as-of]`, which also lists the possible
+    double reservations with the command that links each, and `pf fund restorations FUND_ID`.
+  - `pf fund restoration-undo`, spelled so for argparse as `fund release-undo`, steps back the
+    newest restoration, so a mistyped amount can be corrected the same month.
+  - `setting show` gains the seeded key's two lines, which seeding the key implies.
+- **Breaks (G12):** 25 applied, 19 caught on the first run. Four were test gaps, closed and
+  caught on the rerun: one checking account's `lq1` used for another, an uncover token taken
+  before the link changed what it covers, a linked obligation still looking like a reserve, and a
+  linked loan still looking like another bill. One was equivalent code and kept: `lq1` without its
+  operation, which the designation already decides, kept because G5 puts the operation in every
+  token. One guard was unreachable and removed: a loan's terms always hold a payment period.
+
+
+**How M16.2 was implemented** (built on 2026-11-19, within the approved plan):
+
+- **`reports/safe_to_spend.py`,** under `reports/` because it combines M12 to M15's figures
+  (CLAUDE.md's import-cycle lesson). Points 1 and 3 to 6 as written, read-only, every figure in
+  cents, a spendable amount rounding down. It refuses without the household timezone, since
+  assignment events are placed in months in that zone.
+- **Commands:** `pf safe-to-spend [--as-of] [--explain]`, whose explanation lists each liquidity
+  account's estimate and every protected item with the entry it comes from, and `pf dashboard
+  [--as-of]`, both from builders in `report_text.py`, with the read-only `/dashboard` page and a
+  navigation link. Neither calls `totals` or the transfer candidate search: the dashboard counts
+  unconfirmed transfer kinds from applied types.
+- **Choices, for the owner's review:**
+  - **A bill due before `as_of` but still within its tolerance** is reserved, as still expected.
+    A missed one is not: it is past. A loan payment is reserved only when due in the horizon, as
+    the plan says, and less what was confirmed paid in its period.
+  - **The planned contribution this month** is computed from the assignments held at the month's
+    start in the household's zone (now less this month's net increase), so assigning the planned
+    amount mid-month leaves the protected total unchanged (SB4). An assignment undone this month
+    counts as a negative increase, so it is owed again.
+  - **The last day an account's documents cover** is the latest coverage end of its documents,
+    each by its declaration in effect, else its claim.
+  - **`open_review_items`** counts open items with a subject transaction on a liquidity account
+    dated after its observation, or an unresolved record of the account.
+  - **`card_without_payment_obligation`:** a card with activity in the last 60 days and no
+    applying obligation on the card, or whose name or matcher holds the card's name, ignoring case.
+    No link ties an obligation to a card, so this is a name match, and it may need the owner's
+    naming.
+  - **Restoration is protected only while the emergency fund is underfunded,** as the month's
+    stated amount less what was assigned to it this month.
+  - **The dashboard's last import date** is the import's UTC date, an institution-data fact, never
+    "now".
+- **Breaks (G12):** 25 applied, 17 caught on the first run. Eight were test gaps, closed and
+  caught on the rerun: a paid bill, a bill within its tolerance before `as_of`, a loan payment
+  already confirmed, part of the plan assigned this month, an assignment undone this month, the
+  tax reserve held on another account, daily rounding on an inexact surplus, and a card named in
+  the obligation's name only.
+- **Compared as G6:** 163,076 command runs on every kept ledger, before on HEAD (`9a9186a`) and after on a copy of the tree, migrated to 32. 159,929 are identical, every token digest unchanged. The 3,147 that differ are expected: 3,063 are `setting show` listing the seeded `checking_buffer_cents` key, and 84 are on two test ledgers HEAD refused as newer than itself. The first run found `obligation coverage` failing on 49 runs, on ledgers holding a reserve with no terms row: fixed, with a test. A sweep of `safe-to-spend --explain`, `dashboard` and `obligation coverage` at three dates on the 3,310 ledgers at 32, each with the household timezone added, found one more ledger failing: its timezone is `x`, written straight into the table by `test_the_token_covers_the_key_and_the_value`. `setting set` refuses such a name, and M14's `report budget` fails the same way on it, so it is not M16's; but a stored name that is not a zone ends in the unexpected-problem message rather than a refusal. Left for the owner.
+- **SB7's benchmark row,** `--scale --safe-to-spend`: **G9's stopping rule is met by `dashboard`.** `safe-to-spend` takes 0.38s at its slowest date and `dashboard` 1.02s, against 1.0s each; three timings at each of the 12 dates on one ledger put the dashboard at 0.98s to 1.06s. The cost, profiled: `dashboard` computes the month's figures more than once. `safe_to_spend` already calls `budget_report`, and `dashboard_lines` calls it again and then `income_report`, so each dashboard runs 3 income reports and 2 budget reports, each matching obligations over the shape's payments anew (0.66s of a 1.7s profile in text normalization). Not optimized, as G9 says: computing the month once and passing it through is the obvious remedy, for the owner's decision. Figures in [benchmarks.md](benchmarks.md).
+- **Accepted, and the two findings settled (2026-11-20).** The owner accepted M16 and left both
+  to the lead engineer: the dashboard now computes the month once (`safe_to_spend` keeps its
+  budget report, which keeps its income month), 0.647s at its slowest date against 1.021s; and a
+  stored timezone that is not a zone is refused with `STORED_ZONE_UNREADABLE`, repeating nothing
+  stored.
+
 ---
 
-## D-073 M17 plan: the local UI completed, with browser writes — Approved, a security change
+## D-073 M17 plan: the local UI completed, with browser writes — Approved, a security change, built for review
 
 M17 meets PRD §18:
 
@@ -2134,6 +2558,53 @@ terminal-only list is right.
 - **H.** The `--ui` benchmark row (point 8).
 - **I.** The slices M17.1 to M17.4, in that order.
 
+### M17.1 slice plan — Approved by the owner's notes of 2026-11-20
+
+Written before any of it was built. The owner's notes of 2026-11-20 accepted M16 and D-079, and
+gave standing approval to continue through the milestones on the lead engineer's choices, which
+is taken as point A's approval of browser writes as one security change.
+
+1. **A write module beside the server.** `ui/writes.py` holds the pipeline's steps 3 to 8 as pure
+   functions over the request's method, path, headers and body, each returning a refusal or the
+   parsed form, so WA1 tests each step alone. `ui/server.py` keeps steps 1 and 2 (shared with
+   `GET`), calls the pipeline, then step 9.
+2. **Step 9 runs the CLI's own command,** `main(["review", "reject", …])`, with the arguments
+   built from the strictly parsed form, its output captured in memory with
+   `contextlib.redirect_stdout` and `redirect_stderr` (the server is one request at a time). No
+   value can start with `-`, so none is read as an option. The handler opens through the gate with a write connection, checks staleness and the
+   revision under D-043's lock, and refuses exactly as the terminal does, so WA3's equality is by
+   construction and tested. Nothing reaches stdout or stderr (WA5).
+3. **The allowlist for M17.1:** `/review/reject`, `/review/confirm` and `/review/undo`. Point 2
+   lists `separate` too, but it decides a transaction, and the UI has no transaction page until
+   M17.3's search: it joins the allowlist there. A test asserts the route table equals the list.
+4. **Forms without script.** The review item page adds forms above its terminal hint: a
+   possible-duplicate or conflict item gets a reject form (pairs, one `T1 T2` per line) and a
+   confirm form (groups, one space-separated group per line). Hidden fields: account, item ID,
+   revision, form token. An unresolved-record item keeps its terminal hint: completing and
+   dismissing are M17.2's corrections and completions. The textareas are parsed strictly: IDs of
+   the ledger's form only, at most 50 lines.
+5. **The form token** is HMAC-SHA256 over the session's 32-byte secret, the route, the form ID
+   (the item or decision ID), the account and every revision token the form shows, in hex. The
+   server keeps the set of used tokens for the session. The secret is made at launch alongside
+   the session value, in memory only.
+6. **Post/Redirect/Get.** Success stores the captured CLI text under a fresh random result ID in
+   the session's memory (at most the last 20) and answers `303` to `/result?id=…`. The result
+   page shows that text, and for a reject or confirm an undo form carrying the new decision's ID
+   and its current revision (computed by the same function `review decision show` uses). A
+   refusal by the command answers `409` with the CLI's refusal text, which by D-037 repeats no
+   input, checked with sentinels (WA4).
+7. **CSP** already holds `form-action 'self'`. No change.
+8. **A departure from point 1: no `urllib.parse`.** W1 refuses every `urllib` import, and its test
+   names `import urllib.parse` in the server as a refusal. So the body is decoded by a strict
+   decoder of the form encoding in `ui/writes.py` (`+`, `%XX`, then strict UTF-8), and W1 stays
+   unchanged as point 1 requires.
+9. **Server imports.** The server still imports only from `cli` and `report_text`, plus its own
+   `ui.writes`. The undo form's revision comes from `active_decision_undo` in `cli.py`, which
+   uses what `review decision show` uses.
+10. **Not in M17.1:** `separate` (M17.3), every other write (M17.2), the `--ui` benchmark (M17.4).
+
+Tests: `tests/scenarios/test_local_ui_writes.py`, WA1 to WA5, each refusal with its control.
+
 ### M17.1 acceptance criteria
 
 | ID | Test |
@@ -2143,6 +2614,66 @@ terminal-only list is right.
 | WA3 | A decision from the browser equals the same CLI decision: the same rows, the same logical digest afterwards. A stale revision token or stale account refuses with the CLI's message, and the UI never reconciles (UD1) |
 | WA4 | Post/Redirect/Get: a reload of the result page writes nothing, and a resubmitted form refuses (UD3). No refusal page repeats a request value, tested with sentinels |
 | WA5 | Each `POST` opens through the gate, and a real ledger whose probe fails refuses with no write (UD4). No request writes to stdout or stderr. Every earlier criterion still passes |
+
+### M17.2 slice plan — Approved by the owner's notes of 2026-11-20
+
+Written before any of it was built, after M17.1. Point 2's allowlist is the owner's input, and
+the owner left the choices to the lead engineer. It is built in two parts, each gated, broken and
+committed on its own:
+
+- **M17.2a, transaction and record writes.** A transaction page, `/transaction?id=T`, showing
+  `review transaction show`'s lines, linked from the transactions list. On it: classify,
+  categorize, correct (one field), separate (groups) and a one-sided transfer. The review item
+  page's unresolved records gain complete and dismiss.
+- **M17.2b, the sections and planning writes.** The accounts and members page (account types,
+  liquidity, links and members), the settings and backups page (settings in effect, `pf storage`,
+  backup records, read-only), and the planning pages already built gain forms: the checking
+  buffer (set and undo), an account's liquidity (set and undo), and obligation coverage links
+  (covers and uncover). The obligations section shows `obligations` and `obligation coverage`.
+- **Amended while building M17.2b:** the preview-then-add flows for income sources,
+  obligations, budget plans and funds are left in the terminal for now. M18's scenario inputs
+  have their own forms (D-074 point 5) and need none of them, and each flow has many typed
+  options better built with a page of its own. Point 6 below stands for when they are built.
+- **Section pages show no creation time.** `setting show`, `account liquidity show`,
+  `obligations` and `household share show` print `, made <time>`. D-073 point 3 says no page
+  shows one (F2), so a section page shows its commands' lines with that clause left out, and
+  its parity test asserts exactly that.
+
+**How every route is built,** generalizing M17.1:
+
+1. **A route is declared, not coded.** Each entry of `WRITE_ROUTES` names its CLI words, its
+   positional field, its hidden fields (fixed by the page, bound by the form token) and its
+   typed fields, each with a kind: an ID, a choice from a fixed list, an amount, a date, a month,
+   or text. Step 9 builds the command line from the declaration alone, writing every option as
+   `--name=value`, so no value can be read as an option whatever it holds. A typed field left
+   empty is left out, as an option not given.
+2. **The form token binds the route and every hidden field,** by name and value, not only the
+   revision: changing any hidden value refuses (WA2, widened).
+3. **Revisions come from the terminal's own show commands.** A page that needs a revision it
+   does not print itself (a superseded statement's, a preview's) runs the read-only show or
+   preview command in memory, as step 9 runs a write, and takes the token from its printed
+   `Revision:` line. The page and the terminal can never disagree on a token.
+4. **Superseding.** Where a classification, categorization or correction of the field already
+   applies, the form carries its ID and its revision from `review <kind> show` as hidden fields,
+   so a browser change supersedes exactly as `--supersedes` does. Where statements disagree, the
+   page shows the terminal command instead of a form.
+5. **Text fields** (a description, a name) accept any printable text up to 200 characters, no
+   control or format character, refused otherwise before any command runs. They are escaped as
+   D-040 wherever shown.
+6. **A preview is a POST that writes nothing.** It passes the whole pipeline, runs the CLI's
+   preview, and answers `200` with the preview's lines and the add form, its typed values now
+   hidden and bound with the preview's revision. The add is the write, and redirects (PRG).
+7. **Terminal only, as point 2 lists, and also for now:** allocations, consumptions, breakdowns,
+   transfer matches, coverage declarations, category rules, balance observations, fund
+   assignments and priority, the preview-then-add flows, and every undo but review decisions',
+   the buffer's, liquidity's and coverage links'. Each needs a page of its own
+   or a second transaction's revision. They are left out rather than built thinly: the
+   terminal does each, and none is needed by M18's scenario input. A test asserts that the
+   route table equals the list as built.
+
+Tests: `tests/scenarios/test_local_ui_writes.py` grows WB1 to WB3's cases: each route's write
+equals its CLI command (rows and output), each refusal is the CLI's, and the route table equals
+the list.
 
 ### M17.2 acceptance criteria
 
@@ -2167,9 +2698,51 @@ terminal-only list is right.
 | WD1 | Export refuses an unsafe or existing destination, writing nothing, and writes `0600`. A cell starting with each formula character is prefixed. Money round-trips exactly, and missing is empty |
 | WD2 | `--ui` records its figures under G9. Every earlier criterion still passes |
 
+### How M17 was implemented
+
+Built on 2026-11-20 on the owner's notes of that day (M16 accepted, standing approval to continue
+on the lead engineer's choices). The slice plans above were written before each slice.
+Departures and choices, each with its reason:
+
+- **No `urllib.parse` (point 1).** W1 refuses every `urllib` import, so `ui/writes.py` decodes
+  form bodies and the transactions page's query with its own strict decoder, and W1 is unchanged.
+- **Step 9 runs the CLI's own `main`** with the form's values as `--name=value` options, output
+  kept in memory. A browser write is the terminal's command, parser, gate and refusals included,
+  and no value can be read as an option. A positional value may not start with `-`.
+- **The form token binds the route and every hidden field** in the route's order, not only the
+  revisions.
+- **Allowlist as built:** review reject, confirm and undo; complete and dismiss; classify,
+  categorize, correct, separate (from M17.3 to M17.2a, since the transaction page came first), a
+  one-sided transfer, tag and "no tags"; the checking buffer set and undo; liquidity set and
+  undo; obligation covers and uncover. Left in the terminal for now: allocations,
+  consumptions, breakdowns, transfer matches, coverage declarations, category rules, balance
+  observations, fund assignments and priority, the preview-then-add flows, and the other undos.
+  The timezone stays terminal-only, as point 2 says: the settings routes take the buffer key
+  alone.
+- **Pages show no creation time (F2).** Section pages run their commands in memory and leave out
+  `, made <time>`, the one way their text differs from the commands'.
+- **`c` stays at 7 (point 5).** A correction token covers what a corrected value can change, and
+  tags have no fit rule, so no correction changes their outcome. `r15`, `t13` and `d12` keep every
+  pinned digest; only their prefixes move.
+- **`tg1`** digests the undo outlook, which already holds the applied tag IDs, each naming one
+  append-only tag.
+- **The visuals** take their rows from figures existing reports give, and `pf report visuals`
+  prints them as the tables beneath the charts. **The real-browser check of the CSP was not made**:
+  no browser was available. By the CSP specification, `style-src` governs style attributes and
+  elements, which the SVG has none of.
+- **`pf export report NAME`** takes the report's own options after its name, so `--out` comes
+  first, and writes the report's lines one a row.
+- **`--ui`** times its 50 writes on the buffer's undo and set, alternately: the shape holds no
+  review item, and those routes pass every pipeline step and the CLI's own command as a decision
+  does.
+- **Breaks:** M17.1 25 (18 caught, 5 gaps closed, 2 unreachable guards removed); M17.2a 25 (19
+  caught, 4 closed, 1 equivalent simplified, 1 guard removed); M17.2b 20 (16 caught, 2 closed, 1
+  equivalent, 1 bad break); M17.3 25 (20 caught, 2 closed, 2 equivalent removed). Logs under
+  `build/s17/breaks/`, ignored.
+
 ---
 
-## D-074 M18 plan: financial scenarios — Approved
+## D-074 M18 plan: financial scenarios — Approved, built for review
 
 M18 meets PRD §15:
 
@@ -2345,6 +2918,53 @@ scenario to model, such as a home purchase, to shape the fixtures.
 - **F.** Migration 0034, `sc1`, `sp1`, and `--scenarios` (point 8).
 - **G.** The slices M18.1 to M18.3, in that order.
 
+### M18 slice plans — Approved by the owner's notes of 2026-11-20
+
+Written before any of M18 was built, after M17. D-074 is approved; these fix what it leaves to
+build time.
+
+**M18.1, scenarios and inputs (migration 0034, `sc1`).**
+
+1. **Tables.** `scenario` (name, unique among active ones is not required: IDs identify;
+   `include_uncertain` 0 or 1), `scenario_event` (made, undone), `scenario_input` (the
+   scenario, the kind, `amount_cents` ≥ 0, `from_date`, an optional `to_date` not before it,
+   the cadence as typed or `once`, an anchor for weekly and biweekly, an optional replaced entry
+   as kind and ID, `uncertain`, `gross` with `take_home_basis_points` exactly when gross, and the
+   kind options as nullable columns, each kind's own CHECKed), and `scenario_input_event`
+   (made, undone). `scenario_promotion`, `scenario_promotion_event` and
+   `scenario_promotion_entry` are M18.3's, created in 0034 so one migration holds the milestone,
+   empty until a promotion. All append-only (G2), with the triggers the other planning tables
+   have. A scenario's inputs change by undo then add.
+2. **The kinds and what each takes,** from D-074 point 2: `income` (replaces a source),
+   `bonus` (once, uncertain unless `--confirmed`), `expense` (replaces an obligation),
+   `annual_expense` (annual cadence, replaces a reserve), `purchase` (once), `home_purchase`
+   (`--price`, `--down-payment`, `--closing-costs`, `--loan-rate`, `--loan-months`,
+   `--ownership-costs`, once on `--from`), `loan_payoff` (`--loan` account, once), `borrowing`
+   (`--amount` as proceeds, `--loan-rate`, `--loan-months`). Refused: an option the kind does not
+   take, gross without a percentage, a percentage without gross or outside 1 to 100, a replacement
+   of the wrong kind or of an entry not applying, `to` before `from`, a cadence on a one-time kind,
+   and a stale `sc1`.
+3. **`sc1`** covers the scenario's name, flag, state and its inputs with their states, by
+   canonical JSON as the other planning tokens; adding, undoing an input and undoing the
+   scenario take it. `scenario show` prints it.
+4. **`target_changed`.** An input whose replaced entry no longer applies (undone, or superseded
+   for chains) shows `target_changed`, left out of every projection and disclosed, until undone
+   and added again.
+5. **Commands:** `scenario add`, `scenario input add`, `scenario input undo`, `scenarios`,
+   `scenario show`, `scenario undo`. New command groups join the test `Ledger.run` helper.
+
+**M18.2, the projection and comparison.** `project(plan, inputs, as_of, months)` in
+`planning/scenarios.py`, pure, monthly from as_of's month, 24 by default and at most 120:
+salary by nominal dates from the sources' schedules; fixed obligations at their planned amounts;
+discretionary at the budget target; fund contributions as planned; loans by their schedules with
+M15's amortization; the starting liquid balance M16's estimate. Inputs replace an entry over
+their range only, or add. Outputs as D-074 point 3, absolute for both runs and the difference.
+`scenario compare` prints them; the scenario pages render `scenarios`, `scenario show` and
+`scenario compare` with M17's pipeline for add, input add, input undo and undo.
+
+**M18.3, promotion.** `scenario promote` and `scenario promotion undo` with `sp1`, mapped as D-074
+point 6, through the planning commands' own functions in one transaction; `--scenarios` benchmark.
+
 ### M18 acceptance criteria
 
 | ID | Test |
@@ -2358,9 +2978,67 @@ scenario to model, such as a home purchase, to shape the fixtures.
 | XC1 | Promotion creates exactly the mapped entries in one transaction, is refused with a stale `sp1` or a changed replaced entry, and lists what is not promotable. Undo restores the plan's every token, and refuses after a later supersession |
 | XC2 | `evidence_digest` is unchanged by every scenario command. `--scenarios` records its figures under G9. Every earlier criterion still passes |
 
+### How M18 was implemented
+
+Built on 2026-11-21 on the owner's notes of 2026-11-20 (continue through M18 and M19 on the
+lead engineer's choices), without a stop between its slices. Departures and choices, each with
+its reason:
+
+- **Kind options as built (M18.1).** A home purchase's amount is its `--price`. A loan payoff
+  names its loan by `--loan` and stores that account's terms, which make it `target_changed` when
+  undone, as a replacement's entry does. An additional income or expense may name `--account`
+  and `--match`, needed only to promote it; a replacement takes neither. A recurring input takes
+  any M12 cadence: weekly, biweekly, quarterly and every-N-months need `--anchor`, and monthly,
+  semimonthly and annual name their own days. Amounts may be 0, so a replacement can model a job
+  ending.
+- **The projection's model (M18.2, point 3).** One pure `project(plan, inputs, as_of, months)`
+  in `planning/projection.py`; `reports/scenario_report.py` reads the plan once. Each month from
+  `as_of`'s, counting in that month only what falls after `as_of`, since the starting balance
+  holds the rest:
+  - **Liquidity** starts at M16's estimate less what funds hold on liquidity accounts.
+  - **Income:** salary sources by their nominal dates. Side sources are left out, so side income
+    comes only from confirmed inputs.
+  - **Outflows:** fixed obligations at their planned amounts. Discretionary obligations are
+    within the budget target, and an obligation covering a reserve is the reserve's purchase, so
+    neither counts again. Discretionary spending is at the target, and in `as_of`'s month what is
+    left of it. The tax reserve accrues on tax-eligible salary.
+  - **Loans:** each projected by M15's monthly interest from its latest observation, its payment
+    counted once where an obligation covers it.
+  - **Funds:** contributions follow D-070's formulas in priority order, as far as liquidity above
+    the protected amount (the checking buffer) allows. A reserve pays its target from the fund on
+    its due date.
+  - **Net worth:** actual net worth plus the change in liquid money less the change in debt,
+    scenario assets apart.
+  - **Allowances:** the target's daily and weekly, capped by the month's liquidity surplus.
+  - **Scenario loans** take the level payment over their months, rounded up.
+
+  Every assumption and missing input is printed.
+- **A FLAG field kind (M18.2).** The forms need the CLI's switches (`--uncertain`, `--gross`,
+  `--confirmed`, `--include-uncertain`), and the pipeline had only valued fields. A FLAG field
+  takes "yes", which writes the option alone, or empty. No check is loosened. Promotion stays in
+  the terminal.
+- **Promotion undo withdraws terms rows (M18.3, against G2's "never undone one by one").** A
+  replacement is promoted as a new terms row, from `--from` on the replaced entry, then the
+  entry's own terms again from the day after `--to`. Undoing the promotion withdraws those rows
+  together: the income, obligation and fund terms loaders leave out rows of an undone
+  promotion. That gives back every pre-existing entry's show and token byte for byte, which XC1
+  asks. With no promotion the loaders read as before. A withdrawn row keeps its date (the terms
+  tables' `UNIQUE`), so promoting again on that date is refused clearly.
+- **Not promotable, beyond point 6's list (M18.3).**
+  - `loan_payoff`: the payoff plan holds a monthly extra, not a one-time payment.
+  - A bonus: no planning entry holds one-time income.
+  - An addition with `--to`: no source, obligation or reserve has an end date.
+  - An addition without `--account` and `--match`.
+
+  Promoted income is salary on a salary cadence, else side; a promoted expense is fixed.
+- **One active promotion per scenario.** Promoting again needs the first undone.
+- **Breaks:** M18.1 25 (25 caught); M18.2 25 (19 caught, 5 gaps closed, 1 that did not apply
+  until its text was corrected, then caught); M18.3 23 (18 caught, 5 gaps closed). Logs under
+  `build/s18/breaks/`, ignored.
+
 ---
 
-## D-075 M19 plan: snapshots — Approved
+## D-075 M19 plan: snapshots — Approved, built for review
 
 M19 meets shared-contract §3 and §4, and records §6's **snapshot compatibility policy**. A snapshot
 is:
@@ -2523,6 +3201,57 @@ institution names may appear on the phone.
   0035).
 - **G.** The slices M19.1 and M19.2, in that order.
 
+### M19 slice plans — Approved by the owner's notes of 2026-11-20
+
+Written before any of M19 was built, after M18. The owner's notes of 2026-11-20 approve the lead
+engineer's choices, the snapshot's destination included, gated as `pf export`'s is. These fix
+what D-075 leaves to build time.
+
+**M19.1, the builder and the format.**
+
+1. **The package** `personal_finance/snapshot/`: `canonical.py` (canonical bytes, refusing any
+   float, NaN or non-string key), `builder.py` (each section from one connection it is given,
+   and the envelope), `schema_v1.json` (the schema document) and `validate.py` (its validator).
+   It imports reports and planning; nothing imports it but the CLI.
+2. **Sections,** as point 2's table: `cutoff`, `period`, `household`, `accounts`, `months`,
+   `budget`, `safe_to_spend`, `funds`, `loans`, `net_worth`, `transactions`, `warnings`,
+   `review` and `assumptions`. Each figure is taken from the report its command prints, never
+   computed again. Where a figure needs the household timezone (budget pace, safe to spend) and
+   none is set, its section is `null` and a warning says so: a snapshot never assumes a zone.
+3. **Accounts** are referenced by `account_index`, their position in the snapshot's account list
+   by display name then ID, with the display name and type only.
+4. **Transactions** in the window are those whose reporting date (D-057's effective transaction
+   date, else posting date) falls in the last `window_days` days through `as_of`, inclusive, in
+   date then ID order. Each has its ledger transaction ID (not a record or external ID).
+5. **The schema document** is JSON in a small, stated subset: each node a `type` (`object`,
+   `array`, `string`, `integer`, `boolean`), objects their `fields`, each `required` and
+   `nullable` stated, arrays their `items`, strings an optional `enum` or `pattern` (a full
+   match), and every field whose name ends `_cents` a `value_kind` of `actual`, `projected`,
+   `reserved` or `allocated`. Unknown fields in a snapshot are ignored by the validator (the
+   compatibility policy's consumer rule), but the builder's output is checked to have none.
+6. **Golden fixtures** under `tests/fixtures/synthetic/snapshots/v1.0/`, built from fixed
+   synthetic ledgers with every generated ID made deterministic in the test (`uuid.uuid4`
+   replaced by a counter), so the bytes are pinned. A test fails if the builder's output differs
+   from a fixture, and another if the fixture's `schema_version` is not the schema's.
+
+**M19.2, creating, verifying and listing (migration 0035).**
+
+1. **`pf snapshot create --out PATH [--as-of] [--window-days N]`** opens the ledger read-only,
+   begins one read transaction, builds every section on that connection, and commits. Then it
+   writes the file by point 7's steps to a destination refused exactly as `pf export` refuses
+   one (`db/exports.py`'s checks: no symbolic link, not in a git work tree or synced folder, a
+   private folder, and on a real ledger an encrypted disk image), the file `0600`. Then it
+   records `snapshot_record` on a separate write connection. A recording failure leaves the file
+   and is reported with exit code 2.
+2. **`snapshot_record`** (migration 0035): `snapshot_id`, `schema_version`, `as_of`,
+   `window_days`, `generated_at` and `content_sha256`, with `created_at`. Append-only, no path.
+3. **`pf snapshot verify PATH [--db DB]`** reads the file and checks, in order: canonical bytes,
+   the envelope, the digest, the schema, point 6's reconciliations and point 3's excluded keys.
+   It writes nothing. With `--db` it also needs a record with the same ID and digest.
+4. **`pf snapshots --db DB`** lists the records.
+5. **The benchmark row** `--snapshot` on `--safe-to-spend`'s shape, timing create and verify and
+   recording the file's size.
+
 ### M19 acceptance criteria
 
 | ID | Test |
@@ -2536,6 +3265,46 @@ institution names may appear on the phone.
 | VB2 | `create` refuses an unsafe or existing destination, writing nothing. It writes `0600` atomically, and records without the path. Migration 0035 meets G10 |
 | VB3 | `verify` accepts a fresh snapshot, and refuses a one-byte change, a changed digest, broken reconciliation and an excluded key, writing nothing |
 | VB4 | `--snapshot` records its figures under G9. Every earlier criterion still passes |
+
+### How M19 was implemented
+
+Built on 2026-11-21 on the owner's notes of 2026-11-20, after M18, without a stop between its
+slices. The format is recorded as shared-contract §6's snapshot compatibility policy
+([shared-contract.md](shared-contract.md)), with the schema document
+`src/personal_finance/snapshot/schema_v1.json`. Departures and choices, each with its reason:
+
+- **What the owner's inputs default to.** The window is 90 days, configurable from 1 to 366.
+  Institution names are left out of the snapshot until the owner says they may appear on the
+  phone: an account is its display name and type.
+- **Value kinds.** Planned figures (budget targets and allowances, safe-to-spend figures,
+  planned contributions, a loan's scheduled payments and projections) are `projected`; what
+  funds hold and safe-to-spend protects `reserved`; members' parts `allocated`; observed and
+  recorded money `actual`.
+- **Household by month** gives each month's totals of all transactions, moved out and in, for the
+  household, each member and the unattributed (`household_by_month`, one pass). Members' parts by
+  D-056's five groups are left for a later minor version.
+- **Without the household timezone** `budget` and `safe_to_spend` are `null`, with a
+  `no_timezone` warning: a snapshot never assumes a zone. `pf snapshot create` without `--as-of`
+  needs the zone for today, as every planning command does.
+- **The window** holds transactions by the date `pf transactions` shows, the effective
+  transaction date else the posting date, from `window_days − 1` days before `as_of` through it.
+  Each keeps its ledger transaction ID, which the phone needs and which is no record or external
+  ID.
+- **Safe to spend's reasons** hold a list of details each, which the benchmark shape found: the
+  test ledgers held none.
+- **The destination** is refused by `db/exports.py`'s check, now naming which file it refuses, so
+  `pf export`'s messages are unchanged. It is checked once, before the build; a name taken
+  during the build is refused by `os.link`, which never replaces a file.
+- **Golden fixtures** are pinned by building their ledger with `uuid4` as a counter and its
+  import times fixed (the test drops and restores `source_document`'s no-update trigger on its own
+  synthetic ledger), so the bytes are the same on any day.
+- **The benchmark does not time the gated write:** `build/` is inside the git work tree, which
+  the destination check refuses. Generation and verify are timed, and the size recorded.
+- **G6, for M18 and M19 together,** since neither changes an existing command: 197,641 command runs over 3,736 kept ledgers, M17's head (`43f29eb`) against M19's code on migrated copies: 197,549 byte for byte the same. The 92 that differ are all on two ledgers a test leaves at version 34, which M17's code refuses as newer than itself and M19's code asks to migrate. No token moved.
+  Scripts and logs under `build/s18/g6/`, ignored.
+- **Breaks:** M19.1 23 (20 caught, 3 gaps closed); M19.2 21 (19 caught, 1 bad break rewritten
+  and caught, 1 equivalent: `os.link` refuses a link at the name either way). Logs under
+  `build/s18/breaks/`, ignored.
 
 ---
 

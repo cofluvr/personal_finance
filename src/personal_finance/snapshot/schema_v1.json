@@ -1,0 +1,1081 @@
+{
+ "about": "The CommonCents snapshot, version 1.0 (D-075). Each node states its type, whether it may be null, and for an object each field and whether it is required. Every field ending _cents states its value kind. A consumer accepts any 1.x and ignores fields it does not know; it refuses another major version.",
+ "deprecated": [],
+ "document": {
+  "fields": {
+   "content": {
+    "fields": {
+     "accounts": {
+      "items": {
+       "fields": {
+        "account_index": {
+         "nullable": false,
+         "required": true,
+         "type": "integer"
+        },
+        "account_type": {
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        "display_name": {
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        }
+       },
+       "nullable": false,
+       "type": "object"
+      },
+      "nullable": false,
+      "required": true,
+      "type": "array"
+     },
+     "assumptions": {
+      "items": {
+       "nullable": false,
+       "type": "string"
+      },
+      "nullable": false,
+      "required": true,
+      "type": "array"
+     },
+     "budget": {
+      "fields": {
+       "actual_cents": {
+        "nullable": false,
+        "required": true,
+        "type": "integer",
+        "value_kind": "actual"
+       },
+       "days_remaining": {
+        "nullable": false,
+        "required": true,
+        "type": "integer"
+       },
+       "month": {
+        "nullable": false,
+        "pattern": "[0-9]{4}-[0-9]{2}",
+        "required": true,
+        "type": "string"
+       },
+       "original_daily_cents": {
+        "nullable": false,
+        "required": true,
+        "type": "integer",
+        "value_kind": "projected"
+       },
+       "remaining_capacity_cents": {
+        "nullable": false,
+        "required": true,
+        "type": "integer",
+        "value_kind": "projected"
+       },
+       "revised_daily_cents": {
+        "nullable": false,
+        "required": true,
+        "type": "integer",
+        "value_kind": "projected"
+       },
+       "revised_weekly_cents": {
+        "nullable": false,
+        "required": true,
+        "type": "integer",
+        "value_kind": "projected"
+       },
+       "target_cents": {
+        "nullable": false,
+        "required": true,
+        "type": "integer",
+        "value_kind": "projected"
+       }
+      },
+      "nullable": true,
+      "required": true,
+      "type": "object"
+     },
+     "cutoff": {
+      "fields": {
+       "accounts": {
+        "items": {
+         "fields": {
+          "account_index": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          },
+          "last_covered_day": {
+           "nullable": true,
+           "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+           "required": true,
+           "type": "string"
+          },
+          "last_import_date": {
+           "nullable": true,
+           "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+           "required": true,
+           "type": "string"
+          },
+          "latest_observation_date": {
+           "nullable": true,
+           "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+           "required": true,
+           "type": "string"
+          },
+          "posting_complete_through": {
+           "nullable": true,
+           "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+           "required": true,
+           "type": "string"
+          },
+          "transaction_complete_through": {
+           "nullable": true,
+           "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+           "required": true,
+           "type": "string"
+          }
+         },
+         "nullable": false,
+         "type": "object"
+        },
+        "nullable": false,
+        "required": true,
+        "type": "array"
+       },
+       "as_of": {
+        "nullable": false,
+        "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+        "required": true,
+        "type": "string"
+       }
+      },
+      "nullable": false,
+      "required": true,
+      "type": "object"
+     },
+     "funds": {
+      "items": {
+       "fields": {
+        "assigned_cents": {
+         "nullable": false,
+         "required": true,
+         "type": "integer",
+         "value_kind": "reserved"
+        },
+        "due": {
+         "nullable": true,
+         "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+         "required": true,
+         "type": "string"
+        },
+        "kind": {
+         "enum": [
+          "goal",
+          "emergency",
+          "reserve",
+          "tax"
+         ],
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        "months_left": {
+         "nullable": true,
+         "required": true,
+         "type": "integer"
+        },
+        "name": {
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        "outstanding_cents": {
+         "nullable": true,
+         "required": true,
+         "type": "integer",
+         "value_kind": "projected"
+        },
+        "planned_contribution_cents": {
+         "nullable": true,
+         "required": true,
+         "type": "integer",
+         "value_kind": "projected"
+        },
+        "required_held_cents": {
+         "nullable": true,
+         "required": true,
+         "type": "integer",
+         "value_kind": "reserved"
+        },
+        "standing": {
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        "state": {
+         "enum": [
+          "active",
+          "undone"
+         ],
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        }
+       },
+       "nullable": false,
+       "type": "object"
+      },
+      "nullable": false,
+      "required": true,
+      "type": "array"
+     },
+     "household": {
+      "fields": {
+       "account_defaults": {
+        "items": {
+         "fields": {
+          "account_index": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          },
+          "member_index": {
+           "nullable": true,
+           "required": true,
+           "type": "integer"
+          }
+         },
+         "nullable": false,
+         "type": "object"
+        },
+        "nullable": false,
+        "required": true,
+        "type": "array"
+       },
+       "members": {
+        "items": {
+         "fields": {
+          "member_index": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          },
+          "name": {
+           "nullable": false,
+           "required": true,
+           "type": "string"
+          }
+         },
+         "nullable": false,
+         "type": "object"
+        },
+        "nullable": false,
+        "required": true,
+        "type": "array"
+       },
+       "months": {
+        "items": {
+         "fields": {
+          "household": {
+           "fields": {
+            "in_cents": {
+             "nullable": false,
+             "required": true,
+             "type": "integer",
+             "value_kind": "actual"
+            },
+            "out_cents": {
+             "nullable": false,
+             "required": true,
+             "type": "integer",
+             "value_kind": "actual"
+            },
+            "transactions": {
+             "nullable": false,
+             "required": true,
+             "type": "integer"
+            }
+           },
+           "nullable": false,
+           "required": true,
+           "type": "object"
+          },
+          "members": {
+           "items": {
+            "fields": {
+             "in_cents": {
+              "nullable": false,
+              "required": true,
+              "type": "integer",
+              "value_kind": "allocated"
+             },
+             "member_index": {
+              "nullable": false,
+              "required": true,
+              "type": "integer"
+             },
+             "out_cents": {
+              "nullable": false,
+              "required": true,
+              "type": "integer",
+              "value_kind": "allocated"
+             },
+             "transactions": {
+              "nullable": false,
+              "required": true,
+              "type": "integer"
+             }
+            },
+            "nullable": false,
+            "type": "object"
+           },
+           "nullable": false,
+           "required": true,
+           "type": "array"
+          },
+          "month": {
+           "nullable": false,
+           "pattern": "[0-9]{4}-[0-9]{2}",
+           "required": true,
+           "type": "string"
+          },
+          "unattributed": {
+           "fields": {
+            "in_cents": {
+             "nullable": false,
+             "required": true,
+             "type": "integer",
+             "value_kind": "allocated"
+            },
+            "out_cents": {
+             "nullable": false,
+             "required": true,
+             "type": "integer",
+             "value_kind": "allocated"
+            },
+            "transactions": {
+             "nullable": false,
+             "required": true,
+             "type": "integer"
+            }
+           },
+           "nullable": false,
+           "required": true,
+           "type": "object"
+          }
+         },
+         "nullable": false,
+         "type": "object"
+        },
+        "nullable": false,
+        "required": true,
+        "type": "array"
+       },
+       "share": {
+        "items": {
+         "fields": {
+          "basis_points": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          },
+          "member_index": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          }
+         },
+         "nullable": false,
+         "type": "object"
+        },
+        "nullable": true,
+        "required": true,
+        "type": "array"
+       },
+       "timezone": {
+        "nullable": true,
+        "required": true,
+        "type": "string"
+       }
+      },
+      "nullable": false,
+      "required": true,
+      "type": "object"
+     },
+     "loans": {
+      "items": {
+       "fields": {
+        "account_index": {
+         "nullable": false,
+         "required": true,
+         "type": "integer"
+        },
+        "due_periods": {
+         "items": {
+          "fields": {
+           "due": {
+            "nullable": false,
+            "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+            "required": true,
+            "type": "string"
+           },
+           "due_cents": {
+            "nullable": false,
+            "required": true,
+            "type": "integer",
+            "value_kind": "projected"
+           },
+           "paid_cents": {
+            "nullable": false,
+            "required": true,
+            "type": "integer",
+            "value_kind": "actual"
+           },
+           "state": {
+            "enum": [
+             "on_schedule",
+             "short",
+             "extra",
+             "missed",
+             "upcoming"
+            ],
+            "nullable": false,
+            "required": true,
+            "type": "string"
+           }
+          },
+          "nullable": false,
+          "type": "object"
+         },
+         "nullable": false,
+         "required": true,
+         "type": "array"
+        },
+        "observed_on": {
+         "nullable": true,
+         "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+         "required": true,
+         "type": "string"
+        },
+        "owed_cents": {
+         "nullable": true,
+         "required": true,
+         "type": "integer",
+         "value_kind": "actual"
+        },
+        "projection": {
+         "fields": {
+          "label": {
+           "nullable": false,
+           "required": true,
+           "type": "string"
+          },
+          "months": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          },
+          "paid_off": {
+           "nullable": true,
+           "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+           "required": true,
+           "type": "string"
+          },
+          "total_interest_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "projected"
+          }
+         },
+         "nullable": true,
+         "required": true,
+         "type": "object"
+        }
+       },
+       "nullable": false,
+       "type": "object"
+      },
+      "nullable": false,
+      "required": true,
+      "type": "array"
+     },
+     "months": {
+      "items": {
+       "fields": {
+        "confirmed_transfers": {
+         "fields": {
+          "in_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "out_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "transactions": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          }
+         },
+         "nullable": false,
+         "required": true,
+         "type": "object"
+        },
+        "income": {
+         "fields": {
+          "in_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "out_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "transactions": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          }
+         },
+         "nullable": false,
+         "required": true,
+         "type": "object"
+        },
+        "month": {
+         "nullable": false,
+         "pattern": "[0-9]{4}-[0-9]{2}",
+         "required": true,
+         "type": "string"
+        },
+        "net_cents": {
+         "nullable": false,
+         "required": true,
+         "type": "integer",
+         "value_kind": "actual"
+        },
+        "spending": {
+         "fields": {
+          "in_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "out_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "transactions": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          }
+         },
+         "nullable": false,
+         "required": true,
+         "type": "object"
+        },
+        "spending_by_category": {
+         "items": {
+          "fields": {
+           "category": {
+            "nullable": true,
+            "required": true,
+            "type": "string"
+           },
+           "in_cents": {
+            "nullable": false,
+            "required": true,
+            "type": "integer",
+            "value_kind": "actual"
+           },
+           "out_cents": {
+            "nullable": false,
+            "required": true,
+            "type": "integer",
+            "value_kind": "actual"
+           },
+           "transactions": {
+            "nullable": false,
+            "required": true,
+            "type": "integer"
+           }
+          },
+          "nullable": false,
+          "type": "object"
+         },
+         "nullable": false,
+         "required": true,
+         "type": "array"
+        },
+        "transactions": {
+         "nullable": false,
+         "required": true,
+         "type": "integer"
+        },
+        "unclassified": {
+         "fields": {
+          "in_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "out_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "transactions": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          }
+         },
+         "nullable": false,
+         "required": true,
+         "type": "object"
+        },
+        "unconfirmed_transfer_kinds": {
+         "fields": {
+          "in_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "out_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "transactions": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          }
+         },
+         "nullable": false,
+         "required": true,
+         "type": "object"
+        }
+       },
+       "nullable": false,
+       "type": "object"
+      },
+      "nullable": false,
+      "required": true,
+      "type": "array"
+     },
+     "net_worth": {
+      "fields": {
+       "accounts": {
+        "items": {
+         "fields": {
+          "account_index": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          },
+          "balance_cents": {
+           "nullable": true,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "counted_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "how": {
+           "nullable": false,
+           "required": true,
+           "type": "string"
+          },
+          "observed_on": {
+           "nullable": true,
+           "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+           "required": true,
+           "type": "string"
+          }
+         },
+         "nullable": false,
+         "type": "object"
+        },
+        "nullable": false,
+        "required": true,
+        "type": "array"
+       },
+       "as_of": {
+        "nullable": false,
+        "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+        "required": true,
+        "type": "string"
+       },
+       "total_cents": {
+        "nullable": false,
+        "required": true,
+        "type": "integer",
+        "value_kind": "actual"
+       }
+      },
+      "nullable": false,
+      "required": true,
+      "type": "object"
+     },
+     "period": {
+      "fields": {
+       "month": {
+        "nullable": false,
+        "pattern": "[0-9]{4}-[0-9]{2}",
+        "required": true,
+        "type": "string"
+       },
+       "window_days": {
+        "nullable": false,
+        "required": true,
+        "type": "integer"
+       },
+       "window_first_day": {
+        "nullable": false,
+        "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+        "required": true,
+        "type": "string"
+       },
+       "window_last_day": {
+        "nullable": false,
+        "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+        "required": true,
+        "type": "string"
+       }
+      },
+      "nullable": false,
+      "required": true,
+      "type": "object"
+     },
+     "review": {
+      "fields": {
+       "possible_duplicate": {
+        "nullable": false,
+        "required": true,
+        "type": "integer"
+       },
+       "unresolved_record": {
+        "nullable": false,
+        "required": true,
+        "type": "integer"
+       }
+      },
+      "nullable": false,
+      "required": true,
+      "type": "object"
+     },
+     "safe_to_spend": {
+      "fields": {
+       "budget_daily_cents": {
+        "nullable": true,
+        "required": true,
+        "type": "integer",
+        "value_kind": "projected"
+       },
+       "horizon_days": {
+        "nullable": false,
+        "required": true,
+        "type": "integer"
+       },
+       "horizon_last_day": {
+        "nullable": false,
+        "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+        "required": true,
+        "type": "string"
+       },
+       "limiting": {
+        "enum": [
+         "budget",
+         "liquidity"
+        ],
+        "nullable": true,
+        "required": true,
+        "type": "string"
+       },
+       "liquid_cents": {
+        "nullable": true,
+        "required": true,
+        "type": "integer",
+        "value_kind": "actual"
+       },
+       "liquidity_daily_cents": {
+        "nullable": true,
+        "required": true,
+        "type": "integer",
+        "value_kind": "projected"
+       },
+       "next_paycheck": {
+        "nullable": true,
+        "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+        "required": true,
+        "type": "string"
+       },
+       "protected_cents": {
+        "nullable": false,
+        "required": true,
+        "type": "integer",
+        "value_kind": "reserved"
+       },
+       "provisional": {
+        "nullable": false,
+        "required": true,
+        "type": "boolean"
+       },
+       "reasons": {
+        "items": {
+         "fields": {
+          "details": {
+           "items": {
+            "nullable": false,
+            "type": "string"
+           },
+           "nullable": false,
+           "required": true,
+           "type": "array"
+          },
+          "reason": {
+           "nullable": false,
+           "required": true,
+           "type": "string"
+          }
+         },
+         "nullable": false,
+         "type": "object"
+        },
+        "nullable": false,
+        "required": true,
+        "type": "array"
+       },
+       "today_cents": {
+        "nullable": true,
+        "required": true,
+        "type": "integer",
+        "value_kind": "projected"
+       },
+       "week_cents": {
+        "nullable": true,
+        "required": true,
+        "type": "integer",
+        "value_kind": "projected"
+       }
+      },
+      "nullable": true,
+      "required": true,
+      "type": "object"
+     },
+     "transactions": {
+      "items": {
+       "fields": {
+        "account_index": {
+         "nullable": false,
+         "required": true,
+         "type": "integer"
+        },
+        "amount_cents": {
+         "nullable": false,
+         "required": true,
+         "type": "integer",
+         "value_kind": "actual"
+        },
+        "category": {
+         "nullable": true,
+         "required": true,
+         "type": "string"
+        },
+        "category_source": {
+         "enum": [
+          "person",
+          "rules"
+         ],
+         "nullable": true,
+         "required": true,
+         "type": "string"
+        },
+        "date": {
+         "nullable": false,
+         "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+         "required": true,
+         "type": "string"
+        },
+        "description": {
+         "nullable": true,
+         "required": true,
+         "type": "string"
+        },
+        "financial_type": {
+         "nullable": true,
+         "required": true,
+         "type": "string"
+        },
+        "member_parts": {
+         "items": {
+          "fields": {
+           "amount_cents": {
+            "nullable": false,
+            "required": true,
+            "type": "integer",
+            "value_kind": "allocated"
+           },
+           "member_index": {
+            "nullable": false,
+            "required": true,
+            "type": "integer"
+           }
+          },
+          "nullable": false,
+          "type": "object"
+         },
+         "nullable": false,
+         "required": true,
+         "type": "array"
+        },
+        "posting_date": {
+         "nullable": true,
+         "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+         "required": true,
+         "type": "string"
+        },
+        "status": {
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        "tags": {
+         "items": {
+          "nullable": false,
+          "type": "string"
+         },
+         "nullable": false,
+         "required": true,
+         "type": "array"
+        },
+        "transaction_date": {
+         "nullable": true,
+         "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}",
+         "required": true,
+         "type": "string"
+        },
+        "transaction_id": {
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        "unsettled": {
+         "items": {
+          "enum": [
+           "correction",
+           "classification",
+           "categorization",
+           "match",
+           "one_sided"
+          ],
+          "nullable": false,
+          "type": "string"
+         },
+         "nullable": false,
+         "required": true,
+         "type": "array"
+        }
+       },
+       "nullable": false,
+       "type": "object"
+      },
+      "nullable": false,
+      "required": true,
+      "type": "array"
+     },
+     "warnings": {
+      "items": {
+       "fields": {
+        "detail": {
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        },
+        "kind": {
+         "enum": [
+          "coverage_gap",
+          "unsettled_statements",
+          "possible_duplicates",
+          "no_timezone",
+          "no_budget_plan",
+          "provisional",
+          "over_assigned"
+         ],
+         "nullable": false,
+         "required": true,
+         "type": "string"
+        }
+       },
+       "nullable": false,
+       "type": "object"
+      },
+      "nullable": false,
+      "required": true,
+      "type": "array"
+     }
+    },
+    "nullable": false,
+    "required": true,
+    "type": "object"
+   },
+   "content_sha256": {
+    "nullable": false,
+    "pattern": "[0-9a-f]{64}",
+    "required": true,
+    "type": "string"
+   },
+   "format": {
+    "enum": [
+     "commoncents-snapshot"
+    ],
+    "nullable": false,
+    "required": true,
+    "type": "string"
+   },
+   "generated_at": {
+    "nullable": false,
+    "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z",
+    "required": true,
+    "type": "string"
+   },
+   "schema_version": {
+    "nullable": false,
+    "pattern": "[0-9]+\\.[0-9]+",
+    "required": true,
+    "type": "string"
+   },
+   "snapshot_id": {
+    "nullable": false,
+    "pattern": "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+    "required": true,
+    "type": "string"
+   }
+  },
+  "nullable": false,
+  "type": "object"
+ },
+ "schema_version": "1.0"
+}

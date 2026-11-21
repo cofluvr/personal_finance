@@ -89,16 +89,17 @@ and keep its index line.
 | D-066 | Roadmap to a finished backend: M12 to M21 — Approved with A to E |
 | D-067 | Cross-milestone guardrails for M12 to M21 — Approved, in [decisions-m12-m21.md](decisions-m12-m21.md) |
 | D-068 | M12 plan: income and recurring obligations — Approved. M12 accepted on 2026-11-16 |
-| D-069 | M13 plan: budgets and spending allowances — Approved. M13.1 and M13.2 built for review |
-| D-070 | M14 plan: goals, reserves and the tax reserve — Approved, not yet built |
-| D-071 | M15 plan: net worth and loans — Approved, not yet built |
-| D-072 | M16 plan: safe-to-spend and the cash-flow constraint — Approved, not yet built |
-| D-073 | M17 plan: the local UI completed, with browser writes — Approved as a security change, not yet built |
-| D-074 | M18 plan: financial scenarios — Approved, not yet built |
-| D-075 | M19 plan: snapshots — Approved, not yet built |
+| D-069 | M13 plan: budgets and spending allowances — Approved, M13 accepted on 2026-11-16 |
+| D-070 | M14 plan: goals, reserves and the tax reserve — Approved. M14 accepted |
+| D-071 | M15 plan: net worth and loans — Approved. M15 accepted |
+| D-072 | M16 plan: safe-to-spend and the cash-flow constraint — Approved. M16 accepted |
+| D-073 | M17 plan: the local UI completed, with browser writes — Approved as a security change. Built for review |
+| D-074 | M18 plan: financial scenarios — Approved. Built for review |
+| D-075 | M19 plan: snapshots — Approved. Built for review; its compatibility policy is in shared-contract §6 |
 | D-076 | M20 plan: pairing and local-network sync — Approved as a security change, with `segno`, not yet built |
 | D-077 | M21 plan: backend acceptance, stress testing and the security audit — Approved, not yet built |
 | D-078 | Test suite cost: a copied test ledger, a narrower W1 check and a `slow` tier — Approved and built |
+| D-079 | iOS companion plan, with screen mock-ups — Proposed, for the owner's approval ([decisions-ios.md](decisions-ios.md)) |
 
 ## Rules in brief
 

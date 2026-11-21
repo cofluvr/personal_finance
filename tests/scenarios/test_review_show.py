@@ -46,6 +46,19 @@ LEDGER_TABLES = (
     "transaction_obligation",
     "ledger_setting_key", "ledger_setting", "ledger_setting_event", "budget_plan",
     "budget_plan_member_part", "budget_plan_category", "budget_plan_event",
+    "fund", "fund_terms", "fund_event", "fund_assignment", "fund_assignment_event",
+    "fund_priority_event", "fund_priority",
+    "fund_consumption", "fund_consumption_record", "fund_consumption_event",
+    "transaction_fund_consumption", "tax_reserve_release", "tax_reserve_release_event",
+    "account_link", "account_link_event",
+    "loan_terms", "loan_terms_event", "loan_rate_period", "loan_payment_period", "payoff_plan",
+    "payoff_plan_event", "loan_payment_breakdown", "loan_payment_breakdown_record",
+    "loan_payment_breakdown_event", "transaction_loan_breakdown",
+    "account_liquidity", "account_liquidity_event", "obligation_coverage",
+    "obligation_coverage_event", "fund_restoration", "fund_restoration_event",
+    "tag", "tag_statement", "tag_statement_record", "tag_statement_event", "transaction_tag",
+    "scenario", "scenario_event", "scenario_input", "scenario_input_event", "scenario_promotion",
+    "scenario_promotion_event", "scenario_promotion_entry", "snapshot_record",
 )
 
 
@@ -113,7 +126,7 @@ def show(db, capsys):
 
 
 def revision_of(text):
-    return re.search(r"Revision: (r12-[0-9a-f]{16})", text)[1]
+    return re.search(r"Revision: (r15-[0-9a-f]{16})", text)[1]
 
 
 def section_order(text, *labels):

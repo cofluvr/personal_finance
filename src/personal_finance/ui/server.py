@@ -1,33 +1,45 @@
-"""The local review UI: read-only pages served on 127.0.0.1 alone (D-062).
+"""The local review UI: pages served on 127.0.0.1 alone (D-062), and the forms on them that
+make review decisions (D-073 point 1, M17.1).
 
 Every page shows the lines of the same builder its CLI command prints, so the UI computes nothing
 of its own. Nothing here writes a file, logs a request or prints: only the CLI prints (D-037).
-Every request opens the ledger read-only through open_ledger, so a real ledger's gate runs on each
-one (D-058). W1 allows this module, and no other, to import from `http`, and only these two
-classes (D-062 point 1).
+Every GET opens the ledger read-only through open_ledger, so a real ledger's gate runs on each
+one (D-058). A POST passes the write pipeline in ui/writes.py, then runs the CLI's own command,
+whose output is kept in memory for the result page: the command opens through the gate for
+writing, and refuses exactly as in the terminal. W1 allows this module, and no other, to import
+from `http`, and only these two classes (D-062 point 1).
 """
 
+import contextlib
 import hmac
 import html
+import io
 import re
 import secrets
 from datetime import date
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from personal_finance.cli import (
+    SAFE_TO_SPEND_TIMEZONE,
     UNEXPECTED_ERROR,
     CommandError,
+    active_decision_undo,
     checked_as_of,
     household_today_if_set,
     explained_error,
     find_account,
+    main,
     open_ledger,
     validated_month,
 )
 from personal_finance.reports.report_text import (
+    ReportLines,
     account_choices,
     document_list_lines,
     budget_report_lines,
+    dashboard_lines,
+    funds_report_lines,
+    net_worth_report_lines,
     household_report_lines,
     income_report_lines,
     member_choices,
@@ -36,9 +48,15 @@ from personal_finance.reports.report_text import (
     review_queue_lines,
     totals_report_lines,
     transaction_list_lines,
+    visual_lines,
+    visuals,
 )
+from personal_finance.ui import charts, writes
 
 LOOPBACK_ADDRESS = "127.0.0.1"
+# Each scenario input kind's route, in the order the routes declare them (M18.2).
+SCENARIO_INPUT_ROUTES = tuple(path for path in writes.WRITE_ROUTES
+                              if path.startswith("/scenario/input/"))
 
 CONTENT_SECURITY_POLICY = (
     "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; "
@@ -78,9 +96,17 @@ NAVIGATION = (
     ("/household", "Household"),
     ("/income", "Income"),
     ("/budget", "Budget"),
+    ("/funds", "Funds"),
+    ("/net-worth", "Net worth"),
+    ("/dashboard", "Dashboard"),
     ("/documents", "Import results"),
     ("/transactions", "Transactions"),
     ("/review", "Review queue"),
+    ("/accounts", "Accounts and members"),
+    ("/obligations", "Obligations"),
+    ("/settings", "Settings and backups"),
+    ("/visuals", "Visuals"),
+    ("/scenarios", "Scenarios"),
 )
 
 # What each page accepts in its address. A value is an ID or a month and nothing else, refused
@@ -91,10 +117,22 @@ PAGE_PARAMETERS = {
     "/household": {"account", "from", "to", "member", "view"},
     "/income": {"account", "from", "to", "as_of"},
     "/budget": {"month", "member", "as_of"},
+    "/funds": {"as_of"},
+    "/net-worth": {"as_of", "member"},
+    "/dashboard": {"as_of"},
     "/documents": set(),
     "/transactions": set(),
     "/review": set(),
     "/review/item": {"id"},
+    "/result": {"id"},
+    "/transaction": {"id"},
+    "/accounts": set(),
+    "/obligations": {"as_of"},
+    "/settings": set(),
+    "/visuals": {"as_of"},
+    "/scenarios": set(),
+    "/scenario": {"id"},
+    "/scenario/compare": {"id", "months", "as_of"},
     "/style.css": set(),
 }
 QUERY_VALUE = re.compile(r"[A-Za-z0-9_-]{0,100}")
@@ -105,7 +143,6 @@ SIGNED_OUT = (
 )
 WRONG_HOST = "This server answers only at the address pf ui printed."
 FOREIGN_ORIGIN = "Requests from other sites are refused."
-READ_ONLY = "This interface is read-only. Decisions are made with pf review in the terminal."
 NOT_FOUND = "There is no such page."
 BAD_ADDRESS = "This address holds a value the interface does not accept."
 UNREADABLE = "This request could not be read."
@@ -114,6 +151,16 @@ CHOOSE_AS_OF = (
     "no clock."
 )
 ITEM_NOT_FOUND = "Review item not found. A later import can replace one: see the review queue."
+TRANSACTION_NOT_FOUND = "Transaction not found. See the transactions list."
+SEVERAL_STATEMENTS = (
+    "More than one statement reaches this, so the choice of which to replace is made in the "
+    "terminal, with --supersedes."
+)
+RESULT_NOT_FOUND = "There is no such result in this session. See the review queue."
+COMMAND_UNREADABLE = "This form could not be read as a command. Nothing was changed."
+# The result pages a session keeps, newest last: older ones are forgotten.
+KEPT_RESULT_COUNT = 20
+RECORDED_DECISION = re.compile(r"Decision (\S+) recorded:")
 
 
 class LoopbackServer(HTTPServer):
@@ -127,6 +174,12 @@ class LoopbackServer(HTTPServer):
         self.launch_key = secrets.token_urlsafe(32)
         self.launch_key_used = False
         self.session_value = secrets.token_urlsafe(32)
+        # The form tokens' key and the tokens spent, for this launch's one session, in memory
+        # only (D-073 point 1, step 8).
+        self.form_secret = secrets.token_bytes(32)
+        self.used_form_tokens = set()
+        # What each successful write printed, by a random result ID, for Post/Redirect/Get.
+        self.results = {}
         super().__init__((LOOPBACK_ADDRESS, 0), ReviewRequestHandler)
 
     def server_bind(self):
@@ -173,14 +226,74 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         self.send_page(code, "Refused", notice=UNREADABLE)
 
     def __getattr__(self, name):
-        # http.server looks up do_<METHOD> for each request. Every method but GET is refused,
-        # its body unread, so nothing can be written through this server.
+        # http.server looks up do_<METHOD> for each request. Every method but GET and POST is
+        # refused, its body unread.
         if name.startswith("do_"):
             return self.refuse_method
         raise AttributeError(name)
 
     def refuse_method(self):
-        self.send_page(405, "Refused", notice=READ_ONLY, extra_headers=(("Allow", "GET"),))
+        self.send_page(405, "Refused", notice=writes.NOT_ALLOWED,
+                       extra_headers=(("Allow", "GET, POST"),))
+
+    def do_POST(self):
+        try:
+            self.answer_post()
+        except Exception as error:
+            message = explained_error(error)
+            self.send_page(500 if message == UNEXPECTED_ERROR else 400, "Refused", notice=message)
+
+    def answer_post(self):
+        """D-073 point 1's pipeline, in its order. Nothing is read from the body, and no ledger
+        is opened, until every step before the form has passed."""
+        server = self.server
+        if self.headers.get_all("Host") != [f"{LOOPBACK_ADDRESS}:{server.server_port}"]:
+            return self.send_page(421, "Refused", notice=WRONG_HOST)
+        if not self.has_session():
+            return self.send_page(403, "Signed out", notice=SIGNED_OUT)
+        refusal = (writes.refuse_route(self.path)
+                   or writes.refuse_origin(self.headers.get_all("Origin"), server.origin)
+                   or writes.refuse_fetch_metadata(self.headers.get_all("Sec-Fetch-Site"),
+                                                   self.headers.get_all("Sec-Fetch-Mode")))
+        if refusal:
+            return self.send_refusal(refusal)
+        length = writes.checked_body_length(self.headers.get_all("Content-Type"),
+                                            self.headers.get_all("Content-Length"),
+                                            self.headers.get_all("Transfer-Encoding"))
+        if isinstance(length, writes.Refusal):
+            return self.send_refusal(length)
+        body = self.rfile.read(length)
+        if len(body) != length:
+            return self.send_page(400, "Refused", notice=UNREADABLE)
+        form = writes.parsed_form(body, writes.WRITE_ROUTES[self.path])
+        if isinstance(form, writes.Refusal):
+            return self.send_refusal(form)
+        refusal = writes.refuse_form_token(form, self.path, server.form_secret,
+                                           server.used_form_tokens)
+        if refusal:
+            return self.send_refusal(refusal)
+        self.run_command(writes.command_words(self.path, form, server.ledger_path))
+
+    def run_command(self, words):
+        """Step 9: the CLI's own command, as the terminal runs it, with what it prints kept in
+        memory. A success redirects to its result page (Post/Redirect/Get), and a refusal shows
+        the CLI's message, which repeats no input (D-037)."""
+        code, printed, message = run_in_memory(words)
+        if code is None:
+            return self.send_page(400, "Refused", notice=COMMAND_UNREADABLE)
+        if code != 0:
+            return self.send_page(409, "Refused", notice=message or UNEXPECTED_ERROR)
+        results = self.server.results
+        result_id = secrets.token_urlsafe(16)
+        results[result_id] = printed
+        while len(results) > KEPT_RESULT_COUNT:
+            del results[next(iter(results))]
+        self.send_body(303, b"", "text/plain; charset=utf-8",
+                       extra_headers=(("Location", f"/result?id={result_id}"),))
+
+    def send_refusal(self, refusal):
+        self.send_page(refusal.status, "Refused", notice=refusal.notice,
+                       extra_headers=refusal.extra_headers)
 
     def do_GET(self):
         try:
@@ -203,7 +316,8 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return self.send_page(403, "Signed out", notice=SIGNED_OUT)
         if path not in PAGE_PARAMETERS:
             return self.send_page(404, "Not found", notice=NOT_FOUND)
-        parameters = parsed_query(query, PAGE_PARAMETERS[path])
+        parameters = (search_parameters(query) if path == "/transactions"
+                      else parsed_query(query, PAGE_PARAMETERS[path]))
         if parameters is None:
             return self.send_page(400, "Refused", notice=BAD_ADDRESS)
         if path == "/style.css":
@@ -244,17 +358,38 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         if path == "/documents":
             return self.send_page(200, "Import results", document_list_lines(conn))
         if path == "/transactions":
-            return self.send_page(200, "Transactions", transaction_list_lines(conn))
+            return self.answer_transactions(conn, parameters)
         if path == "/review":
             return self.send_page(200, "Review queue", review_queue_lines(conn))
         if path == "/review/item":
             report = review_item_report(conn, parameters.get("id", ""))
             if report is None:
                 return self.send_page(404, "Not found", notice=ITEM_NOT_FOUND)
+            forms = decision_forms(self.server.form_secret, report)
             hint = decision_hint(self.server.ledger_path, report)
-            return self.send_page(200, "Review item", report.lines, after=hint)
+            return self.send_page(200, "Review item", report.lines, after=forms + hint)
+        if path == "/result":
+            return self.answer_result(conn, parameters.get("id", ""))
+        if path == "/transaction":
+            return self.answer_transaction(conn, parameters.get("id", ""))
+        if path == "/visuals":
+            return self.answer_visuals(conn, parameters)
+        if path == "/scenarios":
+            return self.answer_scenarios()
+        if path == "/scenario":
+            return self.answer_scenario(parameters.get("id", ""))
+        if path == "/scenario/compare":
+            return self.answer_scenario_compare(conn, parameters)
+        if path in SECTIONS:
+            return self.answer_section(conn, path, parameters)
         if path == "/budget":
             return self.answer_budget(conn, parameters)
+        if path == "/funds":
+            return self.answer_funds(conn, parameters)
+        if path == "/net-worth":
+            return self.answer_net_worth(conn, parameters)
+        if path == "/dashboard":
+            return self.answer_dashboard(conn, parameters)
         first_month = validated_month("from", parameters.get("from") or None)
         last_month = validated_month("to", parameters.get("to") or None)
         if first_month and last_month and first_month > last_month:
@@ -266,6 +401,194 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         form = account_form(conn, "/monthly", account_id, first_month, last_month)
         lines = monthly_report_lines(conn, account_id, first_month, last_month)
         self.send_page(200, "Monthly report", lines, form=form)
+
+    def answer_result(self, conn, result_id):
+        """What a write printed, and for a decision still in effect, a form that undoes it with
+        its current revision, as review decision show gives it. Reloading writes nothing."""
+        kept = self.server.results.get(result_id)
+        if kept is None:
+            return self.send_page(404, "Not found", notice=RESULT_NOT_FOUND)
+        printed = kept
+        lines = ReportLines()
+        for text in printed.splitlines():
+            lines.add(text)
+        recorded = RECORDED_DECISION.match(printed)
+        after = ""
+        undo = recorded and active_decision_undo(conn, recorded.group(1))
+        if undo:
+            decision_account_id, revision = undo
+            after = undo_form(self.server.form_secret, recorded.group(1), decision_account_id,
+                              revision)
+        self.send_page(200, "Result", lines, after=after)
+
+    def answer_visuals(self, conn, parameters):
+        """The eight visuals as SVG, each over the table pf report visuals prints for it, as of
+        the date given, else today in the household's timezone (G7)."""
+        text = parameters.get("as_of") or None
+        form = as_of_form("/visuals", text)
+        as_of = (household_today_if_set(conn) if text is None
+                 else date.fromisoformat(checked_as_of(text)))
+        if as_of is None:
+            return self.send_page(200, "Visuals", notice=CHOOSE_AS_OF, form=form)
+        drawn = visuals(conn, as_of)
+        svgs = "".join(f'<div class="chart">{charts.chart_svg(chart)}</div>' for chart in drawn)
+        self.send_page(200, "Visuals", visual_lines(conn, as_of, drawn), form=form + svgs)
+
+    def printed_lines(self, words) -> tuple[ReportLines | None, str, str]:
+        """A command run in memory, as its lines, else None with its refusal."""
+        code, printed, message = run_in_memory([*words, f"--db={self.server.ledger_path}"])
+        if code != 0:
+            return None, printed, message or BAD_ADDRESS
+        lines = ReportLines()
+        for text in without_creation_times(printed).splitlines():
+            lines.add(text)
+        return lines, printed, ""
+
+    def answer_scenarios(self):
+        """pf scenarios as it prints, a link to each scenario, and the form adding one."""
+        lines, printed, _ = self.printed_lines(["scenarios"])
+        links = "".join(f'<p><a href="/scenario?id={escaped(found)}">Open scenario '
+                        f"{escaped(found)}</a></p>"
+                        for found in SCENARIO_ROW.findall(printed))
+        add = route_form(self.server.form_secret, "/scenario/add", {}, heading="Add a scenario")
+        self.send_page(200, "Scenarios", lines, after=links + add)
+
+    def answer_scenario(self, scenario_id):
+        """pf scenario show as it prints, and point 5's forms: an input form for each kind, each
+        input's undo, the scenario's undo, and the comparison by GET, which writes nothing."""
+        lines, printed, message = self.printed_lines(["scenario", "show", scenario_id])
+        if lines is None:
+            return self.send_page(404, "Not found", notice=message)
+        secret = self.server.form_secret
+        forms = [comparison_form(scenario_id, None, None)]
+        added = SCENARIO_INPUT_REVISION.search(printed)
+        if added:
+            forms.append("<h2>Adding an input</h2>")
+            for path in SCENARIO_INPUT_ROUTES:
+                kind = path.removeprefix("/scenario/input/")
+                forms.append(route_form(secret, path,
+                                        {"scenario": scenario_id, "revision": added[1]},
+                                        heading=kind.replace("_", " ").capitalize()))
+        undone = [route_form(secret, "/scenario/input-undo",
+                             {"scenario": scenario_id, "input": row["id"],
+                              "revision": row["revision"]}, heading=f"Input {row['id']}")
+                  for row in SCENARIO_INPUT_UNDO.finditer(printed)]
+        if undone:
+            forms += ["<h2>Undoing an input</h2>", *undone]
+        scenario_undo = SCENARIO_UNDO_REVISION.search(printed)
+        if scenario_undo:
+            forms.append(route_form(secret, "/scenario/undo",
+                                    {"scenario": scenario_id, "revision": scenario_undo[1]},
+                                    heading="Undoing the scenario"))
+        self.send_page(200, "Scenario", lines, after="".join(forms))
+
+    def answer_scenario_compare(self, conn, parameters):
+        """pf scenario compare as it prints: recalculated on every GET, nothing stored (point 5).
+        As of the date given, else today in the household's timezone (G7)."""
+        scenario_id = parameters.get("id", "")
+        months = parameters.get("months") or "24"
+        as_of = parameters.get("as_of") or None
+        form = comparison_form(scenario_id, months, as_of)
+        if as_of is None and household_today_if_set(conn) is None:
+            return self.send_page(200, "Scenario comparison", notice=CHOOSE_AS_OF, form=form)
+        dated = [] if as_of is None else [f"--as-of={as_of}"]
+        lines, _, message = self.printed_lines(["scenario", "compare", scenario_id,
+                                                f"--months={months}", *dated])
+        if lines is None:
+            return self.send_page(400, "Refused", notice=message, form=form)
+        self.send_page(200, "Scenario comparison", lines, form=form)
+
+    def answer_transactions(self, conn, parameters):
+        """pf transactions with the filters given, run in memory, so the page and the command
+        never differ (D-073 point 4), and a form that searches by GET."""
+        form = search_form(conn, parameters)
+        after = export_hint(self.server.ledger_path, parameters)
+        if not parameters:
+            return self.send_page(200, "Transactions", transaction_list_lines(conn), form=form,
+                                  after=after)
+        words = ["transactions", f"--db={self.server.ledger_path}",
+                 *(f"--{name}={value}" for name, value in parameters.items())]
+        code, printed, message = run_in_memory(words)
+        if code != 0:
+            return self.send_page(400, "Refused", notice=message or BAD_ADDRESS, form=form)
+        lines = ReportLines()
+        for text in printed.splitlines():
+            found = TRANSACTION_ROW.match(text)
+            lines.add(text, linked_transaction_id=found and found[1])
+        self.send_page(200, "Transactions", lines, form=form, after=after)
+
+    def answer_section(self, conn, path, parameters):
+        """A section of PRD §18 as its commands print it, one after another, without creation
+        times (F2, D-073 point 3), and the forms point 2 allows there."""
+        heading, commands = SECTIONS[path]
+        db = f"--db={self.server.ledger_path}"
+        as_of = parameters.get("as_of") or None
+        if as_of is not None:
+            checked_as_of(as_of)
+        lines, printed_by_command = ReportLines(), {}
+        for key, words in commands:
+            dated = ["--as-of", as_of] if as_of and key == "coverage" else []
+            code, printed, message = run_in_memory([*words, db, *dated])
+            printed = without_creation_times(printed if code == 0
+                                             else f"Not available: {message}\n")
+            printed_by_command[key] = printed
+            for text in printed.splitlines():
+                lines.add(text)
+        secret = self.server.form_secret
+        forms = SECTION_FORMS[path](secret, printed_by_command, account_choices(conn))
+        form = as_of_form(path, as_of) if path == "/obligations" else ""
+        self.send_page(200, heading, lines, form=form, after=forms)
+
+    def answer_transaction(self, conn, transaction_id):
+        """review transaction show's lines, as the terminal prints them, and the forms that
+        state or correct what this transaction is (M17.2a). Each statement already applying is
+        superseded by its own revision from its show command."""
+        db = f"--db={self.server.ledger_path}"
+        code, printed, message = run_in_memory(
+            ["review", "transaction", "show", transaction_id, db])
+        if code is None:
+            return self.send_page(404, "Not found", notice=TRANSACTION_NOT_FOUND)
+        if code != 0:
+            return self.send_page(404, "Not found", notice=message)
+        lines = ReportLines()
+        for text in printed.splitlines():
+            lines.add(text)
+        account_id = re.search(r"^  Account: .* \(([^()\s]+)\)$", printed, re.MULTILINE)[1]
+        revision = re.search(r"^  Revision: (\S+)$", printed, re.MULTILINE)[1]
+        hidden = {"transaction": transaction_id, "account": account_id, "revision": revision}
+        secret = self.server.form_secret
+        forms = []
+        for path, kind, label in (("/transaction/classify", "classification", "Financial type"),
+                                  ("/transaction/categorize", "categorization", "Category"),
+                                  ("/transaction/tag", "tagging", "Tags")):
+            superseding = superseded_statement(printed, kind, db)
+            if superseding is None:
+                forms.append(f'<h3>{label}</h3><p class="notice">{escaped(SEVERAL_STATEMENTS)}'
+                             "</p>")
+                continue
+            forms.append(route_form(secret, path, {**hidden, **superseding}, heading=label))
+            if path == "/transaction/tag":
+                forms.append(route_form(secret, "/transaction/tag-none",
+                                        {**hidden, **superseding}))
+        for field in writes.CORRECTABLE_FIELDS:
+            superseding = superseded_correction(printed, field, db)
+            heading = f"Correct the {field.replace('_', ' ')}"
+            if superseding is None:
+                forms.append(f'<h3>{escaped(heading)}</h3><p class="notice">'
+                             f"{escaped(SEVERAL_STATEMENTS)}</p>")
+                continue
+            forms.append(route_form(secret, "/transaction/correct",
+                                    {**hidden, "field": field, **superseding}, heading=heading))
+        forms.append(route_form(secret, "/transaction/separate", hidden,
+                                heading="Separate its records"))
+        accounts = [(choice_id, name) for choice_id, name in account_choices(conn)
+                    if choice_id != account_id]
+        if accounts:
+            forms.append(route_form(secret, "/transaction/one-sided", hidden,
+                                    choices={"counterpart_account": accounts},
+                                    heading="A transfer whose other side is not imported"))
+        self.send_page(200, "Transaction", lines, after="<h2>Deciding this transaction</h2>"
+                       + "".join(forms))
 
     def answer_household(self, conn, parameters, account_id, first_month, last_month):
         """The household report in one view: side by side, one member's by ID, or shared."""
@@ -312,6 +635,46 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
                                     None if member_id is None else names[member_id])
         self.send_page(200, "Budget report", lines, form=form)
 
+    def answer_funds(self, conn, parameters):
+        """The funds report as of the date the page is given, else today in the household's
+        timezone (G7)."""
+        text = parameters.get("as_of") or None
+        form = funds_form(text)
+        as_of = (household_today_if_set(conn) if text is None
+                 else date.fromisoformat(checked_as_of(text)))
+        if as_of is None:
+            return self.send_page(200, "Funds report", notice=CHOOSE_AS_OF, form=form)
+        self.send_page(200, "Funds report", funds_report_lines(conn, as_of), form=form)
+
+    def answer_net_worth(self, conn, parameters):
+        """Net worth as of the date the page is given, else today in the household's timezone,
+        for the household or one member by ID (G7)."""
+        member = parameters.get("member") or None
+        names = dict(member_choices(conn))
+        if member is not None and (not member.isdigit() or int(member) not in names):
+            return self.send_page(400, "Bad address", notice=BAD_ADDRESS)
+        member_id = None if member is None else int(member)
+        text = parameters.get("as_of") or None
+        form = net_worth_form(conn, member_id, text)
+        as_of = (household_today_if_set(conn) if text is None
+                 else date.fromisoformat(checked_as_of(text)))
+        if as_of is None:
+            return self.send_page(200, "Net worth", notice=CHOOSE_AS_OF, form=form)
+        lines = net_worth_report_lines(conn, as_of.isoformat(),
+                                       None if member_id is None else names[member_id])
+        self.send_page(200, "Net worth", lines, form=form)
+
+    def answer_dashboard(self, conn, parameters):
+        """The dashboard as of the date the page is given, else today in the household's
+        timezone (G7). With no timezone set it asks, as pf dashboard refuses."""
+        text = parameters.get("as_of") or None
+        form = as_of_form("/dashboard", text)
+        today = household_today_if_set(conn)
+        if today is None:
+            return self.send_page(200, "Dashboard", notice=SAFE_TO_SPEND_TIMEZONE, form=form)
+        as_of = today if text is None else date.fromisoformat(checked_as_of(text))
+        self.send_page(200, "Dashboard", dashboard_lines(conn, as_of), form=form)
+
     def send_page(self, status, heading, lines=(), *, notice="", form="", after="",
                   extra_headers=()):
         body = render_page(heading, lines, notice=notice, form=form, after=after)
@@ -326,6 +689,196 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
+
+
+def run_in_memory(words) -> tuple[int | None, str, str]:
+    """A CLI command as the terminal runs it, through the same parser, handler and gate, with
+    what it prints kept in memory: its exit code (None when its arguments could not be read),
+    its output, and its error message without the "Error: " the terminal adds. The server
+    answers one request at a time, so redirecting the process's streams is safe."""
+    printed, said = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(said):
+            code = main(words)
+    except SystemExit:
+        return None, "", ""
+    return code, printed.getvalue(), said.getvalue().strip().removeprefix("Error: ")
+
+
+CREATION_TIME = re.compile(r", made \d{4}-\d{2}-\d{2}T[0-9:.]+Z")
+LIQUIDITY_ROW = re.compile(
+    r"^Account (?P<name>.*) \((?:checking|savings), (?P<id>[0-9a-f-]{36})\): .*\n"
+    r"  (?P<kind>Undo|Set) revision: (?P<revision>\S+)$", re.MULTILINE)
+BUFFER_ROW = re.compile(
+    r"^Setting checking_buffer_cents: (?P<state>.*)\n  Revision: (?P<revision>\S+)$",
+    re.MULTILINE)
+COVERAGE_ROW = re.compile(
+    r"^Obligation (?P<id>[0-9a-f-]{36}) \((?P<name>.*)\): .*\n"
+    r"  (?P<kind>Covers|Uncover) revision: (?P<revision>\S+)$", re.MULTILINE)
+
+
+SCENARIO_ROW = re.compile(r"^Scenario (\S+): ", re.MULTILINE)
+SCENARIO_INPUT_REVISION = re.compile(r"^Input revision: (\S+)$", re.MULTILINE)
+SCENARIO_UNDO_REVISION = re.compile(r"^Undo revision: (\S+)$", re.MULTILINE)
+SCENARIO_INPUT_UNDO = re.compile(
+    r"^  Input (?P<id>[0-9a-f-]{36}): .*\n    Undo revision: (?P<revision>\S+)$", re.MULTILINE)
+
+
+def comparison_form(scenario_id, months, as_of) -> str:
+    """A form that shows the comparison by GET, which writes nothing."""
+    return ('<form method="get" action="/scenario/compare">'
+            f'<input type="hidden" name="id" value="{escaped(scenario_id)}">'
+            '<label>Months <input name="months" placeholder="24" size="4" '
+            f'value="{escaped(months or "")}"></label>'
+            '<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+            f'value="{escaped(as_of or "")}"></label> <button>Compare</button></form>')
+
+
+def without_creation_times(printed: str) -> str:
+    """A command's lines with each ", made <time>" left out: no page shows a creation time
+    (F2, D-073 point 3). The one way a section page's text differs from its commands'."""
+    return CREATION_TIME.sub("", printed)
+
+
+def accounts_forms(secret, printed, accounts) -> str:
+    forms = []
+    for row in LIQUIDITY_ROW.finditer(printed.get("liquidity", "")):
+        path = "/account/liquidity-undo" if row["kind"] == "Undo" else "/account/liquidity-set"
+        forms.append(route_form(secret, path, {"account": row["id"],
+                                               "revision": row["revision"]},
+                                heading=f"Account {row['name']}"))
+    return "<h2>Liquidity</h2>" + "".join(forms) if forms else ""
+
+
+def settings_forms(secret, printed, accounts) -> str:
+    row = BUFFER_ROW.search(printed.get("setting", ""))
+    if row is None:
+        return ""
+    path = "/setting/buffer-set" if row["state"] == "not set" else "/setting/buffer-undo"
+    return "<h2>Checking buffer</h2>" + route_form(
+        secret, path, {"key": "checking_buffer_cents", "revision": row["revision"]})
+
+
+def obligations_forms(secret, printed, accounts) -> str:
+    forms = []
+    for row in COVERAGE_ROW.finditer(printed.get("coverage", "")):
+        hidden = {"obligation": row["id"], "revision": row["revision"]}
+        heading = f"Obligation {row['name']}"
+        if row["kind"] == "Uncover":
+            forms.append(route_form(secret, "/obligation/uncover", hidden, heading=heading))
+            continue
+        forms.append(route_form(secret, "/obligation/covers-loan", hidden,
+                                choices={"loan": accounts}, heading=heading))
+        forms.append(route_form(secret, "/obligation/covers-fund", hidden))
+    return "<h2>What each obligation covers</h2>" + "".join(forms) if forms else ""
+
+
+# Each section: its heading, the commands it shows in order, and its forms.
+SECTIONS = {
+    "/accounts": ("Accounts and members", (
+        ("liquidity", ("account", "liquidity", "show")), ("links", ("account", "links")),
+        ("members", ("household", "members")), ("share", ("household", "share", "show")))),
+    "/obligations": ("Obligations", (("obligations", ("obligations",)),
+                                     ("coverage", ("obligation", "coverage")))),
+    "/settings": ("Settings and backups", (("setting", ("setting", "show")),
+                                           ("storage", ("storage",)))),
+}
+SECTION_FORMS = {"/accounts": accounts_forms, "/obligations": obligations_forms,
+                 "/settings": settings_forms}
+
+
+# How review transaction show names each kind's statements.
+STATEMENT_LABELS = {"classification": "Classification", "categorization": "Categorization",
+                    "tagging": "Tag statement"}
+
+
+def superseded_statement(printed, kind, db) -> dict[str, str] | None:
+    """The supersedes fields for a new classification, categorization or tag statement: empty
+    where none reaches the transaction, the one reaching it and its revision from review <kind>
+    show, or None where several do or its revision cannot be read."""
+    found = re.findall(rf"^    {STATEMENT_LABELS[kind]} (\S+): ", printed, re.MULTILINE)
+    return supersedes_fields(found, ["review", kind, "show"], db)
+
+
+def superseded_correction(printed, field, db) -> dict[str, str] | None:
+    """The same for a correction of one field, by its correction show."""
+    found = re.findall(rf"^    Correction (\S+): {field} corrected to ", printed, re.MULTILINE)
+    return supersedes_fields(found, ["review", "correction", "show"], db)
+
+
+def supersedes_fields(found, show_words, db) -> dict[str, str] | None:
+    if not found:
+        return {"supersedes": "", "supersedes_revision": ""}
+    if len(found) > 1:
+        return None
+    revision = printed_revision([*show_words, found[0], db])
+    return None if revision is None else {"supersedes": found[0],
+                                          "supersedes_revision": revision}
+
+
+def printed_revision(words) -> str | None:
+    """The revision a read-only show command prints, as the terminal shows it (M17.2 slice
+    plan point 3), or None when it prints none or refuses."""
+    code, printed, _ = run_in_memory(words)
+    found = re.search(r"^\s*Revision: (\S+)$", printed, re.MULTILINE) if code == 0 else None
+    return found[1] if found else None
+
+
+# What the transactions page takes, and of what kind, as pf transactions does (D-073 point 4).
+SEARCH_FIELDS = {"search": writes.TEXT, "account": writes.ID, "from": writes.DATE_KIND,
+                 "to": writes.DATE_KIND, "category": writes.TEXT, "tag": writes.TEXT,
+                 "min": writes.AMOUNT_KIND, "max": writes.AMOUNT_KIND}
+TRANSACTION_ROW = re.compile(r"^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})  ")
+
+
+def search_parameters(query: str) -> dict[str, str] | None:
+    """The transactions page's filters, decoded as a form is and each of its kind, given once.
+    An empty one is a filter not given. None when anything else is there."""
+    parameters = {}
+    for piece in query.split("&") if query else []:
+        raw_name, separator, raw_value = piece.encode("latin-1").partition(b"=")
+        try:
+            name = writes.decoded_form_part(raw_name)
+            value = writes.decoded_form_part(raw_value)
+        except (UnicodeDecodeError, ValueError):
+            return None
+        if not separator or name not in SEARCH_FIELDS or name in parameters:
+            return None
+        if not writes.acceptable(writes.Field(name, SEARCH_FIELDS[name], f"--{name}",
+                                              required=False), value):
+            return None
+        parameters[name] = value
+    return {name: value for name, value in parameters.items() if value != ""}
+
+
+def export_hint(ledger_path, parameters) -> str:
+    """The terminal command that exports these transactions. The page offers no download: one
+    would land in Downloads, unencrypted and perhaps synced (D-073 point 7)."""
+    scope = "".join(f" --{name} {value}" for name, value in parameters.items()
+                    if name in ("account", "from", "to"))
+    command = f"pf export transactions --db {ledger_path} --out FILE.csv{scope}"
+    return ('<p class="notice">To export transactions as CSV, to a private folder outside any '
+            'synced or git folder, run in the terminal:</p>'
+            f'<div class="report"><div class="hint-line">  {escaped(command)}</div></div>')
+
+
+def search_form(conn, parameters) -> str:
+    """A form that searches the transactions by GET, holding the filters given."""
+    def text_input(name, label, size=24):
+        value = escaped(parameters.get(name, ""))
+        return f'<label> {label} <input name="{name}" size="{size}" value="{value}"></label>'
+
+    accounts = ['<option value="">Every account</option>']
+    for choice_id, name in account_choices(conn):
+        selected = " selected" if choice_id == parameters.get("account") else ""
+        accounts.append(f'<option value="{escaped(choice_id)}"{selected}>{escaped(name)}</option>')
+    return ('<form method="get" action="/transactions">'
+            + text_input("search", "Description contains", 30)
+            + f'<label> Account <select name="account">{"".join(accounts)}</select></label>'
+            + text_input("from", "From", 10) + text_input("to", "To", 10)
+            + text_input("category", "Category", 16) + text_input("tag", "Tag", 12)
+            + text_input("min", "Least amount", 10) + text_input("max", "Greatest amount", 10)
+            + " <button>Search</button></form>")
 
 
 def same_secret(given: str, expected: str) -> bool:
@@ -355,11 +908,12 @@ def escaped(text: str) -> str:
 
 
 def rendered_line(line) -> str:
-    item_id = line.linked_review_item_id
-    if item_id and item_id in line.text:
-        before, _, after = line.text.partition(item_id)
-        link = f'<a href="/review/item?id={escaped(item_id)}">{escaped(item_id)}</a>'
-        return f'<div class="line">{escaped(before)}{link}{escaped(after)}</div>'
+    for linked_id, page in ((line.linked_review_item_id, "/review/item"),
+                            (line.linked_transaction_id, "/transaction")):
+        if linked_id and linked_id in line.text:
+            before, _, after = line.text.partition(linked_id)
+            link = f'<a href="{page}?id={escaped(linked_id)}">{escaped(linked_id)}</a>'
+            return f'<div class="line">{escaped(before)}{link}{escaped(after)}</div>'
     return f'<div class="line">{escaped(line.text)}</div>'
 
 
@@ -432,9 +986,143 @@ def budget_form(conn, month, member_id, as_of) -> str:
             f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
 
 
+def net_worth_form(conn, member_id, as_of) -> str:
+    """A form that reloads the net worth page by GET: the household or a member, and the as-of
+    date."""
+    members = ['<option value="">Household</option>']
+    for choice_id, name in member_choices(conn):
+        selected = " selected" if choice_id == member_id else ""
+        members.append(f'<option value="{choice_id}"{selected}>{escaped(name)}</option>')
+    return ('<form method="get" action="/net-worth">'
+            f'<label>Member <select name="member">{"".join(members)}</select></label>'
+            '<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+            f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
+
+
+def funds_form(as_of) -> str:
+    """A form that reloads the funds page by GET with an as-of date."""
+    return as_of_form("/funds", as_of)
+
+
+def as_of_form(action, as_of) -> str:
+    """A form that reloads a page by GET with an as-of date."""
+    return (f'<form method="get" action="{action}">'
+            '<label>As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+            f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
+
+
+# What each typed field is called on its form, and each route's button.
+FIELD_LABELS = {
+    "pairs": "Pairs that are different events, two transaction IDs a line",
+    "groups": "Groups that are one event each, transaction IDs a line, separated by spaces",
+    "amount": "Amount, such as -12.50, negative for money out",
+    "transaction_date": "Transaction date, YYYY-MM-DD",
+    "posting_date": "Posting date, YYYY-MM-DD",
+    "description": "Description",
+    "type": "Financial type",
+    "category": "Category, a name from category list",
+    "value": "Corrected value",
+    "counterpart_account": "The other account",
+    "tags": "Tags, names from tags separated by commas",
+    "buffer": "Checking buffer, an amount such as 500.00",
+    "loan": "Covers this loan's payment",
+    "fund": "Covers this reserve's purchase, by its fund ID",
+    "scenario_name": "Name",
+    "include_uncertain": "Count uncertain inputs too",
+    "from_date": "From, YYYY-MM-DD",
+    "input_amount": "Amount, such as 250.00, money in or out by its kind",
+    "to_date": "To, YYYY-MM-DD, inclusive, or empty",
+    "cadence": "Cadence, such as monthly:1, biweekly or annual:09-01",
+    "anchor": "Anchor, a weekly, biweekly or quarterly cadence's date",
+    "replaces": "Replaces this source, obligation or reserve ID, or empty for additional",
+    "uncertain": "Uncertain",
+    "confirmed": "Confirmed, as a bonus is uncertain unless confirmed",
+    "gross": "Gross",
+    "take_home_percent": "Take-home percent of a gross amount",
+    "price": "Price",
+    "down_payment": "Down payment",
+    "closing_costs": "Closing costs",
+    "loan_rate": "Loan APR, such as 6.5",
+    "loan_months": "Loan months",
+    "ownership_costs": "Ownership costs a month",
+    "payoff_loan": "The loan account, by name or ID",
+    "promote_account": "Account a promotion records it on, or empty",
+    "promote_match": "Description text a promotion matches, or empty",
+}
+BUTTONS = {
+    "/review/reject": "Reject these pairs",
+    "/review/confirm": "Confirm these groups",
+    "/review/undo": "Undo this decision",
+    "/review/complete": "Complete this row",
+    "/review/dismiss": "Dismiss this row",
+    "/transaction/classify": "Classify",
+    "/transaction/categorize": "Categorize",
+    "/transaction/correct": "Correct",
+    "/transaction/separate": "Separate these groups",
+    "/transaction/one-sided": "Record a one-sided transfer",
+    "/transaction/tag": "Tag",
+    "/transaction/tag-none": "State it has no tags",
+    "/setting/buffer-set": "Set the buffer",
+    "/setting/buffer-undo": "Undo the buffer",
+    "/account/liquidity-set": "Designate liquid",
+    "/account/liquidity-undo": "Undo the designation",
+    "/obligation/covers-loan": "Link to the loan",
+    "/obligation/covers-fund": "Link to the reserve",
+    "/obligation/uncover": "Undo the link",
+    "/scenario/add": "Add the scenario",
+    "/scenario/undo": "Undo the scenario",
+    "/scenario/input-undo": "Undo this input",
+    **{path: "Add this input" for path in SCENARIO_INPUT_ROUTES},
+}
+
+
+def route_form(secret, path, hidden, *, choices=None, heading="") -> str:
+    """A route's form: its hidden fields as the page fixes them, the token that binds them, and
+    an input for each typed field. choices gives a typed field's options by name, as a page
+    knows them (an account list), where the route itself fixes none."""
+    route = writes.WRITE_ROUTES[path]
+    token = writes.form_token(secret, path, hidden)
+    parts = [f'<input type="hidden" name="{field.name}" value="{escaped(hidden[field.name])}">'
+             for field in route.hidden]
+    parts.append(f'<input type="hidden" name="{writes.FORM_TOKEN_FIELD}" value="{token}">')
+    for field in route.typed:
+        label = escaped(FIELD_LABELS[field.name])
+        options = (choices or {}).get(field.name) or [(value, value) for value in field.choices]
+        if field.kind in (writes.PAIR_LINES, writes.GROUP_LINES):
+            control = f'<textarea name="{field.name}" rows="3" cols="80"></textarea>'
+        elif field.kind == writes.FLAG:
+            control = (f'<select name="{field.name}"><option value="">No</option>'
+                       f'<option value="{writes.FLAG_ON}">Yes</option></select>')
+        elif options:
+            listed = "".join(f'<option value="{escaped(value)}">{escaped(shown_as)}</option>'
+                             for value, shown_as in options)
+            control = f'<select name="{field.name}">{listed}</select>'
+        else:
+            control = f'<input name="{field.name}" size="40">'
+        parts.append(f"<label>{label}<br>{control}</label><br>")
+    title = f"<h3>{escaped(heading)}</h3>" if heading else ""
+    return (f'{title}<form method="post" action="{path}">{"".join(parts)}'
+            f"<button>{escaped(BUTTONS[path])}</button></form>")
+
+
+def decision_forms(secret, report) -> str:
+    """The forms that decide a review item, posting what the terminal commands take: reject and
+    confirm for a possible duplicate or conflict, complete and dismiss for an unresolved row."""
+    hidden = {"item": report.item_id, "account": report.account_id, "revision": report.revision}
+    paths = (("/review/complete", "/review/dismiss") if report.kind == "unresolved_record"
+             else ("/review/reject", "/review/confirm"))
+    return "<h2>Deciding this item</h2>" + "".join(
+        route_form(secret, path, hidden) for path in paths)
+
+
+def undo_form(secret, decision_id, account_id, revision) -> str:
+    return route_form(secret, "/review/undo", {"decision": decision_id, "account": account_id,
+                                               "revision": revision})
+
+
 def decision_hint(ledger_path, report) -> str:
     """The terminal commands that decide this item, with its account ID, item ID and revision
-    token. The interface decides nothing (D-062 point 3), so D-043's checks stay in pf review."""
+    token. D-043's checks are the same from either place."""
     common = (f"{report.item_id} --db {ledger_path} --account {report.account_id} "
               f"--revision {report.revision}")
     if report.kind == "unresolved_record":
@@ -444,5 +1132,5 @@ def decision_hint(ledger_path, report) -> str:
         commands = [f"pf review confirm {common} --group T ...",
                     f"pf review reject {common} --pair T1 T2"]
     lines = "".join(f'<div class="hint-line">  {escaped(command)}</div>' for command in commands)
-    return ('<h2>Deciding this item</h2><p class="notice">This interface is read-only. To decide, '
-            f'run one of these in the terminal:</p><div class="report">{lines}</div>')
+    return ('<p class="notice">In the terminal, run one of these:</p>'
+            f'<div class="report">{lines}</div>')

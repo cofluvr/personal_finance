@@ -10,11 +10,17 @@ import uuid
 import zoneinfo
 from dataclasses import dataclass
 
-from personal_finance.planning.entries import in_one_write, refuse_unless_revision
+from personal_finance.planning.entries import (
+    in_one_write,
+    parsed_amount,
+    refuse_unless_revision,
+)
 from personal_finance.reconcile.decisions import DecisionRefused
 from personal_finance.reports.category_rule_evidence import digest
 
 HOUSEHOLD_TIMEZONE = "household_timezone"
+# One amount kept back across all liquidity accounts, stored as whole cents (D-072 point 2).
+CHECKING_BUFFER = "checking_buffer_cents"
 
 # Bump whenever the material below changes, so an old token can never appear current.
 SETTING_REVISION_VERSION = 1
@@ -26,6 +32,14 @@ KEY_UNKNOWN = "there is no setting {key}. Run setting show for the keys. Nothing
 ZONE_UNKNOWN = (
     "{value} is not an IANA timezone this Mac knows. Give a name such as America/Chicago. "
     "Nothing was changed."
+)
+STORED_ZONE_UNREADABLE = (
+    "The household timezone stored in this ledger is not a timezone this Mac knows. Set it again "
+    "with setting set household_timezone ZONE. Nothing was changed."
+)
+BUFFER_INVALID = (
+    "{key} must be an amount above zero, such as 500.00. It is kept as whole cents. Nothing was "
+    "changed."
 )
 ALREADY_SET = (
     "{key} is set already. Undo it with setting undo, then set it again. Nothing was changed."
@@ -74,8 +88,15 @@ def setting_revision(conn: sqlite3.Connection, key: str) -> str:
 
 
 def household_timezone(conn: sqlite3.Connection) -> zoneinfo.ZoneInfo | None:
+    """The zone set, else None. A stored name this Mac cannot read as a zone, which setting set
+    never stores, is refused clearly rather than failing later (owner's decision, 2026-11-20)."""
     active = active_setting(conn, HOUSEHOLD_TIMEZONE)
-    return None if active is None else zoneinfo.ZoneInfo(active.value)
+    if active is None:
+        return None
+    try:
+        return zoneinfo.ZoneInfo(active.value)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+        raise DecisionRefused(STORED_ZONE_UNREADABLE) from None
 
 
 def refuse_unless_known_key(conn: sqlite3.Connection, key: str) -> None:
@@ -84,11 +105,20 @@ def refuse_unless_known_key(conn: sqlite3.Connection, key: str) -> None:
 
 
 def checked_value(key: str, value: str) -> str:
-    """Each key's own check. The timezone must be a name in this Mac's IANA database, which
-    also refuses paths and names such as localtime that ZoneInfo alone would read."""
+    """Each key's own check, and the value as stored. The timezone must be a name in this Mac's
+    IANA database, which also refuses paths and names such as localtime that ZoneInfo alone would
+    read. The buffer is typed as an amount and stored as its whole cents."""
     if key == HOUSEHOLD_TIMEZONE and value not in zoneinfo.available_timezones():
         raise DecisionRefused(ZONE_UNKNOWN.format(value=value))
+    if key == CHECKING_BUFFER:
+        return str(parsed_amount(value, BUFFER_INVALID.format(key=key), least=1))
     return value
+
+
+def checking_buffer_cents(conn: sqlite3.Connection) -> int | None:
+    """The buffer set, else None: safe-to-spend then keeps back 0 and says so."""
+    active = active_setting(conn, CHECKING_BUFFER)
+    return None if active is None else int(active.value)
 
 
 def set_setting(conn: sqlite3.Connection, key: str, value: str, revision: str) -> str:

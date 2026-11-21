@@ -19,6 +19,7 @@ from personal_finance.planning.schedules import (  # noqa: F401, the schedules i
     Cadence,
     cadence_dates,
     dates_to_show,
+    kept_terms,
     on_cadence,
     paired_with_dates,
     scheduled_dates,
@@ -232,7 +233,9 @@ def load_sources(conn: sqlite3.Connection) -> tuple[IncomeSource, ...]:
          amount_cents) in conn.execute(
         """SELECT chain_id, effective_from, cadence, first_day, second_day, interval_months,
                   anchor, amount_cents
-           FROM income_source_terms ORDER BY chain_id, effective_from"""
+           FROM income_source_terms terms
+           WHERE """ + kept_terms("income_source_terms") + """
+           ORDER BY chain_id, effective_from"""
     ):
         terms_by_chain[chain_id].append(Terms(
             effective_from, Cadence(cadence, first_day, second_day, interval_months), anchor,

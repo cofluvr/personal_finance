@@ -35,6 +35,15 @@ from test_decisions import (
     OBLIGATION_TABLES,
     SETTING_KEY_TABLES,
     BUDGET_TABLES,
+    FUND_TABLES,
+    CONSUMPTION_TABLES,
+    LINK_TABLES,
+    LOAN_TABLES,
+    BREAKDOWN_TABLES,
+    LIQUIDITY_TABLES,
+    TAG_TABLES,
+    SCENARIO_TABLES,
+    SNAPSHOT_TABLES,
     CATEGORY_TABLES,
     CHECKING_HEADER,
     HOUSEHOLD_TABLES,
@@ -59,7 +68,10 @@ LATEST = len(load_migrations())
 LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", *REAL_LEDGER_TABLES, *BACKUP_TABLES,
                  *CATEGORY_TABLES, *CATEGORIZATION_TABLES, *CATEGORY_RULE_TABLES,
                  *HOUSEHOLD_TABLES, *ALLOCATION_TABLES, *INCOME_TABLES, *OBLIGATION_TABLES,
-                 *SETTING_KEY_TABLES, *BUDGET_TABLES)
+                 *SETTING_KEY_TABLES, *BUDGET_TABLES, *FUND_TABLES, *CONSUMPTION_TABLES,
+                 *LINK_TABLES, *LOAN_TABLES,
+                 *BREAKDOWN_TABLES, *LIQUIDITY_TABLES, *TAG_TABLES, *SCENARIO_TABLES,
+                 *SNAPSHOT_TABLES)
 LEDGER_VOLUME = Path("/Volumes/SyntheticLedger")
 BACKUP_VOLUME = Path("/Volumes/SyntheticBackups")
 
@@ -711,8 +723,18 @@ class TestRestore:
         # The newest migration's tables, dropped, make the copy a ledger of the version before.
         newest = load_migrations()[-1].path.read_text()
         tables = reversed(re.findall(r"^CREATE TABLE (\w+)", newest, re.MULTILINE))
+        # And any setting key it seeds, taken out past its append-only trigger.
+        keys = re.findall(r"^INSERT INTO ledger_setting_key \(setting_key\) VALUES \('(\w+)'\)",
+                          newest, re.MULTILINE)
+        conn = connect(ledger.path)
+        (trigger,) = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name "
+                                  "= 'ledger_setting_key_no_delete'").fetchone()
+        conn.close()
+        unseeded = (["DROP TRIGGER ledger_setting_key_no_delete",
+                     *(f"DELETE FROM ledger_setting_key WHERE setting_key = '{key}'"
+                       for key in keys), trigger] if keys else [])
         change_ledger_copy(backup_folder, *(f"DROP TABLE {table}" for table in tables),
-                           f"PRAGMA user_version = {LATEST - 1}")
+                           *unseeded, f"PRAGMA user_version = {LATEST - 1}")
         rewrite_manifest(backup_folder, digest=True, schema_version=LATEST - 1)
         restored = tmp_path / "restored.db"
         code, out, err = pf(capsys, "backup", "restore", "--from", backup_folder, "--to", restored)
@@ -749,12 +771,16 @@ LISTS = [("documents",), ("transactions",), ("totals",), ("report", "monthly"),
          ("household", "members"), ("household", "share", "show"), ("review", "allocations"),
          ("income", "sources"), ("income", "proposals"), ("obligations",),
          ("obligation", "proposals"), ("obligation", "dismissals"), ("setting", "show"),
-         ("budgets",)]
+         ("budgets",), ("funds", "--as-of", "2026-03-20"),
+         ("report", "funds", "--as-of", "2026-03-20"), ("review", "consumptions"),
+         ("report", "budget", "--month", "2026-03", "--as-of", "2026-03-20"),
+         ("account", "liquidity", "show"), ("obligation", "coverage", "--as-of", "2026-03-20")]
 PER_ACCOUNT = [("totals",), ("report", "monthly"), ("review", "merges"), ("review", "decisions"),
                ("review", "corrections"), ("review", "classifications"), ("review", "transfers"),
                ("review", "resolutions"), ("review", "coverage", "history"),
                ("balance", "list"), ("balance", "check"), ("review", "categorizations"),
-               ("household", "account", "show"), ("review", "allocations")]
+               ("household", "account", "show"), ("review", "allocations"),
+               ("review", "consumptions")]
 PER_ID = [
     ("SELECT id FROM ledger_transaction", [("trace",), ("review", "transaction", "show"),
                                            ("review", "merge", "show")]),
@@ -772,6 +798,9 @@ PER_ID = [
     ("SELECT id FROM income_source", [("income", "source", "show", "--as-of", "2026-03-31")]),
     ("SELECT id FROM recurring_obligation", [("obligation", "show", "--as-of", "2026-03-31")]),
     ("SELECT id FROM budget_plan", [("budget", "show")]),
+    ("SELECT id FROM fund", [("fund", "show", "--as-of", "2026-03-31")]),
+    ("SELECT id FROM fund_consumption", [("review", "consumption", "show")]),
+    ("SELECT id FROM fund", [("fund", "restorations")]),
 ]
 
 
@@ -863,6 +892,9 @@ def build_rich_ledger(ledger, *, checking_rows, decision, match, one_sided, corr
     build_income(ledger)
     build_obligations(ledger)
     build_budgets(ledger)
+    build_funds(ledger)
+    build_safe_to_spend_inputs(ledger)
+    build_tags(ledger)
 
     items_before = set(ledger.items())
     ledger.card("p1.csv", CAFE, extra=FIRST_HALF, account="S")
@@ -981,16 +1013,20 @@ def budget_token(out, kind="Revision"):
     return re.search(rf"{kind}: ((?:bp|st)1-[0-9a-f]{{16}})", out)[1]
 
 
+def zone_block(ledger):
+    return ledger.run("setting", "show")[1].split("Setting household_timezone")[1]
+
+
 def build_budgets(ledger):
     """The household timezone set, undone and set again, a plan divided between the members with
     a category allowance, superseded, a later plan undone, and a closed month corrected (D-069)."""
     for zone in ("Europe/Paris", "America/Chicago"):
         code, _, err = ledger.run("setting", "set", "household_timezone", zone, "--revision",
-                                  budget_token(ledger.run("setting", "show")[1]))
+                                  budget_token(zone_block(ledger)))
         assert code == 0, err
         if zone == "Europe/Paris":
             code, _, err = ledger.run("setting", "undo", "household_timezone", "--revision",
-                                      budget_token(ledger.run("setting", "show")[1]))
+                                      budget_token(zone_block(ledger)))
             assert code == 0, err
     as_of = ["--as-of", "2026-03-20"]
     plans = []
@@ -1008,6 +1044,156 @@ def build_budgets(ledger):
         plans.append(re.search(r"Budget plan (\S+) recorded", out)[1])
     code, _, err = ledger.run("budget", "undo", plans[1], *as_of, "--revision", budget_token(
         ledger.run("budget", "show", plans[1])[1], "Undo revision"))
+    assert code == 0, err
+
+
+def fund_token(out, kind="Revision"):
+    return re.search(rf"{kind}: ((?:fu|fa|fc)1-[0-9a-f]{{16}})", out)[1]
+
+
+def build_funds(ledger):
+    """Savings S observed, a reserve holding part of it and a goal assigned then released, a
+    priority list, a tax reserve over tax-eligible side income with one release kept and one
+    undone, and a bill paid from the reserve, with another consumption undone (D-070)."""
+    as_of = ["--as-of", "2026-03-20"]
+    code, _, err = ledger.run("balance", "record", "--account", "S", "--date", "2026-03-01",
+                              "--balance", "5000.00")
+    assert code == 0, err
+    ledger.load_path(ledger.write("gig.csv", CHECKING_HEADER, [
+        "G1,2026-03-05,2026-03-05,SYNTHETIC GIG,333.33,POSTED"]), layout="synthetic_checking_v1")
+    (gig,) = rows_of(ledger, "gig.csv")
+    ledger.classify_ok(gig, "income")
+    words = ["--account", "A", "--name", "Gig", "--kind", "side", "--match", "synthetic gig",
+             "--cadence", "monthly:5", "--anchor", "2026-03-05", "--amount", "333.33",
+             "--tax-eligible"]
+    code, _, err = ledger.run("income", "add", *words, "--revision",
+                              income_token(ledger.run("income", "preview", *words)[1]))
+    assert code == 0, err
+    funds = {}
+    for name, terms in (("Insurance", ["--kind", "reserve", "--target", "1200.00", "--due",
+                                       "2026-09-01"]),
+                        ("Car", ["--kind", "goal", "--target", "900.00", "--by", "2026-12"]),
+                        ("Tax", ["--kind", "tax", "--percent", "25", "--effective-from",
+                                 "2026-03-01"])):
+        words = ["--name", name, *terms, *as_of]
+        code, out, err = ledger.run("fund", "add", *words, "--revision",
+                                    fund_token(ledger.run("fund", "preview", *words)[1]))
+        assert code == 0, err
+        funds[name] = re.search(r"Fund (\S+) recorded", out)[1]
+
+    def assignment(fund):
+        shown = ledger.run("fund", "show", funds[fund], *as_of)[1]
+        return fund_token(shown.split("Account S:")[1], "Assignment revision, to \\w+")
+
+    for fund, amount in (("Car", "100.00"), ("Insurance", "600.00")):
+        code, _, err = ledger.run("fund", "assign", "--fund", funds[fund], "--account", "S",
+                                  "--amount", amount, *as_of, "--revision", assignment(fund))
+        assert code == 0, err
+    code, _, err = ledger.run("fund", "unassign", "--fund", funds["Car"], "--account", "S",
+                              *as_of, "--revision", assignment("Car"))
+    assert code == 0, err
+    code, _, err = ledger.run("fund", "priority", funds["Insurance"], funds["Car"], "--revision",
+                              fund_token(ledger.run("funds", *as_of)[1], "Priority revision"))
+    assert code == 0, err
+    for amount, undone in (("5.00", True), ("10.00", False)):
+        code, out, err = ledger.run(
+            "fund", "release", "--fund", funds["Tax"], "--amount", amount, "--on", "2026-03-20",
+            *as_of, "--revision",
+            fund_token(ledger.run("fund", "show", funds["Tax"], *as_of)[1], "Release revision"))
+        assert code == 0, err
+        if undone:
+            release = re.search(r"Release (\S+) recorded", out)[1]
+            code, _, err = ledger.run(
+                "fund", "release-undo", release, "--fund", funds["Tax"], "--revision",
+                fund_token(ledger.run("fund", "show", funds["Tax"], *as_of)[1],
+                           "Release undo revision"))
+            assert code == 0, err
+    bills = rows_of(ledger, "bills.csv")
+    for bill, undone in ((bills[1], True), (bills[2], False)):
+        code, out, err = ledger.run("review", "consume", bill, "--account", "A", "--fund",
+                                    funds["Insurance"], "--revision",
+                                    ledger.transaction_revision(bill))
+        assert code == 0, err
+        if undone:
+            consumption = re.search(r"Consumption (\S+) recorded", out)[1]
+            shown = ledger.run("review", "consumption", "show", consumption)[1]
+            code, _, err = ledger.run("review", "consumption", "undo", consumption, "--account",
+                                      "A", "--revision", fund_token(shown))
+            assert code == 0, err
+
+
+def build_safe_to_spend_inputs(ledger):
+    """S liquid, T designated then undone, an obligation covering the Insurance reserve, an
+    emergency fund with one restoration kept and a later one undone, and the buffer (D-072)."""
+    as_of = ["--as-of", "2026-03-20"]
+    for account, undone in (("S", False), ("T", True)):
+        for operation in ("set", "undo") if undone else ("set",):
+            shown = ledger.run("account", "liquidity", "show")[1]
+            block = shown.split(f"Account {account} (")[1].split("\nAccount ")[0]
+            code, _, err = ledger.run(
+                "account", "liquidity", operation, "--account", account, "--revision",
+                re.search(r"revision: (lq1-[0-9a-f]{16})", block)[1])
+            assert code == 0, err
+    conn = ledger.conn()
+    (reserve,) = conn.execute("SELECT id FROM fund WHERE name = 'Insurance'").fetchone()
+    conn.close()
+    (obligation,) = re.findall(r"^Obligation (\S+) \(", ledger.run(
+        "obligation", "coverage", *as_of)[1], re.MULTILINE)[:1]
+    shown = ledger.run("obligation", "coverage", *as_of)[1]
+    code, _, err = ledger.run("obligation", "covers", obligation, "--fund", reserve, "--revision",
+                              re.search(r"Covers revision: (ob1-[0-9a-f]{16})", shown)[1])
+    assert code == 0, err
+    words = ["--name", "Rainy", "--kind", "emergency", "--minimum", "8000.00", *as_of]
+    code, out, err = ledger.run("fund", "add", *words, "--revision",
+                                fund_token(ledger.run("fund", "preview", *words)[1]))
+    assert code == 0, err
+    emergency = re.search(r"Fund (\S+) recorded", out)[1]
+    for effective_from, monthly in (("2026-03-20", "250.00"), ("2026-04-01", "300.00")):
+        code, _, err = ledger.run(
+            "fund", "restoration", "--fund", emergency, "--monthly", monthly, "--effective-from",
+            effective_from, *as_of, "--revision",
+            fund_token(ledger.run("fund", "restorations", emergency)[1], "Restoration revision"))
+        assert code == 0, err
+    code, _, err = ledger.run(
+        "fund", "restoration-undo", "--fund", emergency, "--revision",
+        fund_token(ledger.run("fund", "restorations", emergency)[1],
+                   "Undo revision, for the newest"))
+    assert code == 0, err
+    code, _, err = ledger.run(
+        "setting", "set", "checking_buffer_cents", "400.00", "--revision",
+        budget_token(ledger.run("setting", "show")[1].split("Setting checking_buffer_cents")[1]))
+    assert code == 0, err
+
+
+def build_tags(ledger):
+    """Two tags, a transaction tagged with both and then superseded with one, and another said
+    to have none and then undone (D-073 point 5)."""
+    for name in ("Trip", "Work"):
+        assert ledger.run("tag", "add", name)[0] == 0
+    transactions = re.findall(r"^([0-9a-f-]{36})  ", ledger.run("transactions")[1], re.MULTILINE)
+
+    def shown(transaction):
+        return ledger.run("review", "transaction", "show", transaction)[1]
+
+    def tag(transaction, *words):
+        out = shown(transaction)
+        account = re.search(r"^  Account: .* \((\S+)\)$", out, re.MULTILINE)[1]
+        code, out, err = ledger.run("review", "tag", transaction, "--account", account,
+                                    "--revision", re.search(r"^  Revision: (\S+)$", out,
+                                                            re.MULTILINE)[1], *words)
+        assert code == 0, err
+        return account, re.search(r"Tag statement (\S+) recorded", out)[1]
+
+    def tagging_token(statement):
+        return re.search(r"Revision: (tg1-[0-9a-f]{16})",
+                         ledger.run("review", "tagging", "show", statement)[1])[1]
+
+    _, first = tag(transactions[0], "--tags", "Trip,Work")
+    tag(transactions[0], "--tags", "Trip", "--supersedes", first, "--supersedes-revision",
+        tagging_token(first))
+    account, none = tag(transactions[1], "--none")
+    code, _, err = ledger.run("review", "tagging", "undo", none, "--account", account,
+                              "--revision", tagging_token(none))
     assert code == 0, err
 
 
@@ -1090,8 +1276,8 @@ def test_a_restored_real_ledger_shows_everything_alike_with_its_originals(  # R4
                                   capsys)
     assert shown[("archive", "verify")][0] == 0
     originals = sorted(os.listdir(vault / "originals"))
-    # a.csv, pay.csv, bills.csv, p1.csv, p2.csv, out.csv, in.csv, one.csv and u.csv.
-    assert len(originals) == 9
+    # a.csv, pay.csv, bills.csv, gig.csv, p1.csv, p2.csv, out.csv, in.csv, one.csv and u.csv.
+    assert len(originals) == 10
     assert sorted(os.listdir(restored_folder / "originals")) == originals
     for name in originals:
         assert sha256_of(restored_folder / "originals" / name) == name

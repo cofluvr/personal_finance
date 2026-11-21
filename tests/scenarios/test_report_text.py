@@ -54,11 +54,17 @@ def ledger_with_an_item(tmp_path, capsys):
 
 
 def test_each_report_command_prints_its_builders_lines_and_nothing_else():
-    handlers = {node.name: node for node in module_tree(cli).body
-                if isinstance(node, ast.FunctionDef) and node.name in BUILDER_OF_HANDLER}
-    assert set(handlers) == set(BUILDER_OF_HANDLER)
+    """A handler calls its builder itself, or through the one *_report_lines_of function that
+    pf export report shares (M17.4), which prints nothing."""
+    functions = {node.name: node for node in module_tree(cli).body
+                 if isinstance(node, ast.FunctionDef)}
+    assert set(BUILDER_OF_HANDLER) <= set(functions)
     for name, builder in BUILDER_OF_HANDLER.items():
-        calls = called_names(handlers[name])
+        calls = called_names(functions[name])
+        for helper in [call for call in calls if call.endswith("_report_lines_of")]:
+            helper_calls = called_names(functions[helper])
+            assert "print" not in helper_calls and "print_report" not in helper_calls, helper
+            calls |= helper_calls
         assert {builder, "print_report", "open_ledger"} <= calls, name
         assert "print" not in calls, name
 

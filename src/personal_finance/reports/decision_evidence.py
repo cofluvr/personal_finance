@@ -18,6 +18,15 @@ from personal_finance.reconcile.allocation_effects import (
     effective_allocations,
     load_active_allocations,
 )
+from personal_finance.reconcile.breakdown_effects import (
+    effective_breakdowns,
+    load_active_breakdowns,
+)
+from personal_finance.reconcile.tag_effects import effective_tags, load_active_tag_statements
+from personal_finance.reconcile.consumption_effects import (
+    effective_consumptions,
+    load_active_consumptions,
+)
 from personal_finance.reconcile.category_effects import (
     effective_categorizations,
     load_active_categorizations,
@@ -49,8 +58,10 @@ from personal_finance.reconcile.supersession import successor_and_newest
 # classifications binding records in scope, left out where there are none (D-053). Version 7 adds
 # categorizations the same way (D-063). Version 8 adds the category rules a description in scope
 # can match, left out where there are none (D-064). Version 9 adds allocations binding records in
-# scope, left out where there are none (D-065).
-DECISION_REVISION_VERSION = 9
+# scope, left out where there are none (D-065). Version 10 adds fund consumptions binding records in
+# scope the same way (D-070 point 7). Version 11 adds loan payment breakdowns the same way (D-071).
+# Version 12 adds tag statements the same way (D-073 point 5).
+DECISION_REVISION_VERSION = 12
 
 
 @dataclass(frozen=True)
@@ -423,6 +434,80 @@ def undo_outlook(
             "with_decision": allocation_view(now),
             "without_decision": allocation_view(after),
         }
+    active_consumptions = load_active_consumptions(conn, decision.account_id)
+    touching_consumptions = [
+        consumption for consumption in active_consumptions
+        if consumption.bound_record_ids & scope
+    ]
+    if touching_consumptions:
+        consumed_record_ids = set().union(
+            *(consumption.bound_record_ids for consumption in touching_consumptions)
+        )
+
+        def consumption_view(result):
+            group_by_record_id = {
+                record_id: index
+                for index, group in enumerate(result.groups) for record_id in group.record_ids
+            }
+            # Agreement alone, for a supposed grouping: whether each group is spending follows
+            # from the classifications above, which are covered.
+            effects = effective_consumptions(active_consumptions, group_by_record_id, None)
+            return sorted(
+                [keyed(result.groups[index].record_ids), effect.state, effect.applied_value]
+                for index, effect in effects.items()
+                if consumed_record_ids.intersection(result.groups[index].record_ids)
+            )
+
+        material["consumptions"] = {
+            "with_decision": consumption_view(now),
+            "without_decision": consumption_view(after),
+        }
+    active_breakdowns = load_active_breakdowns(conn, decision.account_id)
+    touching_breakdowns = [
+        breakdown for breakdown in active_breakdowns if breakdown.bound_record_ids & scope
+    ]
+    if touching_breakdowns:
+        broken_down_record_ids = set().union(
+            *(breakdown.bound_record_ids for breakdown in touching_breakdowns)
+        )
+
+        def breakdown_view(result):
+            group_by_record_id = {
+                record_id: index
+                for index, group in enumerate(result.groups) for record_id in group.record_ids
+            }
+            # Agreement alone, for a supposed grouping: whether each group is a confirmed loan
+            # payment covering it follows from the types and corrections above, which are covered.
+            effects = effective_breakdowns(active_breakdowns, group_by_record_id, None)
+            return sorted(
+                [keyed(result.groups[index].record_ids), effect.state, effect.applied_value]
+                for index, effect in effects.items()
+                if broken_down_record_ids.intersection(result.groups[index].record_ids)
+            )
+
+        material["breakdowns"] = {
+            "with_decision": breakdown_view(now),
+            "without_decision": breakdown_view(after),
+        }
+    active_tags = load_active_tag_statements(conn, decision.account_id)
+    touching_tags = [statement for statement in active_tags if statement.bound_record_ids & scope]
+    if touching_tags:
+        tagged_record_ids = set().union(*(statement.bound_record_ids
+                                          for statement in touching_tags))
+
+        def tag_view(result):
+            group_by_record_id = {
+                record_id: index
+                for index, group in enumerate(result.groups) for record_id in group.record_ids
+            }
+            effects = effective_tags(active_tags, group_by_record_id)
+            return sorted(
+                [keyed(result.groups[index].record_ids), effect.state, effect.applied_value]
+                for index, effect in effects.items()
+                if tagged_record_ids.intersection(result.groups[index].record_ids)
+            )
+
+        material["tags"] = {"with_decision": tag_view(now), "without_decision": tag_view(after)}
     # Which group a record joins decides the description a rule reads, and the groups, records,
     # corrections and types are covered above, so the rules that could match are enough.
     descriptions = [record.description for record in records if record.id in scope]

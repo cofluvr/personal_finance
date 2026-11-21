@@ -664,8 +664,8 @@ moves.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M13.1 | Settings and budget plans: migration 0026, `pf setting`, `pf budget preview`, `set`, `show`, `undo`, `pf budgets`, chains, `st1`, `bp1`, today from the household timezone, `--as-of` optional on M12's commands | Built, awaiting review |
-| M13.2 | `pf report budget`: actual against target, pace, revised allowances, the personal view, closed months and unused capacity, the `/budget` page, the `--budget` benchmark row | Built, awaiting review |
+| M13.1 | Settings and budget plans: migration 0026, `pf setting`, `pf budget preview`, `set`, `show`, `undo`, `pf budgets`, chains, `st1`, `bp1`, today from the household timezone, `--as-of` optional on M12's commands | Accepted on 2026-11-16, as built |
+| M13.2 | `pf report budget`: actual against target, pace, revised allowances, the personal view, closed months and unused capacity, the `/budget` page, the `--budget` benchmark row | Accepted on 2026-11-16, as built |
 
 ### M13.1 acceptance criteria
 
@@ -692,6 +692,255 @@ moves.
 Rollover, weekly or custom periods, budgets by account, safe to spend (M16), alerts, goals (M14)
 and budgets in scenarios (M18), as D-069 lists them.
 
+## M14 plan
+
+Approved by the owner on 2026-11-10 as D-070, with A to I, in
+[decisions-m12-m21.md](decisions-m12-m21.md), under D-067's guardrails G1 to G13. The owner allowed
+M14.1 to be built on 2026-11-16 and accepted it as built the same day, approving the plan for
+M14.2 to M15.3 under D-070 ("M14.2 to M15.3: the implementation plan") to be built without a stop
+between slices. No security control changes. `r`, `t`, `d` and `c` move once, in M14.2.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M14.1 | Funds, assignments and priority: migration 0027, `pf fund preview`, `add`, `terms`, `undo`, `show`, `assign`, `unassign`, `priority`, `pf funds`, the four kinds' required amounts, the assignability guard, planned contributions, `fu1`, `fa1` | Accepted 2026-11-16 |
+| M14.2 | Consumption and the tax reserve: migration 0028, `review consume`, tax payments and releases, `fc1`, `r13`, `t11`, `d10`, `c6` | Accepted 2026-11-19 |
+| M14.3 | `pf report funds`, extra income and unused capacity by priority, "paid from reserves" (built in M14.2), the page, the restore test, `--funds` | Accepted 2026-11-19 |
+
+### M14.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| GA1 | Migration 0027 meets G10, every trigger refusing with a control |
+| GA2 | Each kind's required amount, by point 1's formula, computed by hand at a deadline month, mid-term and past due, rounded up (G8). A percentage goal is byte-identical across M12's third-paycheck pair |
+| GA3 | `fund assign` refuses beyond the latest observation, on an account with no observation, on a card, loan or retirement account, a second active assignment and a stale `fa1`, changing nothing |
+| GA4 | A later lower observation makes the account `over_assigned` by exactly the difference, disclosed wherever funds show, and new assignments there refuse until resolved. A race test (G3): two assignments shown against one observation, so the second refuses |
+| GA5 | Planned contributions and restoration change no assignment. `evidence_digest` is unchanged by every fund write |
+
+### M14.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| GB1 | Migration 0028 meets G10. `review consume` follows D-043 and D-063: a stale `t11`, another account, a transaction not in spending and an unknown fund are refused. Chains, agreement, conflict and `basis_changed` follow CB2 and CB3 |
+| GB2 | No double count: a purchase consuming a reserve counts once in `totals` and its category, leaves discretionary actual by exactly the consumed portion, and its excess stays discretionary. The fund's outstanding amount falls by exactly the consumed portion. Undo restores both exactly |
+| GB3 | Tax accrual rounds up per occurrence from `effective_from`. Payments and releases reduce required, never below zero, and every tax line carries PRD §16's label |
+| GB4 | `r13`, `t11`, `d10` and `c6` keep every digest without consumption, with a test pinning each definition and `fc1`. Every command but those point 7 names is byte for byte as before (G6) |
+
+### M14.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| GC1 | Extra income and unused capacity allocate down the priority list exactly, each fund to its need, leaving the remainder shown. All are labelled planned |
+| GC2 | `report funds` and its page agree line for line, read-only, with names holding HTML shown as text |
+| GC3 | Backup and restore keep funds, assignments, priority, consumptions and releases, compared as HB5 |
+| GC4 | `--funds` asserts its counts and records its figures under G9. Every earlier criterion still passes |
+
+### Not in M14
+
+Automatic consumption matchers, automatic assignments, per-source extra overrides, goals in net
+worth (M15), safe to spend (M16) and goals in snapshots (M19), as D-070 lists them.
+
+## M15 plan
+
+Approved by the owner on 2026-11-10 as D-071, with A to H, in
+[decisions-m12-m21.md](decisions-m12-m21.md), and its implementation plan on 2026-11-16 under
+D-070 ("M14.2 to M15.3: the implementation plan"), with `balance record --from-statement` not
+built. No security control changes. `r`, `t`, `d` and `c` move once, in M15.3.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M15.1 | Net worth: migration 0029, `pf account links`, `link`, `unlink`, `al1`, valuation dates and warnings, retirement and investment history, `pf report net-worth [--member]`, its page | Accepted 2026-11-19 |
+| M15.2 | Loan terms and planning: migration 0030, rate and payment periods, actual against schedule, projections, payoff orders, `pf report loans`, `loan project`, `loan payoff`, `lt1` | Accepted 2026-11-19 |
+| M15.3 | Principal and interest: migration 0031, `review breakdown`, interest in Spending by amount, `r14`, `t12`, `d11`, `c7`, `lb1`, `--loans` | Accepted 2026-11-19 |
+
+### M15.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| LA1 | Migration 0029 meets G10. `account link` refuses non-loans, two levels, a second aggregate and a stale `al1` |
+| LA2 | Net worth adds valuations exactly, with liabilities negative. An unvalued account is listed and not counted, and the incompleteness and mixed-date warnings fire exactly at 31 days |
+| LA3 | Subaccounts and aggregate never both counted, over generated link and observation sets, with each branch of point 2 produced |
+| LA4 | `--member` parts plus unattributed equal net worth exactly. (`--from-statement` is not built: no statement balance is stored) |
+| LA5 | `report net-worth` and its page agree line for line, read-only |
+
+### M15.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| LB1 | Migration 0030 meets G10. Terms refuse a non-loan or non-card account, a rate or payment out of range, a due day outside 1 to 28 (no month-end clamping), and a stale `lt1` |
+| LB2 | Graduated schedule: the amount due on each due date is the period in effect, at every step, including a step on the due date itself |
+| LB3 | Actual against schedule produces each state exactly, counts only confirmed transfers, and lists unconfirmed payments apart |
+| LB4 | A projection matches a hand-computed amortization for 12 months to the cent, half-even, flags negative amortization, stops at 600 months and prints every assumption of point 5 |
+| LB5 | Payoff orders follow point 6's ordering and ties, roll payments over, and are deterministic. Every figure is labelled projection |
+
+### M15.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| LC1 | Migration 0031 meets G10. `review breakdown` follows D-043 and D-063, and refuses interest + fees > \|amount\|, an unconfirmed or non-loan payment and a stale `t12` |
+| LC2 | With breakdowns, D-056's groups add to net movement exactly by amount, Spending rises by exactly the applied interest and fees, Confirmed transfers fall by the same, and the category line moves with them. D-055's warning is withdrawn only where a breakdown applies |
+| LC3 | Without breakdowns, `totals`, `report monthly` and `report household` are byte for byte as before. `r14`, `t12`, `d11` and `c7` keep every digest, with `lb1` pinned |
+| LC4 | `--loans` asserts its counts and records its figures, `totals` among them, under G9. Every earlier criterion still passes |
+
+### Not in M15
+
+Lender-exact accrual, fees inside projections, statement balances read automatically, investment
+performance or prices, a separate ownership table, and loans in scenarios (M18), as D-071 lists
+them.
+
+## M16 plan
+
+Approved by the owner on 2026-11-10 as D-072, with A to I, in
+[decisions-m12-m21.md](decisions-m12-m21.md). The owner allowed it to be built on 2026-11-19,
+with local commits on `feature/m10-rules`. No security control changes, and no `r`, `t`, `d` or
+`c` token moves.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M16.1 | Inputs: migration 0032, `pf account liquidity show`, `set`, `undo`, `pf obligation coverage`, `covers`, `uncover`, `pf fund restorations`, `restoration`, `restoration-undo`, the checking buffer, `lq1` | Accepted 2026-11-20 |
+| M16.2 | The engine: the horizon, the liquid balance, protected funds, the two constraints, provisional reasons, `pf safe-to-spend`, `pf dashboard`, its page, `--safe-to-spend` | Accepted 2026-11-20 |
+
+### M16.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| SA1 | Migration 0032 meets G10 and seeds `checking_buffer_cents`. Designation refuses non-checking and non-savings accounts and a stale `lq1`. Coverage links refuse a second link on either side and a stale `ob1` |
+| SA2 | Possible double reservations are found exactly at the 3-day edges, for loans and for reserves, and a link clears each |
+| SA3 | `evidence_digest` is unchanged by every M16 write. Every existing command is byte for byte as before |
+
+### M16.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| SB1 | The horizon: N for weekly, biweekly and semimonthly sources at month ends, a payday equal to `as_of`, an unreceived paycheck within its tolerance, and no source |
+| SB2 | The liquid balance is the observation plus activity, with pending outflows in and pending inflows out, and `activity_incomplete` and `stale_observation` fire exactly at their edges |
+| SB3 | Each protected row computed by hand. No entry appears in two rows, over plans with links, unlinked look-alikes, reserves covered by obligations and loans covered by obligations |
+| SB4 | Money assigned this month is counted once, as an assignment or as an outstanding contribution, never both: assigning the planned amount mid-month leaves the protected total unchanged |
+| SB5 | Safe to spend is the lower of the two constraints, with the constraint named, ties to liquidity, a shortfall shown with safe to spend 0, and every provisional reason produced and cleared by its stated action |
+| SB6 | Third paycheck: the extra changes neither the budget constraint nor the horizon's protected amounts. It reaches liquidity only as money actually received |
+| SB7 | `safe-to-spend` and `dashboard` open read-only, call no candidate search (a test replaces it with a failure), and the dashboard page equals the command line for line. `--safe-to-spend` records its figures under G9. Every earlier criterion still passes |
+
+### Not in M16
+
+Safe to spend per member, intra-day timing, forecasts beyond the next paycheck (M18), automatic
+linking of duplicate reservations, and notifications, as D-072 lists them.
+
+## M17 plan
+
+Approved by the owner on 2026-11-10 as D-073, with A to I, in
+[decisions-m12-m21.md](decisions-m12-m21.md), a security change. The owner's notes of 2026-11-20
+accepted M16 and gave standing approval to continue through the milestones on the lead
+engineer's choices, which is taken as point A's approval. Slice plans for M17.1 and M17.2 are
+under D-073; departures are in its "How M17.n was implemented".
+
+| Slice | Scope | Status |
+|---|---|---|
+| M17.1 | The write pipeline, review decisions from the browser (reject, confirm, undo) | Built, for review |
+| M17.2 | The transaction page and its writes, unresolved records, the accounts, obligations and settings sections and their planning writes | Built, for review |
+| M17.3 | Migration 0033, tags (`tg1`, `r15`, `t13`, `d12`), search, the eight visuals | Built, for review |
+| M17.4 | CSV export, `--ui` | Built, for review |
+
+### M17.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| WA1 | Each pipeline step refuses alone, on a request correct in every other respect, with the same request passing as the control (UD2) |
+| WA2 | A form token is single-use, bound to its session, route and shown revision tokens. Reuse, another session's token, a changed hidden revision and a missing token are each refused, changing nothing |
+| WA3 | A decision from the browser equals the same CLI decision: the same rows, the same logical digest afterwards. A stale revision token or stale account refuses with the CLI's message, and the UI never reconciles (UD1) |
+| WA4 | Post/Redirect/Get: a reload of the result page writes nothing, and a resubmitted form refuses (UD3). No refusal page repeats a request value, tested with sentinels |
+| WA5 | Each `POST` opens through the gate, and a real ledger whose probe fails refuses with no write (UD4). No request writes to stdout or stderr. Every earlier criterion still passes |
+
+### M17.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| WB1 | Each section's pages equal their commands line for line, with names holding HTML shown as text (section pages leave out `, made <time>`, F2) |
+| WB2 | The route table equals point 2's allowlist as built, and each terminal-only command has no route. A `POST` to any other path is `404` |
+| WB3 | Each planning write from the browser equals its CLI write, including refusals |
+
+### M17.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| WC1 | Migration 0033 meets G10. Tag statements follow D-063 and D-065's multi-part model. `r15`, `t13` and `d12` keep every digest without tags, with `tg1` pinned (`c` stays 7: see D-073) |
+| WC2 | Search filters each select exactly, compose with AND, refuse malformed values, and cap at 500 with the rest counted. `pf transactions` with no filter is byte for byte as before |
+| WC3 | Each SVG's mark values equal its table. No script, event attribute, external reference or `style` is present. **The real-browser check of the CSP is not recorded**: no browser was available |
+
+### M17.4 acceptance criteria
+
+| ID | Test |
+|---|---|
+| WD1 | Export refuses an unsafe or existing destination, writing nothing, and writes `0600`. A cell starting with each formula character is prefixed. Money round-trips exactly, and missing is empty |
+| WD2 | `--ui` records its figures under G9. Every earlier criterion still passes |
+
+### Not in M17
+
+Script of any kind, PDF or image export, the UI on any address but loopback, separate logins,
+decision history pages, browser downloads, and for now the browser writes M17.2's slice plan
+point 7 leaves in the terminal.
+
+## M18 plan
+
+Approved by the owner on 2026-11-10 as D-074, with A to G, in
+[decisions-m12-m21.md](decisions-m12-m21.md). Its slice plans were written under D-074 before any
+of it was built, and approved by the owner's notes of 2026-11-20; departures are in its "How M18
+was implemented". No security control change: its browser forms run through M17's pipeline.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M18.1 | Migration 0034, scenarios and inputs of every kind, `target_changed`, `sc1` | Built, for review |
+| M18.2 | The pure projection, `scenario compare`, the scenario pages and forms | Built, for review |
+| M18.3 | Promotion and its undo, `sp1`, `--scenarios` | Built, for review |
+
+### M18 acceptance criteria
+
+| ID | Test |
+|---|---|
+| XA1 | Migration 0034 meets G10. Each kind and distinction is stored and refused as point 2: gross without a percentage, a replacement of the wrong kind, a `to` before `from`, a stale `sc1` |
+| XA2 | A replaced entry undone or superseded makes its input `target_changed`, left out and disclosed |
+| XB1 | A scenario with no inputs equals the baseline byte for byte. Replacing a salary counts only the new amount in range. A look-alike addition counts and is flagged |
+| XB2 | Uncertain inputs count only with `--include-uncertain`. Discretionary spending projects at target. Every output of point 3 is present, absolute and as a difference, with assumptions and missing inputs listed |
+| XB3 | A 12-month projection is computed by hand to the cent, including a home purchase's parts. Scenario assets never reach actual net worth |
+| XB4 | `scenario compare` and its page agree line for line. Each form follows M17's pipeline, and a `GET` writes nothing |
+| XC1 | Promotion creates exactly the mapped entries in one transaction, is refused with a stale `sp1` or a changed replaced entry, and lists what is not promotable. Undo restores the plan's every token, and refuses after a later supersession |
+| XC2 | `evidence_digest` is unchanged by every scenario command. `--scenarios` records its figures under G9. Every earlier criterion still passes |
+
+### Not in M18
+
+Monte Carlo or probability, inflation or market returns, tax calculation, stored results,
+scenarios in actual reports, scenarios from the phone, and promoting from the browser.
+
+## M19 plan
+
+Approved by the owner on 2026-11-10 as D-075, with A to G, in
+[decisions-m12-m21.md](decisions-m12-m21.md). Its slice plans were written under D-075 before any
+of it was built, approved by the owner's notes of 2026-11-20, which also approve the snapshot's
+destination gated as `pf export`'s is; departures are in its "How M19 was implemented". No network
+and no security control change.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M19.1 | The builder, canonical JSON, the envelope, every §3 section, the schema document and its validator, golden fixtures | Built, for review |
+| M19.2 | Create in one read transaction, the gated atomic write, migration 0035, verify, the list, `--snapshot` | Built, for review |
+
+### M19 acceptance criteria
+
+| ID | Test |
+|---|---|
+| VA1 | Fixed inputs give byte-identical snapshots. Canonical encoding is checked, and a float anywhere in the builder's output fails |
+| VA2 | Every §3 item is present, and every number agrees with its source command on the same ledger and `as_of` |
+| VA3 | No sentinel from any excluded field appears in the snapshot's bytes |
+| VA4 | Every `*_cents` field has a declared kind, missing is `null`, and the validator accepts the golden fixtures and refuses each mutated copy: a wrong type, a missing required field, an unknown enum value, an unknown major |
+| VA5 | A builder change without a fixture and version change fails |
+| VB1 | A concurrent writer gives a snapshot equal to the before or the after state, never a mix |
+| VB2 | `create` refuses an unsafe or existing destination, writing nothing. It writes `0600` atomically, and records without the path. Migration 0035 meets G10 |
+| VB3 | `verify` accepts a fresh snapshot, and refuses a one-byte change, a changed digest, broken reconciliation and an excluded key, writing nothing |
+| VB4 | `--snapshot` records its figures under G9. Every earlier criterion still passes |
+
+### Not in M19
+
+Encrypting the file, a network, incremental or delta snapshots, phone writes, scenario results,
+and institution names (until the owner says they may appear).
+
 ## Backlog benchmarks
 
 Not scheduled, and not part of A39 acceptance.
@@ -705,7 +954,4 @@ Not scheduled, and not part of A39 acceptance.
 
 Recorded for later planning. None of this is in M1 scope.
 
-- **Financial scenarios:** a local UI for named scenarios with dated income and
-  expense changes, compared with the baseline after the user requests
-  recalculation. Inputs, comparison outputs and safeguards are in
-  [PRD-backend.md](PRD-backend.md) §15, "Scenario Inputs and Comparison".
+- **Financial scenarios:** built in M18 (D-074), above.

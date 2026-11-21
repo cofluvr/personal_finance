@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`, which holds everything through M9. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
+Last updated: 2026-11-20. Branch: `feature/m10-rules`, from `main` at `19ee858`, which holds everything through M9. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
 
 | Milestone | Status |
 |---|---|
@@ -66,9 +66,28 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M12.2: recurring obligations | Accepted on 2026-11-16 as built, its departures included (D-068) |
 | M12.3: the income report, its page, the benchmark row | Accepted on 2026-11-16 as built, its departures included (D-068) |
 | **M12 overall** | **Complete and accepted** on 2026-11-16. Not on the real ledger, which takes 24 and 25 after M10's and M11's migrations, each after a verified backup |
-| M13.1: settings, budget plans, today from the household timezone | Built on 2026-11-16 (D-069, "How M13.1 was implemented"), awaiting the owner's review |
-| M13.2: the budget report, its page, the benchmark row | Built on 2026-11-16 (D-069, "How M13.2 was implemented"), awaiting the owner's review |
-| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 accepted, M13 built for review |
+| M13.1: settings, budget plans, today from the household timezone | Accepted on 2026-11-16 as built, its departures included (D-069) |
+| M13.2: the budget report, its page, the benchmark row | Accepted on 2026-11-16 as built, its departures included (D-069) |
+| **M13 overall** | **Complete and accepted** on 2026-11-16. Not on the real ledger, which takes 26 after M12's migrations, each after a verified backup |
+| M14.1: funds, assignments and the priority list | Accepted on 2026-11-16 as built, its departures included (D-070) |
+| M14.2: consumption, tax payments and releases | Accepted on 2026-11-19 as built, its departures included (D-070) |
+| M14.3: `report funds`, the extra by priority, its page, the restore test, `--funds` | Accepted on 2026-11-19 as built, its departures included (D-070) |
+| M15.1: net worth, account links, its page | Accepted on 2026-11-19 as built, its departures included (D-071) |
+| M15.2: loan terms, actual against schedule, projections, payoff orders | Accepted on 2026-11-19 as built, its departures included (D-071) |
+| M15.3: principal and interest, interest in Spending, `--loans` | Accepted on 2026-11-19 as built, its departures included (D-071) |
+| **M14 and M15 overall** | **Complete and accepted** on 2026-11-19. Not on the real ledger, which takes 27 and 28, then 29 to 31, after the earlier milestones' migrations, each after a verified backup |
+| M16.1: liquidity designations, coverage links, restoration, the buffer | Accepted on 2026-11-20 as built (D-072) |
+| M16.2: safe to spend, the dashboard, its page, `--safe-to-spend` | Accepted on 2026-11-20 as built, with the two findings settled (D-072) |
+| M17.1: the browser write pipeline, review decisions from the browser | Built on 2026-11-20 (D-073, "How M17 was implemented"), a security change, awaiting the owner's review |
+| M17.2: the transaction page and its writes, the sections and planning writes | Built on 2026-11-20, awaiting the owner's review |
+| M17.3: migration 0033, tags, search, the eight visuals | Built on 2026-11-20, awaiting the owner's review. The real-browser CSP check is not done |
+| M17.4: CSV export, `--ui` | Built on 2026-11-20, awaiting the owner's review |
+| M18.1: migration 0034, scenarios and their inputs, `sc1` | Built on 2026-11-21 (D-074, "How M18 was implemented"), awaiting the owner's review |
+| M18.2: the projection, `scenario compare`, the scenario pages and forms | Built on 2026-11-21, awaiting the owner's review |
+| M18.3: promotion and its undo, `sp1`, `--scenarios` | Built on 2026-11-21, awaiting the owner's review |
+| M19.1: the snapshot builder, canonical JSON, the schema and its validator | Built on 2026-11-21 (D-075, "How M19 was implemented"), awaiting the owner's review |
+| M19.2: snapshot create, verify and the list, migration 0035, `--snapshot` | Built on 2026-11-21, awaiting the owner's review |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 to M16 accepted, M17 to M19 built for review |
 
 ## What exists
 
@@ -96,7 +115,7 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `0014_transfer_matches`, `0015_one_sided_transfers`, `0016_balance_observations`,
   `0017_real_ledger`, `0018_backup_records`, `0019_categories`, `0020_categorizations`,
   `0021_category_rules`, `0022_household`, `0023_allocations`, `0024_income_sources` and
-  `0025_recurring_obligations` and `0026_settings_and_budgets`,
+  `0025_recurring_obligations`, `0026_settings_and_budgets` and `0027_funds`,
   applied by `init` and `migrate` only (D-035).
 - `personal_finance.ingest`: two invented layouts and five unverified institution layouts (D-059), explicit coverage, atomic
   per-file import.
@@ -155,6 +174,10 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 - `personal_finance.planning.budgets` and `budget_pace`: budget plans, the plan in effect for a
   month, chains and closed months, with `bp1` (D-069 points 2 and 6); and point 4's formulas in
   integer cents. `reports.budget_report` builds `pf report budget` (D-069 points 3 to 5).
+- `personal_finance.planning.funds`: funds of four kinds with dated terms, each kind's required
+  amount rounded up, assignments of an account's observed balance with the guard, and the
+  priority list, with `fu1` and `fa1` (D-070 points 1 to 4). `reports.fund_standing` gathers
+  baseline income, fixed commitments and the tax accrual from M12 for `pf funds` and `fund show`.
 - `personal_finance.reconcile.transfer_effects` and `transfers`: which transfer matches and one-sided
   transfers apply and which pairs are candidates, read after each account derives alone, and
   matching, stating and undoing under one write lock (D-054, D-055).
@@ -203,11 +226,34 @@ Last updated: 2026-11-15. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `obligation undo`, `obligation dismiss`, `obligation dismissals`, `obligation dismissal undo`,
   `obligations`, `report income`, `setting show`, `setting set`, `setting undo`,
   `budget preview`, `budget set`, `budget show`, `budget undo`, `budgets`, `report budget`,
+  `fund preview`, `fund add`, `fund terms`, `fund undo`, `fund show`, `fund assign`,
+  `fund unassign`, `fund priority`, `fund release`, `fund release-undo`, `funds`,
+  `report funds`, `review consume`, `review consumptions`, `review consumption show`,
+  `review consumption undo`, `account links`, `account link`, `account unlink`,
+  `report net-worth`, `loan terms add`, `loan terms show`, `loan terms undo`, `loan rate`,
+  `loan payment`, `loan plan set`, `report loans`, `loan project`, `loan payoff`,
+  `review breakdown`, `review breakdowns`, `review breakdown-show`, `review breakdown-undo`,
+  `account liquidity show`, `account liquidity set`, `account liquidity undo`,
+  `obligation coverage`, `obligation covers`, `obligation uncover`, `fund restorations`,
+  `fund restoration`, `fund restoration-undo`, `safe-to-spend`, `dashboard`,
+  `tag add`, `tags`, `review tag`, `review tagging show`, `review tagging undo`,
+  `transactions` with `--search`, `--account`, `--from`, `--to`, `--category`, `--tag`, `--min`
+  and `--max`, `report visuals`, `export transactions`, `export report`, `scenario add`,
+  `scenarios`, `scenario show`, `scenario input add`, `scenario input undo`, `scenario undo`,
+  `scenario compare`, `scenario promote`, `scenario promotion undo`, `snapshot create`,
+  `snapshot verify`, `snapshots`,
   `totals`,
   `report monthly`, `report household`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
   `backup verify`, `backup restore`, `pdf text`, run
   through the `bin/pf` launcher (D-038).
+
+- `personal_finance.planning.scenarios`, `projection` and `promotions`: scenarios and their
+  inputs, the pure monthly projection, and promotion with its undo (D-074).
+  `personal_finance.reports.scenario_report`: the plan read once, and the lines of `scenarios`,
+  `scenario show` and `scenario compare`, which the scenario pages render.
+- `personal_finance.snapshot`: canonical JSON, the snapshot builder, the schema document and its
+  validator, and creating, verifying and listing snapshot files (D-075).
 
 ## What does not exist yet
 
@@ -237,7 +283,12 @@ Stated here once (D-058 point 9, W2).
   `ui/server.py`, the one module W1 allows to import from `http`, and only `http.server`'s
   `BaseHTTPRequestHandler` and `HTTPServer`. It binds `127.0.0.1` at a port the system picks, with
   no option to change it, looks up no name, and connects to nothing. A request needs the exact
-  Host, and the cookie from that launch's one-use key, and only `GET` is answered.
+  Host, and the cookie from that launch's one-use key. From M17.1, a security change approved
+  with D-073, a `POST` to a route on the allowlist also needs this server's exact `Origin`,
+  same-origin fetch metadata when sent, a plain form of at most 8,192 bytes parsed strictly, and
+  a single-use HMAC form token bound to the route and every hidden field; it then runs the CLI's
+  own command, whose gate and refusals apply. Every other method is refused. Forms work without
+  script, and the CSP is unchanged.
 - **One runtime dependency: pypdf 6.21.2** (D-060 point 1, as amended), pure Python and BSD-3-Clause,
   with no dependency of its own on Python 3.12. Pinned by version and hash in `requirements.txt`,
   installed with `--require-hashes`, and imported by `ingest/pdf_reader.py` alone. W1 parses its
@@ -281,6 +332,25 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
 
 ## Known limitations
 
+- **The browser makes only the writes D-073's allowlist as built names** (review decisions,
+  completion and dismissal, the transaction page's classify, categorize, correct, separate,
+  one-sided transfer and tags, the buffer, liquidity and coverage links). Everything else,
+  including every planning preview-then-add, is made in the terminal. The UI is still one session,
+  one request at a time, on loopback only. **The CSP was not checked in a real browser** for the
+  visuals' presentation attributes or the forms (D-073 point 6), and no browser has submitted a
+  form: the tests post as a browser would, over the real handler.
+- **Scenarios project monthly,** with the assumptions `scenario compare` prints: no daily
+  timing, inflation, returns or tax. Promotion is terminal only, one active promotion per
+  scenario, and maps only point 6's inputs: a loan payoff, a bonus, a borrowing, a home purchase,
+  an addition with an end date or without `--account` and `--match` stay scenarios. A withdrawn
+  promotion's terms row keeps its date, so a terms row on that same date is refused (D-074).
+- **A snapshot file is unencrypted** (D-075 point 7): it is to be kept on the encrypted image and
+  carried to the phone by hand. Members' parts are monthly totals moved out and in, not D-056's
+  five groups. Institution names are left out until the owner decides.
+- Tags are free labels on a transaction's whole set, entering no total; no renaming, merging or
+  deleting a tag. Search is a plain scan, capped at 500 rows shown.
+- Exports are CSV only: transactions with fixed columns, or a report's lines one a row. No PDF,
+  image or browser download.
 - Categories cover spending only, by a person one transaction at a time, or by category rules on
   spending a person has typed (D-064): no income categories, and no renaming, merging or deleting a
   category (D-063). A ledger shows spending by category only while some categorization reaches a
@@ -326,8 +396,38 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
   cap counts its subcategories. A closed month's correction is disclosed from the plan's
   `--correct-closed-month` flag and the month the plan was made, so a correction made with an
   `--as-of` far from the real date discloses by the real date.
-- The local UI is read-only, and shows nine commands' output only, `report income` and
-  `report budget` the last two. It searches nothing, imports
+- Funds (M14.1) are planning figures: nothing is assigned automatically, and an assignment says
+  what an account's observed balance already holds, never that money moved. An account holds
+  assignments up to its latest balance observation on or before the date; below it, the account
+  is over-assigned, disclosed and never absorbed. One emergency fund and one tax reserve at a
+  time. A fund has no supersession: its terms change from a date, anything else is undo then
+  add, and a fund holding an assignment cannot be undone. A fund's start and terms cannot fall
+  in a closed month. The tax reserve accrues from received occurrences only.
+- A consumption (M14.2) pays from what the assignments active when it was stated still hold, so
+  a later assignment never rewrites it; its portion is computed where read, never stored. The
+  emergency fund is never consumed. `report budget` takes the portion out of discretionary
+  actual; `totals` and categories count the purchase once, unchanged. A fund paying for a
+  transaction cannot be undone until each consumption is.
+- `report funds` (M14.3) offers as extra only as_of's month's extra paychecks and side income (net
+  of its tax accrual) and the latest closed month's unused capacity; a goal with no target takes
+  none. Every allocation is planned, never an assignment or a transfer.
+- Net worth (M15.1) reads balance observations only. `balance record --from-statement` is not
+  built: no statement balance is stored. Net worth by member divides by account attribution.
+- Loan projections and payoff orders (M15.2) are projections, not lender-exact: monthly
+  interest, no fees, no daily accrual, at most 600 months. A card takes a rate only. Periods may
+  start in a closed month, since a schedule is the lender's contract.
+- A breakdown (M15.3) is the only change of M12 to M21 to `totals`, `report monthly` and
+  `report household`: only where one applies, interest and fees move from confirmed transfers to
+  spending, and each divided payment is counted in both groups, disclosed by count.
+- Safe to spend (M16) is an estimate until the next salary paycheck, never a balance: the
+  latest observation of each liquidity account plus its activity since, with pending and
+  unknown-status inflows left out. It is provisional while any of D-072 point 6's reasons holds,
+  each printed with what clears it, and it refuses without the household timezone. A card's
+  payment obligation is recognised by the card's name in the obligation's name or matcher. A
+  loan payment due before `as_of` is not reserved. Nothing is linked automatically: a possible
+  double reservation is a warning until `obligation covers` links the pair.
+- The local UI is read-only, and shows twelve commands' output only, `report funds`,
+  `report net-worth` and `dashboard` the last three. It searches nothing, imports
   nothing, exports nothing and shows no `trace` or decision history, which carry creation
   timestamps (F2). Decisions are made with `pf review` in the terminal (D-062).
 - `pf ui` cannot stop what the browser keeps: history (addresses with IDs and months, a fixed

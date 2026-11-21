@@ -23,7 +23,14 @@ from personal_finance.reconcile.household_effects import (
     attributed_transactions,
     load_household,
 )
-from personal_finance.reports.totals import GroupTotal, IncomeAndSpending, IncomeAndSpendingTally
+from personal_finance.reconcile.breakdown_effects import applied_breakdowns
+from personal_finance.reports.totals import (
+    GroupTotal,
+    IncomeAndSpending,
+    IncomeAndSpendingTally,
+    divided_by_parts,
+    interest_category_id,
+)
 
 SIDE_BY_SIDE = "side_by_side"
 ONE_MEMBER = "member"
@@ -67,15 +74,27 @@ def household_report(conn: sqlite3.Connection, account_id: str | None = None,
     tallies = defaultdict(IncomeAndSpendingTally)
     unattributed = defaultdict(GroupTotal)
     outside = shown = 0
+    broken_down = {transaction_id: interest + fees
+                   for transaction_id, (interest, fees) in applied_breakdowns(conn).items()}
+    interest_category = interest_category_id(conn)
     for entry in attributed_transactions(conn, household, account_id):
         month, financial_type, confirmed, category_id = facts[entry.transaction_id]
         if (first_month and month < first_month) or (last_month and month > last_month):
             outside += 1
             continue
         attribution = entry.attribution
+        whole_broken_down = broken_down.get(entry.transaction_id, 0)
+        # Each member's part of a divided loan payment carries its share of the interest and
+        # fees, so the parts add to the whole in every group.
+        part_broken_down = dict(zip(
+            [member for member, _ in attribution.parts],
+            divided_by_parts(whole_broken_down, [cents for _, cents in attribution.parts],
+                             entry.amount_cents) if whole_broken_down and attribution.parts
+            else [0] * len(attribution.parts), strict=True))
 
-        def add(column, cents):
-            tallies[column].add(cents, financial_type, confirmed, category_id)
+        def add(column, cents, divided=whole_broken_down):
+            tallies[column].add(cents, financial_type, confirmed, category_id, divided,
+                                interest_category)
 
         if attribution.kind == UNATTRIBUTED:
             unattributed[attribution.reason] = unattributed[attribution.reason].adding(
@@ -85,17 +104,17 @@ def household_report(conn: sqlite3.Connection, account_id: str | None = None,
             if attribution.kind == UNATTRIBUTED:
                 add(UNATTRIBUTED, entry.amount_cents)
             for part_member, cents in attribution.parts:
-                add(part_member, cents)
+                add(part_member, cents, part_broken_down[part_member])
         elif view == ONE_MEMBER:
             for part_member, cents in attribution.parts:
                 if part_member == member_id:
-                    add(attribution.kind, cents)
-                    add(HOUSEHOLD_COLUMN, cents)
+                    add(attribution.kind, cents, part_broken_down[part_member])
+                    add(HOUSEHOLD_COLUMN, cents, part_broken_down[part_member])
         elif len(attribution.parts) > 1:
             shown += 1
             add(WHOLE_COLUMN, entry.amount_cents)
             for part_member, cents in attribution.parts:
-                add(part_member, cents)
+                add(part_member, cents, part_broken_down[part_member])
 
     names = {member.member_id: member.name for member in household.members}
     if view == SIDE_BY_SIDE:
@@ -152,3 +171,20 @@ def _facts(conn, account_id) -> dict[str, tuple]:
             {"account": account_id},
         )
     }
+
+
+def household_by_month(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Every month's totals of all transactions: the household's, each member's parts by member
+    ID, and the unattributed, in one pass (D-075 point 2). Members' parts and the unattributed
+    add to the household's exactly, in cents moved out and in."""
+    household = load_household(conn)
+    facts = _facts(conn, None)
+    months = defaultdict(lambda: defaultdict(GroupTotal))
+    for entry in attributed_transactions(conn, household):
+        totals = months[facts[entry.transaction_id][0]]
+        totals[HOUSEHOLD_COLUMN] = totals[HOUSEHOLD_COLUMN].adding(entry.amount_cents)
+        if entry.attribution.kind == UNATTRIBUTED:
+            totals[UNATTRIBUTED] = totals[UNATTRIBUTED].adding(entry.amount_cents)
+        for member_id, cents in entry.attribution.parts:
+            totals[member_id] = totals[member_id].adding(cents)
+    return {month: dict(totals) for month, totals in sorted(months.items())}

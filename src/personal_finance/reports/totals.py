@@ -309,7 +309,9 @@ def one_sided_summary(conn: sqlite3.Connection, account_id: str | None = None) -
         """SELECT effect.state, COALESCE(fix.corrected_amount_cents, entry.amount_cents),
                   kind.financial_type, counterpart.account_type,
                   EXISTS (SELECT 1 FROM document_coverage document
-                          WHERE document.account_id = statement.counterpart_account_id)
+                          WHERE document.account_id = statement.counterpart_account_id),
+                  EXISTS (SELECT 1 FROM transaction_loan_breakdown divided
+                          WHERE divided.transaction_id = entry.id AND divided.state = 'applied')
            FROM one_sided_transfer_effect effect
            JOIN one_sided_transfer statement ON statement.id = effect.one_sided_transfer_id
            JOIN account counterpart ON counterpart.id = statement.counterpart_account_id
@@ -323,22 +325,48 @@ def one_sided_summary(conn: sqlite3.Connection, account_id: str | None = None) -
         {"account": account_id},
     ).fetchall()
     applied = [row for row in rows if row[0] == "applied"]
-    card_payments = [amount for _, amount, kind, counterpart_type, _ in applied
+    card_payments = [amount for _, amount, kind, counterpart_type, _, _ in applied
                      if kind == "card_payment" and counterpart_type == "credit_card"]
-    loan_payments = [amount for _, amount, kind, counterpart_type, _ in applied
-                     if kind == "loan_payment" and counterpart_type == "loan"]
+    # D-055's warning is withdrawn for each payment holding an applied breakdown (D-071).
+    loan_payments = [amount for _, amount, kind, counterpart_type, _, divided in applied
+                     if kind == "loan_payment" and counterpart_type == "loan" and not divided]
     states = [row[0] for row in rows]
     return OneSidedSummary(
         len(applied),
         sum(-amount for _, amount, *_ in applied if amount < 0),
         sum(amount for _, amount, *_ in applied if amount > 0),
-        sum(not has_documents for *_, has_documents in applied),
-        sum(bool(has_documents) for *_, has_documents in applied),
+        sum(not has_documents for *_, has_documents, _ in applied),
+        sum(bool(has_documents) for *_, has_documents, _ in applied),
         len(card_payments), sum(abs(amount) for amount in card_payments),
         len(loan_payments), sum(abs(amount) for amount in loan_payments),
         states.count("basis_changed"), states.count("conflict"), states.count("type_differs"),
         states.count("counterpart_found"), states.count("counterpart_covered"),
     )
+
+
+# The spending line for a loan payment's interest and fees, stated by a breakdown (D-071 point 7),
+# and the category they count under.
+LOAN_INTEREST = "loan interest and fees within loan payments"
+INTEREST_CATEGORY = "Interest and financial fees"
+
+
+def interest_category_id(conn: sqlite3.Connection) -> int | None:
+    row = conn.execute("SELECT id FROM category WHERE name = ?", (INTEREST_CATEGORY,)).fetchone()
+    return None if row is None else row[0]
+
+
+def divided_by_parts(total_cents: int, parts, whole_cents: int) -> list[int]:
+    """total_cents divided among parts of whole_cents in proportion to each part's size, by
+    largest remainder, so the shares add up to total_cents exactly (a member's share of a loan
+    payment's interest and fees)."""
+    magnitude, whole = abs(total_cents), abs(whole_cents)
+    shares = [magnitude * abs(part) // whole for part in parts]
+    left_over = magnitude - sum(shares)
+    by_remainder = sorted(range(len(parts)),
+                          key=lambda index: (-(magnitude * abs(parts[index]) % whole), index))
+    for index in by_remainder[:left_over]:
+        shares[index] += 1
+    return shares
 
 
 @dataclass(frozen=True)
@@ -377,6 +405,9 @@ class IncomeAndSpending:
     # Spending by the category applying to each transaction, by category ID in the order made,
     # and None, last, for spending no category applies to (D-063). It adds to spending exactly.
     spending_by_category: tuple[tuple[int | None, GroupTotal], ...] = ()
+    # Loan payments a breakdown divides, their interest and fees in spending and their principal
+    # in confirmed transfers, so each is counted in both groups (D-071 point 7).
+    divided_loan_payments: int = 0
 
     @property
     def spending(self) -> GroupTotal:
@@ -396,9 +427,24 @@ class IncomeAndSpendingTally:
         self.spending_by_type: dict[str, GroupTotal] = {}
         self.confirmed_by_type: dict[str, GroupTotal] = {}
         self.spending_by_category: dict[int | None, GroupTotal] = {}
+        self.divided_loan_payments = 0
 
     def add(self, amount_cents: int, financial_type: str | None, confirmed_transfer: bool,
-            category_id: int | None = None) -> None:
+            category_id: int | None = None, broken_down_cents: int = 0,
+            interest_category: int | None = None) -> None:
+        """broken_down_cents, a confirmed loan payment's interest and fees by an applied
+        breakdown, leave the payment's confirmed transfer for spending, under its own line and
+        interest_category (D-071 point 7)."""
+        if broken_down_cents:
+            if not (confirmed_transfer and financial_type == "loan_payment"):
+                raise AssertionError("a breakdown applies to something not a confirmed loan "
+                                     "payment")
+            self.divided_loan_payments += 1
+            self.spending_by_type[LOAN_INTEREST] = self.spending_by_type.get(
+                LOAN_INTEREST, GroupTotal()).adding(-broken_down_cents)
+            self.spending_by_category[interest_category] = self.spending_by_category.get(
+                interest_category, GroupTotal()).adding(-broken_down_cents)
+            amount_cents += broken_down_cents
         in_spending = not confirmed_transfer and financial_type in SPENDING_TYPES
         if category_id is not None and not in_spending:
             raise AssertionError("a category applies to a transaction outside spending")
@@ -428,13 +474,15 @@ class IncomeAndSpendingTally:
         return IncomeAndSpending(
             self.income,
             tuple((financial_type, self.spending_by_type[financial_type])
-                  for financial_type in FINANCIAL_TYPES if financial_type in self.spending_by_type),
+                  for financial_type in (*FINANCIAL_TYPES, LOAN_INTEREST)
+                  if financial_type in self.spending_by_type),
             tuple((financial_type, self.confirmed_by_type[financial_type])
                   for financial_type in (*FINANCIAL_TYPES, UNCLASSIFIED)
                   if financial_type in self.confirmed_by_type),
             self.unconfirmed_transfer_kinds, self.unclassified,
             tuple(sorted(self.spending_by_category.items(),
                          key=lambda item: (item[0] is None, item[0] or 0))),
+            self.divided_loan_payments,
         )
 
 
@@ -443,10 +491,13 @@ def income_and_spending(conn: sqlite3.Connection,
     """Groups each transaction by whether a transfer is confirmed there, then by its applied type,
     and spending by its category: a person's, else the category rules' (D-063, D-064)."""
     tally = IncomeAndSpendingTally()
-    for amount_cents, financial_type, confirmed_transfer, category_id in conn.execute(
+    interest = interest_category_id(conn)
+    for amount_cents, financial_type, confirmed_transfer, category_id, broken_down in conn.execute(
         f"""SELECT COALESCE(fix.corrected_amount_cents, entry.amount_cents), kind.financial_type,
                    {CONFIRMED_TRANSFER_SQL},
-                   COALESCE(categorized.category_id, by_rules.category_id)
+                   COALESCE(categorized.category_id, by_rules.category_id),
+                   (SELECT breakdown FROM transaction_loan_breakdown divided
+                    WHERE divided.transaction_id = entry.id)
             FROM ledger_transaction entry
             LEFT JOIN transaction_correction fix
                 ON fix.transaction_id = entry.id AND fix.field = 'amount' AND fix.state = 'applied'
@@ -458,8 +509,17 @@ def income_and_spending(conn: sqlite3.Connection,
             WHERE :account IS NULL OR entry.account_id = :account""",
         {"account": account_id},
     ):
-        tally.add(amount_cents, financial_type, confirmed_transfer, category_id)
+        tally.add(amount_cents, financial_type, confirmed_transfer, category_id,
+                  broken_down_cents(broken_down), interest)
     return tally.result()
+
+
+def broken_down_cents(value: str | None) -> int:
+    """A breakdown's interest and fees together, or 0 with none applying."""
+    if value is None:
+        return 0
+    interest, _, fees = value.partition(":")
+    return int(interest) + int(fees)
 
 
 @dataclass(frozen=True)

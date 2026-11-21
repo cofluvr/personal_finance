@@ -106,8 +106,135 @@ BUDGET_TABLES = ("budget_plan_event", "budget_plan_category", "budget_plan_membe
                  "budget_plan", "ledger_setting_event", "ledger_setting")
 
 
+# Created by 0027, and empty until a fund, an assignment or a priority list is stated (D-070).
+FUND_TABLES = ("fund_priority", "fund_priority_event", "fund_assignment_event", "fund_assignment",
+               "fund_event", "fund_terms", "fund")
+
+
+# Created by 0028, and empty until a consumption or a release is stated (D-070 points 5 and 6).
+CONSUMPTION_TABLES = ("transaction_fund_consumption", "tax_reserve_release_event",
+                      "tax_reserve_release", "fund_consumption_event", "fund_consumption_record",
+                      "fund_consumption")
+
+
+# Created by 0029, and empty until an account is linked to an aggregate (D-071 point 2).
+LINK_TABLES = ("account_link_event", "account_link")
+
+
+# Created by 0030, and empty until loan terms or a payoff plan are stated (D-071 points 4 to 6).
+LOAN_TABLES = ("payoff_plan_event", "payoff_plan", "loan_payment_period", "loan_rate_period",
+               "loan_terms_event", "loan_terms")
+
+
+# Created by 0031, and empty until a loan payment's interest and fees are stated (D-071 point 7).
+BREAKDOWN_TABLES = ("transaction_loan_breakdown", "loan_payment_breakdown_event",
+                    "loan_payment_breakdown_record", "loan_payment_breakdown")
+
+
+# Created by 0032, and empty until a person states what safe-to-spend reads (D-072 point 2). 0032
+# also seeds the checking_buffer_cents setting key.
+LIQUIDITY_TABLES = ("fund_restoration_event", "fund_restoration", "obligation_coverage_event",
+                    "obligation_coverage", "account_liquidity_event", "account_liquidity")
+LIQUIDITY_SETTING_KEYS = ("checking_buffer_cents",)
+
+
+# Created by 0033, and empty until a tag is named or a transaction tagged (D-073 point 5).
+TAG_TABLES = ("transaction_tag", "tag_statement_event", "tag_statement_record", "tag_statement",
+              "tag")
+
+
+# Created by 0034, and empty until a scenario is added (D-074).
+SCENARIO_TABLES = ("scenario_promotion_entry", "scenario_promotion_event", "scenario_promotion",
+                   "scenario_input_event", "scenario_input", "scenario_event", "scenario")
+
+
+# Created by 0035, and empty until a snapshot is written (D-075 point 7).
+SNAPSHOT_TABLES = ("snapshot_record",)
+
+
+def drop_snapshot_tables(conn) -> None:
+    """Undo 0035 on a ledger at the latest version, before setting it back further."""
+    for table in SNAPSHOT_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
+def drop_scenario_tables(conn) -> None:
+    """Undo 0035 and 0034 on a ledger at the latest version, before setting it back further."""
+    drop_snapshot_tables(conn)
+    for table in SCENARIO_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
+def drop_tag_tables(conn) -> None:
+    """Undo 0035 to 0033 on a ledger at the latest version, before setting it back further."""
+    drop_scenario_tables(conn)
+    for table in TAG_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
+def drop_liquidity_tables(conn) -> None:
+    """Undo 0033 and 0032 on a ledger at the latest version, before setting it back further:
+    their tables, and the key 0032 seeds, which no value may use."""
+    drop_tag_tables(conn)
+    for table in LIQUIDITY_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+    (trigger,) = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'trigger' "
+                              "AND name = 'ledger_setting_key_no_delete'").fetchone()
+    conn.execute("DROP TRIGGER ledger_setting_key_no_delete")
+    for key in LIQUIDITY_SETTING_KEYS:
+        assert conn.execute("SELECT COUNT(*) FROM ledger_setting WHERE setting_key = ?",
+                            (key,)).fetchone()[0] == 0
+        conn.execute("DELETE FROM ledger_setting_key WHERE setting_key = ?", (key,))
+    conn.execute(trigger)
+
+
+def drop_breakdown_tables(conn) -> None:
+    """Undo 0033 to 0031 on a ledger at the latest version, before setting it back further."""
+    drop_liquidity_tables(conn)
+    for table in BREAKDOWN_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
+def drop_loan_tables(conn) -> None:
+    """Undo 0033 to 0030 on a ledger at the latest version, before setting it back further."""
+    drop_breakdown_tables(conn)
+    for table in LOAN_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
+def drop_link_tables(conn) -> None:
+    """Undo 0033 to 0029 on a ledger at the latest version, before setting it back further."""
+    drop_loan_tables(conn)
+    for table in LINK_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
+def drop_consumption_tables(conn) -> None:
+    """Undo 0033 to 0028 on a ledger at the latest version, before setting it back further."""
+    drop_link_tables(conn)
+    for table in CONSUMPTION_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
+def drop_fund_tables(conn) -> None:
+    """Undo 0033 to 0027 on a ledger at the latest version, before setting it back further."""
+    drop_consumption_tables(conn)
+    for table in FUND_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
 def drop_budget_tables(conn) -> None:
-    """Undo 0026 on a ledger at the latest version, before setting it back further."""
+    """Undo 0033 to 0026 on a ledger at the latest version, before setting it back further."""
+    drop_fund_tables(conn)
     for table in BUDGET_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
@@ -123,7 +250,7 @@ OBLIGATION_TABLES = ("transaction_obligation", "obligation_proposal_dismissal_ev
 
 
 def drop_obligation_tables(conn) -> None:
-    """Undo 0026 and 0025 on a ledger at the latest version, before setting it back further."""
+    """Undo 0033 to 0025 on a ledger at the latest version, before setting it back further."""
     drop_budget_tables(conn)
     for table in OBLIGATION_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -131,7 +258,7 @@ def drop_obligation_tables(conn) -> None:
 
 
 def drop_income_tables(conn) -> None:
-    """Undo 0026 to 0024 on a ledger at the latest version, before setting it back further."""
+    """Undo 0033 to 0024 on a ledger at the latest version, before setting it back further."""
     drop_obligation_tables(conn)
     for table in INCOME_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -139,7 +266,7 @@ def drop_income_tables(conn) -> None:
 
 
 def drop_allocation_tables(conn) -> None:
-    """Undo 0026 to 0023 on a ledger at the latest version, before setting it back further."""
+    """Undo 0033 to 0023 on a ledger at the latest version, before setting it back further."""
     drop_income_tables(conn)
     for table in ALLOCATION_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -147,7 +274,7 @@ def drop_allocation_tables(conn) -> None:
 
 
 def drop_household_tables(conn) -> None:
-    """Undo 0026 to 0022 on a ledger at the latest version, before setting it back further."""
+    """Undo 0033 to 0022 on a ledger at the latest version, before setting it back further."""
     drop_allocation_tables(conn)
     for table in HOUSEHOLD_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -155,7 +282,7 @@ def drop_household_tables(conn) -> None:
 
 
 def drop_category_rule_tables(conn) -> None:
-    """Undo 0026 to 0021 on a ledger at the latest version, before setting it back further."""
+    """Undo 0033 to 0021 on a ledger at the latest version, before setting it back further."""
     drop_household_tables(conn)
     for table in CATEGORY_RULE_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -163,7 +290,7 @@ def drop_category_rule_tables(conn) -> None:
 
 
 def drop_category_tables(conn) -> None:
-    """Undo 0026 to 0019 on a ledger at the latest version, before setting it back further."""
+    """Undo 0033 to 0019 on a ledger at the latest version, before setting it back further."""
     drop_category_rule_tables(conn)
     for table in CATEGORIZATION_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -207,17 +334,23 @@ class Ledger:
             position = 3
         if words[0] == "income":
             position = 3 if words[1] == "source" else 2
-        if words[0] in ("setting", "budget"):
+        if words[0] in ("setting", "budget", "fund", "loan", "tag", "export", "snapshot"):
             position = 2
+        if words[:2] in (["loan", "terms"], ["loan", "plan"]):
+            position = 3
         if words[0] == "obligation":
             position = 3 if words[1] == "dismissal" else 2
+        if words[0] == "scenario":
+            position = 3 if words[1] in ("input", "promotion") else 2
         if words[0] == "household":
             position = 2 if words[1] == "members" else 3
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
                          ["review", "correction"], ["review", "resolution"],
                          ["review", "coverage"], ["review", "classification"],
                          ["review", "transfer"], ["review", "categorization"],
-                         ["review", "allocation"]):
+                         ["review", "allocation"], ["review", "consumption"],
+                         ["review", "tagging"],
+                         ["account", "liquidity"]):
             position = 3
         words[position:position] = ["--db", self.db]
         code = main(words)
@@ -257,7 +390,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r12-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r15-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)
@@ -280,7 +413,7 @@ class Ledger:
 
     def decision_revision(self, decision):
         out = self.run("review", "decision", "show", decision)[1]
-        return re.search(r"Revision: (d9-[0-9a-f]{16})", out)[1]
+        return re.search(r"Revision: (d12-[0-9a-f]{16})", out)[1]
 
     def undo(self, decision, revision=None, account="A"):
         return self.run("review", "undo", decision, "--account", account,
@@ -1142,7 +1275,7 @@ class TestUndoToken:  # S21
 
     def test_the_token_has_the_documented_form(self, ledger):
         _, token = self.decided(ledger)
-        assert re.fullmatch(r"d9-[0-9a-f]{16}", token)
+        assert re.fullmatch(r"d12-[0-9a-f]{16}", token)
 
 
 class TestConstraintsApplied:

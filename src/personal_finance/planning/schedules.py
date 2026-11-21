@@ -170,6 +170,19 @@ def unpaid_state(nominal: date, as_of: date, tolerance_days: int) -> str:
     return "missed" if as_of > nominal + timedelta(days=tolerance_days) else "expected"
 
 
+# Terms rows a scenario promotion made and its undo withdrew (D-074 point 6): every loader of
+# a terms table leaves them out, so undoing a promotion gives back the plan as it was.
+
+def kept_terms(kind: str, alias: str = "terms") -> str:
+    """A SQL condition on a terms table's row: not one an undone promotion made."""
+    return (f"""NOT EXISTS (SELECT 1 FROM scenario_promotion_entry promoted
+                    JOIN scenario_promotion_event withdrawn
+                        ON withdrawn.promotion_id = promoted.promotion_id
+                       AND withdrawn.event = 'undone'
+                    WHERE promoted.entry_kind = '{kind}'
+                      AND promoted.terms_row_id = {alias}.id)""")
+
+
 # Cadences as a person types them.
 
 _DAY = r"([1-9]|[12][0-9]|3[01])"

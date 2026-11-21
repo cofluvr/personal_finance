@@ -1,5 +1,6 @@
 """The local UI's import results, transactions, review queue and review item pages (M8.3, UC1 to
-UC4, D-062). Read-only: the item page shows the terminal commands that decide it, and no form.
+UC4, D-062). The item page shows the terminal commands that decide it, and from M17.1 the forms
+that decide a possible duplicate or conflict (test_local_ui_writes.py).
 """
 
 import re
@@ -139,7 +140,7 @@ class TestEscaping:  # UC2
 
 
 class TestItemPage:  # UC3
-    def test_it_shows_what_deciding_it_in_the_terminal_needs_and_no_form(self, ledger):
+    def test_it_shows_what_deciding_it_in_the_terminal_needs(self, ledger):
         conn = connect(ledger.path, read_only=True)
         (account_id,) = conn.execute("SELECT id FROM account").fetchone()
         conn.close()
@@ -148,7 +149,7 @@ class TestItemPage:  # UC3
             for item in open_items(ledger.path):
                 response = client.get(f"/review/item?id={item}")
                 page = parsed_page(response.body)
-                assert "form" not in page.tags and "input" not in page.tags
+                assert "form" in page.tags
                 revision = ledger.revision(item)
                 common = f"{item} --db {ledger.db} --account {account_id} --revision {revision}"
                 assert response.text.count(common) == 2

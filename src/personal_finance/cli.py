@@ -30,6 +30,9 @@ from personal_finance.db.migrate import (
     migrate,
     schema_version,
 )
+from personal_finance.db.exports import ExportRefused, csv_text, write_export
+from personal_finance.reports.export_rows import AMOUNT_COLUMNS as EXPORT_AMOUNT_COLUMNS
+from personal_finance.reports.export_rows import TRANSACTION_COLUMNS, transaction_export_rows
 from personal_finance.db.originals import (
     originals_folder_beside,
     prepare_originals_folder,
@@ -48,7 +51,7 @@ from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import LAYOUTS
 from personal_finance.ingest.pdf_reader import read_pdf_lines
 from personal_finance.ingest.pipeline import import_files
-from personal_finance.money import format_cents
+from personal_finance.money import MoneyParseError, format_cents, parse_cents
 from personal_finance.planning.income_effects import AMOUNT_CHANGED as INCOME_AMOUNT_CHANGED
 from personal_finance.planning.income_effects import RECEIVED as INCOME_RECEIVED
 from personal_finance.planning.income_effects import SOURCE_CONFLICT, occurrences
@@ -94,6 +97,101 @@ from personal_finance.planning.budgets import (
     undo_plan,
     undo_revision,
 )
+from personal_finance.planning.funds import (
+    ADD as FUND_ADD,
+    ASSIGNABLE_ACCOUNT_TYPES,
+    FUND_NOT_FOUND,
+    RELEASE as FUND_RELEASE,
+    RELEASE_UNDO as FUND_RELEASE_UNDO,
+    TAX as TAX_FUND,
+    TERMS as FUND_TERMS,
+    UNDO as FUND_UNDO,
+    UNASSIGN,
+    FundRequest,
+    TermsOptions,
+    account_holding,
+    add_fund,
+    assign,
+    assignment_operation,
+    change_terms as change_fund_terms,
+    checked_fund,
+    fund_revision,
+    load_assignments,
+    load_funds,
+    load_releases,
+    priority_revision,
+    assignment_revision,
+    set_priority,
+    unassign,
+    undo_fund,
+)
+from personal_finance.planning.fund_releases import release_tax_reserve, undo_release
+from personal_finance.planning.fund_restorations import RESTORATION as FUND_RESTORATION
+from personal_finance.planning.fund_restorations import RESTORATION_UNDO as FUND_RESTORATION_UNDO
+from personal_finance.planning.fund_restorations import (
+    load_restorations,
+    restoration_revision,
+    set_restoration,
+    undo_restoration,
+)
+from personal_finance.planning.coverage import COVERS as OBLIGATION_COVERS
+from personal_finance.planning.coverage import UNCOVER as OBLIGATION_UNCOVER
+from personal_finance.planning.coverage import (
+    cover,
+    coverage_revision,
+    load_coverages,
+    possible_double_reservations,
+    target_words,
+    uncover,
+)
+from personal_finance.planning.projection import LONGEST_MONTHS
+from personal_finance.snapshot.files import SnapshotNotRecorded, SnapshotRefused
+from personal_finance.snapshot.files import create as create_snapshot
+from personal_finance.snapshot.files import records as snapshot_records
+from personal_finance.snapshot.files import verified as verified_snapshot
+from personal_finance.planning.promotions import promote as promote_scenario
+from personal_finance.planning.promotions import undo_promotion as undo_scenario_promotion
+from personal_finance.planning.scenarios import InputRequest as ScenarioInputRequest
+from personal_finance.planning.scenarios import add_input as add_scenario_input
+from personal_finance.planning.scenarios import (
+    add_scenario,
+    find_scenario,
+    load_scenarios,
+    undo_scenario,
+)
+from personal_finance.planning.scenarios import undo_input as undo_scenario_input
+from personal_finance.reports.scenario_report import (
+    compare,
+    compare_lines,
+    scenario_lines,
+    scenarios_lines,
+)
+from personal_finance.planning.liquidity import (
+    LIQUID_ACCOUNT_TYPES,
+    designate,
+    liquidity_revision,
+    load_designations,
+    undo_designation,
+)
+from personal_finance.planning.entries import parsed_amount
+from personal_finance.planning.loans import EXTRA_INVALID as LOAN_EXTRA_INVALID
+from personal_finance.planning.loans import HORIZON_MONTHS as LOAN_HORIZON
+from personal_finance.planning.loans import PAYMENT as LOAN_PAYMENT
+from personal_finance.planning.loans import RATE as LOAN_RATE
+from personal_finance.planning.loans import TermsRequest as LoanTermsRequest
+from personal_finance.planning.loans import add_period as add_loan_period
+from personal_finance.planning.loans import add_terms as add_loan_terms
+from personal_finance.planning.loans import checked_order as checked_loan_order
+from personal_finance.planning.loans import set_plan as set_payoff_plan
+from personal_finance.planning.loans import undo_terms as undo_loan_terms
+from personal_finance.planning.net_worth import LINK as ACCOUNT_LINK
+from personal_finance.planning.net_worth import UNLINK as ACCOUNT_UNLINK
+from personal_finance.planning.net_worth import (
+    link_account,
+    link_revision,
+    load_links,
+    unlink_account,
+)
 from personal_finance.planning.settings import (
     active_setting,
     household_timezone,
@@ -113,7 +211,12 @@ from personal_finance.reconcile.classification_effects import (
     TYPE_AGAINST_DIRECTION,
     UNCLASSIFIED,
 )
-from personal_finance.reconcile.categories import UNCATEGORIZED, add_category, list_categories
+from personal_finance.reconcile.categories import (
+    UNCATEGORIZED,
+    add_category,
+    find_category,
+    list_categories,
+)
 from personal_finance.reconcile.categorizations import (
     categorize_transaction,
     undo_categorization,
@@ -136,6 +239,17 @@ from personal_finance.reconcile.record_resolutions import (
 )
 from personal_finance.reconcile.allocation_effects import AMOUNT_DIFFERS
 from personal_finance.reconcile.allocations import Stated, allocate_transaction, undo_allocation
+from personal_finance.reconcile.breakdown_effects import parsed as parsed_breakdown
+from personal_finance.reconcile.breakdowns import break_down, undo_breakdown
+from personal_finance.reconcile.tags import (
+    add_tag,
+    find_tag,
+    list_tags,
+    tag_transaction,
+    undo_tagging,
+)
+from personal_finance.reports.tag_evidence import load_tagging, tagging_undo_outlook
+from personal_finance.reconcile.consumptions import consume_transaction, undo_consumption
 from personal_finance.reconcile.household import (
     add_member,
     set_account_default,
@@ -176,6 +290,17 @@ from personal_finance.reports.balances import (
     load_observation,
     observation_revision,
 )
+from personal_finance.reports.breakdown_evidence import (
+    breakdown_undo_outlook,
+    list_breakdowns,
+    load_breakdown,
+)
+from personal_finance.reports.consumption_evidence import (
+    consumption_undo_outlook,
+    list_consumptions,
+    load_consumption,
+)
+from personal_finance.reports.fund_standing import funds_view
 from personal_finance.reports.income_evidence import TERMS as INCOME_TERMS
 from personal_finance.reports.income_evidence import UNDO as INCOME_UNDO
 from personal_finance.reports.income_evidence import preview_outlook, source_outlook
@@ -237,6 +362,18 @@ from personal_finance.reports.household_evidence import (
 )
 from personal_finance.reports.import_summary import summarize_run
 from personal_finance.reports.report_text import (
+    TAX_LABEL,
+    fund_standing_lines,
+    fund_terms_sentence,
+    dashboard_lines,
+    funds_report_lines,
+    safe_to_spend_lines,
+    net_worth_report_lines,
+    loan_payoff_lines,
+    loan_projection_lines,
+    loan_terms_lines,
+    loans_report_lines,
+    holding_lines,
     budget_report_lines,
     income_report_lines,
     ATTRIBUTION_EXPLANATIONS,
@@ -270,7 +407,9 @@ from personal_finance.reports.report_text import (
     shown,
     shown_amount,
     totals_report_lines,
+    TransactionFilters,
     transaction_list_lines,
+    visual_lines,
 )
 from personal_finance.reports.resolution_evidence import (
     binding_entries,
@@ -488,6 +627,61 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--type", required=True, choices=ACCOUNT_TYPES)
     add.add_argument("--institution")
     add.add_argument("--last4")
+    links = command("links", account_commands, handler=run_account_links,
+                    help="list loan accounts, their links and their link revisions")
+    link = command("link", account_commands, handler=run_account_link,
+                   help="put a loan subaccount under an aggregate loan account")
+    link.add_argument("--subaccount", required=True, help="the subaccount's name or ID")
+    link.add_argument("--aggregate", required=True, help="the aggregate's name or ID")
+    link.add_argument("--revision", required=True,
+                      help="the aggregate's link revision from account links")
+    unlink = command("unlink", account_commands, handler=run_account_unlink,
+                     help="stop a subaccount's link applying, keeping it on record")
+    unlink.add_argument("--subaccount", required=True, help="the subaccount's name or ID")
+    unlink.add_argument("--revision", required=True,
+                        help="the subaccount's unlink revision from account links")
+    liquidity = account_commands.add_parser(
+        "liquidity", help="show, set or undo which accounts safe-to-spend may draw on")
+    liquidity_commands = liquidity.add_subparsers(dest="liquidity_command", required=True)
+    command("show", liquidity_commands, handler=run_account_liquidity_show,
+            help="list checking and savings accounts, their designations and revisions")
+    for name, handler, words in (
+            ("set", run_account_liquidity_set, "designate a checking or savings account liquid"),
+            ("undo", run_account_liquidity_undo,
+             "stop an account's designation applying, keeping it on record")):
+        sub = command(name, liquidity_commands, handler=handler, help=words)
+        sub.add_argument("--account", required=True, help="the account's name or ID")
+        sub.add_argument("--revision", required=True,
+                         help="the account's revision from account liquidity show")
+
+    export = commands.add_parser("export", help="write transactions or a report as CSV")
+    export_commands = export.add_subparsers(dest="export_command", required=True)
+    export_transactions = command(
+        "transactions", export_commands, handler=run_export_transactions,
+        help="write transactions with their effective values, type, category and tags as CSV")
+    export_transactions.add_argument("--out", type=Path, required=True,
+                                     help="a new file in a private folder, never replaced")
+    export_transactions.add_argument("--account", help="account name or ID")
+    export_transactions.add_argument("--from", dest="first_date", help="the first date, "
+                                     "YYYY-MM-DD")
+    export_transactions.add_argument("--to", dest="last_date", help="the last date, YYYY-MM-DD")
+    export_report = command(
+        "report", export_commands, handler=run_export_report,
+        help="write a report's lines as CSV, one line a row")
+    export_report.add_argument("--out", type=Path, required=True,
+                               help="a new file in a private folder, never replaced")
+    export_report.add_argument("report_name", choices=tuple(EXPORTED_REPORTS),
+                               help="the report, taking its own options after its name, so "
+                                    "--out comes before it")
+    export_report.add_argument("report_options", nargs=argparse.REMAINDER,
+                               help="the report's options, as its own command takes them")
+
+    tag = commands.add_parser("tag", help="name the tags a transaction can carry")
+    tag_commands = tag.add_subparsers(dest="tag_command", required=True)
+    tag_add = command("add", tag_commands, handler=run_tag_add,
+                      help="add a tag, a free label that enters no total")
+    tag_add.add_argument("name", help="the tag's name, compared exactly, without commas")
+    command("tags", handler=run_tags, help="list the tags")
 
     category = commands.add_parser("category", help="name the categories spending can take")
     category_commands = category.add_subparsers(dest="category_command", required=True)
@@ -651,6 +845,174 @@ def build_parser() -> argparse.ArgumentParser:
                              help="the undo revision from budget show")
     budget_undo.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
 
+    funds_command = command(
+        "funds", handler=run_funds,
+        help="list funds with what each needs, the accounts holding them and the priority")
+    funds_command.add_argument("--as-of", help=TODAY_HELP)
+    fund = commands.add_parser(
+        "fund", help="state goals, the emergency fund, reserves and the tax reserve, and assign "
+                     "account balances to them")
+    fund_commands = fund.add_subparsers(dest="fund_command", required=True)
+
+    def fund_terms_arguments(sub):
+        sub.add_argument("--monthly", help="a goal's planned contribution a month, such as 500.00")
+        sub.add_argument("--percent-of-income", dest="percent_of_income",
+                         help="a goal's percentage of baseline income a month, such as 10")
+        sub.add_argument("--target", help="a goal's or reserve's target amount")
+        sub.add_argument("--by", help="a goal's last month for its target, YYYY-MM")
+        sub.add_argument("--minimum", help="the emergency fund's minimum amount held")
+        sub.add_argument("--months", help="the emergency fund's months of fixed commitments held")
+        sub.add_argument("--due", help="a reserve's due date, YYYY-MM-DD")
+        sub.add_argument("--cadence",
+                         help="a reserve's recurrence, annual:MM-DD or every:N-months:D")
+        sub.add_argument("--anchor", help="an every-N-months reserve's first due date")
+        sub.add_argument("--percent", help="the tax reserve's percentage of tax-eligible income")
+        sub.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
+
+    def fund_arguments(sub):
+        sub.add_argument("--name", required=True, help="the fund's name")
+        sub.add_argument("--kind", required=True, help="goal, emergency, reserve or tax")
+        sub.add_argument("--effective-from", help="the first day its terms apply, else --as-of")
+        fund_terms_arguments(sub)
+
+    fund_preview = command("preview", fund_commands, handler=run_fund_preview,
+                           help="show a fund and its revision, writing nothing")
+    fund_arguments(fund_preview)
+    fund_add = command("add", fund_commands, handler=run_fund_add,
+                       help="record a fund whose preview is still current")
+    fund_arguments(fund_add)
+    fund_add.add_argument("--revision", required=True, help="the revision from fund preview")
+    fund_terms = command("terms", fund_commands, handler=run_fund_terms,
+                         help="change a fund's terms from a date, keeping earlier months")
+    fund_terms.add_argument("fund_id", help="a fund ID from funds")
+    fund_terms.add_argument("--effective-from", required=True,
+                            help="the first day the new terms apply")
+    fund_terms_arguments(fund_terms)
+    fund_terms.add_argument("--revision", required=True,
+                            help="the terms revision from fund show")
+    fund_undo = command("undo", fund_commands, handler=run_fund_undo,
+                        help="stop a fund applying, keeping it on record")
+    fund_undo.add_argument("fund_id", help="a fund ID from funds")
+    fund_undo.add_argument("--revision", required=True, help="the undo revision from fund show")
+    fund_show = command("show", fund_commands, handler=run_fund_show,
+                        help="show a fund, what it needs, its accounts and its revisions")
+    fund_show.add_argument("fund_id", help="a fund ID from funds")
+    fund_show.add_argument("--as-of", help=TODAY_HELP)
+    for name, handler, words in (
+            ("assign", run_fund_assign, "assign part of an account's observed balance to a fund"),
+            ("unassign", run_fund_unassign, "release a fund's assignment on an account")):
+        sub = command(name, fund_commands, handler=handler, help=words)
+        sub.add_argument("--fund", required=True, help="a fund ID from funds")
+        sub.add_argument("--account", required=True, help="the account's name or ID")
+        if name == "assign":
+            sub.add_argument("--amount", required=True, help="the amount, such as 1200.00")
+        sub.add_argument("--as-of", help=f"{TODAY_HELP}: the balance observed by then")
+        sub.add_argument("--revision", required=True,
+                         help="the account's assignment revision from fund show")
+    fund_priority = command("priority", fund_commands, handler=run_fund_priority,
+                            help="set the order in which funds take extra income, as a plan")
+    fund_priority.add_argument("fund_ids", nargs="*", metavar="FUND_ID",
+                               help="goals, reserves and the emergency fund, first first; none "
+                                    "clears the list")
+    fund_priority.add_argument("--revision", required=True,
+                               help="the priority revision from funds")
+    fund_release = command("release", fund_commands, handler=run_fund_release,
+                           help="release part of the tax reserve found too large, as a plan")
+    fund_release.add_argument("--fund", required=True, help="the tax reserve's fund ID")
+    fund_release.add_argument("--amount", required=True, help="the amount, such as 300.00")
+    fund_release.add_argument("--on", required=True, help="the day it is released, YYYY-MM-DD")
+    fund_release.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
+    fund_release.add_argument("--revision", required=True,
+                              help="the release revision from fund show")
+    fund_release_undo = command("release-undo", fund_commands, handler=run_fund_release_undo,
+                                help="stop a release of the tax reserve applying, keeping it on "
+                                     "record")
+    fund_release_undo.add_argument("release_id", help="a release ID from fund show")
+    fund_release_undo.add_argument("--fund", required=True, help="the tax reserve's fund ID")
+    fund_release_undo.add_argument("--revision", required=True,
+                                   help="the release undo revision from fund show")
+    fund_restorations = command("restorations", fund_commands, handler=run_fund_restorations,
+                                help="show the emergency fund's restorations and their revisions")
+    fund_restorations.add_argument("fund_id", help="the emergency fund's ID from funds")
+    fund_restoration = command("restoration", fund_commands, handler=run_fund_restoration,
+                               help="protect a monthly amount toward the emergency fund while "
+                                    "it is underfunded, from a date")
+    fund_restoration.add_argument("--fund", required=True, help="the emergency fund's ID")
+    fund_restoration.add_argument("--monthly", required=True,
+                                  help="the amount a month, such as 200.00")
+    fund_restoration.add_argument("--effective-from", required=True,
+                                  help="the first day it applies, YYYY-MM-DD")
+    fund_restoration.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
+    fund_restoration.add_argument("--revision", required=True,
+                                  help="the restoration revision from fund restorations")
+    fund_restoration_undo = command("restoration-undo", fund_commands,
+                                    handler=run_fund_restoration_undo,
+                                    help="stop the newest restoration applying, keeping it on "
+                                         "record")
+    fund_restoration_undo.add_argument("--fund", required=True, help="the emergency fund's ID")
+    fund_restoration_undo.add_argument("--revision", required=True,
+                                       help="the undo revision from fund restorations")
+
+    loan = commands.add_parser("loan", help="state loan terms, project loans and compare payoff "
+                                             "orders")
+    loan_commands = loan.add_subparsers(dest="loan_command", required=True)
+    loan_terms = loan_commands.add_parser("terms", help="add, show or undo an account's loan "
+                                                        "terms")
+    loan_terms_commands = loan_terms.add_subparsers(dest="loan_terms_command", required=True)
+    terms_add = command("add", loan_terms_commands, handler=run_loan_terms_add,
+                        help="record a loan's or card's terms")
+    terms_add.add_argument("--account", required=True, help="the loan or card, name or ID")
+    terms_add.add_argument("--rate", required=True, help="the APR in percent, such as 6.875")
+    terms_add.add_argument("--payment", help="a loan's scheduled payment, such as 1500.00")
+    terms_add.add_argument("--due-day", required=True, dest="due_day",
+                           help="the day of the month payments are due, 1 to 28")
+    terms_add.add_argument("--effective-from", required=True,
+                           help="the first day the rate and payment apply")
+    terms_add.add_argument("--remaining-months", dest="remaining_months",
+                           help="the months left, as the lender states them")
+    terms_add.add_argument("--revision", required=True,
+                           help="the add revision from loan terms show")
+    terms_show = command("show", loan_terms_commands, handler=run_loan_terms_show,
+                         help="show an account's loan terms and their revisions")
+    terms_show.add_argument("--account", required=True, help="the loan or card, name or ID")
+    terms_undo = command("undo", loan_terms_commands, handler=run_loan_terms_undo,
+                         help="stop an account's loan terms applying, keeping them on record")
+    terms_undo.add_argument("--account", required=True, help="the loan or card, name or ID")
+    terms_undo.add_argument("--revision", required=True,
+                            help="the undo revision from loan terms show")
+    for name, handler, option, words in (
+            ("rate", run_loan_rate, "--rate", "a new rate from a date"),
+            ("payment", run_loan_payment, "--amount", "a new scheduled payment from a date")):
+        sub = command(name, loan_commands, handler=handler, help=words)
+        sub.add_argument("--account", required=True, help="the loan or card, name or ID")
+        sub.add_argument(option, required=True, dest="value",
+                         help="the APR in percent" if name == "rate" else "the amount")
+        sub.add_argument("--effective-from", required=True, help="the first day it applies")
+        sub.add_argument("--revision", required=True,
+                         help=f"the {name} revision from loan terms show")
+    loan_plan = loan_commands.add_parser("plan", help="set the payoff plan")
+    loan_plan_commands = loan_plan.add_subparsers(dest="loan_plan_command", required=True)
+    plan_set = command("set", loan_plan_commands, handler=run_loan_plan_set,
+                       help="set the payoff order and its extra, as a plan")
+    plan_set.add_argument("--order", required=True,
+                          help="avalanche, snowball or custom:A,B,... naming every loan")
+    plan_set.add_argument("--extra", help="an extra amount a month, such as 200.00")
+    plan_set.add_argument("--extra-from-fund", dest="extra_from_fund",
+                          help="a goal whose planned contribution is the extra (the debt goal)")
+    plan_set.add_argument("--revision", required=True,
+                          help="the plan revision from report loans")
+    loan_project = command("project", loan_commands, handler=run_loan_project,
+                           help="project one loan or card from its latest observation")
+    loan_project.add_argument("--account", required=True, help="the loan or card, name or ID")
+    loan_project.add_argument("--extra", help="an extra amount a month, such as 200.00")
+    loan_project.add_argument("--months", help="how many months, at most 600")
+    loan_project.add_argument("--as-of", help=TODAY_HELP)
+    loan_payoff = command("payoff", loan_commands, handler=run_loan_payoff,
+                          help="compare payoff orders side by side, as projections")
+    loan_payoff.add_argument("--order", help="only this order: avalanche, snowball or custom:A,B")
+    loan_payoff.add_argument("--extra", help="an extra amount a month, else the payoff plan's")
+    loan_payoff.add_argument("--as-of", help=TODAY_HELP)
+
     obligation = commands.add_parser(
         "obligation", help="state recurring obligations and see their payments against their "
                            "schedules")
@@ -719,6 +1081,25 @@ def build_parser() -> argparse.ArgumentParser:
     obligation_undo.add_argument("obligation_id", help="an obligation ID from obligations")
     obligation_undo.add_argument("--revision", required=True,
                                  help="the undo revision from obligation show")
+    obligation_coverage = command("coverage", obligation_commands,
+                                  handler=run_obligation_coverage,
+                                  help="list which loan or reserve each obligation covers, the "
+                                       "revisions, and possible double reservations")
+    obligation_coverage.add_argument("--as-of", help=f"{TODAY_HELP}: the next due dates after it")
+    obligation_covers = command("covers", obligation_commands, handler=run_obligation_covers,
+                                help="say an obligation is a loan's payment or a reserve's "
+                                     "purchase, so it is reserved once")
+    obligation_covers.add_argument("obligation_id", help="an obligation ID from obligations")
+    covered = obligation_covers.add_mutually_exclusive_group(required=True)
+    covered.add_argument("--loan", help="the loan account's name or ID")
+    covered.add_argument("--fund", help="the reserve's fund ID")
+    obligation_covers.add_argument("--revision", required=True,
+                                   help="the covers revision from obligation coverage")
+    obligation_uncover = command("uncover", obligation_commands, handler=run_obligation_uncover,
+                                 help="stop an obligation's link applying, keeping it on record")
+    obligation_uncover.add_argument("obligation_id", help="an obligation ID from obligations")
+    obligation_uncover.add_argument("--revision", required=True,
+                                    help="the uncover revision from obligation coverage")
     obligation_dismiss = command("dismiss", obligation_commands, handler=run_obligation_dismiss,
                                  help="withdraw a proposal across imports, until undone")
     obligation_dismiss.add_argument("proposal_key", help="a proposal key from obligation "
@@ -740,9 +1121,22 @@ def build_parser() -> argparse.ArgumentParser:
     dismissal_undo.add_argument("dismissal_id", help="a dismissal ID from obligation dismissals")
     dismissal_undo.add_argument("--revision", required=True,
                                 help="the undo revision from obligation dismissals")
+    safe = command("safe-to-spend", commands, handler=run_safe_to_spend,
+                   help="the lower of budget capacity and liquidity until the next paycheck, "
+                        "with the constraint that limits it")
+    safe.add_argument("--as-of", help=TODAY_HELP)
+    safe.add_argument("--explain", action="store_true",
+                      help="also list each liquidity account's estimate and every protected item")
+    dashboard = command("dashboard", commands, handler=run_dashboard,
+                        help="safe to spend, budget pace, funds, net worth, income, review counts "
+                             "and freshness on one page")
+    dashboard.add_argument("--as-of", help=TODAY_HELP)
     obligations_command = command("obligations", commands, handler=run_obligations,
                                   help="list obligations, and spending by class")
     obligations_command.add_argument("--account", help="only this account's obligations")
+
+    scenario_parsers(commands, command)
+    snapshot_parsers(commands, command)
 
     household = commands.add_parser(
         "household", help="name household members, the household share and account defaults")
@@ -834,7 +1228,19 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile.add_argument("--account", help="account name or ID (default: every account)")
 
     command("documents", handler=run_documents, help="list imported documents and their coverage")
-    command("transactions", handler=run_transactions, help="list logical transactions")
+    transactions = command("transactions", handler=run_transactions,
+                           help="list logical transactions, or search them with filters")
+    transactions.add_argument("--search", help="text the effective description contains, "
+                              "ignoring case and repeated spaces")
+    transactions.add_argument("--account", help="account name or ID")
+    transactions.add_argument("--from", dest="first_date", help="the first date, YYYY-MM-DD")
+    transactions.add_argument("--to", dest="last_date", help="the last date, YYYY-MM-DD")
+    transactions.add_argument("--category", help="the category in effect, a name from category "
+                              "list")
+    transactions.add_argument("--tag", help="a tag applying, a name from tags")
+    transactions.add_argument("--min", dest="minimum", help="the least effective amount, such as "
+                              "--min=-100.00, negative for money out")
+    transactions.add_argument("--max", dest="maximum", help="the greatest effective amount")
 
     trace = command("trace", handler=run_trace, help="show where a transaction came from")
     trace.add_argument("transaction_id")
@@ -1161,6 +1567,114 @@ def build_parser() -> argparse.ArgumentParser:
         "--revision", required=True, help="the revision from review allocation show"
     )
 
+    consume = command(
+        "consume", review_commands, handler=run_review_consume,
+        help="state that a spending transaction is paid from a goal, reserve or the tax reserve",
+    )
+    consume.add_argument("transaction_id", help="a transaction ID from transactions")
+    consume.add_argument("--account", required=True, help="account name or ID")
+    consume.add_argument("--fund", required=True, help="a fund ID from funds")
+    consume.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    consume.add_argument(
+        "--supersedes",
+        help="the consumption applying to this transaction now, which this one replaces",
+    )
+    consume.add_argument(
+        "--supersedes-revision",
+        help="the revision from review consumption show for the consumption being replaced",
+    )
+    consumptions = command(
+        "consumptions", review_commands, handler=run_review_consumptions,
+        help="list stored fund consumptions",
+    )
+    consumptions.add_argument("--account", help="account name or ID")
+    consumption = review_commands.add_parser("consumption",
+                                             help="inspect or undo one fund consumption")
+    consumption_commands = consumption.add_subparsers(dest="consumption_command", required=True)
+    consumption_show = command(
+        "show", consumption_commands, handler=run_review_consumption_show,
+        help="show what a consumption binds and what undoing it would do",
+    )
+    consumption_show.add_argument("consumption_id",
+                                  help="a consumption ID from review consumptions")
+    consumption_undo = command(
+        "undo", consumption_commands, handler=run_review_consumption_undo,
+        help="stop a consumption applying, keeping it on record",
+    )
+    consumption_undo.add_argument("consumption_id",
+                                  help="a consumption ID from review consumptions")
+    consumption_undo.add_argument("--account", required=True, help="account name or ID")
+    consumption_undo.add_argument(
+        "--revision", required=True, help="the revision from review consumption show"
+    )
+
+    breakdown = command(
+        "breakdown", review_commands, handler=run_review_breakdown,
+        help="state a loan payment's interest and fees, as the lender's statement gives them",
+    )
+    breakdown.add_argument("transaction_id", help="a transaction ID from transactions")
+    breakdown.add_argument("--account", required=True, help="account name or ID")
+    breakdown.add_argument("--interest", required=True, help="the interest, such as 57.25")
+    breakdown.add_argument("--fees", help="any fees, such as 15.00")
+    breakdown.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    breakdown.add_argument(
+        "--supersedes",
+        help="the breakdown applying to this transaction now, which this one replaces",
+    )
+    breakdown.add_argument(
+        "--supersedes-revision",
+        help="the revision from review breakdown-show for the breakdown being replaced",
+    )
+    breakdowns = command("breakdowns", review_commands, handler=run_review_breakdowns,
+                         help="list stored loan payment breakdowns")
+    breakdowns.add_argument("--account", help="account name or ID")
+    breakdown_show = command("breakdown-show", review_commands, handler=run_review_breakdown_show,
+                             help="show what a breakdown binds and what undoing it would do")
+    breakdown_show.add_argument("breakdown_id", help="a breakdown ID from review breakdowns")
+    breakdown_undo = command("breakdown-undo", review_commands, handler=run_review_breakdown_undo,
+                             help="stop a breakdown applying, keeping it on record")
+    breakdown_undo.add_argument("breakdown_id", help="a breakdown ID from review breakdowns")
+    breakdown_undo.add_argument("--account", required=True, help="account name or ID")
+    breakdown_undo.add_argument("--revision", required=True,
+                                help="the revision from review breakdown-show")
+
+    review_tag = command(
+        "tag", review_commands, handler=run_review_tag,
+        help="state a transaction's whole set of tags, or that it has none",
+    )
+    review_tag.add_argument("transaction_id", help="a transaction ID from transactions")
+    review_tag.add_argument("--account", required=True, help="account name or ID")
+    tag_values = review_tag.add_mutually_exclusive_group(required=True)
+    tag_values.add_argument("--tags", help="tag names from tags, separated by commas")
+    tag_values.add_argument("--none", action="store_true", help="the transaction has no tags")
+    review_tag.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    review_tag.add_argument(
+        "--supersedes", help="the tag statement applying to this transaction now, which this one "
+        "replaces")
+    review_tag.add_argument(
+        "--supersedes-revision",
+        help="the revision from review tagging show for the statement being replaced",
+    )
+    tagging = review_commands.add_parser("tagging", help="inspect or undo one tag statement")
+    tagging_commands = tagging.add_subparsers(dest="tagging_command", required=True)
+    tagging_show = command("show", tagging_commands, handler=run_review_tagging_show,
+                           help="show what a tag statement binds and what undoing it would do")
+    tagging_show.add_argument("tag_statement_id",
+                              help="a tag statement ID from review transaction show")
+    tagging_undo = command("undo", tagging_commands, handler=run_review_tagging_undo,
+                           help="stop a tag statement applying, keeping it on record")
+    tagging_undo.add_argument("tag_statement_id",
+                              help="a tag statement ID from review transaction show")
+    tagging_undo.add_argument("--account", required=True, help="account name or ID")
+    tagging_undo.add_argument("--revision", required=True,
+                              help="the revision from review tagging show")
+
     transfer = review_commands.add_parser(
         "transfer", help="match, inspect or undo a transfer between two accounts"
     )
@@ -1333,6 +1847,27 @@ def build_parser() -> argparse.ArgumentParser:
     budget_report.add_argument("--month", help="the month, YYYY-MM, else the as-of month")
     budget_report.add_argument("--member", help="one member's part, a name from household members")
     budget_report.add_argument("--as-of", help=TODAY_HELP)
+    funds_report_command = command(
+        "funds", report_commands, handler=run_report_funds,
+        help="every fund's standing, the month's extra and its planned allocation by priority",
+    )
+    funds_report_command.add_argument("--as-of", help=TODAY_HELP)
+    net_worth_command = command(
+        "net-worth", report_commands, handler=run_report_net_worth,
+        help="net worth from balance observations, with retirement and investment history",
+    )
+    net_worth_command.add_argument("--as-of", help=TODAY_HELP)
+    loans_report_command = command(
+        "loans", report_commands, handler=run_report_loans,
+        help="each loan's terms and its actual payments against its schedule")
+    loans_report_command.add_argument("--as-of", help=TODAY_HELP)
+    visuals_command = command(
+        "visuals", report_commands, handler=run_report_visuals,
+        help="the eight visuals' figures as tables, which the UI also draws as charts")
+    visuals_command.add_argument("--as-of", help=TODAY_HELP)
+    net_worth_command.add_argument("--member",
+                                   help="one member's part by account attribution, a name from "
+                                        "household members")
     household_view = household.add_mutually_exclusive_group()
     household_view.add_argument("--member", help="one member's parts, a name from household members")
     household_view.add_argument("--shared", action="store_true",
@@ -1487,6 +2022,183 @@ def run_account_add(args) -> int:
     except sqlite3.IntegrityError:
         raise CommandError("account name is already used, or last4 is not four digits") from None
     print(f"Added account {args.name}: {account_id}")
+    return 0
+
+
+def run_account_links(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    loans = conn.execute("SELECT id, display_name FROM account WHERE account_type = 'loan' "
+                         "ORDER BY display_name").fetchall()
+    names = dict(loans)
+    aggregate_of = {link.subaccount_id: link.aggregate_id for link in load_links(conn)}
+    for account_id, name in loans:
+        if account_id in aggregate_of:
+            print(f"Loan {shown(name)} ({account_id}): subaccount of "
+                  f"{shown(names[aggregate_of[account_id]])}")
+            print(f"  Unlink revision: "
+                  f"{link_revision(conn, ACCOUNT_UNLINK, aggregate_of[account_id], account_id)}")
+            continue
+        under = sorted(names[sub] for sub, aggregate in aggregate_of.items()
+                       if aggregate == account_id)
+        print(f"Loan {shown(name)} ({account_id}): "
+              + ("aggregate of " + ", ".join(shown(sub) for sub in under) if under
+                 else "no link"))
+        print(f"  Link revision, as aggregate: {link_revision(conn, ACCOUNT_LINK, account_id)}")
+    print(f"Loans: {len(loans)}, links: {len(aggregate_of)}")
+    return 0
+
+
+def run_account_link(args) -> int:
+    conn = open_ledger(args.db)
+    subaccount, aggregate = find_account(conn, args.subaccount), find_account(conn, args.aggregate)
+    link_id = link_account(conn, subaccount, aggregate, args.revision)
+    print(f"Link {link_id} recorded: {shown(args.subaccount)} is a subaccount of "
+          f"{shown(args.aggregate)}. Net worth counts the debt once.")
+    return 0
+
+
+def run_account_unlink(args) -> int:
+    conn = open_ledger(args.db)
+    link = unlink_account(conn, find_account(conn, args.subaccount), args.revision)
+    print(f"Link {link.link_id} undone. It stays on record.")
+    return 0
+
+
+def run_account_liquidity_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    designations = load_designations(conn)
+    accounts = conn.execute(
+        "SELECT id, display_name, account_type FROM account WHERE account_type IN (?, ?) "
+        "ORDER BY display_name", LIQUID_ACCOUNT_TYPES).fetchall()
+    for account_id, name, account_type in accounts:
+        designation = designations.get(account_id)
+        state = ("not designated" if designation is None else
+                 f"liquid, designation {designation.designation_id}, made "
+                 f"{designation.created_at}")
+        print(f"Account {shown(name)} ({account_type.replace('_', ' ')}, {account_id}): {state}")
+        print(f"  {'Set' if designation is None else 'Undo'} revision: "
+              f"{liquidity_revision(conn, account_id)}")
+    print(f"Checking and savings accounts: {len(accounts)}, liquid: {len(designations)}")
+    return 0
+
+
+def run_account_liquidity_set(args) -> int:
+    conn = open_ledger(args.db)
+    designation_id = designate(conn, find_account(conn, args.account), args.revision)
+    print(f"Designation {designation_id} recorded: {shown(args.account)} is liquid, so "
+          "safe-to-spend may draw on it.")
+    return 0
+
+
+def run_account_liquidity_undo(args) -> int:
+    conn = open_ledger(args.db)
+    designation = undo_designation(conn, find_account(conn, args.account), args.revision)
+    print(f"Designation {designation.designation_id} undone. It stays on record.")
+    return 0
+
+
+def net_worth_report_lines_of(args) -> ReportLines:
+    """What report net worth prints, which pf export report writes too."""
+    conn = open_ledger(args.db, read_only=True)
+    if args.member is not None and load_household(conn).find_member(args.member) is None:
+        raise CommandError("household member not found. Run household members.")
+    return net_worth_report_lines(conn, as_of_date(conn, args.as_of).isoformat(),
+                                       args.member)
+
+
+def run_report_net_worth(args) -> int:
+    print_report(net_worth_report_lines_of(args))
+    return 0
+
+
+def run_loan_terms_add(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    add_loan_terms(conn, account_id, LoanTermsRequest(args.rate, args.due_day,
+                                                      args.effective_from, args.payment,
+                                                      args.remaining_months), args.revision)
+    print(f"Loan terms recorded for {shown(args.account)}: from {args.effective_from}, rate "
+          f"{args.rate}%" + (f", payment {args.payment}" if args.payment else "")
+          + f", due day {args.due_day}")
+    return 0
+
+
+def run_loan_terms_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    print_report(loan_terms_lines(conn, find_account(conn, args.account)))
+    return 0
+
+
+def run_loan_terms_undo(args) -> int:
+    conn = open_ledger(args.db)
+    undo_loan_terms(conn, find_account(conn, args.account), args.revision)
+    print(f"Loan terms of {shown(args.account)} undone. They stay on record.")
+    return 0
+
+
+def run_loan_rate(args) -> int:
+    conn = open_ledger(args.db)
+    add_loan_period(conn, find_account(conn, args.account), LOAN_RATE, args.value,
+                    args.effective_from, args.revision)
+    print(f"Rate recorded for {shown(args.account)}: {args.value}% from {args.effective_from}")
+    return 0
+
+
+def run_loan_payment(args) -> int:
+    conn = open_ledger(args.db)
+    add_loan_period(conn, find_account(conn, args.account), LOAN_PAYMENT, args.value,
+                    args.effective_from, args.revision)
+    print(f"Scheduled payment recorded for {shown(args.account)}: {args.value} from "
+          f"{args.effective_from}")
+    return 0
+
+
+def run_loan_plan_set(args) -> int:
+    conn = open_ledger(args.db)
+    set_payoff_plan(conn, args.order, args.extra, args.extra_from_fund, args.revision,
+                    find_account)
+    print(f"Payoff plan recorded, planned: {args.order}")
+    return 0
+
+
+def checked_extra(text) -> int:
+    return 0 if text is None else parsed_amount(text, LOAN_EXTRA_INVALID, least=1)
+
+
+def run_loan_project(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account)
+    months = LOAN_HORIZON
+    if args.months is not None:
+        if not args.months.isdigit() or not 1 <= int(args.months) <= LOAN_HORIZON:
+            raise CommandError(f"--months must be a whole number from 1 to {LOAN_HORIZON}.")
+        months = int(args.months)
+    print_report(loan_projection_lines(conn, account_id,
+                                       as_of_date(conn, args.as_of).isoformat(),
+                                       checked_extra(args.extra), months))
+    return 0
+
+
+def run_loan_payoff(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    order, custom = None, ()
+    if args.order is not None:
+        order, custom = checked_loan_order(conn, args.order, find_account)
+    extra = None if args.extra is None else checked_extra(args.extra)
+    print_report(loan_payoff_lines(conn, as_of_date(conn, args.as_of).isoformat(), order, extra,
+                                   custom))
+    return 0
+
+
+def run_report_loans(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    print_report(loans_report_lines(conn, as_of_date(conn, args.as_of)))
+    return 0
+
+
+def run_report_visuals(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    print_report(visual_lines(conn, as_of_date(conn, args.as_of)))
     return 0
 
 
@@ -1878,10 +2590,68 @@ def run_documents(args) -> int:
     return 0
 
 
+SEARCH_TEXT_INVALID = ("--search must hold printable text, up to 200 characters. Nothing was "
+                       "searched.")
+
+
 def run_transactions(args) -> int:
     conn = open_ledger(args.db, read_only=True)
-    print_report(transaction_list_lines(conn))
+    print_report(transaction_list_lines(conn, transaction_filters(conn, args)))
     return 0
+
+
+def transaction_filters(conn, args) -> TransactionFilters | None:
+    """The filters given, each checked strictly, or None with none given, so the list is as
+    before (D-073 point 4)."""
+    given = [(name, value) for name, value in (
+        ("search", args.search), ("account", args.account), ("from", args.first_date),
+        ("to", args.last_date), ("category", args.category), ("tag", args.tag),
+        ("min", args.minimum), ("max", args.maximum)) if value is not None]
+    if not given:
+        return None
+    if args.search is not None and (not args.search.strip() or len(args.search) > 200
+                                    or not args.search.isprintable()):
+        raise CommandError(SEARCH_TEXT_INVALID)
+    first = None if args.first_date is None else checked_date(args.first_date, "--from")
+    last = None if args.last_date is None else checked_date(args.last_date, "--to")
+    if first and last and first > last:
+        raise CommandError("--from is after --to. Nothing was searched.")
+    category = None
+    if args.category is not None:
+        category = find_category(conn, args.category)
+        if category is None:
+            raise CommandError("category not found. Names are compared exactly: run category "
+                               "list.")
+    tag = None
+    if args.tag is not None:
+        tag = find_tag(conn, args.tag)
+        if tag is None:
+            raise CommandError("tag not found. Names are compared exactly: run tags.")
+    minimum = None if args.minimum is None else checked_amount(args.minimum, "--min")
+    maximum = None if args.maximum is None else checked_amount(args.maximum, "--max")
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise CommandError("--min is above --max. Nothing was searched.")
+    return TransactionFilters(
+        args.search, None if args.account is None else find_account(conn, args.account),
+        first, last, category and category.category_id, tag and tag.tag_id, minimum, maximum,
+        tuple(given))
+
+
+def checked_date(text, option) -> str:
+    try:
+        return parsed_date(text, option)
+    except DecisionRefused as refused:
+        raise CommandError(str(refused).replace(" Nothing was changed.", "")) from None
+
+
+def checked_amount(text, option) -> int:
+    try:
+        cents = parse_cents(text)
+    except MoneyParseError:
+        cents = None
+    if cents is None:
+        raise CommandError(f"{option} must be an amount such as -12.50. Nothing was searched.")
+    return cents
 
 
 def run_trace(args) -> int:
@@ -2270,6 +3040,15 @@ def run_review_decision_show(args) -> int:
     return 0
 
 
+def active_decision_undo(conn, decision_id) -> tuple[str, str] | None:
+    """A decision still in effect: its account and the revision review decision show gives for
+    undoing it, for the UI's undo form. None for any other decision, or none."""
+    decision = load_decision(conn, decision_id)
+    if decision is None or decision.state != STATE_ACTIVE:
+        return None
+    return decision.account_id, undo_outlook(conn, decision, DEFAULT_RULES).revision
+
+
 def run_review_undo(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
@@ -2284,6 +3063,8 @@ def run_review_undo(args) -> int:
     print_newly_unclassified(result.newly_unclassified_transactions)
     print_newly_unmatched(result.newly_unsettled_matches)
     print_newly_unattributed(result.newly_unattributed_transactions)
+    print_newly_unconsumed(result.newly_unconsumed_transactions)
+    print_newly_unbroken(result.newly_unbroken_down_transactions)
     print(f"  {UNDO_NOTICE}")
     return 0
 
@@ -2909,6 +3690,12 @@ def run_income_source_show(args) -> int:
     return 0
 
 
+# Safe to spend reads months and assignment events in the household's zone, so --as-of alone is
+# not enough (D-072 point 6, G7).
+SAFE_TO_SPEND_TIMEZONE = (
+    "safe to spend needs the household's timezone, which is not set. Run setting set "
+    "household_timezone ZONE with the revision from setting show."
+)
 TIMEZONE_NEEDED = (
     "this needs today's date in the household's timezone, which is not set. Run setting set "
     "household_timezone ZONE with the revision from setting show, or give --as-of YYYY-MM-DD."
@@ -3189,6 +3976,61 @@ def run_obligation_undo(args) -> int:
     return 0
 
 
+def run_obligation_coverage(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    as_of = as_of_date(conn, args.as_of)
+    coverages = load_coverages(conn)
+    obligations = load_obligations(conn)
+    linked = {coverage.chain_id: coverage for coverage in coverages}
+    applying_chains = {obligation.chain_id for obligation in obligations if obligation.applies}
+    for obligation in obligations:
+        coverage = linked.get(obligation.chain_id)
+        # Each chain once: its applying obligation, else the one an inert link names.
+        if not obligation.applies and (coverage is None
+                                       or obligation.chain_id in applying_chains
+                                       or coverage.obligation_id != obligation.obligation_id):
+            continue
+        name = shown(obligation.definition.name)
+        if coverage is None:
+            print(f"Obligation {obligation.obligation_id} ({name}): covers nothing")
+            print(f"  Covers revision: {coverage_revision(conn, OBLIGATION_COVERS, obligation)}")
+            continue
+        state = "" if obligation.applies else f", inert: the obligation is {obligation.state}"
+        print(f"Obligation {obligation.obligation_id} ({name}): covers "
+              f"{shown(target_words(conn, *coverage.target))}, link {coverage.coverage_id}"
+              f"{state}")
+        print(f"  Uncover revision: {coverage_revision(conn, OBLIGATION_UNCOVER, obligation)}")
+    alikes = possible_double_reservations(conn, as_of)
+    print(f"Possible double reservations as of {as_of.isoformat()}: {len(alikes) or 'none'}")
+    for alike in alikes:
+        option = "--loan" if alike.target_kind == "loan" else "--fund"
+        target = shown(alike.target_name) if alike.target_kind == "loan" else alike.target_id
+        print(f"  Obligation {alike.obligation_id}, due {alike.obligation_due}, and "
+              f"{alike.target_kind} {shown(alike.target_name)}, due {alike.target_due}, both "
+              f"{shown_amount(alike.amount_cents)}. If they are one payment, run obligation "
+              f"covers {alike.obligation_id} {option} {target}.")
+    print(f"Links: {len(coverages)}")
+    return 0
+
+
+def run_obligation_covers(args) -> int:
+    conn = open_ledger(args.db)
+    loan = None if args.loan is None else find_account(conn, args.loan)
+    coverage_id = cover(conn, args.obligation_id, loan_account_id=loan, fund_id=args.fund,
+                        revision=args.revision)
+    target = f"loan {shown(args.loan)}" if loan else f"reserve {args.fund}"
+    print(f"Link {coverage_id} recorded: obligation {args.obligation_id} covers {target}, so "
+          "safe-to-spend reserves it once.")
+    return 0
+
+
+def run_obligation_uncover(args) -> int:
+    conn = open_ledger(args.db)
+    coverage = uncover(conn, args.obligation_id, args.revision)
+    print(f"Link {coverage.coverage_id} undone. It stays on record.")
+    return 0
+
+
 def run_obligation_dismiss(args) -> int:
     conn = open_ledger(args.db)
     dismissal_id, proposal = dismiss_proposal(conn, args.proposal_key, args.revision)
@@ -3466,6 +4308,410 @@ def run_review_allocation_undo(args) -> int:
     print_newly_unattributed(result.newly_unattributed_transactions)
     print(f"  {ALLOCATION_UNDO_NOTICE}")
     return 0
+
+
+CONSUME_NOTICE = (
+    "Totals and its category count it once, unchanged. The fund pays what its assignments still "
+    "hold, and report budget leaves that portion out of discretionary actual. Matching never "
+    "reads consumptions, and new records are not bound, but a re-export that joins this "
+    "transaction keeps the consumption applied."
+)
+
+CONSUMPTION_UNDO_NOTICE = (
+    "The transaction is paid from the fund of the consumption this one superseded, else from "
+    "none, and counts in discretionary actual again."
+)
+
+# How a consumed transaction's outcome reads in an undo preview.
+CONSUMPTION_PREVIEW_STATES = {
+    None: "paid from no fund",
+    FIELD_APPLIED: "paid from a fund",
+    FIELD_IN_CONFLICT: "paid from no fund, consumptions disagree",
+    FIELD_BASIS_CHANGED: "paid from no fund, basis changed",
+    "not_spending": "paid from no fund, no longer spending",
+}
+
+
+def run_review_consume(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    result = consume_transaction(
+        conn, account_id, args.transaction_id, args.revision, args.fund,
+        supersedes=args.supersedes, supersedes_revision=args.supersedes_revision,
+    )
+    name = conn.execute("SELECT name FROM fund WHERE id = ?", (result.fund_id,)).fetchone()[0]
+    print(
+        f"Consumption {result.consumption_id} recorded: transaction {args.transaction_id} is paid "
+        f"from fund {result.fund_id} ({shown(name)}), binding {result.bound_record_count} records."
+    )
+    if args.supersedes:
+        print(f"  Supersedes consumption {args.supersedes}. It stays on record.")
+    print(f"  {CONSUME_NOTICE}")
+    return 0
+
+
+def run_review_consumptions(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_consumptions(conn, account_id)
+    for consumption_id, account, created_at, state, fund_name, bound_count in rows:
+        print(
+            f"Consumption {consumption_id}: {state}, fund {shown(fund_name)}, {bound_count} "
+            f"records, {shown(account)}, {created_at}"
+        )
+    print(f"Consumptions: {len(rows)}")
+    unsettled = conn.execute(
+        """SELECT derived.transaction_id, derived.state FROM transaction_fund_consumption derived
+           JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+           WHERE derived.state <> 'applied' AND (:account IS NULL OR entry.account_id = :account)
+           ORDER BY derived.transaction_id""",
+        {"account": account_id},
+    ).fetchall()
+    for transaction_id, state in unsettled:
+        print(f"Transaction {transaction_id}: {CONSUMPTION_PREVIEW_STATES[state]}")
+    if rows:
+        print("To see what a consumption binds, run review consumption show.")
+    return 0
+
+
+def run_review_consumption_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    consumption = load_consumption(conn, args.consumption_id)
+    if consumption is None:
+        raise CommandError("consumption not found. Run review consumptions.")
+    fund_id = conn.execute("SELECT fund_id FROM fund_consumption WHERE id = ?",
+                           (consumption.statement_id,)).fetchone()[0]
+    print(f"Consumption {consumption.statement_id}")
+    print(f"  Account: {shown(consumption.account_name)} ({consumption.account_id})")
+    print(f"  Paid from: fund {fund_id} ({shown(consumption.shown_value)})")
+    print(f"  Status: {consumption.state}")
+    print(f"  Made: {consumption.created_at}")
+    if consumption.undone_at:
+        print(f"  Undone: {consumption.undone_at}. It stays on record and no longer applies.")
+    if consumption.superseded_by:
+        print(
+            f"  Superseded by consumption {consumption.superseded_by}. It stays on record and no "
+            "longer applies, unless that consumption is undone."
+        )
+    if consumption.newest_of_chain != consumption.superseded_by:
+        print(
+            f"  Newest of its chain: consumption {consumption.newest_of_chain}, the only one that "
+            "can be undone. Each undo restores the consumption before it."
+        )
+    if consumption.supersedes_id:
+        print(f"  Supersedes consumption {consumption.supersedes_id}")
+    print(f"  From transaction: {consumption.target_transaction_id}")
+    print("Bound records:")
+    for record in consumption.bound_records:
+        where = record.transaction_id or "no transaction"
+        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
+
+    if consumption.state == STATE_ACTIVE:
+        outlook = consumption_undo_outlook(conn, consumption)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this consumption now:")
+        if consumption.supersedes_id:
+            print(f"  Restores consumption {consumption.supersedes_id}, which it superseded")
+        for transaction_id, state_now, state_after in outlook.state_by_transaction:
+            print(
+                f"  Transaction {transaction_id}: {CONSUMPTION_PREVIEW_STATES[state_now]} now, "
+                f"{CONSUMPTION_PREVIEW_STATES[state_after]} after"
+            )
+        if stale_accounts(conn, DEFAULT_RULES, consumption.account_id):
+            print(
+                "This account has not been reconciled under the current matching rules, so "
+                "undo will be refused until it is. Run reconcile."
+            )
+    return 0
+
+
+def run_review_consumption_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_consumption(conn, account_id, args.consumption_id, args.revision)
+    print(f"Consumption {args.consumption_id} undone. It stays on record and no longer applies.")
+    if result.restored:
+        print(f"  Consumption {result.restored}, which it superseded, applies again.")
+    print_newly_unconsumed(result.newly_unsettled_transactions)
+    print(f"  {CONSUMPTION_UNDO_NOTICE}")
+    return 0
+
+
+BREAKDOWN_NOTICE = (
+    "Totals, report monthly and report household count the interest and fees in spending, under "
+    "Interest and financial fees, and the principal in confirmed transfers. Matching never reads "
+    "breakdowns, and new records are not bound, but a re-export that joins this transaction "
+    "keeps the breakdown applied."
+)
+
+# How a broken-down transaction's outcome reads in an undo preview.
+BREAKDOWN_PREVIEW_STATES = {
+    None: "no breakdown",
+    FIELD_APPLIED: "broken down",
+    FIELD_IN_CONFLICT: "no breakdown applies, breakdowns disagree",
+    FIELD_BASIS_CHANGED: "no breakdown applies, basis changed",
+    "does_not_fit": "no breakdown applies, it no longer fits",
+}
+
+
+def describe_breakdown(value) -> str:
+    interest, fees = parsed_breakdown(value)
+    return f"interest {shown_amount(interest)}, fees {shown_amount(fees)}"
+
+
+def run_review_breakdown(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    result = break_down(conn, account_id, args.transaction_id, args.revision, args.interest,
+                        args.fees, supersedes=args.supersedes,
+                        supersedes_revision=args.supersedes_revision)
+    print(f"Breakdown {result.breakdown_id} recorded: transaction {args.transaction_id}, "
+          f"{describe_breakdown(result.breakdown)}, binding {result.bound_record_count} records.")
+    if args.supersedes:
+        print(f"  Supersedes breakdown {args.supersedes}. It stays on record.")
+    print(f"  {BREAKDOWN_NOTICE}")
+    return 0
+
+
+def run_review_breakdowns(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    rows = list_breakdowns(conn, account_id)
+    for breakdown_id, account, created_at, state, value, bound_count in rows:
+        print(f"Breakdown {breakdown_id}: {state}, {describe_breakdown(value)}, {bound_count} "
+              f"records, {shown(account)}, {created_at}")
+    print(f"Breakdowns: {len(rows)}")
+    for transaction_id, state in conn.execute(
+        """SELECT derived.transaction_id, derived.state FROM transaction_loan_breakdown derived
+           JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+           WHERE derived.state <> 'applied' AND (:account IS NULL OR entry.account_id = :account)
+           ORDER BY derived.transaction_id""",
+        {"account": account_id},
+    ):
+        print(f"Transaction {transaction_id}: {BREAKDOWN_PREVIEW_STATES[state]}")
+    if rows:
+        print("To see what a breakdown binds, run review breakdown-show.")
+    return 0
+
+
+def run_review_breakdown_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    breakdown = load_breakdown(conn, args.breakdown_id)
+    if breakdown is None:
+        raise CommandError("breakdown not found. Run review breakdowns.")
+    print(f"Breakdown {breakdown.statement_id}")
+    print(f"  Account: {shown(breakdown.account_name)} ({breakdown.account_id})")
+    print(f"  Stated: {describe_breakdown(breakdown.shown_value)}")
+    print(f"  Status: {breakdown.state}")
+    print(f"  Made: {breakdown.created_at}")
+    if breakdown.undone_at:
+        print(f"  Undone: {breakdown.undone_at}. It stays on record and no longer applies.")
+    if breakdown.superseded_by:
+        print(f"  Superseded by breakdown {breakdown.superseded_by}. It stays on record and no "
+              "longer applies, unless that breakdown is undone.")
+    if breakdown.newest_of_chain != breakdown.superseded_by:
+        print(f"  Newest of its chain: breakdown {breakdown.newest_of_chain}, the only one that "
+              "can be undone. Each undo restores the breakdown before it.")
+    if breakdown.supersedes_id:
+        print(f"  Supersedes breakdown {breakdown.supersedes_id}")
+    print(f"  From transaction: {breakdown.target_transaction_id}")
+    print("Bound records:")
+    for record in breakdown.bound_records:
+        print(f"  {shown(record.file_name)} row {record.row}, now in "
+              f"{record.transaction_id or 'no transaction'}")
+    if breakdown.state == STATE_ACTIVE:
+        outlook = breakdown_undo_outlook(conn, breakdown)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this breakdown now:")
+        if breakdown.supersedes_id:
+            print(f"  Restores breakdown {breakdown.supersedes_id}, which it superseded")
+        for transaction_id, state_now, state_after in outlook.state_by_transaction:
+            print(f"  Transaction {transaction_id}: {BREAKDOWN_PREVIEW_STATES[state_now]} now, "
+                  f"{BREAKDOWN_PREVIEW_STATES[state_after]} after")
+        if stale_accounts(conn, DEFAULT_RULES, breakdown.account_id):
+            print("This account has not been reconciled under the current matching rules, so "
+                  "undo will be refused until it is. Run reconcile.")
+    return 0
+
+
+def run_review_breakdown_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_breakdown(conn, account_id, args.breakdown_id, args.revision)
+    print(f"Breakdown {args.breakdown_id} undone. It stays on record and no longer applies.")
+    if result.restored:
+        print(f"  Breakdown {result.restored}, which it superseded, applies again.")
+    print_newly_unbroken(result.newly_unsettled_transactions)
+    print("  The payment counts whole in confirmed transfers again, or as the breakdown this one "
+          "superseded divides it.")
+    return 0
+
+
+TAG_NOTICE = "Tags are free labels: they enter no total, and filter transactions and exports."
+TAGGING_PREVIEW_STATES = {
+    None: "no tags",
+    "applied": "tagged",
+    "conflict": "no tags, statements disagree",
+    "basis_changed": "no tags, its records were regrouped",
+}
+
+
+# Each report pf export report writes: the words of its own command, and what gives its lines.
+EXPORTED_REPORTS = {
+    "totals": (("totals",), lambda args: totals_report_lines_of(args)),
+    "monthly": (("report", "monthly"), lambda args: monthly_report_lines_of(args)),
+    "budget": (("report", "budget"), lambda args: budget_report_lines_of(args)),
+    "funds": (("report", "funds"), lambda args: funds_report_lines_of(args)),
+    "net-worth": (("report", "net-worth"), lambda args: net_worth_report_lines_of(args)),
+    "household": (("report", "household"), lambda args: household_report_lines_of(args)),
+}
+EXPORT_NOTICE = (
+    "The file is not encrypted and holds financial data: keep it private, and delete it when "
+    "done. Formula-like text cells start with an apostrophe."
+)
+
+
+def run_export_transactions(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    account_id = find_account(conn, args.account) if args.account else None
+    first = None if args.first_date is None else checked_date(args.first_date, "--from")
+    last = None if args.last_date is None else checked_date(args.last_date, "--to")
+    if first and last and first > last:
+        raise CommandError("--from is after --to. Nothing was written.")
+    rows = transaction_export_rows(conn, account_id, first, last)
+    written = write_export(args.out, csv_text(TRANSACTION_COLUMNS, rows, EXPORT_AMOUNT_COLUMNS),
+                           is_real_ledger(conn))
+    print(f"Exported {len(rows)} transactions to {args.out}: {written} bytes.")
+    print(f"  {EXPORT_NOTICE}")
+    return 0
+
+
+def run_export_report(args) -> int:
+    """The report's own command parses its options, so they mean what they mean there."""
+    words, lines_of = EXPORTED_REPORTS[args.report_name]
+    report_args = build_parser().parse_args([*words, "--db", str(args.db),
+                                             *args.report_options])
+    lines = lines_of(report_args)
+    conn = open_ledger(args.db, read_only=True)
+    written = write_export(args.out, csv_text(("line",), [(line.text,) for line in lines]),
+                           is_real_ledger(conn))
+    print(f"Exported {len(lines)} lines of {args.report_name} to {args.out}: {written} bytes.")
+    print(f"  {EXPORT_NOTICE}")
+    return 0
+
+
+def run_tag_add(args) -> int:
+    conn = open_ledger(args.db)
+    tag = add_tag(conn, args.name)
+    print(f"Tag {shown(tag.name)} added.")
+    return 0
+
+
+def run_tags(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    found = list_tags(conn)
+    for tag in found:
+        print(shown(tag.name))
+    print(f"Tags: {len(found)}")
+    return 0
+
+
+def checked_tag_names(text) -> tuple[str, ...]:
+    names = tuple(name.strip() for name in text.split(","))
+    if not all(names):
+        raise CommandError("--tags must name tags separated by commas, none empty. Nothing was "
+                           "changed.")
+    return names
+
+
+def run_review_tag(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    names = () if args.none else checked_tag_names(args.tags)
+    result = tag_transaction(conn, account_id, args.transaction_id, args.revision, names,
+                             supersedes=args.supersedes,
+                             supersedes_revision=args.supersedes_revision)
+    stated = ", ".join(shown(name) for name in result.names) or "no tags"
+    print(f"Tag statement {result.tag_statement_id} recorded: transaction "
+          f"{args.transaction_id}, {stated}, binding {result.bound_record_count} records.")
+    if args.supersedes:
+        print(f"  Supersedes tag statement {args.supersedes}. It stays on record.")
+    print(f"  {TAG_NOTICE}")
+    return 0
+
+
+def run_review_tagging_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    statement = load_tagging(conn, args.tag_statement_id)
+    if statement is None:
+        raise CommandError("tag statement not found. Run review transaction show.")
+    print(f"Tag statement {statement.statement_id}")
+    print(f"  Account: {shown(statement.account_name)} ({statement.account_id})")
+    print(f"  Stated: {shown(statement.shown_value)}")
+    print(f"  Status: {statement.state}")
+    print(f"  Made: {statement.created_at}")
+    if statement.undone_at:
+        print(f"  Undone: {statement.undone_at}. It stays on record and no longer applies.")
+    if statement.superseded_by:
+        print(f"  Superseded by tag statement {statement.superseded_by}. It stays on record and "
+              "no longer applies, unless that statement is undone.")
+    if statement.newest_of_chain != statement.superseded_by:
+        print(f"  Newest of its chain: tag statement {statement.newest_of_chain}, the only one "
+              "that can be undone. Each undo restores the statement before it.")
+    if statement.supersedes_id:
+        print(f"  Supersedes tag statement {statement.supersedes_id}")
+    print(f"  From transaction: {statement.target_transaction_id}")
+    print("Bound records:")
+    for record in statement.bound_records:
+        print(f"  {shown(record.file_name)} row {record.row}, now in "
+              f"{record.transaction_id or 'no transaction'}")
+    if statement.state == STATE_ACTIVE:
+        outlook = tagging_undo_outlook(conn, statement)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this tag statement now:")
+        if statement.supersedes_id:
+            print(f"  Restores tag statement {statement.supersedes_id}, which it superseded")
+        for transaction_id, state_now, state_after in outlook.state_by_transaction:
+            print(f"  Transaction {transaction_id}: {TAGGING_PREVIEW_STATES[state_now]} now, "
+                  f"{TAGGING_PREVIEW_STATES[state_after]} after")
+        if stale_accounts(conn, DEFAULT_RULES, statement.account_id):
+            print("This account has not been reconciled under the current matching rules, so "
+                  "undo will be refused until it is. Run reconcile.")
+    return 0
+
+
+def run_review_tagging_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_tagging(conn, account_id, args.tag_statement_id, args.revision)
+    print(f"Tag statement {args.tag_statement_id} undone. It stays on record and no longer "
+          "applies.")
+    if result.restored:
+        print(f"  Tag statement {result.restored}, which it superseded, applies again.")
+    if result.newly_unsettled_transactions:
+        print(f"  Transactions now with no tags applying, because statements disagree or lost "
+              f"their basis: {result.newly_unsettled_transactions}.")
+    return 0
+
+
+def print_newly_unbroken(count) -> None:
+    if count:
+        print(f"  Loan payments now with no breakdown applying, because breakdowns disagree, lost "
+              f"their basis or no longer fit: {count}. Run review breakdowns.")
+
+
+def print_newly_unconsumed(count) -> None:
+    if count:
+        print(
+            f"  Transactions now paid from no fund, because consumptions disagree, lost their "
+            f"basis or are no longer on spending: {count}. Run review consumptions."
+        )
 
 
 def print_newly_unattributed(count) -> None:
@@ -3871,10 +5117,15 @@ def run_review_coverage_undo(args) -> int:
     return 0
 
 
-def run_totals(args) -> int:
+def totals_report_lines_of(args) -> ReportLines:
+    """What totals prints, which pf export report writes too."""
     conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
-    print_report(totals_report_lines(conn, account_id))
+    return totals_report_lines(conn, account_id)
+
+
+def run_totals(args) -> int:
+    print_report(totals_report_lines_of(args))
     return 0
 
 
@@ -4014,18 +5265,24 @@ def validated_month(option, text) -> str | None:
     return text
 
 
-def run_report_monthly(args) -> int:
+def monthly_report_lines_of(args) -> ReportLines:
+    """What report monthly prints, which pf export report writes too."""
     first_month = validated_month("--from", args.first_month)
     last_month = validated_month("--to", args.last_month)
     if first_month and last_month and first_month > last_month:
         raise CommandError("--from is after --to. Nothing was changed.")
     conn = open_ledger(args.db, read_only=True)
     account_id = find_account(conn, args.account) if args.account else None
-    print_report(monthly_report_lines(conn, account_id, first_month, last_month))
+    return monthly_report_lines(conn, account_id, first_month, last_month)
+
+
+def run_report_monthly(args) -> int:
+    print_report(monthly_report_lines_of(args))
     return 0
 
 
-def run_report_household(args) -> int:
+def household_report_lines_of(args) -> ReportLines:
+    """What report household prints, which pf export report writes too."""
     first_month = validated_month("--from", args.first_month)
     last_month = validated_month("--to", args.last_month)
     if first_month and last_month and first_month > last_month:
@@ -4038,8 +5295,12 @@ def run_report_household(args) -> int:
         if member is None:
             raise CommandError("household member not found. Run household members.")
         member_id = member.member_id
-    print_report(household_report_lines(conn, account_id, first_month, last_month, member_id,
-                                        args.shared))
+    return household_report_lines(conn, account_id, first_month, last_month, member_id,
+                                        args.shared)
+
+
+def run_report_household(args) -> int:
+    print_report(household_report_lines_of(args))
     return 0
 
 
@@ -4057,7 +5318,8 @@ def run_report_income(args) -> int:
     return 0
 
 
-def run_report_budget(args) -> int:
+def budget_report_lines_of(args) -> ReportLines:
+    """What report budget prints, which pf export report writes too."""
     month = validated_month("--month", args.month)
     if args.as_of is not None:
         checked_as_of(args.as_of)
@@ -4065,7 +5327,46 @@ def run_report_budget(args) -> int:
     as_of = as_of_date(conn, args.as_of)
     if args.member is not None and load_household(conn).find_member(args.member) is None:
         raise CommandError("household member not found. Run household members.")
-    print_report(budget_report_lines(conn, month or as_of.isoformat()[:7], as_of, args.member))
+    return budget_report_lines(conn, month or as_of.isoformat()[:7], as_of, args.member)
+
+
+def run_report_budget(args) -> int:
+    print_report(budget_report_lines_of(args))
+    return 0
+
+
+def safe_to_spend_as_of(args):
+    """Both commands open read-only and refuse without the household timezone (G7)."""
+    if args.as_of is not None:
+        checked_as_of(args.as_of)
+    conn = open_ledger(args.db, read_only=True)
+    if household_timezone(conn) is None:
+        raise CommandError(SAFE_TO_SPEND_TIMEZONE)
+    return conn, as_of_date(conn, args.as_of)
+
+
+def run_safe_to_spend(args) -> int:
+    conn, as_of = safe_to_spend_as_of(args)
+    print_report(safe_to_spend_lines(conn, as_of, args.explain))
+    return 0
+
+
+def run_dashboard(args) -> int:
+    conn, as_of = safe_to_spend_as_of(args)
+    print_report(dashboard_lines(conn, as_of))
+    return 0
+
+
+def funds_report_lines_of(args) -> ReportLines:
+    """What report funds prints, which pf export report writes too."""
+    if args.as_of is not None:
+        checked_as_of(args.as_of)
+    conn = open_ledger(args.db, read_only=True)
+    return funds_report_lines(conn, as_of_date(conn, args.as_of))
+
+
+def run_report_funds(args) -> int:
+    print_report(funds_report_lines_of(args))
     return 0
 
 
@@ -4225,6 +5526,219 @@ def run_budget_undo(args) -> int:
     return 0
 
 
+def fund_request(args) -> FundRequest:
+    return FundRequest(args.name, args.kind, terms_options(args), args.effective_from)
+
+
+def terms_options(args) -> TermsOptions:
+    return TermsOptions(args.monthly, args.percent_of_income, args.target, args.by, args.minimum,
+                        args.months, args.due, args.cadence, args.anchor, args.percent)
+
+
+def run_fund_preview(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    fund = checked_fund(conn, fund_request(args), as_of_text(conn, args.as_of))
+    print(f"Fund preview: {shown(fund.name)}, {fund.kind}")
+    print(f"  Terms: from {fund.terms[0].effective_from}, {fund_terms_sentence(fund, fund.terms[0])}")
+    print(f"Revision: {fund_revision(FUND_ADD, fund)}")
+    print("To record this fund, run fund add with the same options and --revision.")
+    return 0
+
+
+def run_fund_add(args) -> int:
+    conn = open_ledger(args.db)
+    fund_id = add_fund(conn, fund_request(args), as_of_text(conn, args.as_of), args.revision)
+    print(f"Fund {fund_id} recorded: {shown(args.name)}, {args.kind}")
+    print("Nothing is assigned to it. Assign what an account already holds with fund assign.")
+    return 0
+
+
+def run_fund_terms(args) -> int:
+    conn = open_ledger(args.db)
+    fund = next((fund for fund in load_funds(conn) if fund.fund_id == args.fund_id), None)
+    terms = change_fund_terms(conn, args.fund_id, terms_options(args), args.effective_from,
+                              as_of_text(conn, args.as_of), args.revision)
+    print(f"Fund {args.fund_id} terms recorded: from {terms.effective_from}, "
+          f"{fund_terms_sentence(fund, terms)}")
+    return 0
+
+
+def run_fund_undo(args) -> int:
+    conn = open_ledger(args.db)
+    undo_fund(conn, args.fund_id, args.revision)
+    print(f"Fund {args.fund_id} undone. It stays on record.")
+    return 0
+
+
+def fund_names(funds) -> dict:
+    return {fund.fund_id: fund.name for fund in funds}
+
+
+def run_funds(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    view = funds_view(conn, as_of_date(conn, args.as_of))
+    print(f"Funds as of {view.as_of}")
+    for fund_view in view.funds:
+        fund = fund_view.fund
+        print(f"Fund {fund.fund_id}: {shown(fund.name)}, {fund.kind}, {fund.state}")
+        if not fund.applies:
+            continue
+        terms = fund.terms_on(view.as_of) or fund.terms[0]
+        print(f"  Terms: from {terms.effective_from}, {fund_terms_sentence(fund, terms)}")
+        print_report(fund_standing_lines(fund_view))
+    if view.holdings:
+        print("Accounts holding funds:")
+        for holding in view.holdings:
+            print_report(holding_lines(holding))
+    names = fund_names(load_funds(conn))
+    print("Priority, for extra income and unused capacity, planned: "
+          + (", ".join(f"{position}. {shown(names[fund_id])} ({fund_id})"
+                       for position, fund_id in enumerate(view.priority, start=1)) or "none"))
+    print(f"  Priority revision: {priority_revision(view.priority)}")
+    active = sum(fund_view.fund.applies for fund_view in view.funds)
+    print(f"Funds: {len(view.funds)}, {active} active")
+    if view.funds:
+        print("To see a fund's terms, accounts and revisions, run fund show.")
+    return 0
+
+
+def run_fund_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    view = funds_view(conn, as_of_date(conn, args.as_of))
+    fund_view = next((fund_view for fund_view in view.funds
+                      if fund_view.fund.fund_id == args.fund_id), None)
+    if fund_view is None:
+        raise CommandError(FUND_NOT_FOUND.replace(" Nothing was changed.", ""))
+    fund = fund_view.fund
+    print(f"Fund {fund.fund_id}")
+    print(f"  Name: {shown(fund.name)}")
+    print(f"  Kind: {fund.kind}")
+    print(f"  Status: {fund.state}")
+    print(f"  Made: {fund.created_at}")
+    for terms in fund.terms:
+        print(f"  Terms from {terms.effective_from}: {fund_terms_sentence(fund, terms)}")
+    if not fund.applies:
+        print(f"  Undone: {fund.undone_at}. It stays on record and no longer applies.")
+        return 0
+    print(f"As of {view.as_of}")
+    print_report(fund_standing_lines(fund_view))
+    assignments = load_assignments(conn)
+    holdings = [holding for holding in view.holdings
+                if holding.account_type in ASSIGNABLE_ACCOUNT_TYPES
+                or any(held == fund.fund_id for held, _ in holding.assignments)]
+    print("Accounts:")
+    for holding in holdings:
+        print_report(holding_lines(holding))
+        held = dict(holding.assignments).get(fund.fund_id)
+        operation = assignment_operation(holding, fund.fund_id)
+        if held is not None:
+            print(f"    This fund: {shown_amount(held)} assigned")
+        if operation == UNASSIGN or holding.observation is not None:
+            print(f"    Assignment revision, to {operation}: "
+                  f"{assignment_revision(holding, fund.fund_id, assignments)}")
+    if not holdings:
+        print("  none can hold a fund: add a checking, savings or investment account")
+    releases = load_releases(conn)
+    if fund.kind == TAX_FUND:
+        for release in releases:
+            if release.fund_id == fund.fund_id:
+                print(f"Release {release.release_id}: {shown_amount(release.amount_cents)} on "
+                      f"{release.released_on}, {TAX_LABEL}")
+        print(f"Release revision: {fund_revision(FUND_RELEASE, fund, releases)}")
+        if any(release.fund_id == fund.fund_id for release in releases):
+            print(f"Release undo revision: {fund_revision(FUND_RELEASE_UNDO, fund, releases)}")
+    print(f"Terms revision: {fund_revision(FUND_TERMS, fund, releases)}")
+    print(f"Undo revision: {fund_revision(FUND_UNDO, fund, releases)}")
+    print("To change its terms from a date, run fund terms. To assign, run fund assign.")
+    return 0
+
+
+def run_fund_release(args) -> int:
+    conn = open_ledger(args.db)
+    release_id = release_tax_reserve(conn, args.fund, args.amount, args.on,
+                                     as_of_text(conn, args.as_of), args.revision)
+    print(f"Release {release_id} recorded: {args.amount} of the tax reserve on {args.on}, "
+          f"{TAX_LABEL}. No money moved.")
+    return 0
+
+
+def run_fund_release_undo(args) -> int:
+    conn = open_ledger(args.db)
+    undo_release(conn, args.fund, args.release_id, args.revision)
+    print(f"Release {args.release_id} undone. It stays on record and no longer applies.")
+    return 0
+
+
+def run_fund_restorations(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    fund = next((fund for fund in load_funds(conn) if fund.fund_id == args.fund_id), None)
+    if fund is None:
+        raise CommandError(FUND_NOT_FOUND.replace(" Nothing was changed.", ""))
+    print(f"Fund {fund.fund_id} ({shown(fund.name)}, {fund.kind}): {fund.state}")
+    restorations = load_restorations(conn, fund.fund_id)
+    for restoration in restorations:
+        print(f"  Restoration {restoration.restoration_id}: from {restoration.effective_from}, "
+              f"planned {shown_amount(restoration.monthly_cents)} a month while underfunded")
+    if not restorations:
+        print("  Restoration: none, so restoring it is recommended but not protected")
+    if fund.applies and fund.kind == "emergency":
+        print(f"  Restoration revision: "
+              f"{restoration_revision(conn, FUND_RESTORATION, fund)}")
+        if restorations:
+            print(f"  Undo revision, for the newest: "
+                  f"{restoration_revision(conn, FUND_RESTORATION_UNDO, fund)}")
+    return 0
+
+
+def run_fund_restoration(args) -> int:
+    conn = open_ledger(args.db)
+    restoration_id = set_restoration(conn, args.fund, args.monthly, args.effective_from,
+                                     as_of_text(conn, args.as_of), args.revision)
+    print(f"Restoration {restoration_id} recorded: from {args.effective_from}, planned "
+          f"{shown(args.monthly)} a month while fund {args.fund} is underfunded. No money moved.")
+    return 0
+
+
+def run_fund_restoration_undo(args) -> int:
+    conn = open_ledger(args.db)
+    restoration = undo_restoration(conn, args.fund, args.revision)
+    print(f"Restoration {restoration.restoration_id} undone. It stays on record.")
+    return 0
+
+
+def run_fund_assign(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    as_of = as_of_text(conn, args.as_of)
+    assignment_id = assign(conn, args.fund, account_id, args.amount, as_of, args.revision)
+    holding = account_holding(conn, account_id, as_of)
+    print(f"Assignment {assignment_id} recorded: {shown_amount(dict(holding.assignments)[args.fund])} "
+          f"of {shown(holding.account_name)} to fund {args.fund}. No money moved: it says what "
+          "the balance already holds.")
+    print(f"  {shown(holding.account_name)} now holds {shown_amount(holding.assigned_cents)} in "
+          f"funds, {shown_amount(holding.unassigned_cents)} unassigned")
+    return 0
+
+
+def run_fund_unassign(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    released = unassign(conn, args.fund, account_id, as_of_text(conn, args.as_of), args.revision)
+    print(f"Assignment {released.assignment_id} released: {shown_amount(released.amount_cents)} "
+          f"of fund {args.fund}. It stays on record.")
+    return 0
+
+
+def run_fund_priority(args) -> int:
+    conn = open_ledger(args.db)
+    set_priority(conn, args.fund_ids, args.revision)
+    names = fund_names(load_funds(conn))
+    print("Priority recorded, planned: "
+          + (", ".join(f"{position}. {shown(names[fund_id])}"
+                       for position, fund_id in enumerate(args.fund_ids, start=1)) or "none"))
+    return 0
+
+
 def run_ui(args) -> int:
     # Imported here, since the server imports this module for open_ledger and its messages.
     from personal_finance.ui.server import LoopbackServer
@@ -4232,7 +5746,8 @@ def run_ui(args) -> int:
     # Through the gate before any port opens, so an unsafe ledger is refused first (D-058).
     open_ledger(args.db, read_only=True).close()
     server = LoopbackServer(args.db)
-    print(f"Serving {args.db} read-only, on 127.0.0.1 only. Open this address once:")
+    print(f"Serving {args.db} on 127.0.0.1 only. Review decisions can be made from its pages. "
+          "Open this address once:")
     print(f"  {server.launch_address}")
     print("It works once, in one browser. Use a private window, so the browser keeps no history "
           "of these pages. Stop with Ctrl-C.")
@@ -4262,10 +5777,275 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
 
+def snapshot_parsers(commands, command) -> None:
+    """pf snapshot and pf snapshots (D-075)."""
+    command("snapshots", commands, handler=run_snapshots,
+            help="list the snapshots written, without their paths")
+    snapshot = commands.add_parser("snapshot", help="write and check the phone's snapshot file")
+    snapshot_commands = snapshot.add_subparsers(dest="snapshot_command", required=True)
+    create = command("create", snapshot_commands, handler=run_snapshot_create,
+                     help="write a new snapshot file to a private, gated folder")
+    create.add_argument("--out", type=Path, required=True,
+                        help="the new file, in a private folder, as pf export takes")
+    create.add_argument("--as-of", help=TODAY_HELP)
+    create.add_argument("--window-days", dest="window_days", default="90",
+                        help="days of transactions it holds, 1 to 366, 90 by default")
+    verify = snapshot_commands.add_parser("verify", help="check a snapshot file, writing nothing")
+    verify.add_argument("path", type=Path, help="the snapshot file")
+    verify.add_argument("--db", type=Path, help="also confirm this ledger recorded it")
+    verify.set_defaults(handler=run_snapshot_verify)
+
+
+WINDOW_DAYS_INVALID = "--window-days must be a whole number from 1 to 366."
+
+
+def run_snapshot_create(args) -> int:
+    if not args.window_days.isdigit() or not 1 <= int(args.window_days) <= 366:
+        raise CommandError(WINDOW_DAYS_INVALID)
+    if args.as_of is not None:
+        checked_as_of(args.as_of)
+    conn = open_ledger(args.db, read_only=True)
+    try:
+        as_of = as_of_date(conn, args.as_of)
+        moment = current_utc_time().astimezone(timezone.utc)
+        generated_at = moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+        written = create_snapshot(conn, lambda: open_ledger(args.db), args.out, as_of,
+                                  int(args.window_days), str(uuid.uuid4()), generated_at,
+                                  is_real_ledger(conn))
+    finally:
+        conn.close()
+    print(f"Snapshot {written.snapshot_id} written to {args.out}: {written.bytes_written} bytes, "
+          f"schema {written.schema_version}, as of {written.as_of}, "
+          f"{written.transactions} transactions over {written.window_days} days.")
+    print("  The file is unencrypted: keep it on the encrypted image, and carry it to the phone "
+          "yourself.")
+    return 0
+
+
+def run_snapshot_verify(args) -> int:
+    data = args.path.read_bytes() if args.path.is_file() else None
+    if data is None:
+        raise CommandError(f"no such file: {args.path}")
+    conn = None if args.db is None else open_ledger(args.db, read_only=True)
+    try:
+        document = verified_snapshot(data, conn)
+    finally:
+        if conn is not None:
+            conn.close()
+    content = document["content"]
+    print(f"Snapshot {document['snapshot_id']} verified: schema {document['schema_version']}, "
+          f"as of {content['cutoff']['as_of']}, {len(content['transactions'])} transactions, "
+          f"digest {document['content_sha256'][:16]}"
+          + (", recorded in this ledger." if args.db else "."))
+    return 0
+
+
+def run_snapshots(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    found = snapshot_records(conn)
+    print("Snapshots")
+    if not found:
+        print("No snapshots written. Write one with snapshot create.")
+    for snapshot_id, version, as_of, window_days, generated_at, digest in found:
+        print(f"Snapshot {snapshot_id}: schema {version}, as of {as_of}, {window_days} days, "
+              f"generated {generated_at}, digest {digest[:16]}")
+    return 0
+
+
+def scenario_parsers(commands, command) -> None:
+    """pf scenarios and pf scenario (D-074)."""
+    command("scenarios", commands, handler=run_scenarios,
+            help="list scenarios, with how many inputs each counts")
+    scenario = commands.add_parser(
+        "scenario", help="model alternatives to the active plan, compare them, and promote one")
+    scenario_commands = scenario.add_subparsers(dest="scenario_command", required=True)
+    scenario_add = command("add", scenario_commands, handler=run_scenario_add,
+                           help="record a scenario with no inputs")
+    scenario_add.add_argument("--name", required=True, help="the scenario's name")
+    scenario_add.add_argument("--include-uncertain", dest="include_uncertain",
+                              action="store_true",
+                              help="count uncertain inputs too; they are left out by default")
+    scenario_show = command("show", scenario_commands, handler=run_scenario_show,
+                            help="show a scenario, its inputs and its revisions")
+    scenario_show.add_argument("scenario_id", help="a scenario ID from scenarios")
+    scenario_compare = command("compare", scenario_commands, handler=run_scenario_compare,
+                               help="project the baseline and the scenario month by month, "
+                                    "writing nothing")
+    scenario_compare.add_argument("scenario_id", help="a scenario ID from scenarios")
+    scenario_compare.add_argument("--months", default="24",
+                                  help="the horizon, 1 to 120 months, 24 by default")
+    scenario_compare.add_argument("--as-of", help=TODAY_HELP)
+    scenario_undo = command("undo", scenario_commands, handler=run_scenario_undo,
+                            help="stop a scenario applying, keeping it on record")
+    scenario_undo.add_argument("scenario_id", help="a scenario ID from scenarios")
+    scenario_undo.add_argument("--revision", required=True,
+                               help="the undo revision from scenario show")
+    scenario_promote = command("promote", scenario_commands, handler=run_scenario_promote,
+                               help="turn a scenario's confirmed inputs into planning entries, "
+                                    "in one transaction")
+    scenario_promote.add_argument("scenario_id", help="a scenario ID from scenarios")
+    scenario_promote.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
+    scenario_promote.add_argument("--revision", required=True,
+                                  help="the promotion revision from scenario show")
+    scenario_promotion = scenario_commands.add_parser("promotion",
+                                                      help="undo a scenario's promotion")
+    promotion_commands = scenario_promotion.add_subparsers(dest="scenario_promotion_command",
+                                                           required=True)
+    promotion_undo = command("undo", promotion_commands, handler=run_scenario_promotion_undo,
+                             help="undo every entry a promotion made, in one transaction")
+    promotion_undo.add_argument("scenario_id", help="a scenario ID from scenarios")
+    promotion_undo.add_argument("--revision", required=True,
+                                help="the promotion undo revision from scenario show")
+    scenario_input = scenario_commands.add_parser("input", help="add or undo a scenario's inputs")
+    input_commands = scenario_input.add_subparsers(dest="scenario_input_command", required=True)
+    input_add = command("add", input_commands, handler=run_scenario_input_add,
+                        help="add a dated input to a scenario")
+    input_add.add_argument("scenario_id", help="a scenario ID from scenarios")
+    input_add.add_argument("--kind", required=True,
+                           help="income, bonus, expense, annual_expense, purchase, home_purchase, "
+                                "loan_payoff or borrowing")
+    input_add.add_argument("--from", dest="from_date", required=True,
+                           help="the first day it applies, YYYY-MM-DD")
+    input_add.add_argument("--to", dest="to_date", help="the last day it applies, inclusive")
+    input_add.add_argument("--amount", help="the amount, money out or in by kind, such as 250.00")
+    input_add.add_argument("--cadence", help="monthly:D, biweekly, annual:MM-DD or another M12 "
+                                             "cadence; one-time kinds take none")
+    input_add.add_argument("--anchor", help="a weekly, biweekly, quarterly or every-N-months "
+                                            "cadence's date")
+    input_add.add_argument("--replaces", help="the source, obligation or reserve ID it replaces "
+                                              "over its dates")
+    input_add.add_argument("--uncertain", action="store_true",
+                           help="count it only in a scenario including uncertain inputs")
+    input_add.add_argument("--confirmed", action="store_true",
+                           help="a bonus is uncertain unless confirmed")
+    input_add.add_argument("--gross", action="store_true",
+                           help="the amount is gross, received at --take-home-percent")
+    input_add.add_argument("--take-home-percent", dest="take_home_percent",
+                           help="the share of a gross amount received, 1 to 100")
+    input_add.add_argument("--price", help="a home purchase's price")
+    input_add.add_argument("--down-payment", dest="down_payment",
+                           help="a home purchase's down payment")
+    input_add.add_argument("--closing-costs", dest="closing_costs",
+                           help="a home purchase's closing costs")
+    input_add.add_argument("--loan-rate", dest="loan_rate", help="the loan's APR, such as 6.5")
+    input_add.add_argument("--loan-months", dest="loan_months", help="the loan's months, 1 to 600")
+    input_add.add_argument("--ownership-costs", dest="ownership_costs",
+                           help="a home's ownership costs a month")
+    input_add.add_argument("--loan", help="the loan account a payoff pays, by name or ID")
+    input_add.add_argument("--account", help="the account a promoted source or obligation is on")
+    input_add.add_argument("--match", help="the description text a promoted source or "
+                                           "obligation matches")
+    input_add.add_argument("--revision", required=True,
+                           help="the input revision from scenario show")
+    input_undo = command("undo", input_commands, handler=run_scenario_input_undo,
+                         help="stop an input counting, keeping it on record")
+    input_undo.add_argument("scenario_id", help="a scenario ID from scenarios")
+    input_undo.add_argument("input_id", help="an input ID from scenario show")
+    input_undo.add_argument("--revision", required=True,
+                            help="the input's undo revision from scenario show")
+
+
+def run_scenarios(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    print_report(scenarios_lines(load_scenarios(conn)))
+    return 0
+
+
+def run_scenario_add(args) -> int:
+    conn = open_ledger(args.db)
+    scenario_id = add_scenario(conn, args.name, args.include_uncertain)
+    print(f"Scenario {scenario_id} recorded: {shown(args.name)}, with no inputs")
+    print("Add inputs with scenario input add, using the input revision from scenario show.")
+    return 0
+
+
+def scenario_shown(conn, scenario_id: str):
+    try:
+        return find_scenario(conn, scenario_id)
+    except DecisionRefused as refused:
+        raise CommandError(str(refused).replace(" Nothing was changed.", "")) from None
+
+
+def run_scenario_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    print_report(scenario_lines(conn, scenario_shown(conn, args.scenario_id)))
+    return 0
+
+
+SCENARIO_MONTHS_INVALID = "--months must be a whole number from 1 to 120."
+
+
+def scenario_compare_lines_of(args) -> ReportLines:
+    """What scenario compare prints, which its page renders too."""
+    if not args.months.isdigit() or not 1 <= int(args.months) <= LONGEST_MONTHS:
+        raise CommandError(SCENARIO_MONTHS_INVALID)
+    conn, as_of = safe_to_spend_as_of(args)
+    return compare_lines(compare(conn, scenario_shown(conn, args.scenario_id), as_of,
+                                 int(args.months)))
+
+
+def run_scenario_compare(args) -> int:
+    print_report(scenario_compare_lines_of(args))
+    return 0
+
+
+def run_scenario_undo(args) -> int:
+    conn = open_ledger(args.db)
+    undo_scenario(conn, args.scenario_id, args.revision)
+    print(f"Scenario {args.scenario_id} undone. It stays on record.")
+    return 0
+
+
+def run_scenario_input_add(args) -> int:
+    conn = open_ledger(args.db)
+    request = ScenarioInputRequest(
+        kind=args.kind, from_date=args.from_date, amount=args.amount, to_date=args.to_date,
+        cadence=args.cadence, anchor=args.anchor, replaces=args.replaces,
+        uncertain=args.uncertain, confirmed=args.confirmed, gross=args.gross,
+        take_home_percent=args.take_home_percent, price=args.price,
+        down_payment=args.down_payment, closing_costs=args.closing_costs,
+        loan_rate=args.loan_rate, loan_months=args.loan_months,
+        ownership_costs=args.ownership_costs,
+        loan_account_id=None if args.loan is None else find_account(conn, args.loan),
+        account_id=None if args.account is None else find_account(conn, args.account),
+        match=args.match)
+    input_id = add_scenario_input(conn, args.scenario_id, request, args.revision)
+    print(f"Input {input_id} recorded on scenario {args.scenario_id}: {args.kind}")
+    return 0
+
+
+def run_scenario_promote(args) -> int:
+    conn = open_ledger(args.db)
+    promotion = promote_scenario(conn, args.scenario_id, as_of_text(conn, args.as_of),
+                                 args.revision)
+    print(f"Scenario {args.scenario_id} promoted as {promotion.promotion_id}, making:")
+    for kind, entry_id, row_id, input_id in promotion.entries:
+        made = f"{kind} {entry_id}" if entry_id else f"{kind} row {row_id}"
+        print(f"  {made}, from input {input_id}")
+    print("Undo it with scenario promotion undo, using the revision from scenario show.")
+    return 0
+
+
+def run_scenario_promotion_undo(args) -> int:
+    conn = open_ledger(args.db)
+    promotion = undo_scenario_promotion(conn, args.scenario_id, args.revision)
+    print(f"Promotion {promotion.promotion_id} undone: every entry it made no longer applies. "
+          "It stays on record.")
+    return 0
+
+
+def run_scenario_input_undo(args) -> int:
+    conn = open_ledger(args.db)
+    undo_scenario_input(conn, args.scenario_id, args.input_id, args.revision)
+    print(f"Input {args.input_id} undone. It stays on record.")
+    return 0
+
+
 def explained_error(error: Exception) -> str:
     """What an error may say, the same in the CLI and the local UI. Expected errors keep their
     sanitized messages, and any other says only that something went wrong (D-037)."""
-    if isinstance(error, (CommandError, DecisionRefused, UnsafeLocation, BackupRefused)):
+    if isinstance(error, (CommandError, DecisionRefused, UnsafeLocation, BackupRefused,
+                          ExportRefused, SnapshotRefused, SnapshotNotRecorded)):
         return str(error)
     if isinstance(error, sqlite3.OperationalError):
         return BUSY_EXPLANATION if "locked" in str(error) else "database error"

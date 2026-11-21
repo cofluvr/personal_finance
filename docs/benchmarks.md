@@ -533,3 +533,135 @@ the household's.
 the transfer candidate search. A member's view adds attributing the month's counted transactions.
 Plans bind no records and derive nothing, so an import, a classification and `totals` pay nothing
 for them.
+
+
+**Funds on the same shape (M14.3, GC4, D-070 point 9),** measured 2026-11-17 with
+`measure_reconciliation.py --scale --funds`, nothing else running. Output in
+`build/m14_3/benchmark-funds.log`, which is ignored and may not survive.
+
+`--recurring`'s shape, its side sources tax-eligible, plus four savings accounts: 20 funds of
+every kind (one emergency, one tax reserve, nine goals, nine reserves, six of them annual), each
+assigned on one of six accounts, one account over-assigned, a priority list over the 19 that take
+one, and 2,000 bills paid from goals, reserves and the tax reserve. The shape asserts its counts:
+20 funds of all four kinds, all six accounts holding assignments, exactly one over-assigned, 2,000
+consumptions applied, and 70 tax-eligible occurrences accrued.
+
+| Operation | First run, right after the build | Provisional target |
+|---|---|---|
+| `pf report funds` | 0.617s | Below 2s: met |
+| `pf report budget`, the month | 0.293s | Below 2s: met |
+| `fund assign`, under the write lock | 0.020s | Below 2s and 2× an import: met |
+| `review consume`, under the write lock | 0.088s | Below 2s and 2× an import: met |
+| One import of one row | 2.262s | At most 0.5s above none: met |
+
+**G9's stopping rule is not met.** The consumed portions are computed where read, from the
+applied consumptions and the assignments, so `report funds` and `report budget` pay for 2,000 of
+them in well under a second.
+
+**Loans on the same shape (M15.3, LC4, D-071 point 9),** measured 2026-11-17 with
+`measure_reconciliation.py --scale --loans`, nothing else running. Output in
+`build/m15_3/benchmark-loans.log`, which is ignored and may not survive.
+
+`--recurring`'s shape plus a checking account, Payer, holding 5,001 loan payments over 120 months
+to eight loans, each confirmed by a one-sided transfer, 5,000 of them broken down: 109,101
+transactions. Two loans graduated in six steps each, one aggregate with three subaccounts, every
+loan observed, and a custom payoff plan with an extra. The shape asserts its counts: more than
+107,000 transactions, 5,000 breakdowns applied and two six-step schedules.
+
+| Operation | First run, right after the build | Provisional target |
+|---|---|---|
+| `pf report net-worth` | 0.021s | Below 2s: met |
+| `pf report loans` | 0.067s | Below 2s: met |
+| `pf loan payoff`, all three orders | 0.032s | Below 2s: met |
+| `pf totals` | 1.779s | Below 2s, and the stop at 2.0s (D-071 point 9): met |
+| `review breakdown`, under the write lock | 0.154s | Below 2s and 2× an import: met |
+| One import of one row | 2.470s | At most 0.5s above none: met |
+
+**G9's stopping rule is not met, and `totals` stays below 2.0s** with 5,000 breakdowns, which it
+reads in the same query as each transaction's type and category.
+
+**Safe to spend on the same shape (M16.2, SB7, D-072 point 8),** measured 2026-11-20 with
+`measure_reconciliation.py --scale --safe-to-spend`, nothing else running. Output in
+`build/m16/benchmark-safe-to-spend.log` and, for the attribution, `build/m16/attrib/attrib.log`,
+both ignored and may not survive.
+
+`--recurring`'s shape with a budget plan, a tax reserve, a reserve, an emergency fund restored
+monthly, a goal, two loans with terms (one covered by a bill), three liquidity accounts observed
+monthly, high in odd months and low in even ones, and a buffer: 104,100 transactions. The shape
+asserts its counts: every protected row reached, and both the budget and liquidity constraints
+limiting at some date. Each command is timed at 12 as-of dates and the slowest reported.
+
+| Operation | Slowest of 12 dates | Provisional target |
+|---|---|---|
+| `pf safe-to-spend` | 0.376s | Below 1.0s: met |
+| `pf dashboard` | 1.021s | Below 1.0s: **missed** |
+
+**G9's stopping rule is met by `dashboard`.** Rerun three times at each date on one kept ledger,
+it takes 0.98s to 1.06s, and `safe-to-spend` 0.36s to 0.38s. A profile at 2026-11-14 attributes
+the cost to repeated work: each dashboard runs `income_report` three times and `budget_report`
+twice, since `safe_to_spend` already computes the month's budget report and `dashboard_lines`
+computes it and the income report again. Each income report matches obligations over the
+shape's payments anew, 212,400 matches with their text normalization, 0.66s of the 1.7s profile.
+Not optimized: the remedy is for the owner's decision.
+
+**The dashboard computing the month once (M16, settled 2026-11-20),** measured with
+`measure_reconciliation.py --scale --safe-to-spend` on the same shape, nothing else running:
+`dashboard` 0.647s at its slowest date (was 1.021s), `safe-to-spend` 0.410s. Both below 1.0s:
+met.
+
+**The local UI on the same shape (M17, WD2, D-073 point 8),** measured 2026-11-20 with
+`measure_reconciliation.py --scale --ui`, nothing else running: 104,100 transactions. Each page
+once, after a warm-up request, through the real handler over a socket pair; then 50 sequential
+`POST` writes through the whole pipeline (the buffer's undo and set, alternately, since the shape
+holds no review item), against the same CLI write. Output in `build/s17/bench/`, ignored.
+
+| Operation | Time | Provisional target |
+|---|---|---|
+| `/visuals` | 2.194s | Below 2.0s: **missed** |
+| `/` (totals) | 1.607s | Below 2.0s: met |
+| `/household` | about 1.13s | Below 2.0s: met |
+| `/transactions`, every row | about 1.1s | Below 2.0s: met |
+| `/dashboard` | about 0.58s | Below 2.0s: met |
+| Every other page, the search and the transaction page included | below 0.75s | Below 2.0s: met |
+| A browser write, median of 50 (p95, max) | 0.015s (0.032s, 0.033s) | Within 0.1s of the CLI's 0.015s: met |
+
+**G9's stopping rule is met by `/visuals`,** and it is not optimized further. Its cost is the
+reports its rows come from: `household_report` 1.127s, `monthly_report` 0.713s,
+`budget_report` 0.287s, the rest under 0.03s. One remedy was taken before this figure: spending
+by category is summed from the monthly report's months rather than computed again by
+`income_and_spending` (0.50s), from 2.686s. What is left is the household comparison's full
+attribution pass; the remedies (a cheaper household total, or the comparison on its own page)
+are for the owner's decision.
+
+**Scenarios on the same shape (M18.3, XC2, D-074 point 8),** measured 2026-11-21 with
+`measure_reconciliation.py --scale --scenarios`, nothing else running. Output in
+`build/s18/bench_scenarios.txt`, ignored. `--safe-to-spend`'s shape, 104,100 transactions, with
+10 scenarios holding 40 inputs: every kind, replacements of a source, an obligation and a
+reserve, and a home purchase, which the shape asserts. Compare runs once untimed first, then each
+scenario at 24 months, three at 120, and the first scenario's promotion (3 entries) and its undo.
+
+| Operation | Time | Provisional target |
+|---|---|---|
+| `pf scenario compare`, 24 months, slowest of 10 (median) | 0.521s (0.511s) | Below 2.0s: met |
+| `pf scenario compare`, 120 months, slowest of 3 | 1.402s | Below 5.0s: met |
+| `pf scenario promote`, making 3 entries | 0.553s | Below 2.0s: met |
+| `pf scenario promotion undo` | 0.163s | Below 2.0s: met |
+
+**G9's stopping rule is not met.** The plan is read once, safe-to-spend's estimate included, and
+the pure projection runs twice over it.
+
+**A snapshot on the same shape (M19.2, VB4, D-075),** measured 2026-11-21 with
+`measure_reconciliation.py --scale --snapshot`, nothing else running. Output in
+`build/s18/bench_snapshot.txt`, ignored. `--safe-to-spend`'s shape: 104,100 transactions over 60
+months, 5,166 of them in the 90-day window as of 2026-12-20, which the shape asserts. Generation
+runs once untimed first, then is timed in one read transaction.
+
+| Operation | Figure | Provisional target |
+|---|---|---|
+| Generation, 90-day window, one read transaction | 2.621s | Below 5.0s: met |
+| File size | 1.81 MB | Below 5 MB: met |
+| Verify | 0.095s | none set |
+
+**G9's stopping rule is not met.** The gated write is not timed: `build/` is inside the git work
+tree, which the destination check refuses.
+
