@@ -183,6 +183,13 @@ class TestLoans:  # point 3: M15's amortization
             baseline[0].debt_cents - 30_000 + projection.monthly_interest(
                 baseline[0].debt_cents, 4_800_000)
 
+    def test_a_payoff_of_a_loan_not_projected_is_named(self):
+        payoff = scenario_input("loan_payoff", 100, "2026-04-20", loan_terms_id="elsewhere")
+        result = project(PLAN, (payoff,), AS_OF, 2)
+        assert result.missing == ("loan payoff in: its loan has no balance observed, so it is "
+                                  "left out",)
+        assert result.months == project(PLAN, (), AS_OF, 2).months
+
     def test_borrowing_brings_its_proceeds_and_a_level_payment(self):
         borrow = scenario_input("borrowing", 1_200_000, "2026-04-03", loan_rate_millionths=0,
                                 loan_months=12)

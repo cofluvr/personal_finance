@@ -54,6 +54,9 @@ from personal_finance.reports.report_text import (
 from personal_finance.ui import charts, writes
 
 LOOPBACK_ADDRESS = "127.0.0.1"
+# Each scenario input kind's route, in the order the routes declare them (M18.2).
+SCENARIO_INPUT_ROUTES = tuple(path for path in writes.WRITE_ROUTES
+                              if path.startswith("/scenario/input/"))
 
 CONTENT_SECURITY_POLICY = (
     "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; "
@@ -103,6 +106,7 @@ NAVIGATION = (
     ("/obligations", "Obligations"),
     ("/settings", "Settings and backups"),
     ("/visuals", "Visuals"),
+    ("/scenarios", "Scenarios"),
 )
 
 # What each page accepts in its address. A value is an ID or a month and nothing else, refused
@@ -126,6 +130,9 @@ PAGE_PARAMETERS = {
     "/obligations": {"as_of"},
     "/settings": set(),
     "/visuals": {"as_of"},
+    "/scenarios": set(),
+    "/scenario": {"id"},
+    "/scenario/compare": {"id", "months", "as_of"},
     "/style.css": set(),
 }
 QUERY_VALUE = re.compile(r"[A-Za-z0-9_-]{0,100}")
@@ -367,6 +374,12 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return self.answer_transaction(conn, parameters.get("id", ""))
         if path == "/visuals":
             return self.answer_visuals(conn, parameters)
+        if path == "/scenarios":
+            return self.answer_scenarios()
+        if path == "/scenario":
+            return self.answer_scenario(parameters.get("id", ""))
+        if path == "/scenario/compare":
+            return self.answer_scenario_compare(conn, parameters)
         if path in SECTIONS:
             return self.answer_section(conn, path, parameters)
         if path == "/budget":
@@ -420,6 +433,70 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         drawn = visuals(conn, as_of)
         svgs = "".join(f'<div class="chart">{charts.chart_svg(chart)}</div>' for chart in drawn)
         self.send_page(200, "Visuals", visual_lines(conn, as_of, drawn), form=form + svgs)
+
+    def printed_lines(self, words) -> tuple[ReportLines | None, str, str]:
+        """A command run in memory, as its lines, else None with its refusal."""
+        code, printed, message = run_in_memory([*words, f"--db={self.server.ledger_path}"])
+        if code != 0:
+            return None, printed, message or BAD_ADDRESS
+        lines = ReportLines()
+        for text in without_creation_times(printed).splitlines():
+            lines.add(text)
+        return lines, printed, ""
+
+    def answer_scenarios(self):
+        """pf scenarios as it prints, a link to each scenario, and the form adding one."""
+        lines, printed, _ = self.printed_lines(["scenarios"])
+        links = "".join(f'<p><a href="/scenario?id={escaped(found)}">Open scenario '
+                        f"{escaped(found)}</a></p>"
+                        for found in SCENARIO_ROW.findall(printed))
+        add = route_form(self.server.form_secret, "/scenario/add", {}, heading="Add a scenario")
+        self.send_page(200, "Scenarios", lines, after=links + add)
+
+    def answer_scenario(self, scenario_id):
+        """pf scenario show as it prints, and point 5's forms: an input form for each kind, each
+        input's undo, the scenario's undo, and the comparison by GET, which writes nothing."""
+        lines, printed, message = self.printed_lines(["scenario", "show", scenario_id])
+        if lines is None:
+            return self.send_page(404, "Not found", notice=message)
+        secret = self.server.form_secret
+        forms = [comparison_form(scenario_id, None, None)]
+        added = SCENARIO_INPUT_REVISION.search(printed)
+        if added:
+            forms.append("<h2>Adding an input</h2>")
+            for path in SCENARIO_INPUT_ROUTES:
+                kind = path.removeprefix("/scenario/input/")
+                forms.append(route_form(secret, path,
+                                        {"scenario": scenario_id, "revision": added[1]},
+                                        heading=kind.replace("_", " ").capitalize()))
+        undone = [route_form(secret, "/scenario/input-undo",
+                             {"scenario": scenario_id, "input": row["id"],
+                              "revision": row["revision"]}, heading=f"Input {row['id']}")
+                  for row in SCENARIO_INPUT_UNDO.finditer(printed)]
+        if undone:
+            forms += ["<h2>Undoing an input</h2>", *undone]
+        scenario_undo = SCENARIO_UNDO_REVISION.search(printed)
+        if scenario_undo:
+            forms.append(route_form(secret, "/scenario/undo",
+                                    {"scenario": scenario_id, "revision": scenario_undo[1]},
+                                    heading="Undoing the scenario"))
+        self.send_page(200, "Scenario", lines, after="".join(forms))
+
+    def answer_scenario_compare(self, conn, parameters):
+        """pf scenario compare as it prints: recalculated on every GET, nothing stored (point 5).
+        As of the date given, else today in the household's timezone (G7)."""
+        scenario_id = parameters.get("id", "")
+        months = parameters.get("months") or "24"
+        as_of = parameters.get("as_of") or None
+        form = comparison_form(scenario_id, months, as_of)
+        if as_of is None and household_today_if_set(conn) is None:
+            return self.send_page(200, "Scenario comparison", notice=CHOOSE_AS_OF, form=form)
+        dated = [] if as_of is None else [f"--as-of={as_of}"]
+        lines, _, message = self.printed_lines(["scenario", "compare", scenario_id,
+                                                f"--months={months}", *dated])
+        if lines is None:
+            return self.send_page(400, "Refused", notice=message, form=form)
+        self.send_page(200, "Scenario comparison", lines, form=form)
 
     def answer_transactions(self, conn, parameters):
         """pf transactions with the filters given, run in memory, so the page and the command
@@ -638,6 +715,23 @@ BUFFER_ROW = re.compile(
 COVERAGE_ROW = re.compile(
     r"^Obligation (?P<id>[0-9a-f-]{36}) \((?P<name>.*)\): .*\n"
     r"  (?P<kind>Covers|Uncover) revision: (?P<revision>\S+)$", re.MULTILINE)
+
+
+SCENARIO_ROW = re.compile(r"^Scenario (\S+): ", re.MULTILINE)
+SCENARIO_INPUT_REVISION = re.compile(r"^Input revision: (\S+)$", re.MULTILINE)
+SCENARIO_UNDO_REVISION = re.compile(r"^Undo revision: (\S+)$", re.MULTILINE)
+SCENARIO_INPUT_UNDO = re.compile(
+    r"^  Input (?P<id>[0-9a-f-]{36}): .*\n    Undo revision: (?P<revision>\S+)$", re.MULTILINE)
+
+
+def comparison_form(scenario_id, months, as_of) -> str:
+    """A form that shows the comparison by GET, which writes nothing."""
+    return ('<form method="get" action="/scenario/compare">'
+            f'<input type="hidden" name="id" value="{escaped(scenario_id)}">'
+            '<label>Months <input name="months" placeholder="24" size="4" '
+            f'value="{escaped(months or "")}"></label>'
+            '<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+            f'value="{escaped(as_of or "")}"></label> <button>Compare</button></form>')
 
 
 def without_creation_times(printed: str) -> str:
@@ -933,6 +1027,27 @@ FIELD_LABELS = {
     "buffer": "Checking buffer, an amount such as 500.00",
     "loan": "Covers this loan's payment",
     "fund": "Covers this reserve's purchase, by its fund ID",
+    "scenario_name": "Name",
+    "include_uncertain": "Count uncertain inputs too",
+    "from_date": "From, YYYY-MM-DD",
+    "input_amount": "Amount, such as 250.00, money in or out by its kind",
+    "to_date": "To, YYYY-MM-DD, inclusive, or empty",
+    "cadence": "Cadence, such as monthly:1, biweekly or annual:09-01",
+    "anchor": "Anchor, a weekly, biweekly or quarterly cadence's date",
+    "replaces": "Replaces this source, obligation or reserve ID, or empty for additional",
+    "uncertain": "Uncertain",
+    "confirmed": "Confirmed, as a bonus is uncertain unless confirmed",
+    "gross": "Gross",
+    "take_home_percent": "Take-home percent of a gross amount",
+    "price": "Price",
+    "down_payment": "Down payment",
+    "closing_costs": "Closing costs",
+    "loan_rate": "Loan APR, such as 6.5",
+    "loan_months": "Loan months",
+    "ownership_costs": "Ownership costs a month",
+    "payoff_loan": "The loan account, by name or ID",
+    "promote_account": "Account a promotion records it on, or empty",
+    "promote_match": "Description text a promotion matches, or empty",
 }
 BUTTONS = {
     "/review/reject": "Reject these pairs",
@@ -954,6 +1069,10 @@ BUTTONS = {
     "/obligation/covers-loan": "Link to the loan",
     "/obligation/covers-fund": "Link to the reserve",
     "/obligation/uncover": "Undo the link",
+    "/scenario/add": "Add the scenario",
+    "/scenario/undo": "Undo the scenario",
+    "/scenario/input-undo": "Undo this input",
+    **{path: "Add this input" for path in SCENARIO_INPUT_ROUTES},
 }
 
 
@@ -971,6 +1090,9 @@ def route_form(secret, path, hidden, *, choices=None, heading="") -> str:
         options = (choices or {}).get(field.name) or [(value, value) for value in field.choices]
         if field.kind in (writes.PAIR_LINES, writes.GROUP_LINES):
             control = f'<textarea name="{field.name}" rows="3" cols="80"></textarea>'
+        elif field.kind == writes.FLAG:
+            control = (f'<select name="{field.name}"><option value="">No</option>'
+                       f'<option value="{writes.FLAG_ON}">Yes</option></select>')
         elif options:
             listed = "".join(f'<option value="{escaped(value)}">{escaped(shown_as)}</option>'
                              for value, shown_as in options)

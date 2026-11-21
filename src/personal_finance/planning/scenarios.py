@@ -101,8 +101,8 @@ KIND_UNKNOWN = (
     "--kind must be income, bonus, expense, annual_expense, purchase, home_purchase, "
     "loan_payoff or borrowing. Nothing was changed."
 )
-OPTION_NOT_TAKEN = "{option} is not taken by a {kind} input. Nothing was changed."
-OPTION_REQUIRED = "a {kind} input needs {option}. Nothing was changed."
+OPTION_NOT_TAKEN = "{option} is not taken by an input of kind {kind}. Nothing was changed."
+OPTION_REQUIRED = "an input of kind {kind} needs {option}. Nothing was changed."
 AMOUNT_INVALID = "{option} must be an amount of zero or more, such as 250.00. Nothing was changed."
 TO_BEFORE_FROM = "--to must be no earlier than --from. Nothing was changed."
 ANNUAL_ONLY = "an annual_expense's --cadence is annual:MM-DD. Nothing was changed."
@@ -126,7 +126,8 @@ TAKE_HOME_RANGE = (
 )
 UNCERTAIN_AND_CONFIRMED = "give --uncertain or --confirmed, not both. Nothing was changed."
 REPLACED_WRONG_KIND = (
-    "a {kind} input replaces {expected} only, and {entry} is not one. Nothing was changed."
+    "an input of kind {kind} replaces {expected} only, and {entry} is not one. Nothing was "
+    "changed."
 )
 REPLACED_NOT_APPLYING = (
     "{entry} does not apply now: it is undone or superseded, so nothing can replace it. "

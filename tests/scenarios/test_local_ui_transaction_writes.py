@@ -28,6 +28,11 @@ ALLOWLIST = {
     "/transaction/tag-none", "/setting/buffer-set", "/setting/buffer-undo", "/account/liquidity-set",
     "/account/liquidity-undo", "/obligation/covers-loan", "/obligation/covers-fund",
     "/obligation/uncover",
+    # M18.2 (D-074 point 5).
+    "/scenario/add", "/scenario/undo", "/scenario/input-undo",
+    *(f"/scenario/input/{kind}" for kind in ("income", "bonus", "expense", "annual_expense",
+                                              "purchase", "home_purchase", "loan_payoff",
+                                              "borrowing")),
 }
 # Terminal only (D-073 point 2, and the M17.2 slice plan point 7): no route runs these.
 TERMINAL_ONLY = [

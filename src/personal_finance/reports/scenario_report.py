@@ -28,6 +28,7 @@ from personal_finance.planning.budgets import load_plans
 from personal_finance.planning.income_effects import SALARY, applying_sources
 from personal_finance.planning.liquidity import liquid_account_ids
 from personal_finance.planning.loans import format_rate, load_loan_terms
+from personal_finance.planning.net_worth import COUNTED
 from personal_finance.planning.obligation_effects import FIXED, applying_obligations
 from personal_finance.planning.projection import (
     DEFAULT_MONTHS,
@@ -90,7 +91,8 @@ def plan_for(conn: sqlite3.Connection, as_of: date) -> Plan:
     if buffer is None:
         missing.append("no checking buffer is set: the protected amount is 0")
     worth = net_worth(conn, text)
-    worth_cents = worth.total_cents if worth.valued else None
+    worth_cents = (worth.total_cents
+                   if any(valuation.how == COUNTED for valuation in worth.valued) else None)
     if worth_cents is None:
         missing.append("no account is valued: net worth is not projected")
 

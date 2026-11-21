@@ -16,6 +16,7 @@ import secrets
 import unicodedata
 from typing import NamedTuple
 
+from personal_finance.planning.scenarios import KIND_OPTIONS, KIND_REQUIRES, KINDS
 from personal_finance.reconcile.classification_effects import FINANCIAL_TYPES
 from personal_finance.reconcile.correction_effects import CORRECTABLE_FIELDS
 
@@ -51,6 +52,9 @@ VALUE_REFUSED = (
 ID, CHOICE, AMOUNT_KIND, DATE_KIND, MONTH_KIND, TEXT = (
     "id", "choice", "amount", "date", "month", "text")
 PAIR_LINES, GROUP_LINES = "pair_lines", "group_lines"
+# A switch the CLI takes alone, such as --uncertain: "yes" gives it, and empty leaves it out.
+FLAG = "flag"
+FLAG_ON = "yes"
 
 
 class Refusal(NamedTuple):
@@ -93,6 +97,34 @@ REVISION = Field("revision", ID, "--revision")
 BUFFER_KEY = Field("key", CHOICE, None, choices=("checking_buffer_cents",))
 SUPERSEDES = (Field("supersedes", ID, "--supersedes", required=False),
               Field("supersedes_revision", ID, "--supersedes-revision", required=False))
+
+# M18.2: each scenario input option's form field, named apart from the other routes' fields, and
+# its kind. Every option is a typed field the kind takes; the CLI refuses what the kind does not.
+SCENARIO_INPUT_FIELDS = {
+    "--amount": ("input_amount", AMOUNT_KIND), "--to": ("to_date", DATE_KIND),
+    "--cadence": ("cadence", TEXT), "--anchor": ("anchor", DATE_KIND),
+    "--replaces": ("replaces", ID), "--uncertain": ("uncertain", FLAG),
+    "--confirmed": ("confirmed", FLAG), "--gross": ("gross", FLAG),
+    "--take-home-percent": ("take_home_percent", AMOUNT_KIND),
+    "--price": ("price", AMOUNT_KIND), "--down-payment": ("down_payment", AMOUNT_KIND),
+    "--closing-costs": ("closing_costs", AMOUNT_KIND), "--loan-rate": ("loan_rate", TEXT),
+    "--loan-months": ("loan_months", ID), "--ownership-costs": ("ownership_costs", AMOUNT_KIND),
+    "--loan": ("payoff_loan", TEXT), "--account": ("promote_account", TEXT),
+    "--match": ("promote_match", TEXT),
+}
+
+
+def scenario_input_route(kind: str) -> "WriteRoute":
+    """scenario input add for one kind: the scenario and its input revision fixed by the page,
+    --from and every option the kind takes typed, and the kind itself a fixed option."""
+    typed = [Field("from_date", DATE_KIND, "--from")]
+    for option in sorted(KIND_OPTIONS[kind]):
+        name, field_kind = SCENARIO_INPUT_FIELDS[option]
+        typed.append(Field(name, field_kind, option, required=option in KIND_REQUIRES[kind]
+                           and field_kind != FLAG))
+    return WriteRoute(("scenario", "input", "add"), (target("scenario"), REVISION), tuple(typed),
+                      flags=(f"--kind={kind}",))
+
 
 # The allowlist (D-073 point 2), as built so far. Each route runs exactly one CLI command.
 WRITE_ROUTES = {
@@ -145,6 +177,15 @@ WRITE_ROUTES = {
         ("obligation", "covers"), (target("obligation"), REVISION),
         (Field("fund", ID, "--fund"),)),
     "/obligation/uncover": WriteRoute(("obligation", "uncover"), (target("obligation"), REVISION)),
+    # M18.2: scenarios, which change no ledger table (D-074 point 5).
+    "/scenario/add": WriteRoute(
+        ("scenario", "add"), (),
+        (Field("scenario_name", TEXT, "--name"),
+         Field("include_uncertain", FLAG, "--include-uncertain", required=False))),
+    "/scenario/undo": WriteRoute(("scenario", "undo"), (target("scenario"), REVISION)),
+    "/scenario/input-undo": WriteRoute(("scenario", "input", "undo"),
+                                       (target("scenario"), target("input"), REVISION)),
+    **{f"/scenario/input/{kind}": scenario_input_route(kind) for kind in KINDS},
 }
 
 
@@ -204,7 +245,8 @@ def decoded_form_part(part: bytes) -> str:
 
 def parsed_form(body: bytes, route: WriteRoute) -> Refusal | dict[str, str]:
     """Step 7: UTF-8, each field once, exactly the route's fields and the token, each value of
-    its field's kind. Point 1's limit of 50 fields is met by that: no route has more than ten."""
+    its field's kind. Point 1's limit of 50 fields is met by that: no route has more than
+    fifteen."""
     form = {}
     for piece in body.split(b"&") if body else []:
         raw_name, separator, raw_value = piece.partition(b"=")
@@ -252,6 +294,8 @@ def acceptable(field: Field, value: str) -> bool:
             value == value.strip())
     if field.kind in (PAIR_LINES, GROUP_LINES):
         return listed_ids(value, 2 if field.kind == PAIR_LINES else None) is not None
+    if field.kind == FLAG:
+        return value == FLAG_ON
     raise AssertionError(field.kind)
 
 
@@ -312,7 +356,9 @@ def command_words(path: str, form: dict[str, str], ledger_path) -> list[str]:
         value = form[field.name]
         if value == "" or field.option is None:
             continue
-        if field.kind in (PAIR_LINES, GROUP_LINES):
+        if field.kind == FLAG:
+            words.append(field.option)
+        elif field.kind in (PAIR_LINES, GROUP_LINES):
             for ids in listed_ids(value, 2 if field.kind == PAIR_LINES else None):
                 words += [field.option, *ids]
         else:

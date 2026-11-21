@@ -567,7 +567,10 @@ def project(plan: Plan, inputs: tuple[ScenarioInput, ...], as_of: date,
                                  completion.get(fund.fund_id), fund.fund_id in unmet,
                                  held[fund.fund_id]))
     without_target = [row.month for row in rows if plan.target_for(row.month) is None]
-    missing = plan.missing
+    missing = plan.missing + tuple(
+        f"loan payoff {input_.input_id}: its loan has no balance observed, so it is left out"
+        for input_ in inputs
+        if input_.kind == LOAN_PAYOFF and input_.loan_terms_id not in loan_by_terms)
     if without_target:
         missing += (f"no budget plan in effect for {len(without_target)} months, from "
                     f"{without_target[0]}: discretionary spending projects at 0",)
