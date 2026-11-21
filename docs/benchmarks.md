@@ -632,3 +632,21 @@ by category is summed from the monthly report's months rather than computed agai
 `income_and_spending` (0.50s), from 2.686s. What is left is the household comparison's full
 attribution pass; the remedies (a cheaper household total, or the comparison on its own page)
 are for the owner's decision.
+
+**Scenarios on the same shape (M18.3, XC2, D-074 point 8),** measured 2026-11-21 with
+`measure_reconciliation.py --scale --scenarios`, nothing else running. Output in
+`build/s18/bench_scenarios.txt`, ignored. `--safe-to-spend`'s shape, 104,100 transactions, with
+10 scenarios holding 40 inputs: every kind, replacements of a source, an obligation and a
+reserve, and a home purchase, which the shape asserts. Compare runs once untimed first, then each
+scenario at 24 months, three at 120, and the first scenario's promotion (3 entries) and its undo.
+
+| Operation | Time | Provisional target |
+|---|---|---|
+| `pf scenario compare`, 24 months, slowest of 10 (median) | 0.521s (0.511s) | Below 2.0s: met |
+| `pf scenario compare`, 120 months, slowest of 3 | 1.402s | Below 5.0s: met |
+| `pf scenario promote`, making 3 entries | 0.553s | Below 2.0s: met |
+| `pf scenario promotion undo` | 0.163s | Below 2.0s: met |
+
+**G9's stopping rule is not met.** The plan is read once, safe-to-spend's estimate included, and
+the pure projection runs twice over it.
+

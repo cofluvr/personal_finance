@@ -82,7 +82,10 @@ Last updated: 2026-11-20. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M17.2: the transaction page and its writes, the sections and planning writes | Built on 2026-11-20, awaiting the owner's review |
 | M17.3: migration 0033, tags, search, the eight visuals | Built on 2026-11-20, awaiting the owner's review. The real-browser CSP check is not done |
 | M17.4: CSV export, `--ui` | Built on 2026-11-20, awaiting the owner's review |
-| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 to M16 accepted, M17 built for review |
+| M18.1: migration 0034, scenarios and their inputs, `sc1` | Built on 2026-11-21 (D-074, "How M18 was implemented"), awaiting the owner's review |
+| M18.2: the projection, `scenario compare`, the scenario pages and forms | Built on 2026-11-21, awaiting the owner's review |
+| M18.3: promotion and its undo, `sp1`, `--scenarios` | Built on 2026-11-21, awaiting the owner's review |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 to M16 accepted, M17 and M18 built for review |
 
 ## What exists
 

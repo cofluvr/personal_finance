@@ -878,6 +878,37 @@ Script of any kind, PDF or image export, the UI on any address but loopback, sep
 decision history pages, browser downloads, and for now the browser writes M17.2's slice plan
 point 7 leaves in the terminal.
 
+## M18 plan
+
+Approved by the owner on 2026-11-10 as D-074, with A to G, in
+[decisions-m12-m21.md](decisions-m12-m21.md). Its slice plans were written under D-074 before any
+of it was built, and approved by the owner's notes of 2026-11-20; departures are in its "How M18
+was implemented". No security control change: its browser forms run through M17's pipeline.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M18.1 | Migration 0034, scenarios and inputs of every kind, `target_changed`, `sc1` | Built, for review |
+| M18.2 | The pure projection, `scenario compare`, the scenario pages and forms | Built, for review |
+| M18.3 | Promotion and its undo, `sp1`, `--scenarios` | Built, for review |
+
+### M18 acceptance criteria
+
+| ID | Test |
+|---|---|
+| XA1 | Migration 0034 meets G10. Each kind and distinction is stored and refused as point 2: gross without a percentage, a replacement of the wrong kind, a `to` before `from`, a stale `sc1` |
+| XA2 | A replaced entry undone or superseded makes its input `target_changed`, left out and disclosed |
+| XB1 | A scenario with no inputs equals the baseline byte for byte. Replacing a salary counts only the new amount in range. A look-alike addition counts and is flagged |
+| XB2 | Uncertain inputs count only with `--include-uncertain`. Discretionary spending projects at target. Every output of point 3 is present, absolute and as a difference, with assumptions and missing inputs listed |
+| XB3 | A 12-month projection is computed by hand to the cent, including a home purchase's parts. Scenario assets never reach actual net worth |
+| XB4 | `scenario compare` and its page agree line for line. Each form follows M17's pipeline, and a `GET` writes nothing |
+| XC1 | Promotion creates exactly the mapped entries in one transaction, is refused with a stale `sp1` or a changed replaced entry, and lists what is not promotable. Undo restores the plan's every token, and refuses after a later supersession |
+| XC2 | `evidence_digest` is unchanged by every scenario command. `--scenarios` records its figures under G9. Every earlier criterion still passes |
+
+### Not in M18
+
+Monte Carlo or probability, inflation or market returns, tax calculation, stored results,
+scenarios in actual reports, scenarios from the phone, and promoting from the browser.
+
 ## Backlog benchmarks
 
 Not scheduled, and not part of A39 acceptance.
@@ -891,7 +922,4 @@ Not scheduled, and not part of A39 acceptance.
 
 Recorded for later planning. None of this is in M1 scope.
 
-- **Financial scenarios:** a local UI for named scenarios with dated income and
-  expense changes, compared with the baseline after the user requests
-  recalculation. Inputs, comparison outputs and safeguards are in
-  [PRD-backend.md](PRD-backend.md) §15, "Scenario Inputs and Comparison".
+- **Financial scenarios:** built in M18 (D-074), above.

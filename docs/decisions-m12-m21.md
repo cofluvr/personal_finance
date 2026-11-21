@@ -2742,7 +2742,7 @@ Departures and choices, each with its reason:
 
 ---
 
-## D-074 M18 plan: financial scenarios — Approved
+## D-074 M18 plan: financial scenarios — Approved, built for review
 
 M18 meets PRD §15:
 
@@ -2977,6 +2977,64 @@ point 6, through the planning commands' own functions in one transaction; `--sce
 | XB4 | `scenario compare` and its page agree line for line. Each form follows M17's pipeline, and a `GET` writes nothing |
 | XC1 | Promotion creates exactly the mapped entries in one transaction, is refused with a stale `sp1` or a changed replaced entry, and lists what is not promotable. Undo restores the plan's every token, and refuses after a later supersession |
 | XC2 | `evidence_digest` is unchanged by every scenario command. `--scenarios` records its figures under G9. Every earlier criterion still passes |
+
+### How M18 was implemented
+
+Built on 2026-11-21 on the owner's notes of 2026-11-20 (continue through M18 and M19 on the
+lead engineer's choices), without a stop between its slices. Departures and choices, each with
+its reason:
+
+- **Kind options as built (M18.1).** A home purchase's amount is its `--price`. A loan payoff
+  names its loan by `--loan` and stores that account's terms, which make it `target_changed` when
+  undone, as a replacement's entry does. An additional income or expense may name `--account`
+  and `--match`, needed only to promote it; a replacement takes neither. A recurring input takes
+  any M12 cadence: weekly, biweekly, quarterly and every-N-months need `--anchor`, and monthly,
+  semimonthly and annual name their own days. Amounts may be 0, so a replacement can model a job
+  ending.
+- **The projection's model (M18.2, point 3).** One pure `project(plan, inputs, as_of, months)`
+  in `planning/projection.py`; `reports/scenario_report.py` reads the plan once. Each month from
+  `as_of`'s, counting in that month only what falls after `as_of`, since the starting balance
+  holds the rest:
+  - **Liquidity** starts at M16's estimate less what funds hold on liquidity accounts.
+  - **Income:** salary sources by their nominal dates. Side sources are left out, so side income
+    comes only from confirmed inputs.
+  - **Outflows:** fixed obligations at their planned amounts. Discretionary obligations are
+    within the budget target, and an obligation covering a reserve is the reserve's purchase, so
+    neither counts again. Discretionary spending is at the target, and in `as_of`'s month what is
+    left of it. The tax reserve accrues on tax-eligible salary.
+  - **Loans:** each projected by M15's monthly interest from its latest observation, its payment
+    counted once where an obligation covers it.
+  - **Funds:** contributions follow D-070's formulas in priority order, as far as liquidity above
+    the protected amount (the checking buffer) allows. A reserve pays its target from the fund on
+    its due date.
+  - **Net worth:** actual net worth plus the change in liquid money less the change in debt,
+    scenario assets apart.
+  - **Allowances:** the target's daily and weekly, capped by the month's liquidity surplus.
+  - **Scenario loans** take the level payment over their months, rounded up.
+
+  Every assumption and missing input is printed.
+- **A FLAG field kind (M18.2).** The forms need the CLI's switches (`--uncertain`, `--gross`,
+  `--confirmed`, `--include-uncertain`), and the pipeline had only valued fields. A FLAG field
+  takes "yes", which writes the option alone, or empty. No check is loosened. Promotion stays in
+  the terminal.
+- **Promotion undo withdraws terms rows (M18.3, against G2's "never undone one by one").** A
+  replacement is promoted as a new terms row, from `--from` on the replaced entry, then the
+  entry's own terms again from the day after `--to`. Undoing the promotion withdraws those rows
+  together: the income, obligation and fund terms loaders leave out rows of an undone
+  promotion. That gives back every pre-existing entry's show and token byte for byte, which XC1
+  asks. With no promotion the loaders read as before. A withdrawn row keeps its date (the terms
+  tables' `UNIQUE`), so promoting again on that date is refused clearly.
+- **Not promotable, beyond point 6's list (M18.3).**
+  - `loan_payoff`: the payoff plan holds a monthly extra, not a one-time payment.
+  - A bonus: no planning entry holds one-time income.
+  - An addition with `--to`: no source, obligation or reserve has an end date.
+  - An addition without `--account` and `--match`.
+
+  Promoted income is salary on a salary cadence, else side; a promoted expense is fixed.
+- **One active promotion per scenario.** Promoting again needs the first undone.
+- **Breaks:** M18.1 25 (25 caught); M18.2 25 (19 caught, 5 gaps closed, 1 that did not apply
+  until its text was corrected, then caught); M18.3 23 (18 caught, 5 gaps closed). Logs under
+  `build/s18/breaks/`, ignored.
 
 ---
 
