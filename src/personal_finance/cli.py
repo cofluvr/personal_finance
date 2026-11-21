@@ -144,6 +144,22 @@ from personal_finance.planning.coverage import (
     target_words,
     uncover,
 )
+from personal_finance.planning.projection import LONGEST_MONTHS
+from personal_finance.planning.scenarios import InputRequest as ScenarioInputRequest
+from personal_finance.planning.scenarios import add_input as add_scenario_input
+from personal_finance.planning.scenarios import (
+    add_scenario,
+    find_scenario,
+    load_scenarios,
+    undo_scenario,
+)
+from personal_finance.planning.scenarios import undo_input as undo_scenario_input
+from personal_finance.reports.scenario_report import (
+    compare,
+    compare_lines,
+    scenario_lines,
+    scenarios_lines,
+)
 from personal_finance.planning.liquidity import (
     LIQUID_ACCOUNT_TYPES,
     designate,
@@ -1112,6 +1128,8 @@ def build_parser() -> argparse.ArgumentParser:
     obligations_command = command("obligations", commands, handler=run_obligations,
                                   help="list obligations, and spending by class")
     obligations_command.add_argument("--account", help="only this account's obligations")
+
+    scenario_parsers(commands, command)
 
     household = commands.add_parser(
         "household", help="name household members, the household share and account defaults")
@@ -5750,6 +5768,159 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:
         print(f"Error: {explained_error(error)}", file=sys.stderr)
         return 2
+
+
+def scenario_parsers(commands, command) -> None:
+    """pf scenarios and pf scenario (D-074)."""
+    command("scenarios", commands, handler=run_scenarios,
+            help="list scenarios, with how many inputs each counts")
+    scenario = commands.add_parser(
+        "scenario", help="model alternatives to the active plan, compare them, and promote one")
+    scenario_commands = scenario.add_subparsers(dest="scenario_command", required=True)
+    scenario_add = command("add", scenario_commands, handler=run_scenario_add,
+                           help="record a scenario with no inputs")
+    scenario_add.add_argument("--name", required=True, help="the scenario's name")
+    scenario_add.add_argument("--include-uncertain", dest="include_uncertain",
+                              action="store_true",
+                              help="count uncertain inputs too; they are left out by default")
+    scenario_show = command("show", scenario_commands, handler=run_scenario_show,
+                            help="show a scenario, its inputs and its revisions")
+    scenario_show.add_argument("scenario_id", help="a scenario ID from scenarios")
+    scenario_compare = command("compare", scenario_commands, handler=run_scenario_compare,
+                               help="project the baseline and the scenario month by month, "
+                                    "writing nothing")
+    scenario_compare.add_argument("scenario_id", help="a scenario ID from scenarios")
+    scenario_compare.add_argument("--months", default="24",
+                                  help="the horizon, 1 to 120 months, 24 by default")
+    scenario_compare.add_argument("--as-of", help=TODAY_HELP)
+    scenario_undo = command("undo", scenario_commands, handler=run_scenario_undo,
+                            help="stop a scenario applying, keeping it on record")
+    scenario_undo.add_argument("scenario_id", help="a scenario ID from scenarios")
+    scenario_undo.add_argument("--revision", required=True,
+                               help="the undo revision from scenario show")
+    scenario_input = scenario_commands.add_parser("input", help="add or undo a scenario's inputs")
+    input_commands = scenario_input.add_subparsers(dest="scenario_input_command", required=True)
+    input_add = command("add", input_commands, handler=run_scenario_input_add,
+                        help="add a dated input to a scenario")
+    input_add.add_argument("scenario_id", help="a scenario ID from scenarios")
+    input_add.add_argument("--kind", required=True,
+                           help="income, bonus, expense, annual_expense, purchase, home_purchase, "
+                                "loan_payoff or borrowing")
+    input_add.add_argument("--from", dest="from_date", required=True,
+                           help="the first day it applies, YYYY-MM-DD")
+    input_add.add_argument("--to", dest="to_date", help="the last day it applies, inclusive")
+    input_add.add_argument("--amount", help="the amount, money out or in by kind, such as 250.00")
+    input_add.add_argument("--cadence", help="monthly:D, biweekly, annual:MM-DD or another M12 "
+                                             "cadence; one-time kinds take none")
+    input_add.add_argument("--anchor", help="a weekly, biweekly, quarterly or every-N-months "
+                                            "cadence's date")
+    input_add.add_argument("--replaces", help="the source, obligation or reserve ID it replaces "
+                                              "over its dates")
+    input_add.add_argument("--uncertain", action="store_true",
+                           help="count it only in a scenario including uncertain inputs")
+    input_add.add_argument("--confirmed", action="store_true",
+                           help="a bonus is uncertain unless confirmed")
+    input_add.add_argument("--gross", action="store_true",
+                           help="the amount is gross, received at --take-home-percent")
+    input_add.add_argument("--take-home-percent", dest="take_home_percent",
+                           help="the share of a gross amount received, 1 to 100")
+    input_add.add_argument("--price", help="a home purchase's price")
+    input_add.add_argument("--down-payment", dest="down_payment",
+                           help="a home purchase's down payment")
+    input_add.add_argument("--closing-costs", dest="closing_costs",
+                           help="a home purchase's closing costs")
+    input_add.add_argument("--loan-rate", dest="loan_rate", help="the loan's APR, such as 6.5")
+    input_add.add_argument("--loan-months", dest="loan_months", help="the loan's months, 1 to 600")
+    input_add.add_argument("--ownership-costs", dest="ownership_costs",
+                           help="a home's ownership costs a month")
+    input_add.add_argument("--loan", help="the loan account a payoff pays, by name or ID")
+    input_add.add_argument("--account", help="the account a promoted source or obligation is on")
+    input_add.add_argument("--match", help="the description text a promoted source or "
+                                           "obligation matches")
+    input_add.add_argument("--revision", required=True,
+                           help="the input revision from scenario show")
+    input_undo = command("undo", input_commands, handler=run_scenario_input_undo,
+                         help="stop an input counting, keeping it on record")
+    input_undo.add_argument("scenario_id", help="a scenario ID from scenarios")
+    input_undo.add_argument("input_id", help="an input ID from scenario show")
+    input_undo.add_argument("--revision", required=True,
+                            help="the input's undo revision from scenario show")
+
+
+def run_scenarios(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    print_report(scenarios_lines(load_scenarios(conn)))
+    return 0
+
+
+def run_scenario_add(args) -> int:
+    conn = open_ledger(args.db)
+    scenario_id = add_scenario(conn, args.name, args.include_uncertain)
+    print(f"Scenario {scenario_id} recorded: {shown(args.name)}, with no inputs")
+    print("Add inputs with scenario input add, using the input revision from scenario show.")
+    return 0
+
+
+def scenario_shown(conn, scenario_id: str):
+    try:
+        return find_scenario(conn, scenario_id)
+    except DecisionRefused as refused:
+        raise CommandError(str(refused).replace(" Nothing was changed.", "")) from None
+
+
+def run_scenario_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    print_report(scenario_lines(scenario_shown(conn, args.scenario_id)))
+    return 0
+
+
+SCENARIO_MONTHS_INVALID = "--months must be a whole number from 1 to 120."
+
+
+def scenario_compare_lines_of(args) -> ReportLines:
+    """What scenario compare prints, which its page renders too."""
+    if not args.months.isdigit() or not 1 <= int(args.months) <= LONGEST_MONTHS:
+        raise CommandError(SCENARIO_MONTHS_INVALID)
+    conn, as_of = safe_to_spend_as_of(args)
+    return compare_lines(compare(conn, scenario_shown(conn, args.scenario_id), as_of,
+                                 int(args.months)))
+
+
+def run_scenario_compare(args) -> int:
+    print_report(scenario_compare_lines_of(args))
+    return 0
+
+
+def run_scenario_undo(args) -> int:
+    conn = open_ledger(args.db)
+    undo_scenario(conn, args.scenario_id, args.revision)
+    print(f"Scenario {args.scenario_id} undone. It stays on record.")
+    return 0
+
+
+def run_scenario_input_add(args) -> int:
+    conn = open_ledger(args.db)
+    request = ScenarioInputRequest(
+        kind=args.kind, from_date=args.from_date, amount=args.amount, to_date=args.to_date,
+        cadence=args.cadence, anchor=args.anchor, replaces=args.replaces,
+        uncertain=args.uncertain, confirmed=args.confirmed, gross=args.gross,
+        take_home_percent=args.take_home_percent, price=args.price,
+        down_payment=args.down_payment, closing_costs=args.closing_costs,
+        loan_rate=args.loan_rate, loan_months=args.loan_months,
+        ownership_costs=args.ownership_costs,
+        loan_account_id=None if args.loan is None else find_account(conn, args.loan),
+        account_id=None if args.account is None else find_account(conn, args.account),
+        match=args.match)
+    input_id = add_scenario_input(conn, args.scenario_id, request, args.revision)
+    print(f"Input {input_id} recorded on scenario {args.scenario_id}: {args.kind}")
+    return 0
+
+
+def run_scenario_input_undo(args) -> int:
+    conn = open_ledger(args.db)
+    undo_scenario_input(conn, args.scenario_id, args.input_id, args.revision)
+    print(f"Input {args.input_id} undone. It stays on record.")
+    return 0
 
 
 def explained_error(error: Exception) -> str:

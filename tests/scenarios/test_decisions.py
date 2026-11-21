@@ -143,8 +143,21 @@ TAG_TABLES = ("transaction_tag", "tag_statement_event", "tag_statement_record", 
               "tag")
 
 
+# Created by 0034, and empty until a scenario is added (D-074).
+SCENARIO_TABLES = ("scenario_promotion_entry", "scenario_promotion_event", "scenario_promotion",
+                   "scenario_input_event", "scenario_input", "scenario_event", "scenario")
+
+
+def drop_scenario_tables(conn) -> None:
+    """Undo 0034 on a ledger at the latest version, before setting it back further."""
+    for table in SCENARIO_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
 def drop_tag_tables(conn) -> None:
-    """Undo 0033 on a ledger at the latest version, before setting it back further."""
+    """Undo 0034 and 0033 on a ledger at the latest version, before setting it back further."""
+    drop_scenario_tables(conn)
     for table in TAG_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
@@ -315,6 +328,8 @@ class Ledger:
             position = 3
         if words[0] == "obligation":
             position = 3 if words[1] == "dismissal" else 2
+        if words[0] == "scenario":
+            position = 3 if words[1] == "input" else 2
         if words[0] == "household":
             position = 2 if words[1] == "members" else 3
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],
