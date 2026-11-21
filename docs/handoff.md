@@ -63,8 +63,8 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `main` holds everything through M9 at `19ee858`. M10 to M19 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
-| Latest commit | Run `git log -1`. M17 from `57a7532` to `43f29eb`; M18 from `2dad560` to `38f2f6f`; M19 from `c1736c6` to this handoff's commit. Earlier commits are in the archive |
-| Latest gating run | GATING_RUN |
+| Latest commit | Run `git log -1`. M17 from `57a7532` to `43f29eb`; M18 from `2dad560` to `38f2f6f`; M19 from `c1736c6` to `1075cb6`, then this handoff's commit. Earlier commits are in the archive |
+| Latest gating run | The full suite, slow tests included, on M19 with its records: 4,217 passed in 0:19:20, exit code 0, chained to `1075cb6` |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
