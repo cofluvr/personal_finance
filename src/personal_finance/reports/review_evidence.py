@@ -23,6 +23,7 @@ from personal_finance.reconcile.classification_effects import load_active_classi
 from personal_finance.reconcile.correction_effects import load_active_corrections
 from personal_finance.reconcile.allocation_effects import load_active_allocations
 from personal_finance.reconcile.breakdown_effects import load_active_breakdowns
+from personal_finance.reconcile.tag_effects import load_active_tag_statements, tag_ids_of
 from personal_finance.reconcile.breakdown_effects import parsed as parsed_breakdown
 from personal_finance.reconcile.consumption_effects import load_active_consumptions
 from personal_finance.reconcile.household_effects import (
@@ -38,14 +39,14 @@ from personal_finance.reconcile.transfer_effects import INFLOW, OUTFLOW
 # (D-051), version 7 classifications (D-053), version 8 transfer matches (D-054), version 9
 # one-sided transfers (D-055), version 10 categorizations (D-063), version 11 the category rules'
 # outcome (D-064), version 12 allocations (D-065), version 13 fund consumptions (D-070), and
-# version 14 loan payment breakdowns (D-071).
-REVISION_VERSION = 14
+# version 14 loan payment breakdowns (D-071), and version 15 tag statements (D-073 point 5).
+REVISION_VERSION = 15
 # The same, for one transaction's evidence, which a separation, correction, classification,
 # transfer match, one-sided transfer or categorization names (D-047, D-049, D-050, D-051, D-053,
 # D-054, D-055, D-063, D-065). Version 8 adds categorizations, version 9 the category rules' outcome
-# (D-064), version 10 allocations (D-065), version 11 fund consumptions (D-070), and version 12
-# loan payment breakdowns (D-071).
-TRANSACTION_REVISION_VERSION = 12
+# (D-064), version 10 allocations (D-065), version 11 fund consumptions (D-070), version 12
+# loan payment breakdowns (D-071), and version 13 tag statements (D-073 point 5).
+TRANSACTION_REVISION_VERSION = 13
 
 # Fields left out of a revision. Random IDs and names say where evidence is stored or how
 # it is labelled, not what it says. Records are identified by document hash and row
@@ -57,13 +58,15 @@ IMMATERIAL_FIELDS = frozenset(
     {"issue_id", "transaction_id", "record_id", "file_name", "account_stale", "account_id",
      "account_name", "decision_id", "correction_id", "classification_id", "match_id",
      "counterpart_transaction_id", "one_sided_transfer_id", "categorization_id", "rule_id",
-     "household", "allocation_id", "recurring", "consumption_id", "breakdown_id"}
+     "household", "allocation_id", "recurring", "consumption_id", "breakdown_id",
+     "tag_statement_id"}
 )
 # Fields left out while empty, so that evidence holding none keeps the digest it had before they
 # existed (D-049).
 OMITTED_WHILE_EMPTY = frozenset({"corrections", "completion", "declared", "classifications",
                                  "transfers", "one_sided_transfers", "categorizations",
-                                 "category_rules", "allocations", "consumptions", "breakdowns"})
+                                 "category_rules", "allocations", "consumptions", "breakdowns",
+                                 "tags"})
 
 
 @dataclass(frozen=True)
@@ -192,6 +195,18 @@ class ConsumptionEvidence:
 
 
 @dataclass(frozen=True)
+class TagEvidence:
+    """An active tag statement binding a record of one transaction (D-073 point 5)."""
+
+    tag_statement_id: str
+    # The tags' names, in order. Empty for a statement that the transaction has none.
+    tags: tuple[str, ...]
+    # The outcome on this transaction: applied, conflict or basis_changed.
+    state: str
+    bound_records: tuple[DecidedRecord, ...]
+
+
+@dataclass(frozen=True)
 class BreakdownEvidence:
     """An active loan payment breakdown binding a record of one transaction (D-071 point 7)."""
 
@@ -274,6 +289,7 @@ class TransactionEvidence:
     household: HouseholdEvidence | None = None
     consumptions: tuple[ConsumptionEvidence, ...] = ()
     breakdowns: tuple[BreakdownEvidence, ...] = ()
+    tags: tuple[TagEvidence, ...] = ()
     # Income sources and obligations reaching it. Joins no token: a source or obligation binds no
     # records, and its own in1 or ob1 covers what it reaches (D-068 point 7).
     recurring: tuple["RecurringEvidence", ...] = ()
@@ -536,7 +552,8 @@ def load_merge_evidence(conn: sqlite3.Connection, transaction_id: str) -> MergeE
                            _household_by_transaction(conn, linked_by_transaction),
                            _recurring_by_transaction(conn, linked_by_transaction),
                            _consumptions_by_transaction(conn, linked_by_transaction),
-                           _breakdowns_by_transaction(conn, linked_by_transaction)),
+                           _breakdowns_by_transaction(conn, linked_by_transaction),
+                           _tags_by_transaction(conn, linked_by_transaction)),
         _documents(conn, account_id, documents),
         account_id in stale_accounts(conn, DEFAULT_RULES, account_id),
         account_id,
@@ -631,13 +648,14 @@ def _transactions(conn, issue_id, linked, corrections_by_transaction,
     recurring_by_transaction = _recurring_by_transaction(conn, linked)
     consumptions_by_transaction = _consumptions_by_transaction(conn, linked)
     breakdowns_by_transaction = _breakdowns_by_transaction(conn, linked)
+    tags_by_transaction = _tags_by_transaction(conn, linked)
     entries = [
         _transaction_entry(row, linked, corrections_by_transaction, classifications_by_transaction,
                            transfers_by_transaction, one_sided_by_transaction,
                            categorizations_by_transaction, category_rules_by_transaction,
                            allocations_by_transaction, household_by_transaction,
                            recurring_by_transaction, consumptions_by_transaction,
-                           breakdowns_by_transaction)
+                           breakdowns_by_transaction, tags_by_transaction)
         for row in conn.execute(
             _TRANSACTION + """
             JOIN review_issue_subject subject ON subject.transaction_id = entry.id
@@ -653,7 +671,7 @@ def _transaction_entry(row, linked, corrections_by_transaction, classifications_
                        categorizations_by_transaction, category_rules_by_transaction,
                        allocations_by_transaction, household_by_transaction,
                        recurring_by_transaction, consumptions_by_transaction,
-                       breakdowns_by_transaction) -> TransactionEvidence:
+                       breakdowns_by_transaction, tags_by_transaction) -> TransactionEvidence:
     transaction_id, *values, primary_id = row
     records = tuple(sorted(linked.get(transaction_id, ()), key=_record_key))
     primary = next(
@@ -670,6 +688,7 @@ def _transaction_entry(row, linked, corrections_by_transaction, classifications_
                                household_by_transaction.get(transaction_id),
                                consumptions_by_transaction.get(transaction_id, ()),
                                breakdowns_by_transaction.get(transaction_id, ()),
+                               tags_by_transaction.get(transaction_id, ()),
                                recurring_by_transaction.get(transaction_id, ()))
 
 
@@ -783,6 +802,46 @@ def _breakdowns_by_transaction(conn, linked) -> dict[str, tuple]:
                 touching, key=lambda breakdown: (
                     breakdown.interest_cents, breakdown.fees_cents,
                     [_decided_key(record) for record in breakdown.bound_records],
+                ),
+            ))
+    return found
+
+
+def _tags_by_transaction(conn, linked) -> dict[str, tuple]:
+    """Active tag statements binding each transaction's records, with the outcome there, as
+    _breakdowns_by_transaction finds breakdowns."""
+    if not linked:
+        return {}
+    (account_id,) = {account for (account,) in conn.execute(
+        "SELECT account_id FROM ledger_transaction WHERE id IN (SELECT value FROM json_each(?))",
+        (json.dumps(sorted(linked)),))}
+    active_statements = load_active_tag_statements(conn, account_id)
+    if not active_statements:
+        return {}
+    name_by_tag = dict(conn.execute("SELECT id, name FROM tag"))
+    state_by_transaction = dict(conn.execute(
+        """SELECT derived.transaction_id, derived.state FROM transaction_tag derived
+           JOIN ledger_transaction entry ON entry.id = derived.transaction_id
+           WHERE entry.account_id = ?""",
+        (account_id,),
+    ))
+    found = {}
+    for transaction_id, records in linked.items():
+        record_ids = {record.record_id for record in records}
+        touching = [
+            TagEvidence(
+                statement.correction_id,
+                tuple(sorted(name_by_tag[tag_id] for tag_id in tag_ids_of(
+                    statement.corrected_value))),
+                state_by_transaction[transaction_id],
+                _decided_records(conn, statement.bound_record_ids),
+            )
+            for statement in active_statements if statement.bound_record_ids & record_ids
+        ]
+        if touching:
+            found[transaction_id] = tuple(sorted(
+                touching, key=lambda statement: (
+                    statement.tags, [_decided_key(record) for record in statement.bound_records],
                 ),
             ))
     return found

@@ -891,6 +891,7 @@ def build_rich_ledger(ledger, *, checking_rows, decision, match, one_sided, corr
     build_budgets(ledger)
     build_funds(ledger)
     build_safe_to_spend_inputs(ledger)
+    build_tags(ledger)
 
     items_before = set(ledger.items())
     ledger.card("p1.csv", CAFE, extra=FIRST_HALF, account="S")
@@ -1158,6 +1159,38 @@ def build_safe_to_spend_inputs(ledger):
     code, _, err = ledger.run(
         "setting", "set", "checking_buffer_cents", "400.00", "--revision",
         budget_token(ledger.run("setting", "show")[1].split("Setting checking_buffer_cents")[1]))
+    assert code == 0, err
+
+
+def build_tags(ledger):
+    """Two tags, a transaction tagged with both and then superseded with one, and another said
+    to have none and then undone (D-073 point 5)."""
+    for name in ("Trip", "Work"):
+        assert ledger.run("tag", "add", name)[0] == 0
+    transactions = re.findall(r"^([0-9a-f-]{36})  ", ledger.run("transactions")[1], re.MULTILINE)
+
+    def shown(transaction):
+        return ledger.run("review", "transaction", "show", transaction)[1]
+
+    def tag(transaction, *words):
+        out = shown(transaction)
+        account = re.search(r"^  Account: .* \((\S+)\)$", out, re.MULTILINE)[1]
+        code, out, err = ledger.run("review", "tag", transaction, "--account", account,
+                                    "--revision", re.search(r"^  Revision: (\S+)$", out,
+                                                            re.MULTILINE)[1], *words)
+        assert code == 0, err
+        return account, re.search(r"Tag statement (\S+) recorded", out)[1]
+
+    def tagging_token(statement):
+        return re.search(r"Revision: (tg1-[0-9a-f]{16})",
+                         ledger.run("review", "tagging", "show", statement)[1])[1]
+
+    _, first = tag(transactions[0], "--tags", "Trip,Work")
+    tag(transactions[0], "--tags", "Trip", "--supersedes", first, "--supersedes-revision",
+        tagging_token(first))
+    account, none = tag(transactions[1], "--none")
+    code, _, err = ledger.run("review", "tagging", "undo", none, "--account", account,
+                              "--revision", tagging_token(none))
     assert code == 0, err
 
 

@@ -111,7 +111,7 @@ class TestBreakdown:  # LC1
         refuse(lambda: ledger.break_down(ledger.payment, "0.00"), AMOUNT_INVALID)
         refuse(lambda: ledger.break_down(ledger.payment, "-5.00"), AMOUNT_INVALID)
         refuse(lambda: ledger.break_down(ledger.payment, "10.00", "-5.00"), AMOUNT_INVALID)
-        refuse(lambda: ledger.break_down(ledger.payment, "5", revision="t12-0000000000000000"),
+        refuse(lambda: ledger.break_down(ledger.payment, "5", revision="t13-0000000000000000"),
                STALE_TRANSACTION_REVISION)
         unconfirmed = loan_payment(ledger, "p2.csv", "2026-04-05", confirm=False)
         refuse(lambda: ledger.break_down(unconfirmed, "5.00"), NOT_A_LOAN_PAYMENT)
@@ -232,9 +232,9 @@ class TestWithout:  # LC3, G6 point 4
         assert (ledger.shown(), ledger.transaction_revision(ledger.payment)) == before
 
     def test_the_versions_are_pinned(self):
-        assert review_evidence.REVISION_VERSION == 14
-        assert review_evidence.TRANSACTION_REVISION_VERSION == 12
-        assert decision_evidence.DECISION_REVISION_VERSION == 11
+        assert review_evidence.REVISION_VERSION == 15
+        assert review_evidence.TRANSACTION_REVISION_VERSION == 13
+        assert decision_evidence.DECISION_REVISION_VERSION == 12
         assert correction_evidence.CORRECTION_REVISION_VERSION == 7
         assert breakdown_evidence.BREAKDOWN_REVISION_VERSION == 1
 

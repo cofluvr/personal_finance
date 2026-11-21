@@ -309,7 +309,7 @@ class Ledger:
             position = 3
         if words[0] == "income":
             position = 3 if words[1] == "source" else 2
-        if words[0] in ("setting", "budget", "fund", "loan"):
+        if words[0] in ("setting", "budget", "fund", "loan", "tag"):
             position = 2
         if words[:2] in (["loan", "terms"], ["loan", "plan"]):
             position = 3
@@ -322,6 +322,7 @@ class Ledger:
                          ["review", "coverage"], ["review", "classification"],
                          ["review", "transfer"], ["review", "categorization"],
                          ["review", "allocation"], ["review", "consumption"],
+                         ["review", "tagging"],
                          ["account", "liquidity"]):
             position = 3
         words[position:position] = ["--db", self.db]
@@ -362,7 +363,7 @@ class Ledger:
         return out
 
     def revision(self, item):
-        return re.search(r"Revision: (r14-[0-9a-f]{16})", self.show(item))[1]
+        return re.search(r"Revision: (r15-[0-9a-f]{16})", self.show(item))[1]
 
     def transactions(self, item):
         return re.findall(r"^Transaction \d+ of \d+: (\S+)", self.show(item), re.MULTILINE)
@@ -385,7 +386,7 @@ class Ledger:
 
     def decision_revision(self, decision):
         out = self.run("review", "decision", "show", decision)[1]
-        return re.search(r"Revision: (d11-[0-9a-f]{16})", out)[1]
+        return re.search(r"Revision: (d12-[0-9a-f]{16})", out)[1]
 
     def undo(self, decision, revision=None, account="A"):
         return self.run("review", "undo", decision, "--account", account,
@@ -1247,7 +1248,7 @@ class TestUndoToken:  # S21
 
     def test_the_token_has_the_documented_form(self, ledger):
         _, token = self.decided(ledger)
-        assert re.fullmatch(r"d11-[0-9a-f]{16}", token)
+        assert re.fullmatch(r"d12-[0-9a-f]{16}", token)
 
 
 class TestConstraintsApplied:

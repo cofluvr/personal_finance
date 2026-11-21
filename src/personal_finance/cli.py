@@ -211,6 +211,8 @@ from personal_finance.reconcile.allocation_effects import AMOUNT_DIFFERS
 from personal_finance.reconcile.allocations import Stated, allocate_transaction, undo_allocation
 from personal_finance.reconcile.breakdown_effects import parsed as parsed_breakdown
 from personal_finance.reconcile.breakdowns import break_down, undo_breakdown
+from personal_finance.reconcile.tags import add_tag, list_tags, tag_transaction, undo_tagging
+from personal_finance.reports.tag_evidence import load_tagging, tagging_undo_outlook
 from personal_finance.reconcile.consumptions import consume_transaction, undo_consumption
 from personal_finance.reconcile.household import (
     add_member,
@@ -613,6 +615,13 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--account", required=True, help="the account's name or ID")
         sub.add_argument("--revision", required=True,
                          help="the account's revision from account liquidity show")
+
+    tag = commands.add_parser("tag", help="name the tags a transaction can carry")
+    tag_commands = tag.add_subparsers(dest="tag_command", required=True)
+    tag_add = command("add", tag_commands, handler=run_tag_add,
+                      help="add a tag, a free label that enters no total")
+    tag_add.add_argument("name", help="the tag's name, compared exactly, without commas")
+    command("tags", handler=run_tags, help="list the tags")
 
     category = commands.add_parser("category", help="name the categories spending can take")
     category_commands = category.add_subparsers(dest="category_command", required=True)
@@ -1557,6 +1566,39 @@ def build_parser() -> argparse.ArgumentParser:
     breakdown_undo.add_argument("--account", required=True, help="account name or ID")
     breakdown_undo.add_argument("--revision", required=True,
                                 help="the revision from review breakdown-show")
+
+    review_tag = command(
+        "tag", review_commands, handler=run_review_tag,
+        help="state a transaction's whole set of tags, or that it has none",
+    )
+    review_tag.add_argument("transaction_id", help="a transaction ID from transactions")
+    review_tag.add_argument("--account", required=True, help="account name or ID")
+    tag_values = review_tag.add_mutually_exclusive_group(required=True)
+    tag_values.add_argument("--tags", help="tag names from tags, separated by commas")
+    tag_values.add_argument("--none", action="store_true", help="the transaction has no tags")
+    review_tag.add_argument(
+        "--revision", required=True, help="the revision from review transaction show"
+    )
+    review_tag.add_argument(
+        "--supersedes", help="the tag statement applying to this transaction now, which this one "
+        "replaces")
+    review_tag.add_argument(
+        "--supersedes-revision",
+        help="the revision from review tagging show for the statement being replaced",
+    )
+    tagging = review_commands.add_parser("tagging", help="inspect or undo one tag statement")
+    tagging_commands = tagging.add_subparsers(dest="tagging_command", required=True)
+    tagging_show = command("show", tagging_commands, handler=run_review_tagging_show,
+                           help="show what a tag statement binds and what undoing it would do")
+    tagging_show.add_argument("tag_statement_id",
+                              help="a tag statement ID from review transaction show")
+    tagging_undo = command("undo", tagging_commands, handler=run_review_tagging_undo,
+                           help="stop a tag statement applying, keeping it on record")
+    tagging_undo.add_argument("tag_statement_id",
+                              help="a tag statement ID from review transaction show")
+    tagging_undo.add_argument("--account", required=True, help="account name or ID")
+    tagging_undo.add_argument("--revision", required=True,
+                              help="the revision from review tagging show")
 
     transfer = review_commands.add_parser(
         "transfer", help="match, inspect or undo a transfer between two accounts"
@@ -4358,6 +4400,111 @@ def run_review_breakdown_undo(args) -> int:
     print_newly_unbroken(result.newly_unsettled_transactions)
     print("  The payment counts whole in confirmed transfers again, or as the breakdown this one "
           "superseded divides it.")
+    return 0
+
+
+TAG_NOTICE = "Tags are free labels: they enter no total, and filter transactions and exports."
+TAGGING_PREVIEW_STATES = {
+    None: "no tags",
+    "applied": "tagged",
+    "conflict": "no tags, statements disagree",
+    "basis_changed": "no tags, its records were regrouped",
+}
+
+
+def run_tag_add(args) -> int:
+    conn = open_ledger(args.db)
+    tag = add_tag(conn, args.name)
+    print(f"Tag {shown(tag.name)} added.")
+    return 0
+
+
+def run_tags(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    found = list_tags(conn)
+    for tag in found:
+        print(shown(tag.name))
+    print(f"Tags: {len(found)}")
+    return 0
+
+
+def checked_tag_names(text) -> tuple[str, ...]:
+    names = tuple(name.strip() for name in text.split(","))
+    if not all(names):
+        raise CommandError("--tags must name tags separated by commas, none empty. Nothing was "
+                           "changed.")
+    return names
+
+
+def run_review_tag(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    if bool(args.supersedes) != bool(args.supersedes_revision):
+        raise CommandError("--supersedes and --supersedes-revision must be given together.")
+    names = () if args.none else checked_tag_names(args.tags)
+    result = tag_transaction(conn, account_id, args.transaction_id, args.revision, names,
+                             supersedes=args.supersedes,
+                             supersedes_revision=args.supersedes_revision)
+    stated = ", ".join(shown(name) for name in result.names) or "no tags"
+    print(f"Tag statement {result.tag_statement_id} recorded: transaction "
+          f"{args.transaction_id}, {stated}, binding {result.bound_record_count} records.")
+    if args.supersedes:
+        print(f"  Supersedes tag statement {args.supersedes}. It stays on record.")
+    print(f"  {TAG_NOTICE}")
+    return 0
+
+
+def run_review_tagging_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    statement = load_tagging(conn, args.tag_statement_id)
+    if statement is None:
+        raise CommandError("tag statement not found. Run review transaction show.")
+    print(f"Tag statement {statement.statement_id}")
+    print(f"  Account: {shown(statement.account_name)} ({statement.account_id})")
+    print(f"  Stated: {shown(statement.shown_value)}")
+    print(f"  Status: {statement.state}")
+    print(f"  Made: {statement.created_at}")
+    if statement.undone_at:
+        print(f"  Undone: {statement.undone_at}. It stays on record and no longer applies.")
+    if statement.superseded_by:
+        print(f"  Superseded by tag statement {statement.superseded_by}. It stays on record and "
+              "no longer applies, unless that statement is undone.")
+    if statement.newest_of_chain != statement.superseded_by:
+        print(f"  Newest of its chain: tag statement {statement.newest_of_chain}, the only one "
+              "that can be undone. Each undo restores the statement before it.")
+    if statement.supersedes_id:
+        print(f"  Supersedes tag statement {statement.supersedes_id}")
+    print(f"  From transaction: {statement.target_transaction_id}")
+    print("Bound records:")
+    for record in statement.bound_records:
+        print(f"  {shown(record.file_name)} row {record.row}, now in "
+              f"{record.transaction_id or 'no transaction'}")
+    if statement.state == STATE_ACTIVE:
+        outlook = tagging_undo_outlook(conn, statement)
+        print(f"  Revision: {outlook.revision}")
+        print("Undoing this tag statement now:")
+        if statement.supersedes_id:
+            print(f"  Restores tag statement {statement.supersedes_id}, which it superseded")
+        for transaction_id, state_now, state_after in outlook.state_by_transaction:
+            print(f"  Transaction {transaction_id}: {TAGGING_PREVIEW_STATES[state_now]} now, "
+                  f"{TAGGING_PREVIEW_STATES[state_after]} after")
+        if stale_accounts(conn, DEFAULT_RULES, statement.account_id):
+            print("This account has not been reconciled under the current matching rules, so "
+                  "undo will be refused until it is. Run reconcile.")
+    return 0
+
+
+def run_review_tagging_undo(args) -> int:
+    conn = open_ledger(args.db)
+    account_id = find_account(conn, args.account)
+    result = undo_tagging(conn, account_id, args.tag_statement_id, args.revision)
+    print(f"Tag statement {args.tag_statement_id} undone. It stays on record and no longer "
+          "applies.")
+    if result.restored:
+        print(f"  Tag statement {result.restored}, which it superseded, applies again.")
+    if result.newly_unsettled_transactions:
+        print(f"  Transactions now with no tags applying, because statements disagree or lost "
+              f"their basis: {result.newly_unsettled_transactions}.")
     return 0
 
 

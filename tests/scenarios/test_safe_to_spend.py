@@ -414,7 +414,7 @@ class TestReasons:  # SB5, point 6
         assert "open_review_items" in ledger.reasons()
         (item,) = ledger.items()
         code, _, err = ledger.run("review", "dismiss", item, "--account", "A", "--revision",
-                                  re.search(r"Revision: (r14-[0-9a-f]{16})",
+                                  re.search(r"Revision: (r15-[0-9a-f]{16})",
                                             ledger.run("review", "show", item)[1])[1])
         assert code == 0, err
         assert "open_review_items" not in ledger.reasons()

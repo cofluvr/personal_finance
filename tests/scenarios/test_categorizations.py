@@ -189,13 +189,13 @@ class TestRefusals:  # CB1
     def test_an_unknown_transaction(self, ledger):
         purchase(ledger)
         self.refused(ledger, TRANSACTION_NOT_FOUND, "no-such-transaction", "Food",
-                     revision="t12-0000000000000000")
+                     revision="t13-0000000000000000")
 
     def test_a_stale_token_and_one_of_the_last_version(self, ledger):
         transaction = purchase(ledger)
         current = ledger.transaction_revision(transaction)
         self.refused(ledger, STALE_TRANSACTION_REVISION, transaction, "Food",
-                     revision="t12-0000000000000000")
+                     revision="t13-0000000000000000")
         self.refused(ledger, STALE_TRANSACTION_REVISION, transaction, "Food",
                      revision="t8-" + current.split("-")[1])
 
@@ -255,7 +255,7 @@ class TestRefusals:  # CB1
         conn.execute("UPDATE account_reconciliation SET rules_fingerprint = ?", ("0" * 64,))
         conn.close()
         self.refused(ledger, STALE_ACCOUNT, transaction, "No such category",
-                     revision="t12-0000000000000000")
+                     revision="t13-0000000000000000")
 
 
 class TestStaleAccount:  # CB1
@@ -575,9 +575,9 @@ class TestShown:  # CB4
 
 class TestTokens:  # CB5
     def test_the_versions_are_pinned(self):
-        assert review_evidence.REVISION_VERSION == 14
-        assert review_evidence.TRANSACTION_REVISION_VERSION == 12
-        assert decision_evidence.DECISION_REVISION_VERSION == 11
+        assert review_evidence.REVISION_VERSION == 15
+        assert review_evidence.TRANSACTION_REVISION_VERSION == 13
+        assert decision_evidence.DECISION_REVISION_VERSION == 12
         assert correction_evidence.CORRECTION_REVISION_VERSION == 7
         assert categorization_evidence.CATEGORIZATION_REVISION_VERSION == 2
 

@@ -631,6 +631,27 @@ def add_transaction_evidence(out, entry, shared) -> None:
     add_recurring(out, entry)
     add_consumptions(out, entry)
     add_breakdowns(out, entry)
+    add_tags(out, entry)
+
+
+TAG_STATE_EXPLANATIONS = {
+    "applied": "these apply",
+    "conflict": "none apply, the statements disagree or are several",
+    "basis_changed": "none apply, its records were regrouped since it was made",
+}
+
+
+def add_tags(out, entry) -> None:
+    """Tag statements binding this transaction's records (D-073 point 5): the Tags section. A
+    transaction none reaches shows nothing here."""
+    if not entry.tags:
+        return
+    out.add("  Tags:")
+    for statement in entry.tags:
+        names = ", ".join(shown(name) for name in statement.tags) or "none"
+        out.add(f"    Tag statement {statement.tag_statement_id}: {names}, binding "
+                f"{describe_side(statement.bound_records)}")
+    out.add(f"    Tags: {TAG_STATE_EXPLANATIONS[entry.tags[0].state]}")
 
 
 def _effective_rank_values(record):

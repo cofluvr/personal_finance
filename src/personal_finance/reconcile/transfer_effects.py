@@ -20,6 +20,7 @@ from personal_finance.planning.income_effects import write_income_source_effects
 from personal_finance.planning.obligation_effects import write_obligation_effects
 from personal_finance.reconcile.allocation_effects import write_allocation_effects
 from personal_finance.reconcile.breakdown_effects import write_breakdown_effects
+from personal_finance.reconcile.tag_effects import write_tag_effects
 from personal_finance.reconcile.consumption_effects import write_consumption_effects
 from personal_finance.reconcile.category_effects import write_category_effects
 from personal_finance.reconcile.category_rule_effects import write_rule_category_effects
@@ -426,6 +427,7 @@ def write_transfer_effects(conn: sqlite3.Connection) -> None:
     write_allocation_effects(conn)
     write_consumption_effects(conn)
     write_breakdown_effects(conn)
+    write_tag_effects(conn)
     write_income_source_effects(conn)
     write_obligation_effects(conn)
 

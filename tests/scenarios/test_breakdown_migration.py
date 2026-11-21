@@ -85,7 +85,7 @@ def stated(tmp_path, capsys):
     ledger.ids = dict(conn.execute("SELECT display_name, id FROM account"))
     record = conn.execute("SELECT id FROM source_record").fetchone()[0]
     conn.execute("INSERT INTO loan_payment_breakdown (id, account_id, breakdown, "
-                 "target_transaction_id, target_revision) VALUES ('b', ?, '57250:0', 'x', 't12-0')",
+                 "target_transaction_id, target_revision) VALUES ('b', ?, '57250:0', 'x', 't13-0')",
                  (ledger.ids["A"],))
     conn.execute("INSERT INTO loan_payment_breakdown_record (breakdown_id, source_record_id) "
                  "VALUES ('b', ?)", (record,))
@@ -111,7 +111,7 @@ class TestAppendOnly:  # LC1, G2
         conn = stated.conn()
         conn.execute("INSERT INTO loan_payment_breakdown (id, account_id, breakdown, "
                      "target_transaction_id, target_revision, supersedes_breakdown_id) "
-                     "VALUES ('c', ?, '0:500', 'x', 't12-0', 'b')", (stated.ids["A"],))
+                     "VALUES ('c', ?, '0:500', 'x', 't13-0', 'b')", (stated.ids["A"],))
         conn.execute("INSERT INTO loan_payment_breakdown_event (breakdown_id, event) "
                      "VALUES ('b', 'undone')")
         conn.execute("INSERT INTO transaction_loan_breakdown (transaction_id, state, breakdown) "
@@ -120,13 +120,13 @@ class TestAppendOnly:  # LC1, G2
 
     @pytest.mark.parametrize("statement", [
         "INSERT INTO loan_payment_breakdown (id, account_id, breakdown, target_transaction_id, "
-        "target_revision) VALUES ('x', :a, '0:0', 'x', 't12-0')",
+        "target_revision) VALUES ('x', :a, '0:0', 'x', 't13-0')",
         "INSERT INTO loan_payment_breakdown (id, account_id, breakdown, target_transaction_id, "
-        "target_revision) VALUES ('x', :a, '-5:0', 'x', 't12-0')",
+        "target_revision) VALUES ('x', :a, '-5:0', 'x', 't13-0')",
         "INSERT INTO loan_payment_breakdown (id, account_id, breakdown, target_transaction_id, "
-        "target_revision) VALUES ('x', :a, '5.00:0', 'x', 't12-0')",
+        "target_revision) VALUES ('x', :a, '5.00:0', 'x', 't13-0')",
         "INSERT INTO loan_payment_breakdown (id, account_id, breakdown, target_transaction_id, "
-        "target_revision, supersedes_breakdown_id) VALUES ('x', :b2, '5:0', 'x', 't12-0', 'b')",
+        "target_revision, supersedes_breakdown_id) VALUES ('x', :b2, '5:0', 'x', 't13-0', 'b')",
         "INSERT INTO loan_payment_breakdown_event (breakdown_id, event) VALUES ('b', 'paused')",
         "INSERT INTO transaction_loan_breakdown (transaction_id, state, breakdown) "
         "VALUES ((SELECT id FROM ledger_transaction), 'applied', NULL)",

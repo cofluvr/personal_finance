@@ -22,6 +22,7 @@ from personal_finance.reconcile.breakdown_effects import (
     effective_breakdowns,
     load_active_breakdowns,
 )
+from personal_finance.reconcile.tag_effects import effective_tags, load_active_tag_statements
 from personal_finance.reconcile.consumption_effects import (
     effective_consumptions,
     load_active_consumptions,
@@ -59,7 +60,8 @@ from personal_finance.reconcile.supersession import successor_and_newest
 # can match, left out where there are none (D-064). Version 9 adds allocations binding records in
 # scope, left out where there are none (D-065). Version 10 adds fund consumptions binding records in
 # scope the same way (D-070 point 7). Version 11 adds loan payment breakdowns the same way (D-071).
-DECISION_REVISION_VERSION = 11
+# Version 12 adds tag statements the same way (D-073 point 5).
+DECISION_REVISION_VERSION = 12
 
 
 @dataclass(frozen=True)
@@ -487,6 +489,25 @@ def undo_outlook(
             "with_decision": breakdown_view(now),
             "without_decision": breakdown_view(after),
         }
+    active_tags = load_active_tag_statements(conn, decision.account_id)
+    touching_tags = [statement for statement in active_tags if statement.bound_record_ids & scope]
+    if touching_tags:
+        tagged_record_ids = set().union(*(statement.bound_record_ids
+                                          for statement in touching_tags))
+
+        def tag_view(result):
+            group_by_record_id = {
+                record_id: index
+                for index, group in enumerate(result.groups) for record_id in group.record_ids
+            }
+            effects = effective_tags(active_tags, group_by_record_id)
+            return sorted(
+                [keyed(result.groups[index].record_ids), effect.state, effect.applied_value]
+                for index, effect in effects.items()
+                if tagged_record_ids.intersection(result.groups[index].record_ids)
+            )
+
+        material["tags"] = {"with_decision": tag_view(now), "without_decision": tag_view(after)}
     # Which group a record joins decides the description a rule reads, and the groups, records,
     # corrections and types are covered above, so the rules that could match are enough.
     descriptions = [record.description for record in records if record.id in scope]

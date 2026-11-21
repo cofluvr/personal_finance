@@ -124,7 +124,7 @@ def show(db, capsys):
 
 
 def revision_of(text):
-    return re.search(r"Revision: (r14-[0-9a-f]{16})", text)[1]
+    return re.search(r"Revision: (r15-[0-9a-f]{16})", text)[1]
 
 
 def section_order(text, *labels):

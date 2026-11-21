@@ -21,6 +21,7 @@ from personal_finance.reconcile.apply import (
 )
 from personal_finance.reconcile.allocation_effects import unsettled_allocations
 from personal_finance.reconcile.breakdown_effects import unsettled_breakdowns
+from personal_finance.reconcile.tag_effects import unsettled_tags
 from personal_finance.reconcile.consumption_effects import unsettled_consumptions
 from personal_finance.reconcile.category_effects import unsettled_categorizations
 from personal_finance.reconcile.classification_effects import unsettled_classifications
@@ -227,6 +228,11 @@ LEAVES_BREAKDOWN_UNSETTLED = (
     "this decision would leave a loan payment's breakdown not applying, because breakdowns would "
     "disagree, lose their basis or no longer fit. It was not recorded and nothing was changed. "
     "Undo the breakdown first, then break down the result."
+)
+LEAVES_TAGGING_UNSETTLED = (
+    "this decision would leave a tagged transaction with no tags applying, because tag statements "
+    "would disagree or lose their basis. It was not recorded and nothing was changed. Undo the "
+    "tag statement first, then tag the result."
 )
 # Shared by every command that refuses to leave a transfer match or one-sided transfer unsettled
 # (D-054, D-055).
@@ -507,6 +513,7 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
     unattributed_before = unsettled_allocations(conn, account_id)
     unconsumed_before = unsettled_consumptions(conn, account_id)
     unbroken_before = unsettled_breakdowns(conn, account_id)
+    untagged_before = unsettled_tags(conn, account_id)
     unmatched_before = unsettled_transfers(conn)
     expected = {
         records for transaction_id, records in before.items()
@@ -545,6 +552,8 @@ def _confirm(conn, account_id, item_id, revision, groups, rules, replacing) -> C
         raise DecisionRefused(LEAVES_CONSUMPTION_UNSETTLED)
     if unsettled_breakdowns(conn, account_id) - unbroken_before:
         raise DecisionRefused(LEAVES_BREAKDOWN_UNSETTLED)
+    if unsettled_tags(conn, account_id) - untagged_before:
+        raise DecisionRefused(LEAVES_TAGGING_UNSETTLED)
     if unsettled_transfers(conn) - unmatched_before:
         raise DecisionRefused(LEAVES_TRANSFER_UNSETTLED)
 
@@ -664,6 +673,7 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules, replaci
     unattributed_before = unsettled_allocations(conn, account_id)
     unconsumed_before = unsettled_consumptions(conn, account_id)
     unbroken_before = unsettled_breakdowns(conn, account_id)
+    untagged_before = unsettled_tags(conn, account_id)
     unmatched_before = unsettled_transfers(conn)
     expected = {records for key, records in before.items() if key != transaction_id}
     expected.update(frozenset(group) for group in groups)
@@ -698,6 +708,8 @@ def _separate(conn, account_id, transaction_id, revision, groups, rules, replaci
         raise DecisionRefused(LEAVES_CONSUMPTION_UNSETTLED)
     if unsettled_breakdowns(conn, account_id) - unbroken_before:
         raise DecisionRefused(LEAVES_BREAKDOWN_UNSETTLED)
+    if unsettled_tags(conn, account_id) - untagged_before:
+        raise DecisionRefused(LEAVES_TAGGING_UNSETTLED)
     if unsettled_transfers(conn) - unmatched_before:
         raise DecisionRefused(LEAVES_TRANSFER_UNSETTLED)
     return Separation(

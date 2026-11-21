@@ -2060,7 +2060,7 @@ def scale_allocations(conn) -> dict[str, int]:
         conn.execute(
             """INSERT INTO allocation_statement (id, account_id, allocation,
                                                  target_transaction_id, target_revision)
-               VALUES (?, ?, ?, ?, 't12-0')""", (allocation_id, account, value, transaction))
+               VALUES (?, ?, ?, ?, 't13-0')""", (allocation_id, account, value, transaction))
         conn.executemany("INSERT INTO allocation_statement_part VALUES (?, ?, ?)",
                          [(allocation_id, member, part) for member, part in parts])
         conn.execute("INSERT INTO allocation_statement_record VALUES (?, ?)",
@@ -2644,7 +2644,7 @@ def measure_funds() -> None:
             consumption_id = f"c{number}"
             conn.execute("INSERT INTO fund_consumption (id, account_id, fund_id, "
                          "target_transaction_id, target_revision) VALUES (?, 'bills', ?, ?, "
-                         "'t12-0')", (consumption_id, consumed[number % len(consumed)][0],
+                         "'t13-0')", (consumption_id, consumed[number % len(consumed)][0],
                                       transaction_id))
             conn.execute("INSERT INTO fund_consumption_record (consumption_id, source_record_id) "
                          "VALUES (?, ?)", (consumption_id, record_id))
@@ -2892,7 +2892,7 @@ def measure_loans() -> None:
             statement_id = f"ol{number:06}"
             conn.execute("""INSERT INTO one_sided_transfer (id, account_id, counterpart_account_id,
                                                          target_transaction_id, target_revision)
-                            VALUES (?, 'payer', ?, ?, 't12-0')""",
+                            VALUES (?, 'payer', ?, ?, 't13-0')""",
                          (statement_id, loans[number % 8], transaction_id))
             conn.execute("INSERT INTO one_sided_transfer_record VALUES (?, ?)",
                          (statement_id, record_id))
@@ -2904,7 +2904,7 @@ def measure_loans() -> None:
             conn.execute("""INSERT INTO loan_payment_breakdown (id, account_id, breakdown,
                                                              target_transaction_id,
                                                              target_revision)
-                            VALUES (?, 'payer', ?, ?, 't12-0')""",
+                            VALUES (?, 'payer', ?, ?, 't13-0')""",
                          (breakdown_id, f"{cents_by_row[f'L{number}'] // 5}:{number % 3 * 100}",
                           transaction_id))
             conn.execute("INSERT INTO loan_payment_breakdown_record VALUES (?, ?)",
