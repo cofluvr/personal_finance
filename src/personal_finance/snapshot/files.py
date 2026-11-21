@@ -57,9 +57,9 @@ def build_in_one_read(conn: sqlite3.Connection, as_of: date, window_days: int,
         conn.execute("COMMIT")
 
 
-def write_atomically(out_path: Path, data: bytes, real_ledger: bool) -> int:
-    """A new 0600 file at out_path holding data, or nothing at all."""
-    refuse_unsafe_export_destination(out_path, real_ledger, SNAPSHOT)
+def write_atomically(out_path: Path, data: bytes) -> int:
+    """A new 0600 file at out_path holding data, or nothing at all. The destination is checked
+    by the caller first; a name taken since is refused by the link."""
     absolute = Path(os.path.abspath(out_path))
     temporary = absolute.parent / f".{absolute.name}.{uuid.uuid4().hex}.partial"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
@@ -102,7 +102,7 @@ def create(read_conn: sqlite3.Connection, write_conn_of, out_path: Path, as_of: 
     refuse_unsafe_export_destination(out_path, real_ledger, SNAPSHOT)
     data = build_in_one_read(read_conn, as_of, window_days, snapshot_id, generated_at)
     document = parsed_canonical(data)
-    written = write_atomically(out_path, data, real_ledger)
+    written = write_atomically(out_path, data)
     try:
         conn = write_conn_of()
         try:
