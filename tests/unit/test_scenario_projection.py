@@ -190,6 +190,16 @@ class TestLoans:  # point 3: M15's amortization
                                   "left out",)
         assert result.months == project(PLAN, (), AS_OF, 2).months
 
+    def test_the_last_payment_is_no_more_than_is_owed(self):
+        borrow = scenario_input("borrowing", 1_000_000, "2026-03-03", loan_rate_millionths=0,
+                                loan_months=3)
+        months = project(PLAN, (borrow,), AS_OF, 5).months
+        # 10,000.00 over 3 months: 3,333.34 twice, then the 3,333.32 still owed.
+        assert [month.loan_payments_cents for month in months] == [0, 333_334, 333_334, 333_332,
+                                                                   0]
+        assert months[-1].debt_cents == 0
+        assert project(PLAN, (borrow,), AS_OF, 5).loans[0].paid_off == "2026-06-03"
+
     def test_borrowing_brings_its_proceeds_and_a_level_payment(self):
         borrow = scenario_input("borrowing", 1_200_000, "2026-04-03", loan_rate_millionths=0,
                                 loan_months=12)
@@ -222,6 +232,21 @@ class TestFunds:  # point 3: required saving, completion and unmet goals
         assert result.goals[0].unmet and result.goals[0].completion_month is None
         assert result.unmet_goals == ("Car",)
         assert result.shortfall_months == tuple(month.month for month in result.months)
+
+    def test_contributions_stop_at_the_protected_amount(self):
+        def tight(liquid_cents):
+            return replace(PLAN, liquid_estimate_cents=liquid_cents, funds=(GOAL,),
+                           salary=(replace(SALARY, terms=(replace(SALARY.terms[0],
+                                                                  amount_cents=270_000),)),))
+
+        # With income spent in full, 1,100.00 leaves 100.00 above the protected 1,000.00.
+        assert project(tight(110_000), (), AS_OF, 1).months[0].funds_cents == 10_000
+        below = project(tight(50_000), (), AS_OF, 1).months[0]
+        assert below.funds_cents == 0
+        # The allowance is capped by liquidity: (500.00 + 1,500.00 − 1,000.00) ÷ 31 days, below
+        # the target's 48.38 a day.
+        assert below.daily_allowance_cents == 100_000 // 31
+        assert below.weekly_allowance_cents == 100_000 * 7 // 31
 
     def test_a_reserve_pays_its_target_on_its_due_date(self):
         reserve = ProjectedFund("reserve", "Insurance", "reserve", (FundTerms(

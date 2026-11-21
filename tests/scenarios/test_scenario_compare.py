@@ -13,6 +13,8 @@ from test_scenarios import KINDS, ScenarioLedger
 from test_safe_to_spend import AS_OF
 
 from personal_finance.cli import SCENARIO_MONTHS_INVALID
+from personal_finance.db.migrate import connect
+from personal_finance.reports.scenario_report import plan_for
 from personal_finance.ui import writes
 
 SECTIONS = ("Monthly cash flow: ", "Liquidity at month end: ", "Daily allowance: ",
@@ -154,6 +156,40 @@ class TestDefaults:  # XB2
         out = ledger.compared(ledger.scenario, "--months", "6")
         assert ledger.section(out, "Scenario assets at month end")[-1][2] == "300000.00"
         assert ledger.run("report", "net-worth", "--as-of", AS_OF) == before
+
+
+class TestPlan:  # point 4: what the plan reads, counted once
+    def test_a_payment_an_obligation_covers_and_a_reserve_s_purchase_count_once(self, ledger):
+        from datetime import date
+
+        ledger.add_typed_account("Mortgage", "loan")
+        ledger.add_terms_ok("Mortgage")
+        ledger.observe("Mortgage", "2026-05-01", "200000.00", option="--owed")
+        mortgage_bill = ledger.ob_add_ok(name="Mortgage bill", match="synthetic mortgage",
+                                         cadence="monthly:5", anchor="2026-01-05",
+                                         amount="1500.00")
+        reserve = ledger.add_fund_ok(name="Insurance", kind="reserve", target="1200.00",
+                                     due="2026-06-10", as_of=AS_OF)
+        insurance_bill = ledger.ob_add_ok(name="Insurance bill", match="synthetic insure",
+                                          cadence="annual:06-10", anchor="2026-06-10",
+                                          amount="1200.00")
+
+        def read():
+            conn = connect(ledger.path, read_only=True)
+            try:
+                return plan_for(conn, date.fromisoformat(AS_OF))
+            finally:
+                conn.close()
+
+        plan = read()
+        assert [loan.payment_is_cash for loan in plan.loans] == [True]
+        assert insurance_bill in [stream.entry_id for stream in plan.obligations]
+        ledger.covers_ok(mortgage_bill, "--loan", "Mortgage")
+        ledger.covers_ok(insurance_bill, "--fund", reserve)
+        plan = read()
+        assert [loan.payment_is_cash for loan in plan.loans] == [False]
+        streams = [stream.entry_id for stream in plan.obligations]
+        assert mortgage_bill in streams and insurance_bill not in streams
 
 
 class TestPages:  # XB4, point 5
