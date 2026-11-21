@@ -11,7 +11,7 @@ from sync_harness import (
     LOOPBACK,
     Clock,
     Connections,
-    LoopbackSyncServer,
+    ScriptedServer,
     SyncLedger,
     raw_exchange,
     served_here,
@@ -246,18 +246,6 @@ class TestAddresses:  # YA3, point 4
     def test_a_device_name_of_0_or_over_64_characters_is_refused(self, ledger, name):
         code, _, err = ledger.run("sync", "pair", "--name", name, "--address", "192.168.1.20")
         assert code == 2 and "--name must be 1 to 64" in err
-
-
-class ScriptedServer(LoopbackSyncServer):
-    """The CLI's server on loopback, its run() a script of client actions instead of waiting."""
-
-    script = None
-
-    def __init__(self, address, *options, **named):
-        super().__init__(LOOPBACK, 0, *options[1:], **named)
-
-    def run(self):
-        type(self).script(self)
 
 
 @pytest.fixture

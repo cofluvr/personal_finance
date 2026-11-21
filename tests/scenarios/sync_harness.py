@@ -33,6 +33,24 @@ class LoopbackSyncServer(SyncServer):
         assert address == LOOPBACK, address
 
 
+class ScriptedServer(LoopbackSyncServer):
+    """The CLI's own server, on loopback at a port the system picks, its run() a script of
+    client actions instead of waiting for connections."""
+
+    script = None
+
+    def __init__(self, address, port, *options, **named):
+        super().__init__(LOOPBACK, 0, *options, **named)
+
+    def run(self):
+        type(self).script(self)
+
+
+def with_connect(client, connect):
+    client.connect = connect
+    return client
+
+
 class Clock:
     """The wall clock the pairing window reads, moved by hand."""
 
