@@ -48,8 +48,10 @@ from personal_finance.reports.report_text import (
     review_queue_lines,
     totals_report_lines,
     transaction_list_lines,
+    visual_lines,
+    visuals,
 )
-from personal_finance.ui import writes
+from personal_finance.ui import charts, writes
 
 LOOPBACK_ADDRESS = "127.0.0.1"
 
@@ -100,6 +102,7 @@ NAVIGATION = (
     ("/accounts", "Accounts and members"),
     ("/obligations", "Obligations"),
     ("/settings", "Settings and backups"),
+    ("/visuals", "Visuals"),
 )
 
 # What each page accepts in its address. A value is an ID or a month and nothing else, refused
@@ -122,6 +125,7 @@ PAGE_PARAMETERS = {
     "/accounts": set(),
     "/obligations": {"as_of"},
     "/settings": set(),
+    "/visuals": {"as_of"},
     "/style.css": set(),
 }
 QUERY_VALUE = re.compile(r"[A-Za-z0-9_-]{0,100}")
@@ -361,6 +365,8 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return self.answer_result(conn, parameters.get("id", ""))
         if path == "/transaction":
             return self.answer_transaction(conn, parameters.get("id", ""))
+        if path == "/visuals":
+            return self.answer_visuals(conn, parameters)
         if path in SECTIONS:
             return self.answer_section(conn, path, parameters)
         if path == "/budget":
@@ -401,6 +407,19 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             after = undo_form(self.server.form_secret, recorded.group(1), decision_account_id,
                               revision)
         self.send_page(200, "Result", lines, after=after)
+
+    def answer_visuals(self, conn, parameters):
+        """The eight visuals as SVG, each over the table pf report visuals prints for it, as of
+        the date given, else today in the household's timezone (G7)."""
+        text = parameters.get("as_of") or None
+        form = as_of_form("/visuals", text)
+        as_of = (household_today_if_set(conn) if text is None
+                 else date.fromisoformat(checked_as_of(text)))
+        if as_of is None:
+            return self.send_page(200, "Visuals", notice=CHOOSE_AS_OF, form=form)
+        drawn = visuals(conn, as_of)
+        svgs = "".join(f'<div class="chart">{charts.chart_svg(chart)}</div>' for chart in drawn)
+        self.send_page(200, "Visuals", visual_lines(conn, as_of, drawn), form=form + svgs)
 
     def answer_transactions(self, conn, parameters):
         """pf transactions with the filters given, run in memory, so the page and the command

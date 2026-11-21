@@ -92,6 +92,7 @@ from personal_finance.reports.review_evidence import (
     review_revision,
     rows_sharing_a_document,
 )
+from personal_finance.reports.visuals import visuals
 from personal_finance.reports.totals import (
     LOAN_INTEREST,
     GroupTotal,
@@ -1430,6 +1431,31 @@ def filtered_transaction_rows(conn, filters: TransactionFilters) -> list[tuple]:
         wanted = normalized_text(filters.search)
         rows = [row for row in rows if wanted in normalized_text(row[4] or "")]
     return rows
+
+
+def chart_value_lines(chart) -> list[str]:
+    """Each row of a chart as its table prints it: the label, then each series and value, then
+    any note. The UI's marks carry these same words (D-073 point 6)."""
+    found = []
+    for row in chart.rows:
+        values = ", ".join(f"{name} {format_cents(value)}"
+                           for name, value in zip(chart.series, row.values))
+        note = f" ({row.note})" if row.note else ""
+        found.append(f"  {shown(row.label)}: {values}{note}")
+    return found
+
+
+def visual_lines(conn, as_of, charts=None) -> ReportLines:
+    """pf report visuals: each of the eight visuals' figures as a table (D-073 point 6). The
+    page passes the charts it draws, so they are computed once."""
+    out = ReportLines()
+    for chart in visuals(conn, as_of) if charts is None else charts:
+        out.add(f"{chart.title}:")
+        for line in chart_value_lines(chart):
+            out.add(line)
+        if chart.notice:
+            out.add(f"  ({chart.notice})")
+    return out
 
 
 def review_queue_lines(conn) -> ReportLines:

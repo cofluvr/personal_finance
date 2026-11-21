@@ -384,6 +384,7 @@ from personal_finance.reports.report_text import (
     totals_report_lines,
     TransactionFilters,
     transaction_list_lines,
+    visual_lines,
 )
 from personal_finance.reports.resolution_evidence import (
     binding_entries,
@@ -1810,6 +1811,10 @@ def build_parser() -> argparse.ArgumentParser:
         "loans", report_commands, handler=run_report_loans,
         help="each loan's terms and its actual payments against its schedule")
     loans_report_command.add_argument("--as-of", help=TODAY_HELP)
+    visuals_command = command(
+        "visuals", report_commands, handler=run_report_visuals,
+        help="the eight visuals' figures as tables, which the UI also draws as charts")
+    visuals_command.add_argument("--as-of", help=TODAY_HELP)
     net_worth_command.add_argument("--member",
                                    help="one member's part by account attribution, a name from "
                                         "household members")
@@ -2133,6 +2138,12 @@ def run_loan_payoff(args) -> int:
 def run_report_loans(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     print_report(loans_report_lines(conn, as_of_date(conn, args.as_of)))
+    return 0
+
+
+def run_report_visuals(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    print_report(visual_lines(conn, as_of_date(conn, args.as_of)))
     return 0
 
 
