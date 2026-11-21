@@ -32,7 +32,7 @@ from personal_finance.planning.entries import (
     refuse_unless_current,
     refuse_unless_revision,
 )
-from personal_finance.planning.schedules import Cadence, cadence_dates, on_cadence
+from personal_finance.planning.schedules import Cadence, cadence_dates, kept_terms, on_cadence
 from personal_finance.reconcile.decisions import DecisionRefused
 from personal_finance.reconcile.household_effects import parse_percent
 from personal_finance.reconcile.rules import DEFAULT_RULES, MatchingRules
@@ -328,7 +328,9 @@ def load_funds(conn: sqlite3.Connection) -> tuple[Fund, ...]:
          cadence, first_day, interval_months, anchor) in conn.execute(
             """SELECT fund_id, effective_from, shape, amount_cents, basis_points, by_month,
                       month_count, due_date, cadence, first_day, interval_months, anchor
-               FROM fund_terms ORDER BY fund_id, effective_from"""):
+               FROM fund_terms terms
+               WHERE """ + kept_terms("fund_terms") + """
+               ORDER BY fund_id, effective_from"""):
         stated_cadence = None if cadence is None else Cadence(
             cadence, first_day, interval_months=interval_months)
         terms_by_fund.setdefault(fund_id, []).append(FundTerms(

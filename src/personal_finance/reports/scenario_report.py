@@ -30,6 +30,15 @@ from personal_finance.planning.liquidity import liquid_account_ids
 from personal_finance.planning.loans import format_rate, load_loan_terms
 from personal_finance.planning.net_worth import COUNTED
 from personal_finance.planning.obligation_effects import FIXED, applying_obligations
+from personal_finance.planning.promotions import (
+    FUND_TERMS_ROW,
+    OBLIGATION_TERMS_ROW,
+    SOURCE_TERMS_ROW,
+    active_promotion,
+    planned_for,
+    promotion_revision,
+    promotion_undo_revision,
+)
 from personal_finance.planning.projection import (
     DEFAULT_MONTHS,
     Plan,
@@ -209,7 +218,37 @@ def scenarios_lines(scenarios) -> ReportLines:
     return out
 
 
-def scenario_lines(scenario: Scenario) -> ReportLines:
+MAKES = {SOURCE_TERMS_ROW: "a new terms row on income source {entry}",
+         OBLIGATION_TERMS_ROW: "a new terms row on obligation {entry}",
+         FUND_TERMS_ROW: "a new terms row on reserve {entry}",
+         "income_source": "a new income source", "recurring_obligation": "a new obligation",
+         "fund": "a new reserve"}
+
+
+def promotion_lines(conn: sqlite3.Connection, scenario: Scenario, out: ReportLines) -> None:
+    """What promoting would make of each input, or why not, and the sp1 tokens (point 6)."""
+    promotion = active_promotion(conn, scenario.scenario_id)
+    out.add("Promotion:")
+    if promotion is not None:
+        out.add(f"  Promoted as {promotion.promotion_id}, making:")
+        for kind, entry_id, row_id, input_id in promotion.entries:
+            made = f"{kind} {entry_id}" if entry_id else f"{kind} row {row_id}"
+            out.add(f"    {made}, from input {input_id}")
+        out.add(f"Promotion undo revision: {promotion_undo_revision(scenario, promotion)}")
+        return
+    planned = planned_for(scenario)
+    replaced = {input_.input_id: input_.replaces_id for input_ in scenario.inputs}
+    if not planned:
+        out.add("  nothing to promote")
+    for each in planned:
+        words = (MAKES[each.makes].format(entry=replaced[each.input_id]) if each.promotable
+                 else f"not promotable: {each.reason}")
+        out.add(f"  Input {each.input_id}: {'becomes ' if each.promotable else ''}{words}")
+    if scenario.applies and any(each.promotable for each in planned):
+        out.add(f"Promotion revision: {promotion_revision(conn, scenario)}")
+
+
+def scenario_lines(conn: sqlite3.Connection, scenario: Scenario) -> ReportLines:
     out = ReportLines()
     out.add(f"Scenario {scenario.scenario_id}")
     out.add(f"  Name: {shown(scenario.name)}")
@@ -229,6 +268,7 @@ def scenario_lines(scenario: Scenario) -> ReportLines:
         out.add(f"Undo revision: {scenario_revision(scenario, UNDO_SCENARIO)}")
     else:
         out.add("Undone. It stays on record and no longer applies.")
+    promotion_lines(conn, scenario, out)
     return out
 
 

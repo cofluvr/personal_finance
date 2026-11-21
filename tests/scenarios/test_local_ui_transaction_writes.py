@@ -41,6 +41,7 @@ TERMINAL_ONLY = [
     ("review", "allocate"), ("review", "consume"), ("review", "breakdown"),
     ("review", "transfer", "match"), ("review", "coverage"), ("category", "rule"),
     ("balance", "record"), ("review", "classification", "undo"),
+    ("scenario", "promote"), ("scenario", "promotion"),
 ]
 
 

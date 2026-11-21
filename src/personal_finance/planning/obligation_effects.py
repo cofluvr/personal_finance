@@ -20,6 +20,7 @@ from datetime import date, timedelta
 from personal_finance.planning.schedules import (
     Cadence,
     dates_to_show,
+    kept_terms,
     paired_with_dates,
     terms_in_effect,
     unpaid_state,
@@ -216,7 +217,9 @@ def load_obligations(conn: sqlite3.Connection) -> tuple[RecurringObligation, ...
          low_cents, high_cents, obligation_class) in conn.execute(
         """SELECT chain_id, effective_from, cadence, first_day, second_day, interval_months,
                   anchor, low_cents, high_cents, obligation_class
-           FROM recurring_obligation_terms ORDER BY chain_id, effective_from"""
+           FROM recurring_obligation_terms terms
+           WHERE """ + kept_terms("recurring_obligation_terms") + """
+           ORDER BY chain_id, effective_from"""
     ):
         terms_by_chain[chain_id].append(ObligationTerms(
             effective_from, Cadence(cadence, first_day, second_day, interval_months), anchor,

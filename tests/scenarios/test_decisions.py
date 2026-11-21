@@ -329,7 +329,7 @@ class Ledger:
         if words[0] == "obligation":
             position = 3 if words[1] == "dismissal" else 2
         if words[0] == "scenario":
-            position = 3 if words[1] == "input" else 2
+            position = 3 if words[1] in ("input", "promotion") else 2
         if words[0] == "household":
             position = 2 if words[1] == "members" else 3
         if words[:2] in (["review", "decision"], ["review", "merge"], ["review", "transaction"],

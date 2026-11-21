@@ -2847,6 +2847,103 @@ def measure_safe_to_spend() -> None:
               flush=True)
 
 
+SCENARIO_AS_OF = date(2026, 7, 15)
+# Ten templates cycled four to a scenario, so the 40 inputs hold every kind, replacements of a
+# source, an obligation and a reserve, and a home purchase (D-074 point 8).
+SCENARIO_TEMPLATES = (
+    dict(kind="income", from_date="2026-08-01", amount="2600.00", cadence="biweekly",
+         anchor="2026-08-07", replaces="src0"),
+    dict(kind="expense", from_date="2026-08-01", amount="90.00", cadence="monthly:10",
+         replaces="ob1"),
+    dict(kind="annual_expense", from_date="2026-08-01", amount="1500.00", cadence="annual:03-15",
+         replaces="reserve"),
+    dict(kind="home_purchase", from_date="2026-09-10", price="300000.00",
+         down_payment="60000.00", closing_costs="6000.00", loan_rate="6.5", loan_months="360",
+         ownership_costs="450.00"),
+    dict(kind="bonus", from_date="2026-12-15", amount="3000.00", confirmed=True),
+    dict(kind="purchase", from_date="2026-10-01", amount="1800.00"),
+    dict(kind="loan_payoff", from_date="2026-09-01", amount="5000.00", loan_account_id="sloan1"),
+    dict(kind="borrowing", from_date="2026-09-01", amount="10000.00", loan_rate="9.5",
+         loan_months="48"),
+    dict(kind="income", from_date="2026-08-01", amount="400.00", cadence="monthly:20",
+         account_id="bills", match="synthetic tutoring"),
+    dict(kind="expense", from_date="2026-08-01", amount="45.00", cadence="monthly:25",
+         account_id="bills", match="synthetic gym", uncertain=True),
+)
+
+
+def measure_scenarios() -> None:
+    """Scenarios on --safe-to-spend's shape (D-074 point 8, XC2): 10 scenarios with 40 inputs of
+    every kind. Times scenario compare at 24 months for each and at 120 for three, and promote
+    and its undo for the first. Stops, as G9 says, if compare misses 2.0s at 24 months or 5.0s
+    at 120."""
+    from personal_finance.planning import scenarios
+    from personal_finance.planning.promotions import (
+        active_promotion,
+        promotion_revision,
+        promotion_undo_revision,
+    )
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _, _ = safe_to_spend_ledger(root)
+        build_seconds = time.perf_counter() - started
+        scenario_ids = []
+        for number in range(10):
+            scenario_id = scenarios.add_scenario(conn, f"Scenario {number}", number % 2 == 1)
+            scenario_ids.append(scenario_id)
+            for step in range(4):
+                template = SCENARIO_TEMPLATES[(number * 4 + step) % len(SCENARIO_TEMPLATES)]
+                scenario = scenarios.find_scenario(conn, scenario_id)
+                scenarios.add_input(conn, scenario_id, scenarios.InputRequest(**template),
+                                    scenarios.scenario_revision(scenario, scenarios.ADD_INPUT))
+        kinds = {kind for (kind,) in conn.execute("SELECT kind FROM scenario_input")}
+        (inputs,) = conn.execute("SELECT COUNT(*) FROM scenario_input").fetchone()
+        (replacing,) = conn.execute(
+            "SELECT COUNT(DISTINCT replaces_kind) FROM scenario_input").fetchone()
+        (transactions,) = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()
+        print(f"shape transactions={transactions} scenarios=10 inputs={inputs} "
+              f"kinds={len(kinds)} replaced_kinds={replacing} build={build_seconds:.1f}s",
+              flush=True)
+        # The shape reaches the cost it claims.
+        assert transactions >= 100_000 and inputs == 40
+        assert kinds == set(scenarios.KINDS) and replacing == 3
+        first = scenarios.find_scenario(conn, scenario_ids[0])
+        promote_token = promotion_revision(conn, first)
+        conn.close()
+
+        database = str(path)
+        as_of = SCENARIO_AS_OF.isoformat()
+        # The first command after a long build runs slow: it is run and not counted.
+        timed_command("scenario", "compare", scenario_ids[0], "--db", database, "--as-of", as_of)
+        at_24 = [timed_command("scenario", "compare", scenario_id, "--db", database, "--as-of",
+                               as_of) for scenario_id in scenario_ids]
+        at_120 = [timed_command("scenario", "compare", scenario_id, "--db", database, "--as-of",
+                                as_of, "--months", "120") for scenario_id in scenario_ids[:3]]
+        promote_seconds = timed_command("scenario", "promote", scenario_ids[0], "--db", database,
+                                        "--as-of", as_of, "--revision", promote_token)
+        conn = connect(path)
+        promotion = active_promotion(conn, scenario_ids[0])
+        made = len(promotion.entries)
+        undo_token = promotion_undo_revision(scenarios.find_scenario(conn, scenario_ids[0]),
+                                             promotion)
+        conn.close()
+        undo_seconds = timed_command("scenario", "promotion", "undo", scenario_ids[0], "--db",
+                                     database, "--revision", undo_token)
+        print(f"compare 24 months: slowest={max(at_24):7.3f}s median="
+              f"{sorted(at_24)[len(at_24) // 2]:7.3f}s; 120 months: slowest={max(at_120):7.3f}s; "
+              f"promote={promote_seconds:7.3f}s making {made} entries; "
+              f"promotion undo={undo_seconds:7.3f}s", flush=True)
+        stops = [name for name, seconds, target in (("compare at 24", max(at_24), 2.0),
+                                                     ("compare at 120", max(at_120), 5.0),
+                                                     ("promote", promote_seconds, 2.0),
+                                                     ("promotion undo", undo_seconds, 2.0))
+                 if seconds > target]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
 FUNDS_CONSUMPTIONS = 2_000
 
 LOANS_BREAKDOWNS = 5_000
@@ -3128,6 +3225,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--scale", "--safe-to-spend"]:
         measure_safe_to_spend()
+        return
+    if sys.argv[1:] == ["--scale", "--scenarios"]:
+        measure_scenarios()
         return
     if sys.argv[1:] == ["--scale", "--ui"]:
         measure_ui()

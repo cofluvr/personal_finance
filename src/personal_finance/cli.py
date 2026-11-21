@@ -145,6 +145,8 @@ from personal_finance.planning.coverage import (
     uncover,
 )
 from personal_finance.planning.projection import LONGEST_MONTHS
+from personal_finance.planning.promotions import promote as promote_scenario
+from personal_finance.planning.promotions import undo_promotion as undo_scenario_promotion
 from personal_finance.planning.scenarios import InputRequest as ScenarioInputRequest
 from personal_finance.planning.scenarios import add_input as add_scenario_input
 from personal_finance.planning.scenarios import (
@@ -5798,6 +5800,22 @@ def scenario_parsers(commands, command) -> None:
     scenario_undo.add_argument("scenario_id", help="a scenario ID from scenarios")
     scenario_undo.add_argument("--revision", required=True,
                                help="the undo revision from scenario show")
+    scenario_promote = command("promote", scenario_commands, handler=run_scenario_promote,
+                               help="turn a scenario's confirmed inputs into planning entries, "
+                                    "in one transaction")
+    scenario_promote.add_argument("scenario_id", help="a scenario ID from scenarios")
+    scenario_promote.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
+    scenario_promote.add_argument("--revision", required=True,
+                                  help="the promotion revision from scenario show")
+    scenario_promotion = scenario_commands.add_parser("promotion",
+                                                      help="undo a scenario's promotion")
+    promotion_commands = scenario_promotion.add_subparsers(dest="scenario_promotion_command",
+                                                           required=True)
+    promotion_undo = command("undo", promotion_commands, handler=run_scenario_promotion_undo,
+                             help="undo every entry a promotion made, in one transaction")
+    promotion_undo.add_argument("scenario_id", help="a scenario ID from scenarios")
+    promotion_undo.add_argument("--revision", required=True,
+                                help="the promotion undo revision from scenario show")
     scenario_input = scenario_commands.add_parser("input", help="add or undo a scenario's inputs")
     input_commands = scenario_input.add_subparsers(dest="scenario_input_command", required=True)
     input_add = command("add", input_commands, handler=run_scenario_input_add,
@@ -5870,7 +5888,7 @@ def scenario_shown(conn, scenario_id: str):
 
 def run_scenario_show(args) -> int:
     conn = open_ledger(args.db, read_only=True)
-    print_report(scenario_lines(scenario_shown(conn, args.scenario_id)))
+    print_report(scenario_lines(conn, scenario_shown(conn, args.scenario_id)))
     return 0
 
 
@@ -5913,6 +5931,26 @@ def run_scenario_input_add(args) -> int:
         match=args.match)
     input_id = add_scenario_input(conn, args.scenario_id, request, args.revision)
     print(f"Input {input_id} recorded on scenario {args.scenario_id}: {args.kind}")
+    return 0
+
+
+def run_scenario_promote(args) -> int:
+    conn = open_ledger(args.db)
+    promotion = promote_scenario(conn, args.scenario_id, as_of_text(conn, args.as_of),
+                                 args.revision)
+    print(f"Scenario {args.scenario_id} promoted as {promotion.promotion_id}, making:")
+    for kind, entry_id, row_id, input_id in promotion.entries:
+        made = f"{kind} {entry_id}" if entry_id else f"{kind} row {row_id}"
+        print(f"  {made}, from input {input_id}")
+    print("Undo it with scenario promotion undo, using the revision from scenario show.")
+    return 0
+
+
+def run_scenario_promotion_undo(args) -> int:
+    conn = open_ledger(args.db)
+    promotion = undo_scenario_promotion(conn, args.scenario_id, args.revision)
+    print(f"Promotion {promotion.promotion_id} undone: every entry it made no longer applies. "
+          "It stays on record.")
     return 0
 
 
