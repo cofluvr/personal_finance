@@ -909,6 +909,38 @@ was implemented". No security control change: its browser forms run through M17'
 Monte Carlo or probability, inflation or market returns, tax calculation, stored results,
 scenarios in actual reports, scenarios from the phone, and promoting from the browser.
 
+## M19 plan
+
+Approved by the owner on 2026-11-10 as D-075, with A to G, in
+[decisions-m12-m21.md](decisions-m12-m21.md). Its slice plans were written under D-075 before any
+of it was built, approved by the owner's notes of 2026-11-20, which also approve the snapshot's
+destination gated as `pf export`'s is; departures are in its "How M19 was implemented". No network
+and no security control change.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M19.1 | The builder, canonical JSON, the envelope, every §3 section, the schema document and its validator, golden fixtures | Built, for review |
+| M19.2 | Create in one read transaction, the gated atomic write, migration 0035, verify, the list, `--snapshot` | Built, for review |
+
+### M19 acceptance criteria
+
+| ID | Test |
+|---|---|
+| VA1 | Fixed inputs give byte-identical snapshots. Canonical encoding is checked, and a float anywhere in the builder's output fails |
+| VA2 | Every §3 item is present, and every number agrees with its source command on the same ledger and `as_of` |
+| VA3 | No sentinel from any excluded field appears in the snapshot's bytes |
+| VA4 | Every `*_cents` field has a declared kind, missing is `null`, and the validator accepts the golden fixtures and refuses each mutated copy: a wrong type, a missing required field, an unknown enum value, an unknown major |
+| VA5 | A builder change without a fixture and version change fails |
+| VB1 | A concurrent writer gives a snapshot equal to the before or the after state, never a mix |
+| VB2 | `create` refuses an unsafe or existing destination, writing nothing. It writes `0600` atomically, and records without the path. Migration 0035 meets G10 |
+| VB3 | `verify` accepts a fresh snapshot, and refuses a one-byte change, a changed digest, broken reconciliation and an excluded key, writing nothing |
+| VB4 | `--snapshot` records its figures under G9. Every earlier criterion still passes |
+
+### Not in M19
+
+Encrypting the file, a network, incremental or delta snapshots, phone writes, scenario results,
+and institution names (until the owner says they may appear).
+
 ## Backlog benchmarks
 
 Not scheduled, and not part of A39 acceptance.

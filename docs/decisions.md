@@ -95,7 +95,7 @@ and keep its index line.
 | D-072 | M16 plan: safe-to-spend and the cash-flow constraint — Approved. M16 accepted |
 | D-073 | M17 plan: the local UI completed, with browser writes — Approved as a security change. Built for review |
 | D-074 | M18 plan: financial scenarios — Approved. Built for review |
-| D-075 | M19 plan: snapshots — Approved, not yet built |
+| D-075 | M19 plan: snapshots — Approved. Built for review; its compatibility policy is in shared-contract §6 |
 | D-076 | M20 plan: pairing and local-network sync — Approved as a security change, with `segno`, not yet built |
 | D-077 | M21 plan: backend acceptance, stress testing and the security audit — Approved, not yet built |
 | D-078 | Test suite cost: a copied test ledger, a narrower W1 check and a `slow` tier — Approved and built |

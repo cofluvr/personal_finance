@@ -1,32 +1,27 @@
-# Session Handoff: M17 Built, Awaiting Review
+# Session Handoff: M17 to M19 Built, Awaiting Review
 
-For a fresh session. Written 2026-11-20. **M1 to M16 are complete and accepted:** the owner
-accepted M16 and D-079's plan and mock-ups on 2026-11-20, with standing approval to continue
-through the milestones on the lead engineer's choices. `main` holds M1 to M9 at `19ee858`. M10 to
-M17 are on `feature/m10-rules`, not merged and not pushed.
+For a fresh session. Written 2026-11-21. **M1 to M16 are complete and accepted.** `main` holds M1
+to M9 at `19ee858`. M10 to M19 are on `feature/m10-rules`, not merged and not pushed.
 
-**M16's two findings are settled** (D-072): the dashboard computes the month once (0.647s), and a
-stored timezone that is not a zone is refused clearly.
+**M17, M18 and M19 are built, for the owner's review,** each without a stop between its slices,
+on the owner's notes of 2026-11-20. M17 (D-073) is a security change: browser writes. M18
+(D-074): scenarios and their inputs, migration 0034, `sc1`; the pure monthly projection,
+`scenario compare` and the scenario pages and forms; promotion with its undo, `sp1`. M19
+(D-075): the snapshot builder, canonical JSON, the schema document and its validator, golden
+fixtures; `snapshot create` in one read transaction to a destination gated as `pf export`'s,
+migration 0035, `snapshot verify`, `snapshots`. Each milestone's departures are in its decision's
+"How M1n was implemented", and the snapshot compatibility policy is shared-contract §6.
 
-**M17 is built, for the owner's review,** under D-073, a security change (browser writes),
-without a stop between its slices. Its slice plans are under D-073, and its departures and
-choices in "How M17 was implemented". In brief: the write pipeline and review decisions from
-the browser (M17.1); the transaction page and its writes, unresolved records, and the accounts,
-obligations and settings sections with their planning writes (M17.2); migration 0033 and tags
-(`tg1`, `r15`, `t13`, `d12`; `c` stays 7), search, and the eight visuals as SVG (M17.3); CSV
-export and `--ui` (M17.4). The allowlist as built is narrower than point 2's: the rest stays in
-the terminal for now.
-
-**Latest results:** see "Latest gating run" below. Breaks: M17.1 25, M17.2a 25, M17.2b 20, M17.3
-25, M17.4 3 (counts in D-073). **`/visuals` meets G9's stopping rule:** 2.194s against 2.0s, its
-cost the household report's attribution pass (benchmarks.md). Not optimized further.
-**Not done: the real-browser check of the CSP** and of a form submitted from a browser: no
-browser was available to the session.
+**Latest results:** see "Latest gating run" below. Breaks per slice are counted in each
+decision. Benchmarks in [benchmarks.md](benchmarks.md): `scenario compare` 0.521s at 24 months
+and 1.402s at 120, promote 0.553s; snapshot generation 2.621s, 1.81 MB. None meets the stopping
+rule. `/visuals` (M17) still does: 2.194s against 2.0s. **G6:** 197,641 command runs over 3,736 kept ledgers, M17's head (`43f29eb`) against this code on migrated copies: 197,549 byte for byte the same. The 92 that differ are all on two ledgers a test leaves at version 34, which M17's code refuses as newer than itself and this code asks to migrate. No token moved.
 
 **Nothing from M10 on is on the real ledger.** It stays at version 20 until the owner makes a
 verified backup and runs `pf migrate` one milestone at a time (G10): 21 (M10), 22 and 23 (M11),
-24 and 25 (M12), 26 (M13), 27 and 28 (M14), 29 to 31 (M15), 32 (M16), then 33 once M17 is
-accepted. After 26, the owner sets the household timezone with `pf setting set`.
+24 and 25 (M12), 26 (M13), 27 and 28 (M14), 29 to 31 (M15), 32 (M16), then 33 (M17), 34 (M18)
+and 35 (M19) once each is accepted. After 26, the owner sets the household timezone with
+`pf setting set`.
 
 Every fixture is invented. Point F with the owner on their already-imported files is still open.
 
@@ -39,41 +34,37 @@ Standing rules are in [CLAUDE.md](../CLAUDE.md), loaded automatically. Do not re
 
 Rewritten by each session for the next. The kickoff prompt carries only the owner's notes.
 
-- **Build M18, then M19, without a stop between them.** The owner asked on 2026-11-20 to keep
-  going through both; M17's review runs alongside and does not block them. A change the owner
-  asks for in M17 comes first when given.
-- **M18** (D-074): follow "M18 slice plans" under D-074, written before any of it was built.
-  M18.1 first, migration 0034 before any other code, with its G10 checklist; then M18.2 (the pure
-  projection, `scenario compare`, the scenario pages and their forms through M17's pipeline);
-  then M18.3 (promotion, `sp1`, `--scenarios`). XB3's 12-month projection is computed by hand to
-  the cent, a home purchase included.
-- **M19** (D-075): write its slice plans under D-075 first, as for M18. No network and no
-  security control change, but a new kind of file leaves the ledger folder: gate the snapshot's
-  destination as `pf export` gates its own (`db/exports.py`). Its schema is what D-079's iOS I1
-  and I2 read, so write it down in [shared-contract.md](shared-contract.md).
-- **Not M20:** it needs network and a new dependency, which no session has been given.
-- **Read first:** D-074 with its slice plans, D-075, D-067's G2, G5, G6, G9 and G10, and
-  D-073's "How M17 was implemented" for the browser routes. `planning/` holds the entries M18
-  projects; `reports/safe_to_spend.py` gives the starting liquid balance; `planning/loans.py`
-  the amortization.
-- **Warnings:** a new migration joins the set-backs before `drop_tag_tables` (0034, then 0035
-  for M19). A new browser route is a `WRITE_ROUTES` entry, its button and labels in the server,
-  and the allowlist tests in `test_local_ui_transaction_writes.py`. New command groups join the
-  test `Ledger.run` helper. Breaks run with `build/s17/breaks/run_breaks.py` on a copy of the
-  tree. `measure_reconciliation.py` needs `PYTHONPATH=src`, and its shape takes about four
-  minutes to build. Never add a migration file while a suite is running.
-- **Done when:** M18 and M19 are built, each slice gated, with 20 to 25 breaks per slice, G6 and
-  each benchmark row recorded, the records updated, and the full suite passing. Stop for review
-  there.
+- **Stop for the owner's review of M17, M18 and M19.** A change the owner asks for in any of
+  them comes first, in the order given. Gate each change on its slice's files, then the full
+  suite before stopping.
+- **Then, only if the owner's notes allow:** D-079's iOS I1 can start on the snapshot schema now
+  written down (shared-contract §6, `snapshot/schema_v1.json`); I2 needs M19 accepted. **M20 is
+  not next on its own:** it needs network and a new dependency (`segno`), which no session has
+  been given. M21 follows M20.
+- **Read first for review changes:** D-073's, D-074's and D-075's "How M1n was implemented".
+  M18's code is `planning/scenarios.py`, `projection.py` and `promotions.py`,
+  `reports/scenario_report.py`, and the scenario routes in `ui/writes.py` and `ui/server.py`;
+  M19's is `snapshot/`. Tests: `test_scenarios.py`, `test_scenario_compare.py`,
+  `test_scenario_promotion.py`, `test_scenario_migration.py`, `tests/unit/test_scenario_projection.py`,
+  `test_snapshot.py`, `test_snapshot_files.py`, `test_snapshot_migration.py`.
+- **Warnings:**
+  - A new migration joins the set-backs before `drop_snapshot_tables`.
+  - The income, obligation and fund terms loaders leave out rows of an undone promotion
+    (`kept_terms` in `planning/schedules.py`): a new reader of a terms table needs the same.
+  - The golden snapshot fixture is rewritten only with `PF_WRITE_SNAPSHOT_FIXTURES=1`, and only
+    with a conscious version change under the compatibility policy.
+  - Breaks run with `build/s18/breaks/run_breaks.py` on a copy of the tree.
+  - The benchmark shapes take about four minutes to build.
+- **Done when:** the owner's review changes are made and gated, and the full suite passes.
 
 ## Current state
 
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `main` holds everything through M9 at `19ee858`. M10 to M17 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
-| Latest commit | Run `git log -1`. M16 follow-ups `cd4ac52`; M17 from `57a7532` to this handoff's commit. Earlier commits are in the archive |
-| Latest gating run | The full suite, slow tests included, on M17 with its records: 3,965 passed in 0:16:27, exit code 0, chained to `01601ea` |
+| Branch | `main` holds everything through M9 at `19ee858`. M10 to M19 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
+| Latest commit | Run `git log -1`. M17 from `57a7532` to `43f29eb`; M18 from `2dad560` to `38f2f6f`; M19 from `c1736c6` to this handoff's commit. Earlier commits are in the archive |
+| Latest gating run | GATING_RUN |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
@@ -126,6 +117,11 @@ Then only what the task needs:
   `tests/scenarios/test_household.py`, `test_allocations.py` and `test_household_report.py`.
   Allocations share the stated model with types and categories, so run `test_categorizations.py`
   and `test_classifications.py` too.
+- For changes to M18: D-074's slice plans and "How M18 was implemented", XA1 to XC2 in
+  [plan.md](plan.md), the files named under "Next task", and migration 0034.
+- For changes to M19: D-075's slice plans and "How M19 was implemented", VA1 to VB4,
+  shared-contract §6, `snapshot/`, `household_by_month` in `reports/household.py`,
+  `refuse_unsafe_export_destination` in `db/exports.py`, and migration 0035.
 - For M12 to M21: D-067's guardrails G1 to G13 in [decisions-m12-m21.md](decisions-m12-m21.md)
   first, then the milestone's own decision, D-068 to D-077, and the decisions it names. Each
   milestone's criteria move into [plan.md](plan.md) when it starts.
@@ -193,9 +189,10 @@ Then only what the task needs:
   `test_decisions.py` drops 0026 to 0019 through `drop_category_rule_tables`,
   `drop_household_tables`, `drop_allocation_tables`, `drop_income_tables`,
   `drop_obligation_tables` and `drop_budget_tables`, and grows with each later migration's tables,
-  down to `drop_liquidity_tables` for 0032.
+  down to `drop_snapshot_tables` for 0035, through `drop_tag_tables` (0033) and
+  `drop_scenario_tables` (0034).
   Also add the tables to `tests/unit/test_migrations.py`, `planning_digest.py`'s
-  `PLANNING_TABLES`,
+  `PLANNING_TABLES` (planning tables only: scenarios are, snapshot records are not),
   `test_review_show.py`'s and `test_backups.py`'s `LEDGER_TABLES`, and the hand-added migrations of
   `test_pending_posted_migration.py`.
 - For changes to M8: D-062 in the full text and its criteria in [plan.md](plan.md), `ui/server.py`,
@@ -253,6 +250,10 @@ F1 and F4 are fixed, and recorded in the archive.
   real browser: one decision, one tag form, `/visuals`, and any CSP console error.
 - M17's inputs (D-073): whether the browser should take more of point 2's allowlist, and the
   `/visuals` remedy.
+- **The review of M18 and M19,** with their departures under D-074 and D-075: notably promotion
+  undo withdrawing terms rows, the FLAG form field, and what is not promotable.
+- M19's inputs (D-075): the transaction window (90 days by default), and whether institution
+  names may appear on the phone (left out until then).
 - M16's inputs (D-072): the checking buffer, which accounts are liquid, the links between
   obligations and loans or reserves, and the emergency restoration amount, entered once the real
   ledger reaches 32. Naming each card's payment obligation after the card, or saying how else to
@@ -272,7 +273,7 @@ F1 and F4 are fixed, and recorded in the archive.
 - On the real ledger, a verified backup, then `pf migrate` to version 21 for M10, verified, then
   22 and 23 for M11, then the owner's members, the 50/50 share and each account's default,
   entered by the owner, then 24 and 25 for M12, then 26 for M13, then 27 and 28 for M14, then 29
-  to 31 for M15, then 32 once M16 is accepted.
+  to 31 for M15, then 32 for M16, then 33, 34 and 35 as M17, M18 and M19 are accepted.
 - Merging `feature/m10-rules` into `main`. Needs the owner's approval.
 - Pushing. Not authorized from here.
 
@@ -280,10 +281,10 @@ F1 and F4 are fixed, and recorded in the archive.
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits | Approved on 2026-11-20, standing, by the owner's notes (continue through the milestones on the lead engineer's choices). Used for M16's follow-ups and M17 | Renewed by each kickoff's notes |
+| Local commits | Approved on 2026-11-20 on `feature/m10-rules` for M18 and M19, by the owner's notes. Used for M18 and M19 | Renewed by each kickoff's notes |
 | M11 | Accepted on 2026-11-10. Not yet on the real ledger | The real-ledger migrations 21, 22 and 23, each after a verified backup |
-| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes. M12 to M16 accepted. M17 built on 2026-11-20, its security change taken as approved by the owner's notes of that day | M17's review. M20 needs network and a new dependency (`segno`, pinned with its hash, W1's check), which no session has been given |
-| iOS (D-079) | Plan and mock-ups accepted on 2026-11-20. Not built | I1 can start on a draft of M19's schema |
+| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes. M12 to M16 accepted. M17 built on 2026-11-20, its security change taken as approved by the owner's notes of that day. M18 and M19 built on 2026-11-21, with their slice plans and M19's snapshot destination approved by the owner's notes of 2026-11-20 | The review of M17 to M19. M20 needs network and a new dependency (`segno`, pinned with its hash, W1's check), which no session has been given |
+| iOS (D-079) | Plan and mock-ups accepted on 2026-11-20. Not built | I1 can start on M19's schema, written down in shared-contract §6; I2 needs M19 accepted |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |

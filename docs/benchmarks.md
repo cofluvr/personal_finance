@@ -650,3 +650,18 @@ scenario at 24 months, three at 120, and the first scenario's promotion (3 entri
 **G9's stopping rule is not met.** The plan is read once, safe-to-spend's estimate included, and
 the pure projection runs twice over it.
 
+**A snapshot on the same shape (M19.2, VB4, D-075),** measured 2026-11-21 with
+`measure_reconciliation.py --scale --snapshot`, nothing else running. Output in
+`build/s18/bench_snapshot.txt`, ignored. `--safe-to-spend`'s shape: 104,100 transactions over 60
+months, 5,166 of them in the 90-day window as of 2026-12-20, which the shape asserts. Generation
+runs once untimed first, then is timed in one read transaction.
+
+| Operation | Figure | Provisional target |
+|---|---|---|
+| Generation, 90-day window, one read transaction | 2.621s | Below 5.0s: met |
+| File size | 1.81 MB | Below 5 MB: met |
+| Verify | 0.095s | none set |
+
+**G9's stopping rule is not met.** The gated write is not timed: `build/` is inside the git work
+tree, which the destination check refuses.
+

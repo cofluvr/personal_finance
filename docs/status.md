@@ -85,7 +85,9 @@ Last updated: 2026-11-20. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M18.1: migration 0034, scenarios and their inputs, `sc1` | Built on 2026-11-21 (D-074, "How M18 was implemented"), awaiting the owner's review |
 | M18.2: the projection, `scenario compare`, the scenario pages and forms | Built on 2026-11-21, awaiting the owner's review |
 | M18.3: promotion and its undo, `sp1`, `--scenarios` | Built on 2026-11-21, awaiting the owner's review |
-| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 to M16 accepted, M17 and M18 built for review |
+| M19.1: the snapshot builder, canonical JSON, the schema and its validator | Built on 2026-11-21 (D-075, "How M19 was implemented"), awaiting the owner's review |
+| M19.2: snapshot create, verify and the list, migration 0035, `--snapshot` | Built on 2026-11-21, awaiting the owner's review |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 to M16 accepted, M17 to M19 built for review |
 
 ## What exists
 
@@ -236,12 +238,22 @@ Last updated: 2026-11-20. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `fund restoration`, `fund restoration-undo`, `safe-to-spend`, `dashboard`,
   `tag add`, `tags`, `review tag`, `review tagging show`, `review tagging undo`,
   `transactions` with `--search`, `--account`, `--from`, `--to`, `--category`, `--tag`, `--min`
-  and `--max`, `report visuals`, `export transactions`, `export report`,
+  and `--max`, `report visuals`, `export transactions`, `export report`, `scenario add`,
+  `scenarios`, `scenario show`, `scenario input add`, `scenario input undo`, `scenario undo`,
+  `scenario compare`, `scenario promote`, `scenario promotion undo`, `snapshot create`,
+  `snapshot verify`, `snapshots`,
   `totals`,
   `report monthly`, `report household`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
   `backup verify`, `backup restore`, `pdf text`, run
   through the `bin/pf` launcher (D-038).
+
+- `personal_finance.planning.scenarios`, `projection` and `promotions`: scenarios and their
+  inputs, the pure monthly projection, and promotion with its undo (D-074).
+  `personal_finance.reports.scenario_report`: the plan read once, and the lines of `scenarios`,
+  `scenario show` and `scenario compare`, which the scenario pages render.
+- `personal_finance.snapshot`: canonical JSON, the snapshot builder, the schema document and its
+  validator, and creating, verifying and listing snapshot files (D-075).
 
 ## What does not exist yet
 
@@ -327,6 +339,14 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
   one request at a time, on loopback only. **The CSP was not checked in a real browser** for the
   visuals' presentation attributes or the forms (D-073 point 6), and no browser has submitted a
   form: the tests post as a browser would, over the real handler.
+- **Scenarios project monthly,** with the assumptions `scenario compare` prints: no daily
+  timing, inflation, returns or tax. Promotion is terminal only, one active promotion per
+  scenario, and maps only point 6's inputs: a loan payoff, a bonus, a borrowing, a home purchase,
+  an addition with an end date or without `--account` and `--match` stay scenarios. A withdrawn
+  promotion's terms row keeps its date, so a terms row on that same date is refused (D-074).
+- **A snapshot file is unencrypted** (D-075 point 7): it is to be kept on the encrypted image and
+  carried to the phone by hand. Members' parts are monthly totals moved out and in, not D-056's
+  five groups. Institution names are left out until the owner decides.
 - Tags are free labels on a transaction's whole set, entering no total; no renaming, merging or
   deleting a tag. Search is a plain scan, capped at 500 rows shown.
 - Exports are CSV only: transactions with fixed columns, or a report's lines one a row. No PDF,

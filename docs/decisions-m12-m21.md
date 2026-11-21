@@ -3038,7 +3038,7 @@ its reason:
 
 ---
 
-## D-075 M19 plan: snapshots — Approved
+## D-075 M19 plan: snapshots — Approved, built for review
 
 M19 meets shared-contract §3 and §4, and records §6's **snapshot compatibility policy**. A snapshot
 is:
@@ -3265,6 +3265,46 @@ what D-075 leaves to build time.
 | VB2 | `create` refuses an unsafe or existing destination, writing nothing. It writes `0600` atomically, and records without the path. Migration 0035 meets G10 |
 | VB3 | `verify` accepts a fresh snapshot, and refuses a one-byte change, a changed digest, broken reconciliation and an excluded key, writing nothing |
 | VB4 | `--snapshot` records its figures under G9. Every earlier criterion still passes |
+
+### How M19 was implemented
+
+Built on 2026-11-21 on the owner's notes of 2026-11-20, after M18, without a stop between its
+slices. The format is recorded as shared-contract §6's snapshot compatibility policy
+([shared-contract.md](shared-contract.md)), with the schema document
+`src/personal_finance/snapshot/schema_v1.json`. Departures and choices, each with its reason:
+
+- **What the owner's inputs default to.** The window is 90 days, configurable from 1 to 366.
+  Institution names are left out of the snapshot until the owner says they may appear on the
+  phone: an account is its display name and type.
+- **Value kinds.** Planned figures (budget targets and allowances, safe-to-spend figures,
+  planned contributions, a loan's scheduled payments and projections) are `projected`; what
+  funds hold and safe-to-spend protects `reserved`; members' parts `allocated`; observed and
+  recorded money `actual`.
+- **Household by month** gives each month's totals of all transactions, moved out and in, for the
+  household, each member and the unattributed (`household_by_month`, one pass). Members' parts by
+  D-056's five groups are left for a later minor version.
+- **Without the household timezone** `budget` and `safe_to_spend` are `null`, with a
+  `no_timezone` warning: a snapshot never assumes a zone. `pf snapshot create` without `--as-of`
+  needs the zone for today, as every planning command does.
+- **The window** holds transactions by the date `pf transactions` shows, the effective
+  transaction date else the posting date, from `window_days − 1` days before `as_of` through it.
+  Each keeps its ledger transaction ID, which the phone needs and which is no record or external
+  ID.
+- **Safe to spend's reasons** hold a list of details each, which the benchmark shape found: the
+  test ledgers held none.
+- **The destination** is refused by `db/exports.py`'s check, now naming which file it refuses, so
+  `pf export`'s messages are unchanged. It is checked once, before the build; a name taken
+  during the build is refused by `os.link`, which never replaces a file.
+- **Golden fixtures** are pinned by building their ledger with `uuid4` as a counter and its
+  import times fixed (the test drops and restores `source_document`'s no-update trigger on its own
+  synthetic ledger), so the bytes are the same on any day.
+- **The benchmark does not time the gated write:** `build/` is inside the git work tree, which
+  the destination check refuses. Generation and verify are timed, and the size recorded.
+- **G6, for M18 and M19 together,** since neither changes an existing command: 197,641 command runs over 3,736 kept ledgers, M17's head (`43f29eb`) against M19's code on migrated copies: 197,549 byte for byte the same. The 92 that differ are all on two ledgers a test leaves at version 34, which M17's code refuses as newer than itself and M19's code asks to migrate. No token moved.
+  Scripts and logs under `build/s18/g6/`, ignored.
+- **Breaks:** M19.1 23 (20 caught, 3 gaps closed); M19.2 21 (19 caught, 1 bad break rewritten
+  and caught, 1 equivalent: `os.link` refuses a link at the name either way). Logs under
+  `build/s18/breaks/`, ignored.
 
 ---
 
