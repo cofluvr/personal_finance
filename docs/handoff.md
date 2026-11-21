@@ -39,20 +39,32 @@ Standing rules are in [CLAUDE.md](../CLAUDE.md), loaded automatically. Do not re
 
 Rewritten by each session for the next. The kickoff prompt carries only the owner's notes.
 
-- **First, the owner's review of M17,** a security change, with "How M17 was implemented" under
-  D-073. Owner checks wanted: open `pf ui` in a browser, submit one review decision and one tag
-  form, and open `/visuals`, noting any CSP console error. Two findings need the owner's
-  decision: `/visuals` at 2.194s (a cheaper household total, or the comparison on its own page),
-  and whether the browser should take more of point 2's allowlist.
-- **Then M18** (D-074), whose slice plans this session drafted under D-074 if it reached them.
-- **Read first:** D-073's "How M17 was implemented", then D-074 and D-067's G5, G6, G9 and G10.
-  `ui/writes.py` holds the pipeline and the route table; `ui/server.py` the pages.
-- **Warnings:** a new migration joins the set-backs before `drop_tag_tables`. A new browser
-  route is a `WRITE_ROUTES` entry, its button and labels in the server, and the allowlist tests in
-  `test_local_ui_transaction_writes.py`. Breaks run with `build/s17/breaks/run_breaks.py` on a
-  copy of the tree. `measure_reconciliation.py` needs `PYTHONPATH=src`.
-- **Done when:** the slice the owner approves is built, gated on the full suite, with 20 to 25
-  breaks reported. Stop for review there unless the owner's notes extend the scope.
+- **Build M18, then M19, without a stop between them.** The owner asked on 2026-11-20 to keep
+  going through both; M17's review runs alongside and does not block them. A change the owner
+  asks for in M17 comes first when given.
+- **M18** (D-074): follow "M18 slice plans" under D-074, written before any of it was built.
+  M18.1 first, migration 0034 before any other code, with its G10 checklist; then M18.2 (the pure
+  projection, `scenario compare`, the scenario pages and their forms through M17's pipeline);
+  then M18.3 (promotion, `sp1`, `--scenarios`). XB3's 12-month projection is computed by hand to
+  the cent, a home purchase included.
+- **M19** (D-075): write its slice plans under D-075 first, as for M18. No network and no
+  security control change, but a new kind of file leaves the ledger folder: gate the snapshot's
+  destination as `pf export` gates its own (`db/exports.py`). Its schema is what D-079's iOS I1
+  and I2 read, so write it down in [shared-contract.md](shared-contract.md).
+- **Not M20:** it needs network and a new dependency, which no session has been given.
+- **Read first:** D-074 with its slice plans, D-075, D-067's G2, G5, G6, G9 and G10, and
+  D-073's "How M17 was implemented" for the browser routes. `planning/` holds the entries M18
+  projects; `reports/safe_to_spend.py` gives the starting liquid balance; `planning/loans.py`
+  the amortization.
+- **Warnings:** a new migration joins the set-backs before `drop_tag_tables` (0034, then 0035
+  for M19). A new browser route is a `WRITE_ROUTES` entry, its button and labels in the server,
+  and the allowlist tests in `test_local_ui_transaction_writes.py`. New command groups join the
+  test `Ledger.run` helper. Breaks run with `build/s17/breaks/run_breaks.py` on a copy of the
+  tree. `measure_reconciliation.py` needs `PYTHONPATH=src`, and its shape takes about four
+  minutes to build. Never add a migration file while a suite is running.
+- **Done when:** M18 and M19 are built, each slice gated, with 20 to 25 breaks per slice, G6 and
+  each benchmark row recorded, the records updated, and the full suite passing. Stop for review
+  there.
 
 ## Current state
 
@@ -61,7 +73,7 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `main` holds everything through M9 at `19ee858`. M10 to M17 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
 | Latest commit | Run `git log -1`. M16 follow-ups `cd4ac52`; M17 from `57a7532` to this handoff's commit. Earlier commits are in the archive |
-| Latest gating run | The full suite, slow tests included, on M16.2 with its records: 3,718 passed in 0:14:27, exit code 0, chained to this handoff's commit |
+| Latest gating run | The full suite, slow tests included, on M17 with its records: 3,965 passed in 0:16:27, exit code 0, chained to `01601ea` |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
