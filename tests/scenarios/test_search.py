@@ -67,6 +67,17 @@ class TestEachFilter:  # WC2
     def test_the_category_in_effect(self, ledger):
         assert listed(ledger, "--category", "Food") == ["SYNTHETIC GROCER"]
 
+    def test_a_category_a_rule_gives(self, ledger):
+        coffee = ledger.ids["SYNTHETIC COFFEE HOUSE"]
+        assert ledger.run("review", "classify", coffee, "--account", "A", "--revision",
+                          ledger.transaction_revision(coffee), "--type", "purchase")[0] == 0
+        words = ["--category", "Entertainment", "--description-contains", "coffee house"]
+        preview = ledger.run("category", "rule", "preview", *words)[1]
+        code, _, err = ledger.run("category", "rule", "add", *words, "--preview",
+                                  re.search(r"Revision: (p1-[0-9a-f]{16})", preview)[1])
+        assert code == 0, err
+        assert listed(ledger, "--category", "Entertainment") == ["SYNTHETIC COFFEE HOUSE"]
+
     def test_a_tag_applying(self, ledger):
         assert listed(ledger, "--tag", "Trip") == ["SYNTHETIC  Coffee   HOUSE"]
 

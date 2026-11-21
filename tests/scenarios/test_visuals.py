@@ -100,6 +100,18 @@ class TestTheCharts:  # WC3
                                or name.startswith("on") for name in element.attrib), element
         assert "url(" not in body and "<foreignObject" not in body
 
+    def test_an_undone_observation_is_not_drawn(self, planned):
+        planned.add_typed_account("Card", "credit_card")
+        owe(planned, "Card", "2026-05-01", "90.00")
+        shown = planned.run("balance", "list", "--account", "Card")[1]
+        observation, token = re.search(r"^Observation (\S+):.*\n  Token: (\S+)$", shown,
+                                       re.MULTILINE).groups()
+        code, _, err = planned.run("balance", "undo", "--account", "Card", "--observation",
+                                   observation, "--token", token)
+        assert code == 0, err
+        out = planned.run("report", "visuals", "--as-of", AS_OF)[1]
+        assert "Card, 2026-05-01" not in out
+
     def test_a_label_holding_markup_is_text(self, planned):
         planned.add_typed_account("<script>x</script>", "credit_card")
         owe(planned, "<script>x</script>", "2026-05-01", "1.00")

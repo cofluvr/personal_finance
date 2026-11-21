@@ -37,10 +37,8 @@ def load_tagging(conn: sqlite3.Connection, statement_id: str) -> StoredStatement
 def tagging_undo_outlook(conn: sqlite3.Connection,
                          statement: StoredStatement) -> TaggingUndoOutlook:
     """The tg1 token, as lb1: the transactions holding its bound records, and their outcome with
-    and without it. The tags' names are part of it, so it reads the same in any ledger holding
-    the same statement."""
+    and without it, the outcome holding the tag IDs, each naming one append-only tag."""
     outlook = undo_outlook(conn, TAG_STATEMENTS, statement,
                            lambda active, membership: effective_tags(active, membership))
-    material = {**outlook.material, "tags": statement.shown_value}
-    return TaggingUndoOutlook(f"tg{TAGGING_REVISION_VERSION}-{digest(material)}",
+    return TaggingUndoOutlook(f"tg{TAGGING_REVISION_VERSION}-{digest(outlook.material)}",
                               outlook.state_by_transaction)

@@ -1419,8 +1419,9 @@ def filtered_transaction_rows(conn, filters: TransactionFilters) -> list[tuple]:
         arguments.append(filters.category_id)
     if filters.tag_id is not None:
         conditions.append(
+            # Only an applied row holds tags (its CHECK), so the others never match.
             """EXISTS (SELECT 1 FROM transaction_tag tagged
-                       WHERE tagged.transaction_id = listed.id AND tagged.state = 'applied'
+                       WHERE tagged.transaction_id = listed.id
                          AND ',' || tagged.tags || ',' LIKE '%,' || ? || ',%')""")
         arguments.append(filters.tag_id)
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
