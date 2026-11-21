@@ -13,6 +13,7 @@ from datetime import date
 from itertools import islice
 from typing import NamedTuple
 
+from personal_finance.reconcile.category_rule_effects import normalized_text
 from personal_finance.money import format_cents
 from personal_finance.reconcile.apply import stale_accounts
 from personal_finance.reconcile.categories import UNCATEGORIZED, list_categories
@@ -1294,13 +1295,14 @@ def document_list_lines(conn) -> ReportLines:
     return out
 
 
-def transaction_list_lines(conn) -> ReportLines:
-    # Effective values: a corrected value where one applies, else the source value (D-049).
-    rows = conn.execute(
-        """SELECT entry.id,
+# Every transaction with its effective values: a corrected value where one applies, else the
+# source value (D-049). Its columns are the ID, the date shown, the amount, the status, the
+# description, whether corrected, whether completed by hand, and the account.
+TRANSACTION_LIST_SQL = """SELECT entry.id,
                   COALESCE(fixed_transaction_date.corrected_text, entry.transaction_date,
                            fixed_posting_date.corrected_text, entry.posting_date) AS shown_date,
-                  COALESCE(fixed_amount.corrected_amount_cents, entry.amount_cents),
+                  COALESCE(fixed_amount.corrected_amount_cents, entry.amount_cents)
+                      AS amount_cents,
                   entry.settlement_status,
                   COALESCE(fixed_description.corrected_text, entry.description),
                   EXISTS (SELECT 1 FROM transaction_correction fix
@@ -1310,7 +1312,8 @@ def transaction_list_lines(conn) -> ReportLines:
                             AND completion.kind = 'completed'
                             AND NOT EXISTS (SELECT 1 FROM record_resolution_event undone
                                             WHERE undone.resolution_id = completion.id
-                                              AND undone.event = 'undone'))
+                                              AND undone.event = 'undone')),
+                  entry.account_id
            FROM ledger_transaction entry
            LEFT JOIN transaction_correction fixed_amount
                ON fixed_amount.transaction_id = entry.id AND fixed_amount.field = 'amount'
@@ -1326,11 +1329,41 @@ def transaction_list_lines(conn) -> ReportLines:
            LEFT JOIN transaction_correction fixed_description
                ON fixed_description.transaction_id = entry.id
               AND fixed_description.field = 'description'
-              AND fixed_description.state = 'applied'
-           ORDER BY shown_date, entry.id"""
-    ).fetchall()
+              AND fixed_description.state = 'applied'"""
+# The most transactions a filtered list shows (D-073 point 4). The rest are counted.
+FILTERED_LIST_CAP = 500
+
+
+@dataclass(frozen=True)
+class TransactionFilters:
+    """pf transactions' filters, each already checked, and how each reads when shown back.
+    Different filters combine with AND (D-073 point 4)."""
+
+    search: str | None = None
+    account_id: str | None = None
+    first_date: str | None = None
+    last_date: str | None = None
+    category_id: int | None = None
+    tag_id: int | None = None
+    minimum_cents: int | None = None
+    maximum_cents: int | None = None
+    # (name, value as typed) for each filter given, for the header line.
+    shown: tuple[tuple[str, str], ...] = ()
+
+
+def transaction_list_lines(conn, filters: TransactionFilters | None = None) -> ReportLines:
+    """Every transaction, or with filters those matching, at most 500 with the rest counted.
+    With no filter the lines are exactly as before M17.3."""
+    if filters is None:
+        rows = conn.execute(TRANSACTION_LIST_SQL + " ORDER BY shown_date, entry.id").fetchall()
+    else:
+        rows = filtered_transaction_rows(conn, filters)
     out = ReportLines()
-    for transaction_id, when, cents, status, description, corrected, completed in rows:
+    if filters is not None:
+        described = ", ".join(f"{name} {shown(value)}" for name, value in filters.shown)
+        out.add(f"Transactions matching {described}:")
+    for (transaction_id, when, cents, status, description, corrected, completed,
+         _) in rows[:FILTERED_LIST_CAP] if filters is not None else rows:
         marker = "  (corrected)" if corrected else ""
         marker += "  (completed by hand)" if completed else ""
         out.add(
@@ -1338,9 +1371,65 @@ def transaction_list_lines(conn) -> ReportLines:
             f"{shown(description) if description else ''}{marker}",
             linked_transaction_id=transaction_id,
         )
-    if not rows:
+    if filters is not None:
+        hidden = len(rows) - FILTERED_LIST_CAP
+        if not rows:
+            out.add("No transactions match.")
+        elif hidden > 0:
+            out.add(f"Matching: {len(rows)}, the first {FILTERED_LIST_CAP} shown. "
+                    f"{hidden} more match: narrow the filters to see them.")
+        else:
+            out.add(f"Matching: {len(rows)}")
+    elif not rows:
         out.add("No transactions.")
     return out
+
+
+def filtered_transaction_rows(conn, filters: TransactionFilters) -> list[tuple]:
+    """The transactions every given filter selects, in the list's order. Dates bound the date
+    shown, inclusive; amounts bound the effective amount in cents, inclusive; a category is the
+    one in effect, a person's before a rule's (D-064); a tag is one applying; and text is found
+    in the effective description as D-064's rules compare it, ignoring case and repeated
+    spaces."""
+    conditions, arguments = [], []
+    if filters.account_id is not None:
+        conditions.append("listed.account_id = ?")
+        arguments.append(filters.account_id)
+    if filters.first_date is not None:
+        conditions.append("listed.shown_date >= ?")
+        arguments.append(filters.first_date)
+    if filters.last_date is not None:
+        conditions.append("listed.shown_date <= ?")
+        arguments.append(filters.last_date)
+    if filters.minimum_cents is not None:
+        conditions.append("listed.amount_cents >= ?")
+        arguments.append(filters.minimum_cents)
+    if filters.maximum_cents is not None:
+        conditions.append("listed.amount_cents <= ?")
+        arguments.append(filters.maximum_cents)
+    if filters.category_id is not None:
+        conditions.append(
+            """COALESCE((SELECT by_person.category_id FROM transaction_category by_person
+                         WHERE by_person.transaction_id = listed.id
+                           AND by_person.state = 'applied'),
+                        (SELECT by_rules.category_id FROM transaction_rule_category by_rules
+                         WHERE by_rules.transaction_id = listed.id
+                           AND by_rules.state = 'applied')) = ?""")
+        arguments.append(filters.category_id)
+    if filters.tag_id is not None:
+        conditions.append(
+            """EXISTS (SELECT 1 FROM transaction_tag tagged
+                       WHERE tagged.transaction_id = listed.id AND tagged.state = 'applied'
+                         AND ',' || tagged.tags || ',' LIKE '%,' || ? || ',%')""")
+        arguments.append(filters.tag_id)
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    rows = conn.execute(
+        f"""SELECT * FROM ({TRANSACTION_LIST_SQL}) listed {where}
+            ORDER BY listed.shown_date, listed.id""", arguments).fetchall()
+    if filters.search is not None:
+        wanted = normalized_text(filters.search)
+        rows = [row for row in rows if wanted in normalized_text(row[4] or "")]
+    return rows
 
 
 def review_queue_lines(conn) -> ReportLines:

@@ -75,8 +75,8 @@ class WriteRoute(NamedTuple):
     hidden: tuple[Field, ...]
     # Typed or chosen by the person.
     typed: tuple[Field, ...] = ()
-    # Whether a success writes, and so redirects (PRG). A preview writes nothing.
-    writes: bool = True
+    # Options the route always gives, such as --none.
+    flags: tuple[str, ...] = ()
 
     @property
     def field_names(self) -> set[str]:
@@ -121,6 +121,12 @@ WRITE_ROUTES = {
     "/transaction/separate": WriteRoute(
         ("review", "separate"), (target("transaction"), ACCOUNT, REVISION),
         (Field("groups", GROUP_LINES, "--group"),)),
+    "/transaction/tag": WriteRoute(
+        ("review", "tag"), (target("transaction"), ACCOUNT, REVISION, *SUPERSEDES),
+        (Field("tags", TEXT, "--tags"),)),
+    "/transaction/tag-none": WriteRoute(
+        ("review", "tag"), (target("transaction"), ACCOUNT, REVISION, *SUPERSEDES),
+        flags=("--none",)),
     "/transaction/one-sided": WriteRoute(
         ("review", "transfer", "one-sided"), (target("transaction"), ACCOUNT, REVISION),
         (Field("counterpart_account", ID, "--counterpart-account"),)),
@@ -303,4 +309,4 @@ def command_words(path: str, form: dict[str, str], ledger_path) -> list[str]:
                 words += [field.option, *ids]
         else:
             words.append(f"{field.option}={value}")
-    return words
+    return [*words, *route.flags]

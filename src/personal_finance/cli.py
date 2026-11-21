@@ -48,7 +48,7 @@ from personal_finance.ingest.errors import ImportFailure
 from personal_finance.ingest.layouts import LAYOUTS
 from personal_finance.ingest.pdf_reader import read_pdf_lines
 from personal_finance.ingest.pipeline import import_files
-from personal_finance.money import format_cents
+from personal_finance.money import MoneyParseError, format_cents, parse_cents
 from personal_finance.planning.income_effects import AMOUNT_CHANGED as INCOME_AMOUNT_CHANGED
 from personal_finance.planning.income_effects import RECEIVED as INCOME_RECEIVED
 from personal_finance.planning.income_effects import SOURCE_CONFLICT, occurrences
@@ -186,7 +186,12 @@ from personal_finance.reconcile.classification_effects import (
     TYPE_AGAINST_DIRECTION,
     UNCLASSIFIED,
 )
-from personal_finance.reconcile.categories import UNCATEGORIZED, add_category, list_categories
+from personal_finance.reconcile.categories import (
+    UNCATEGORIZED,
+    add_category,
+    find_category,
+    list_categories,
+)
 from personal_finance.reconcile.categorizations import (
     categorize_transaction,
     undo_categorization,
@@ -211,7 +216,13 @@ from personal_finance.reconcile.allocation_effects import AMOUNT_DIFFERS
 from personal_finance.reconcile.allocations import Stated, allocate_transaction, undo_allocation
 from personal_finance.reconcile.breakdown_effects import parsed as parsed_breakdown
 from personal_finance.reconcile.breakdowns import break_down, undo_breakdown
-from personal_finance.reconcile.tags import add_tag, list_tags, tag_transaction, undo_tagging
+from personal_finance.reconcile.tags import (
+    add_tag,
+    find_tag,
+    list_tags,
+    tag_transaction,
+    undo_tagging,
+)
 from personal_finance.reports.tag_evidence import load_tagging, tagging_undo_outlook
 from personal_finance.reconcile.consumptions import consume_transaction, undo_consumption
 from personal_finance.reconcile.household import (
@@ -371,6 +382,7 @@ from personal_finance.reports.report_text import (
     shown,
     shown_amount,
     totals_report_lines,
+    TransactionFilters,
     transaction_list_lines,
 )
 from personal_finance.reports.resolution_evidence import (
@@ -1165,7 +1177,19 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile.add_argument("--account", help="account name or ID (default: every account)")
 
     command("documents", handler=run_documents, help="list imported documents and their coverage")
-    command("transactions", handler=run_transactions, help="list logical transactions")
+    transactions = command("transactions", handler=run_transactions,
+                           help="list logical transactions, or search them with filters")
+    transactions.add_argument("--search", help="text the effective description contains, "
+                              "ignoring case and repeated spaces")
+    transactions.add_argument("--account", help="account name or ID")
+    transactions.add_argument("--from", dest="first_date", help="the first date, YYYY-MM-DD")
+    transactions.add_argument("--to", dest="last_date", help="the last date, YYYY-MM-DD")
+    transactions.add_argument("--category", help="the category in effect, a name from category "
+                              "list")
+    transactions.add_argument("--tag", help="a tag applying, a name from tags")
+    transactions.add_argument("--min", dest="minimum", help="the least effective amount, such as "
+                              "--min=-100.00, negative for money out")
+    transactions.add_argument("--max", dest="maximum", help="the greatest effective amount")
 
     trace = command("trace", handler=run_trace, help="show where a transaction came from")
     trace.add_argument("transaction_id")
@@ -2500,10 +2524,68 @@ def run_documents(args) -> int:
     return 0
 
 
+SEARCH_TEXT_INVALID = ("--search must hold printable text, up to 200 characters. Nothing was "
+                       "searched.")
+
+
 def run_transactions(args) -> int:
     conn = open_ledger(args.db, read_only=True)
-    print_report(transaction_list_lines(conn))
+    print_report(transaction_list_lines(conn, transaction_filters(conn, args)))
     return 0
+
+
+def transaction_filters(conn, args) -> TransactionFilters | None:
+    """The filters given, each checked strictly, or None with none given, so the list is as
+    before (D-073 point 4)."""
+    given = [(name, value) for name, value in (
+        ("search", args.search), ("account", args.account), ("from", args.first_date),
+        ("to", args.last_date), ("category", args.category), ("tag", args.tag),
+        ("min", args.minimum), ("max", args.maximum)) if value is not None]
+    if not given:
+        return None
+    if args.search is not None and (not args.search.strip() or len(args.search) > 200
+                                    or not args.search.isprintable()):
+        raise CommandError(SEARCH_TEXT_INVALID)
+    first = None if args.first_date is None else checked_date(args.first_date, "--from")
+    last = None if args.last_date is None else checked_date(args.last_date, "--to")
+    if first and last and first > last:
+        raise CommandError("--from is after --to. Nothing was searched.")
+    category = None
+    if args.category is not None:
+        category = find_category(conn, args.category)
+        if category is None:
+            raise CommandError("category not found. Names are compared exactly: run category "
+                               "list.")
+    tag = None
+    if args.tag is not None:
+        tag = find_tag(conn, args.tag)
+        if tag is None:
+            raise CommandError("tag not found. Names are compared exactly: run tags.")
+    minimum = None if args.minimum is None else checked_amount(args.minimum, "--min")
+    maximum = None if args.maximum is None else checked_amount(args.maximum, "--max")
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise CommandError("--min is above --max. Nothing was searched.")
+    return TransactionFilters(
+        args.search, None if args.account is None else find_account(conn, args.account),
+        first, last, category and category.category_id, tag and tag.tag_id, minimum, maximum,
+        tuple(given))
+
+
+def checked_date(text, option) -> str:
+    try:
+        return parsed_date(text, option)
+    except DecisionRefused as refused:
+        raise CommandError(str(refused).replace(" Nothing was changed.", "")) from None
+
+
+def checked_amount(text, option) -> int:
+    try:
+        cents = parse_cents(text)
+    except MoneyParseError:
+        cents = None
+    if cents is None:
+        raise CommandError(f"{option} must be an amount such as -12.50. Nothing was searched.")
+    return cents
 
 
 def run_trace(args) -> int:

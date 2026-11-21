@@ -305,7 +305,8 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return self.send_page(403, "Signed out", notice=SIGNED_OUT)
         if path not in PAGE_PARAMETERS:
             return self.send_page(404, "Not found", notice=NOT_FOUND)
-        parameters = parsed_query(query, PAGE_PARAMETERS[path])
+        parameters = (search_parameters(query) if path == "/transactions"
+                      else parsed_query(query, PAGE_PARAMETERS[path]))
         if parameters is None:
             return self.send_page(400, "Refused", notice=BAD_ADDRESS)
         if path == "/style.css":
@@ -346,7 +347,7 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         if path == "/documents":
             return self.send_page(200, "Import results", document_list_lines(conn))
         if path == "/transactions":
-            return self.send_page(200, "Transactions", transaction_list_lines(conn))
+            return self.answer_transactions(conn, parameters)
         if path == "/review":
             return self.send_page(200, "Review queue", review_queue_lines(conn))
         if path == "/review/item":
@@ -401,6 +402,23 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
                               revision)
         self.send_page(200, "Result", lines, after=after)
 
+    def answer_transactions(self, conn, parameters):
+        """pf transactions with the filters given, run in memory, so the page and the command
+        never differ (D-073 point 4), and a form that searches by GET."""
+        form = search_form(conn, parameters)
+        if not parameters:
+            return self.send_page(200, "Transactions", transaction_list_lines(conn), form=form)
+        words = ["transactions", f"--db={self.server.ledger_path}",
+                 *(f"--{name}={value}" for name, value in parameters.items())]
+        code, printed, message = run_in_memory(words)
+        if code != 0:
+            return self.send_page(400, "Refused", notice=message or BAD_ADDRESS, form=form)
+        lines = ReportLines()
+        for text in printed.splitlines():
+            found = TRANSACTION_ROW.match(text)
+            lines.add(text, linked_transaction_id=found and found[1])
+        self.send_page(200, "Transactions", lines, form=form)
+
     def answer_section(self, conn, path, parameters):
         """A section of PRD §18 as its commands print it, one after another, without creation
         times (F2, D-073 point 3), and the forms point 2 allows there."""
@@ -443,13 +461,17 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         secret = self.server.form_secret
         forms = []
         for path, kind, label in (("/transaction/classify", "classification", "Financial type"),
-                                  ("/transaction/categorize", "categorization", "Category")):
+                                  ("/transaction/categorize", "categorization", "Category"),
+                                  ("/transaction/tag", "tagging", "Tags")):
             superseding = superseded_statement(printed, kind, db)
             if superseding is None:
                 forms.append(f'<h3>{label}</h3><p class="notice">{escaped(SEVERAL_STATEMENTS)}'
                              "</p>")
                 continue
             forms.append(route_form(secret, path, {**hidden, **superseding}, heading=label))
+            if path == "/transaction/tag":
+                forms.append(route_form(secret, "/transaction/tag-none",
+                                        {**hidden, **superseding}))
         for field in writes.CORRECTABLE_FIELDS:
             superseding = superseded_correction(printed, field, db)
             heading = f"Correct the {field.replace('_', ' ')}"
@@ -650,11 +672,16 @@ SECTION_FORMS = {"/accounts": accounts_forms, "/obligations": obligations_forms,
                  "/settings": settings_forms}
 
 
+# How review transaction show names each kind's statements.
+STATEMENT_LABELS = {"classification": "Classification", "categorization": "Categorization",
+                    "tagging": "Tag statement"}
+
+
 def superseded_statement(printed, kind, db) -> dict[str, str] | None:
-    """The supersedes fields for a new classification or categorization: empty where none
-    reaches the transaction, the one reaching it and its revision from review <kind> show, or
-    None where several do or its revision cannot be read."""
-    found = re.findall(rf"^    {kind.capitalize()} (\S+): ", printed, re.MULTILINE)
+    """The supersedes fields for a new classification, categorization or tag statement: empty
+    where none reaches the transaction, the one reaching it and its revision from review <kind>
+    show, or None where several do or its revision cannot be read."""
+    found = re.findall(rf"^    {STATEMENT_LABELS[kind]} (\S+): ", printed, re.MULTILINE)
     return supersedes_fields(found, ["review", kind, "show"], db)
 
 
@@ -680,6 +707,52 @@ def printed_revision(words) -> str | None:
     code, printed, _ = run_in_memory(words)
     found = re.search(r"^\s*Revision: (\S+)$", printed, re.MULTILINE) if code == 0 else None
     return found[1] if found else None
+
+
+# What the transactions page takes, and of what kind, as pf transactions does (D-073 point 4).
+SEARCH_FIELDS = {"search": writes.TEXT, "account": writes.ID, "from": writes.DATE_KIND,
+                 "to": writes.DATE_KIND, "category": writes.TEXT, "tag": writes.TEXT,
+                 "min": writes.AMOUNT_KIND, "max": writes.AMOUNT_KIND}
+TRANSACTION_ROW = re.compile(r"^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})  ")
+
+
+def search_parameters(query: str) -> dict[str, str] | None:
+    """The transactions page's filters, decoded as a form is and each of its kind, given once.
+    An empty one is a filter not given. None when anything else is there."""
+    parameters = {}
+    for piece in query.split("&") if query else []:
+        raw_name, separator, raw_value = piece.encode("latin-1").partition(b"=")
+        try:
+            name = writes.decoded_form_part(raw_name)
+            value = writes.decoded_form_part(raw_value)
+        except (UnicodeDecodeError, ValueError):
+            return None
+        if not separator or name not in SEARCH_FIELDS or name in parameters:
+            return None
+        if not writes.acceptable(writes.Field(name, SEARCH_FIELDS[name], f"--{name}",
+                                              required=False), value):
+            return None
+        parameters[name] = value
+    return {name: value for name, value in parameters.items() if value != ""}
+
+
+def search_form(conn, parameters) -> str:
+    """A form that searches the transactions by GET, holding the filters given."""
+    def text_input(name, label, size=24):
+        value = escaped(parameters.get(name, ""))
+        return f'<label> {label} <input name="{name}" size="{size}" value="{value}"></label>'
+
+    accounts = ['<option value="">Every account</option>']
+    for choice_id, name in account_choices(conn):
+        selected = " selected" if choice_id == parameters.get("account") else ""
+        accounts.append(f'<option value="{escaped(choice_id)}"{selected}>{escaped(name)}</option>')
+    return ('<form method="get" action="/transactions">'
+            + text_input("search", "Description contains", 30)
+            + f'<label> Account <select name="account">{"".join(accounts)}</select></label>'
+            + text_input("from", "From", 10) + text_input("to", "To", 10)
+            + text_input("category", "Category", 16) + text_input("tag", "Tag", 12)
+            + text_input("min", "Least amount", 10) + text_input("max", "Greatest amount", 10)
+            + " <button>Search</button></form>")
 
 
 def same_secret(given: str, expected: str) -> bool:
@@ -824,6 +897,7 @@ FIELD_LABELS = {
     "category": "Category, a name from category list",
     "value": "Corrected value",
     "counterpart_account": "The other account",
+    "tags": "Tags, names from tags separated by commas",
     "buffer": "Checking buffer, an amount such as 500.00",
     "loan": "Covers this loan's payment",
     "fund": "Covers this reserve's purchase, by its fund ID",
@@ -839,6 +913,8 @@ BUTTONS = {
     "/transaction/correct": "Correct",
     "/transaction/separate": "Separate these groups",
     "/transaction/one-sided": "Record a one-sided transfer",
+    "/transaction/tag": "Tag",
+    "/transaction/tag-none": "State it has no tags",
     "/setting/buffer-set": "Set the buffer",
     "/setting/buffer-undo": "Undo the buffer",
     "/account/liquidity-set": "Designate liquid",

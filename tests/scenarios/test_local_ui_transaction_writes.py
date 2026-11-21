@@ -24,8 +24,8 @@ from personal_finance.ui import writes
 ALLOWLIST = {
     "/review/reject", "/review/confirm", "/review/undo", "/review/complete", "/review/dismiss",
     "/transaction/classify", "/transaction/categorize", "/transaction/correct",
-    "/transaction/separate", "/transaction/one-sided",
-    "/setting/buffer-set", "/setting/buffer-undo", "/account/liquidity-set",
+    "/transaction/separate", "/transaction/one-sided", "/transaction/tag",
+    "/transaction/tag-none", "/setting/buffer-set", "/setting/buffer-undo", "/account/liquidity-set",
     "/account/liquidity-undo", "/obligation/covers-loan", "/obligation/covers-fund",
     "/obligation/uncover",
 }
@@ -146,7 +146,8 @@ class TestTheTransactionPage:  # WB1
             browser.close()
         assert set(forms) == {"/transaction/classify", "/transaction/categorize",
                               "/transaction/correct", "/transaction/separate",
-                              "/transaction/one-sided"}
+                              "/transaction/one-sided", "/transaction/tag",
+                              "/transaction/tag-none"}
         for form in forms.values():
             assert form["transaction"] == transaction_id
             assert form["revision"] == revision_of(ledger, transaction_id)
@@ -212,6 +213,28 @@ class TestWritesEqualTheCli:  # WB3
             ["review", "correct", transaction_id, "--account", account, "--revision",
              revision_of(ledger, transaction_id), "--field", field, f"--value={value}"],
             the_fields_form)
+
+    def test_tag_then_say_none_superseding(self, ledger, tmp_path, capsys):
+        (transaction_id,) = transaction_ids(ledger)
+        for name in ("Trip", "Work"):
+            assert ledger.run("tag", "add", name)[0] == 0
+        account = account_id(ledger, "A")
+        assert_browser_equals_cli(
+            ledger, tmp_path, capsys, "/transaction/tag", {"tags": "Work,Trip"},
+            ["review", "tag", transaction_id, "--account", account, "--revision",
+             revision_of(ledger, transaction_id), "--tags", "Work,Trip"],
+            page_forms(transaction_id))
+        out = ledger.run("review", "transaction", "show", transaction_id)[1]
+        statement = re.search(r"^    Tag statement (\S+): ", out, re.MULTILINE)[1]
+        superseded = re.search(r"^\s*Revision: (\S+)$",
+                               ledger.run("review", "tagging", "show", statement)[1],
+                               re.MULTILINE)[1]
+        assert_browser_equals_cli(
+            ledger, tmp_path, capsys, "/transaction/tag-none", {},
+            ["review", "tag", transaction_id, "--account", account, "--revision",
+             revision_of(ledger, transaction_id), "--none", "--supersedes", statement,
+             "--supersedes-revision", superseded],
+            page_forms(transaction_id))
 
     def test_a_one_sided_transfer(self, ledger, tmp_path, capsys):
         (transaction_id,) = transaction_ids(ledger)
