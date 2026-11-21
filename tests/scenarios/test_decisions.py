@@ -148,15 +148,27 @@ SCENARIO_TABLES = ("scenario_promotion_entry", "scenario_promotion_event", "scen
                    "scenario_input_event", "scenario_input", "scenario_event", "scenario")
 
 
+# Created by 0035, and empty until a snapshot is written (D-075 point 7).
+SNAPSHOT_TABLES = ("snapshot_record",)
+
+
+def drop_snapshot_tables(conn) -> None:
+    """Undo 0035 on a ledger at the latest version, before setting it back further."""
+    for table in SNAPSHOT_TABLES:
+        assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        conn.execute(f"DROP TABLE {table}")
+
+
 def drop_scenario_tables(conn) -> None:
-    """Undo 0034 on a ledger at the latest version, before setting it back further."""
+    """Undo 0035 and 0034 on a ledger at the latest version, before setting it back further."""
+    drop_snapshot_tables(conn)
     for table in SCENARIO_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")
 
 
 def drop_tag_tables(conn) -> None:
-    """Undo 0034 and 0033 on a ledger at the latest version, before setting it back further."""
+    """Undo 0035 to 0033 on a ledger at the latest version, before setting it back further."""
     drop_scenario_tables(conn)
     for table in TAG_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -322,7 +334,7 @@ class Ledger:
             position = 3
         if words[0] == "income":
             position = 3 if words[1] == "source" else 2
-        if words[0] in ("setting", "budget", "fund", "loan", "tag", "export"):
+        if words[0] in ("setting", "budget", "fund", "loan", "tag", "export", "snapshot"):
             position = 2
         if words[:2] in (["loan", "terms"], ["loan", "plan"]):
             position = 3

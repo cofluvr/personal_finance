@@ -58,7 +58,7 @@ LEDGER_TABLES = (
     "obligation_coverage_event", "fund_restoration", "fund_restoration_event",
     "tag", "tag_statement", "tag_statement_record", "tag_statement_event", "transaction_tag",
     "scenario", "scenario_event", "scenario_input", "scenario_input_event", "scenario_promotion",
-    "scenario_promotion_event", "scenario_promotion_entry",
+    "scenario_promotion_event", "scenario_promotion_entry", "snapshot_record",
 )
 
 

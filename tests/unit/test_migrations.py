@@ -82,6 +82,7 @@ def test_new_database_has_the_expected_tables(conn):
         "scenario_promotion",
         "scenario_promotion_entry",
         "scenario_promotion_event",
+        "snapshot_record",
         "account_link_event",
         "account_attribution",
         "account_attribution_event",

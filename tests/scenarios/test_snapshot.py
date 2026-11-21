@@ -195,6 +195,16 @@ class TestContents:  # VA2, point 2
             with pytest.raises(ValueError):
                 ledger.content(window_days=days)
 
+    def test_provisional_reasons_are_listed_with_their_details(self, ledger):
+        content = ledger.content(as_of="2026-05-20")
+        reasons = {reason["reason"]: reason["details"]
+                   for reason in content["safe_to_spend"]["reasons"]}
+        assert reasons["stale_observation"] == ["A observed 2026-05-01"]
+        assert {"kind": "provisional", "detail": "stale_observation: A observed 2026-05-01"} \
+            in content["warnings"]
+        assert validate.validate(json.loads(ledger.snapshot(as_of="2026-05-20")),
+                                 validate.load_schema()) == []
+
     def test_missing_is_null_never_zero(self, tmp_path, capsys, deterministic_ids):
         bare = SnapshotLedger(tmp_path, capsys)
         content = bare.content()

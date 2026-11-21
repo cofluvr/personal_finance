@@ -209,8 +209,8 @@ def safe_to_spend_section(conn, as_of: date, zone, warnings) -> dict | None:
     if zone is None:
         return None
     view = safe_to_spend(conn, as_of)
-    for reason, detail in view.reasons.items():
-        warnings.append({"kind": "provisional", "detail": f"{reason}: {detail}"})
+    for reason, details in view.reasons.items():
+        warnings.append({"kind": "provisional", "detail": f"{reason}: {'; '.join(details)}"})
     return {"today_cents": view.today_cents, "week_cents": view.week_cents,
             "limiting": view.limiting,
             "liquid_cents": view.liquid_cents if view.liquidity_evaluated else None,
@@ -219,8 +219,8 @@ def safe_to_spend_section(conn, as_of: date, zone, warnings) -> dict | None:
             "liquidity_daily_cents": view.liquidity_daily_cents,
             "horizon_last_day": view.horizon.last_day, "horizon_days": view.horizon.days,
             "next_paycheck": view.horizon.next_paycheck, "provisional": view.provisional,
-            "reasons": [{"reason": reason, "detail": detail}
-                        for reason, detail in view.reasons.items()]}
+            "reasons": [{"reason": reason, "details": list(details)}
+                        for reason, details in view.reasons.items()]}
 
 
 def funds_section(conn, as_of: date, warnings) -> list[dict]:

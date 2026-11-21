@@ -28,31 +28,34 @@ def protected_cell(text: str) -> str:
     return "'" + text if text.startswith(FORMULA_STARTS) else text
 
 
-def refuse_unsafe_export_destination(out_path: Path, real_ledger: bool) -> None:
+def refuse_unsafe_export_destination(out_path: Path, real_ledger: bool,
+                                     noun: str = "an export") -> None:
+    """The checks every file leaving the ledger folder passes: a pf export, and a snapshot
+    (D-075 point 7), which names itself in the refusal."""
     absolute_path = Path(os.path.abspath(out_path))
     folder = absolute_path.parent
     if folder.resolve() != folder:
-        raise ExportRefused(f"an export cannot be reached through a symbolic link: {folder} "
+        raise ExportRefused(f"{noun} cannot be reached through a symbolic link: {folder} "
                             f"leads to {folder.resolve()}. Nothing was written.")
     if os.path.lexists(absolute_path):
-        raise ExportRefused(f"{out_path} already exists, and an export never replaces a file. "
+        raise ExportRefused(f"{out_path} already exists, and {noun} never replaces a file. "
                             "Nothing was written.")
     if not folder.is_dir():
-        raise ExportRefused(f"the folder for an export must already exist: {folder}. Nothing was "
+        raise ExportRefused(f"the folder for {noun} must already exist: {folder}. Nothing was "
                             "written.")
     try:
         work_tree = checks.git_work_tree_containing(folder)
         if work_tree is not None:
-            raise UnsafeLocation(f"an export cannot be inside a git work tree: {work_tree}")
+            raise UnsafeLocation(f"{noun} cannot be inside a git work tree: {work_tree}")
         synced_folder = checks.synced_folder_containing(folder)
         if synced_folder is not None:
-            raise UnsafeLocation(f"an export cannot be inside a synced folder: {synced_folder}")
+            raise UnsafeLocation(f"{noun} cannot be inside a synced folder: {synced_folder}")
         checks.refuse_unless_private(folder, private_mode="700")
         if real_ledger:
             checks.refuse_unless_on_encrypted_disk_image(folder)
     except UnsafeLocation as refusal:
-        raise ExportRefused(f"the export destination is refused: {refusal}. Nothing was "
-                            "written.") from None
+        raise ExportRefused(f"the {noun.split(' ', 1)[1]} destination is refused: {refusal}. "
+                            "Nothing was written.") from None
 
 
 def csv_text(header: tuple[str, ...], rows, amount_columns: frozenset[str] = frozenset()) -> str:

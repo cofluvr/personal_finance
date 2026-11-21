@@ -846,10 +846,14 @@
        "reasons": {
         "items": {
          "fields": {
-          "detail": {
+          "details": {
+           "items": {
+            "nullable": false,
+            "type": "string"
+           },
            "nullable": false,
            "required": true,
-           "type": "string"
+           "type": "array"
           },
           "reason": {
            "nullable": false,

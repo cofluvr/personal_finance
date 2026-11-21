@@ -2944,6 +2944,53 @@ def measure_scenarios() -> None:
               flush=True)
 
 
+SNAPSHOT_AS_OF = date(2026, 12, 20)
+
+
+def measure_snapshot() -> None:
+    """A snapshot on --safe-to-spend's shape (D-075, VB4): generation in one read transaction
+    with a 90-day window, the file's size, and verify. The gated write is not timed: build/ is
+    inside the git work tree, which the destination check refuses, and it is one fsynced write.
+    Stops, as G9 says, if generation misses 5.0s or the file 5 MB."""
+    from personal_finance.snapshot import files
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _, _ = safe_to_spend_ledger(root)
+        build_seconds = time.perf_counter() - started
+        (transactions,) = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()
+        (months,) = conn.execute(
+            "SELECT COUNT(DISTINCT substr(COALESCE(transaction_date, posting_date), 1, 7)) "
+            "FROM ledger_transaction").fetchone()
+        conn.close()
+        reader = connect(path, read_only=True)
+        # The first read after a long build runs slow: it is run and not counted.
+        files.build_in_one_read(reader, SNAPSHOT_AS_OF, 90,
+                                "00000000-0000-4000-8000-000000000001",
+                                "2026-12-20T12:00:00.000Z")
+        started = time.perf_counter()
+        data = files.build_in_one_read(reader, SNAPSHOT_AS_OF, 90,
+                                       "00000000-0000-4000-8000-000000000002",
+                                       "2026-12-20T12:00:00.000Z")
+        generate_seconds = time.perf_counter() - started
+        started = time.perf_counter()
+        document = files.verified(data)
+        verify_seconds = time.perf_counter() - started
+        reader.close()
+        window = len(document["content"]["transactions"])
+        print(f"shape transactions={transactions} months={months} window_transactions={window} "
+              f"build={build_seconds:.1f}s", flush=True)
+        assert transactions >= 100_000 and months >= 60 and window >= 4_000
+        megabytes = len(data) / 1_000_000
+        print(f"generate={generate_seconds:7.3f}s size={len(data)} bytes ({megabytes:.2f} MB) "
+              f"verify={verify_seconds:7.3f}s", flush=True)
+        stops = [name for name, missed in (("generation", generate_seconds > 5.0),
+                                           ("size", len(data) > 5_000_000)) if missed]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
 FUNDS_CONSUMPTIONS = 2_000
 
 LOANS_BREAKDOWNS = 5_000
@@ -3225,6 +3272,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--scale", "--safe-to-spend"]:
         measure_safe_to_spend()
+        return
+    if sys.argv[1:] == ["--scale", "--snapshot"]:
+        measure_snapshot()
         return
     if sys.argv[1:] == ["--scale", "--scenarios"]:
         measure_scenarios()

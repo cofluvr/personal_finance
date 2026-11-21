@@ -145,6 +145,10 @@ from personal_finance.planning.coverage import (
     uncover,
 )
 from personal_finance.planning.projection import LONGEST_MONTHS
+from personal_finance.snapshot.files import SnapshotNotRecorded, SnapshotRefused
+from personal_finance.snapshot.files import create as create_snapshot
+from personal_finance.snapshot.files import records as snapshot_records
+from personal_finance.snapshot.files import verified as verified_snapshot
 from personal_finance.planning.promotions import promote as promote_scenario
 from personal_finance.planning.promotions import undo_promotion as undo_scenario_promotion
 from personal_finance.planning.scenarios import InputRequest as ScenarioInputRequest
@@ -1132,6 +1136,7 @@ def build_parser() -> argparse.ArgumentParser:
     obligations_command.add_argument("--account", help="only this account's obligations")
 
     scenario_parsers(commands, command)
+    snapshot_parsers(commands, command)
 
     household = commands.add_parser(
         "household", help="name household members, the household share and account defaults")
@@ -5772,6 +5777,81 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
 
+def snapshot_parsers(commands, command) -> None:
+    """pf snapshot and pf snapshots (D-075)."""
+    command("snapshots", commands, handler=run_snapshots,
+            help="list the snapshots written, without their paths")
+    snapshot = commands.add_parser("snapshot", help="write and check the phone's snapshot file")
+    snapshot_commands = snapshot.add_subparsers(dest="snapshot_command", required=True)
+    create = command("create", snapshot_commands, handler=run_snapshot_create,
+                     help="write a new snapshot file to a private, gated folder")
+    create.add_argument("--out", type=Path, required=True,
+                        help="the new file, in a private folder, as pf export takes")
+    create.add_argument("--as-of", help=TODAY_HELP)
+    create.add_argument("--window-days", dest="window_days", default="90",
+                        help="days of transactions it holds, 1 to 366, 90 by default")
+    verify = snapshot_commands.add_parser("verify", help="check a snapshot file, writing nothing")
+    verify.add_argument("path", type=Path, help="the snapshot file")
+    verify.add_argument("--db", type=Path, help="also confirm this ledger recorded it")
+    verify.set_defaults(handler=run_snapshot_verify)
+
+
+WINDOW_DAYS_INVALID = "--window-days must be a whole number from 1 to 366."
+
+
+def run_snapshot_create(args) -> int:
+    if not args.window_days.isdigit() or not 1 <= int(args.window_days) <= 366:
+        raise CommandError(WINDOW_DAYS_INVALID)
+    if args.as_of is not None:
+        checked_as_of(args.as_of)
+    conn = open_ledger(args.db, read_only=True)
+    try:
+        as_of = as_of_date(conn, args.as_of)
+        moment = current_utc_time().astimezone(timezone.utc)
+        generated_at = moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+        written = create_snapshot(conn, lambda: open_ledger(args.db), args.out, as_of,
+                                  int(args.window_days), str(uuid.uuid4()), generated_at,
+                                  is_real_ledger(conn))
+    finally:
+        conn.close()
+    print(f"Snapshot {written.snapshot_id} written to {args.out}: {written.bytes_written} bytes, "
+          f"schema {written.schema_version}, as of {written.as_of}, "
+          f"{written.transactions} transactions over {written.window_days} days.")
+    print("  The file is unencrypted: keep it on the encrypted image, and carry it to the phone "
+          "yourself.")
+    return 0
+
+
+def run_snapshot_verify(args) -> int:
+    data = args.path.read_bytes() if args.path.is_file() else None
+    if data is None:
+        raise CommandError(f"no such file: {args.path}")
+    conn = None if args.db is None else open_ledger(args.db, read_only=True)
+    try:
+        document = verified_snapshot(data, conn)
+    finally:
+        if conn is not None:
+            conn.close()
+    content = document["content"]
+    print(f"Snapshot {document['snapshot_id']} verified: schema {document['schema_version']}, "
+          f"as of {content['cutoff']['as_of']}, {len(content['transactions'])} transactions, "
+          f"digest {document['content_sha256'][:16]}"
+          + (", recorded in this ledger." if args.db else "."))
+    return 0
+
+
+def run_snapshots(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    found = snapshot_records(conn)
+    print("Snapshots")
+    if not found:
+        print("No snapshots written. Write one with snapshot create.")
+    for snapshot_id, version, as_of, window_days, generated_at, digest in found:
+        print(f"Snapshot {snapshot_id}: schema {version}, as of {as_of}, {window_days} days, "
+              f"generated {generated_at}, digest {digest[:16]}")
+    return 0
+
+
 def scenario_parsers(commands, command) -> None:
     """pf scenarios and pf scenario (D-074)."""
     command("scenarios", commands, handler=run_scenarios,
@@ -5965,7 +6045,7 @@ def explained_error(error: Exception) -> str:
     """What an error may say, the same in the CLI and the local UI. Expected errors keep their
     sanitized messages, and any other says only that something went wrong (D-037)."""
     if isinstance(error, (CommandError, DecisionRefused, UnsafeLocation, BackupRefused,
-                          ExportRefused)):
+                          ExportRefused, SnapshotRefused, SnapshotNotRecorded)):
         return str(error)
     if isinstance(error, sqlite3.OperationalError):
         return BUSY_EXPLANATION if "locked" in str(error) else "database error"
