@@ -182,6 +182,55 @@ class TestPromote:  # XC1, point 6
         conn.close()
 
 
+class TestWhatIsMade:  # XC1, point 6's table
+    def test_a_target_changed_input_is_listed_and_left_out(self, ledger):
+        assert ledger.ob_undo(ledger.power)[0] == 0
+        shown = ledger.scenario_shown(ledger.scenario)
+        assert (f"  Input {ledger.inputs['power']}: not promotable: "
+                f"{promotions.TARGET_GONE}") in shown
+        out = ledger.promote_ok(ledger.scenario)
+        assert "recurring_obligation_terms" not in out
+        conn = ledger.conn()
+        try:
+            assert conn.execute("SELECT COUNT(*) FROM recurring_obligation_terms "
+                                "WHERE chain_id = ?", (ledger.power,)).fetchone()[0] == 1
+        finally:
+            conn.close()
+
+    def test_a_promoted_income_on_a_salary_cadence_is_salary(self, ledger):
+        out = ledger.promote_ok(ledger.scenario)
+        made = re.search(r"^  income_source (\S+),", out, re.MULTILINE)[1]
+        assert ", salary, account A, description contains synthetic tutoring" in ledger.show(made)
+
+    def test_a_purchase_is_a_reserve_due_on_its_date(self, ledger):
+        out = ledger.promote_ok(ledger.scenario)
+        made = [ledger.fund_shown(fund) for fund in re.findall(r"^  fund (\S+),", out,
+                                                                re.MULTILINE)]
+        assert any("2026-08-01" in shown and "1800.00" in shown for shown in made)
+
+    def test_a_gross_replacement_promotes_its_take_home_amount(self, ledger):
+        scenario_id = ledger.scenario_add("Gross")
+        ledger.input_ok(scenario_id, "--kind", "income", "--amount", "4000.00", "--from",
+                        "2026-07-01", "--cadence", "biweekly", "--anchor", "2026-07-03",
+                        "--gross", "--take-home-percent", "65", "--replaces", ledger.salary)
+        ledger.promote_ok(scenario_id)
+        assert "Terms from 2026-07-01: biweekly, anchor 2026-07-03, expected 2600.00" in \
+            ledger.show(ledger.salary)
+
+    def test_an_undone_scenario_is_never_promoted(self, ledger):
+        from personal_finance.planning.scenarios import SCENARIO_NOT_ACTIVE, find_scenario
+
+        assert ledger.scenario_undo(ledger.scenario)[0] == 0
+        assert "Promotion revision" not in ledger.scenario_shown(ledger.scenario)
+        conn = ledger.conn()
+        try:
+            token = promotions.promotion_revision(conn, find_scenario(conn, ledger.scenario))
+            with pytest.raises(Exception, match=SCENARIO_NOT_ACTIVE.split(".")[0]):
+                promotions.promote(conn, ledger.scenario, AS_OF, token)
+        finally:
+            conn.close()
+
+
 class TestUndo:  # XC1
     def test_undo_gives_back_every_entry_s_show_and_token(self, ledger):
         existing = ledger.entry_ids()
@@ -200,6 +249,17 @@ class TestUndo:  # XC1
                       + [ledger.ob_show(each) for each in made[1]]
                       + [ledger.fund_shown(each) for each in made[2]]):
             assert "Status: undone" in shown
+
+    def test_undo_rewrites_what_each_payment_is(self, ledger):
+        ledger.pay("power.csv", "2026-06-05")
+        scenario_id = ledger.scenario_add("Cheaper power")
+        ledger.input_ok(scenario_id, "--kind", "expense", "--amount", "60.00", "--from",
+                        "2026-06-01", "--cadence", "monthly:5", "--replaces", ledger.power)
+        before = ledger.dump(("transaction_obligation",))
+        ledger.promote_ok(scenario_id)
+        assert ledger.dump(("transaction_obligation",)) != before
+        assert ledger.unpromote(scenario_id)[0] == 0
+        assert ledger.dump(("transaction_obligation",)) == before
 
     def test_undo_refuses_after_a_later_terms_row(self, ledger):
         ledger.promote_ok(ledger.scenario)
