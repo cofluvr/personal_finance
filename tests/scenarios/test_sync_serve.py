@@ -288,6 +288,18 @@ class TestTheCommand:  # YB3, the command as typed
         code, _, err = ledger.run("sync", "serve", "--address", "192.168.1.20")
         assert code == 2 and "timezone" in err
 
+    def test_serve_takes_an_as_of_date_instead(self, ledger, monkeypatch):
+        monkeypatch.setattr(cli, "checked_private_address", lambda address: address)
+        monkeypatch.setattr(sync_server, "SyncServer", ScriptedServer)
+        ScriptedServer.script = lambda server: None
+        code, out, err = ledger.run("sync", "serve", "--address", "192.168.1.20", "--as-of",
+                                    "2026-04-30")
+        assert (code, err) == (0, ""), err
+        assert " as of 2026-04-30 on 192.168.1.20:8443 " in out
+        code, _, err = ledger.run("sync", "serve", "--address", "192.168.1.20", "--as-of",
+                                  "2026-02-30")
+        assert code == 2 and "--as-of must be a date" in err
+
     @pytest.mark.parametrize("words, message", [
         (("--minutes", "0"), "--minutes must be"), (("--minutes", "61"), "--minutes must be"),
         (("--minutes", "1.5"), "--minutes must be"), (("--window-days", "0"), "--window-days"),

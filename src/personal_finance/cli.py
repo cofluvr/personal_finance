@@ -5911,6 +5911,7 @@ def sync_parsers(commands, command) -> None:
                        help="how long it serves, 1 to 60 minutes, 10 by default")
     serve.add_argument("--window-days", dest="window_days", default="90",
                        help="days of transactions the snapshot holds, 1 to 366, 90 by default")
+    serve.add_argument("--as-of", help=TODAY_HELP)
     command("devices", sync_commands, handler=run_sync_devices,
             help="list paired devices, with their revoke revisions")
     revoke = command("revoke", sync_commands, handler=run_sync_revoke,
@@ -6031,12 +6032,14 @@ def run_sync_serve(args) -> int:
     if not args.minutes.isdigit() or not 1 <= int(args.minutes) <= 60:
         raise CommandError(SYNC_MINUTES_INVALID)
     window_days = checked_window_days(args.window_days)
+    if args.as_of is not None:
+        checked_as_of(args.as_of)
     conn = open_ledger(args.db)
     sync_folder = prepared_sync_folder(args.db)
     with sync_lock(sync_folder):
         identity = required_identity(conn)
         key_path, certificate_path = checked_identity_files(identity, sync_folder)
-        as_of = household_today(conn)
+        as_of = as_of_date(conn, args.as_of)
         data = build_in_one_read(conn, as_of, window_days, str(uuid.uuid4()), utc_now_text())
         document = verified_snapshot(data)
         server = listening_server(address, port, lambda: SyncServer(
