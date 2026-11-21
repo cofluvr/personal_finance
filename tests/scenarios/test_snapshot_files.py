@@ -93,6 +93,12 @@ class TestCreate:  # VB2, point 7
         assert code == 2 and "Nothing was written" in err, err
         assert sorted(os.listdir(ledger.vault)) == before and records(ledger) == []
 
+    def test_a_link_where_the_file_would_be_is_refused(self, ledger):
+        (ledger.vault / "phone.json").symlink_to(ledger.vault / "elsewhere.json")
+        code, _, err, _ = create(ledger)
+        assert code == 2 and "already exists" in err
+        assert not (ledger.vault / "elsewhere.json").exists() and records(ledger) == []
+
     def test_the_final_name_taken_while_writing_is_refused(self, ledger, monkeypatch):
         real_link = os.link
 
