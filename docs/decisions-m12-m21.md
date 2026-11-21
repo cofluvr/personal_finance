@@ -2918,6 +2918,53 @@ scenario to model, such as a home purchase, to shape the fixtures.
 - **F.** Migration 0034, `sc1`, `sp1`, and `--scenarios` (point 8).
 - **G.** The slices M18.1 to M18.3, in that order.
 
+### M18 slice plans — Approved by the owner's notes of 2026-11-20
+
+Written before any of M18 was built, after M17. D-074 is approved; these fix what it leaves to
+build time.
+
+**M18.1, scenarios and inputs (migration 0034, `sc1`).**
+
+1. **Tables.** `scenario` (name, unique among active ones is not required: IDs identify;
+   `include_uncertain` 0 or 1), `scenario_event` (made, undone), `scenario_input` (the
+   scenario, the kind, `amount_cents` ≥ 0, `from_date`, an optional `to_date` not before it,
+   the cadence as typed or `once`, an anchor for weekly and biweekly, an optional replaced entry
+   as kind and ID, `uncertain`, `gross` with `take_home_basis_points` exactly when gross, and the
+   kind options as nullable columns, each kind's own CHECKed), and `scenario_input_event`
+   (made, undone). `scenario_promotion`, `scenario_promotion_event` and
+   `scenario_promotion_entry` are M18.3's, created in 0034 so one migration holds the milestone,
+   empty until a promotion. All append-only (G2), with the triggers the other planning tables
+   have. A scenario's inputs change by undo then add.
+2. **The kinds and what each takes,** from D-074 point 2: `income` (replaces a source),
+   `bonus` (once, uncertain unless `--confirmed`), `expense` (replaces an obligation),
+   `annual_expense` (annual cadence, replaces a reserve), `purchase` (once), `home_purchase`
+   (`--price`, `--down-payment`, `--closing-costs`, `--loan-rate`, `--loan-months`,
+   `--ownership-costs`, once on `--from`), `loan_payoff` (`--loan` account, once), `borrowing`
+   (`--amount` as proceeds, `--loan-rate`, `--loan-months`). Refused: an option the kind does not
+   take, gross without a percentage, a percentage without gross or outside 1 to 100, a replacement
+   of the wrong kind or of an entry not applying, `to` before `from`, a cadence on a one-time kind,
+   and a stale `sc1`.
+3. **`sc1`** covers the scenario's name, flag, state and its inputs with their states, by
+   canonical JSON as the other planning tokens; adding, undoing an input and undoing the
+   scenario take it. `scenario show` prints it.
+4. **`target_changed`.** An input whose replaced entry no longer applies (undone, or superseded
+   for chains) shows `target_changed`, left out of every projection and disclosed, until undone
+   and added again.
+5. **Commands:** `scenario add`, `scenario input add`, `scenario input undo`, `scenarios`,
+   `scenario show`, `scenario undo`. New command groups join the test `Ledger.run` helper.
+
+**M18.2, the projection and comparison.** `project(plan, inputs, as_of, months)` in
+`planning/scenarios.py`, pure, monthly from as_of's month, 24 by default and at most 120:
+salary by nominal dates from the sources' schedules; fixed obligations at their planned amounts;
+discretionary at the budget target; fund contributions as planned; loans by their schedules with
+M15's amortization; the starting liquid balance M16's estimate. Inputs replace an entry over
+their range only, or add. Outputs as D-074 point 3, absolute for both runs and the difference.
+`scenario compare` prints them; the scenario pages render `scenarios`, `scenario show` and
+`scenario compare` with M17's pipeline for add, input add, input undo and undo.
+
+**M18.3, promotion.** `scenario promote` and `scenario promotion undo` with `sp1`, mapped as D-074
+point 6, through the planning commands' own functions in one transaction; `--scenarios` benchmark.
+
 ### M18 acceptance criteria
 
 | ID | Test |

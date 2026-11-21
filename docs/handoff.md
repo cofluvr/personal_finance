@@ -1,41 +1,34 @@
-# Session Handoff: M16 Built, Awaiting Review
+# Session Handoff: M17 Built, Awaiting Review
 
-For a fresh session. Written 2026-11-19. **M1 to M15 are complete and accepted:** the owner
-accepted M14.2 to M15.3 as built on 2026-11-19. `main` holds M1 to M9 at `19ee858`. M10 to M16
-are on `feature/m10-rules`, not merged and not pushed.
+For a fresh session. Written 2026-11-20. **M1 to M16 are complete and accepted:** the owner
+accepted M16 and D-079's plan and mock-ups on 2026-11-20, with standing approval to continue
+through the milestones on the lead engineer's choices. `main` holds M1 to M9 at `19ee858`. M10 to
+M17 are on `feature/m10-rules`, not merged and not pushed.
 
-**M16 is built, for the owner's review,** under D-072, without a stop between its slices, on the
-owner's instruction of 2026-11-19 to keep building:
+**M16's two findings are settled** (D-072): the dashboard computes the month once (0.647s), and a
+stored timezone that is not a zone is refused clearly.
 
-1. **M16.1** (`9a9186a`): migration 0032, `pf account liquidity show`, `set` and `undo` with
-   `lq1`, `pf obligation coverage`, `covers` and `uncover` with `ob1`'s two new operations, `pf fund
-   restorations`, `restoration` and `restoration-undo` with `fu1`'s, and the checking buffer.
-2. **M16.2** (this handoff's commit): `pf safe-to-spend [--explain]`, `pf dashboard`, the
-   `/dashboard` page and the `--safe-to-spend` benchmark row.
+**M17 is built, for the owner's review,** under D-073, a security change (browser writes),
+without a stop between its slices. Its slice plans are under D-073, and its departures and
+choices in "How M17 was implemented". In brief: the write pipeline and review decisions from
+the browser (M17.1); the transaction page and its writes, unresolved records, and the accounts,
+obligations and settings sections with their planning writes (M17.2); migration 0033 and tags
+(`tg1`, `r15`, `t13`, `d12`; `c` stays 7), search, and the eight visuals as SVG (M17.3); CSV
+export and `--ui` (M17.4). The allowlist as built is narrower than point 2's: the rest stays in
+the terminal for now.
 
-Their departures and choices are in "How M16.1 was implemented" and "How M16.2 was implemented"
-under D-072. In brief: three read commands show the new tokens; `setting show` gains the seeded
-key; a bill still within its tolerance is reserved, a loan payment only when due in the horizon;
-this month's plan is computed from the assignments held at the month's start; a card's payment
-obligation is found by the card's name.
-
-**Also written, for the owner's review:** D-079, the iOS companion's plan, in
-[decisions-ios.md](decisions-ios.md), with screen mock-ups in
-[ios-mockups/index.html](ios-mockups/index.html). Nothing of it is built: it needs approval, and its
-data comes from M19 and M20.
-
-**Latest results:** see "Latest gating run" below. Breaks: M16.1 25 applied, 19 caught, 4 gaps
-closed, 1 equivalent kept, 1 unreachable guard removed; M16.2 25 applied, 17 caught, 8 gaps
-closed. G6: 159,929 of 163,076 runs identical, the rest expected. **`--safe-to-spend` meets G9's stopping rule:** `dashboard` takes 1.02s against 1.0s, because it computes the month's budget and income reports more than once (D-072, SB7's benchmark row). Not optimized.
+**Latest results:** see "Latest gating run" below. Breaks: M17.1 25, M17.2a 25, M17.2b 20, M17.3
+25, M17.4 3 (counts in D-073). **`/visuals` meets G9's stopping rule:** 2.194s against 2.0s, its
+cost the household report's attribution pass (benchmarks.md). Not optimized further.
+**Not done: the real-browser check of the CSP** and of a form submitted from a browser: no
+browser was available to the session.
 
 **Nothing from M10 on is on the real ledger.** It stays at version 20 until the owner makes a
 verified backup and runs `pf migrate` one milestone at a time (G10): 21 (M10), 22 and 23 (M11),
-24 and 25 (M12), 26 (M13), 27 and 28 (M14), 29 to 31 (M15), then 32 once M16 is accepted. After
-26, the owner sets the household timezone with `pf setting set` before any command that needs
-today.
+24 and 25 (M12), 26 (M13), 27 and 28 (M14), 29 to 31 (M15), 32 (M16), then 33 once M17 is
+accepted. After 26, the owner sets the household timezone with `pf setting set`.
 
-No security control changed, no dependency was added, and the UI stays read-only. Every fixture
-is invented. Point F with the owner on their already-imported files is still open.
+Every fixture is invented. Point F with the owner on their already-imported files is still open.
 
 Earlier history is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when
 a task needs a specific section.
@@ -46,29 +39,18 @@ Standing rules are in [CLAUDE.md](../CLAUDE.md), loaded automatically. Do not re
 
 Rewritten by each session for the next. The kickoff prompt carries only the owner's notes.
 
-- **First, the owner's review of M16,** with the choices and departures under D-072, and of D-079
-  with the iOS mock-ups and their open questions. A change the owner asks for is the next task.
-  Two findings need the owner's decision: whether to make `dashboard` compute the month once
-  (G9's stopping rule, met at 1.02s), and whether a stored timezone that is not a zone should be
-  refused clearly rather than end in the unexpected-problem message (D-072, "Compared as G6").
-- **Then, by the owner's choice:**
-  - **M17** (D-073) needs a kickoff that explicitly allows its security change (browser writes).
-    M17.3 (search, tags, visuals) and M17.4 (CSV export) change no control, but D-073 orders
-    them after M17.1's pipeline.
-  - **M18** (D-074, scenarios) changes no control and can be built in the terminal first, its
-    pages waiting for M17. It would take migration 0033, moving M17.3's to the next free number.
-  - **M19** (D-075, snapshots) is what the iOS app's I1 and I2 need.
-  - **D-079's I1**, once approved.
-- **Read first:** D-072's "How M16.n was implemented", then the chosen milestone's decision and
-  D-067's G5, G6, G9 and G10. `reports/safe_to_spend.py` is the engine; `planning/coverage.py`,
-  `liquidity.py` and `fund_restorations.py` hold M16.1.
-- **Warnings:** a new migration joins the set-backs before `drop_liquidity_tables`, which also
-  deletes the seeded `checking_buffer_cents` key past its append-only trigger. G6's scripts for
-  this run are `build/m16/g6/` (`capture.py --m15 --m16`, `compare.py`, `migrate_copies.py` from
-  31), captured in four shards (`--shard=K/4`) and merged. Breaks run on a copy of the tree with
-  `build/m16/breaks/run_breaks.py`. A capture alongside a test run slows both: run them apart.
-  Test ledgers built on `LoanLedger` and `BudgetLedger` together clash on `set_plan`: call
-  `BudgetLedger.set_plan` explicitly, as `SafeLedger.budget_plan_ok` does.
+- **First, the owner's review of M17,** a security change, with "How M17 was implemented" under
+  D-073. Owner checks wanted: open `pf ui` in a browser, submit one review decision and one tag
+  form, and open `/visuals`, noting any CSP console error. Two findings need the owner's
+  decision: `/visuals` at 2.194s (a cheaper household total, or the comparison on its own page),
+  and whether the browser should take more of point 2's allowlist.
+- **Then M18** (D-074), whose slice plans this session drafted under D-074 if it reached them.
+- **Read first:** D-073's "How M17 was implemented", then D-074 and D-067's G5, G6, G9 and G10.
+  `ui/writes.py` holds the pipeline and the route table; `ui/server.py` the pages.
+- **Warnings:** a new migration joins the set-backs before `drop_tag_tables`. A new browser
+  route is a `WRITE_ROUTES` entry, its button and labels in the server, and the allowlist tests in
+  `test_local_ui_transaction_writes.py`. Breaks run with `build/s17/breaks/run_breaks.py` on a
+  copy of the tree. `measure_reconciliation.py` needs `PYTHONPATH=src`.
 - **Done when:** the slice the owner approves is built, gated on the full suite, with 20 to 25
   breaks reported. Stop for review there unless the owner's notes extend the scope.
 
@@ -77,8 +59,8 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `main` holds everything through M9 at `19ee858`. M10 to M16 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
-| Latest commit | Run `git log -1`. M16.1 `9a9186a`, M16.2 and the records this handoff's commit. Earlier commits are in the archive |
+| Branch | `main` holds everything through M9 at `19ee858`. M10 to M17 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
+| Latest commit | Run `git log -1`. M16 follow-ups `cd4ac52`; M17 from `57a7532` to this handoff's commit. Earlier commits are in the archive |
 | Latest gating run | The full suite, slow tests included, on M16.2 with its records: 3,718 passed in 0:14:27, exit code 0, chained to this handoff's commit |
 | Python | 3.12.6, project `.venv` already present |
 | macOS | Golden Gate 27.2, as stated by the owner |
@@ -255,13 +237,14 @@ F1 and F4 are fixed, and recorded in the archive.
   throwaway ledger, with the owner, at the final review.
 - [real-data-readiness.md](real-data-readiness.md) names the backup volume `CommonCentsBackups`.
   The owner's is `/Volumes/CommonCentsBackup`. A doc fix, not made.
-- **The review of M16,** with its departures under D-072, and of D-079 and the iOS mock-ups.
-  Then renewed commit permission for the next milestone.
+- **The review of M17,** a security change, with its departures under D-073, and a check in a
+  real browser: one decision, one tag form, `/visuals`, and any CSP console error.
+- M17's inputs (D-073): whether the browser should take more of point 2's allowlist, and the
+  `/visuals` remedy.
 - M16's inputs (D-072): the checking buffer, which accounts are liquid, the links between
   obligations and loans or reserves, and the emergency restoration amount, entered once the real
   ledger reaches 32. Naming each card's payment obligation after the card, or saying how else to
   tie them.
-- Whether M17's security change may be built, in a kickoff that allows it.
 - M15's inputs (D-071): graduated-loan documents (redacted), aggregates and subaccounts, any
   ownership differing from attribution, and the payoff extra or the debt goal, entered once the
   real ledger reaches 31.
@@ -285,10 +268,10 @@ F1 and F4 are fixed, and recorded in the archive.
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits | Approved on 2026-11-19 for M16 on `feature/m10-rules`, with the instruction to keep building. Used for `9a9186a` and this handoff's commit | **Must be renewed** for any later change |
+| Local commits | Approved on 2026-11-20, standing, by the owner's notes (continue through the milestones on the lead engineer's choices). Used for M16's follow-ups and M17 | Renewed by each kickoff's notes |
 | M11 | Accepted on 2026-11-10. Not yet on the real ledger | The real-ledger migrations 21, 22 and 23, each after a verified backup |
-| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes. M12 to M15 accepted. M16 built on 2026-11-19 | Its review. M17's browser writes and M20 need the owner's approval in a session whose kickoff allows a security change, a dependency and network. Installing `segno` still needs its pinned version and hash, and W1's check |
-| iOS (D-079) | Proposed on 2026-11-19, with mock-ups. Not built | Approval of the plan before any of it is built |
+| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes. M12 to M16 accepted. M17 built on 2026-11-20, its security change taken as approved by the owner's notes of that day | M17's review. M20 needs network and a new dependency (`segno`, pinned with its hash, W1's check), which no session has been given |
+| iOS (D-079) | Plan and mock-ups accepted on 2026-11-20. Not built | I1 can start on a draft of M19's schema |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |

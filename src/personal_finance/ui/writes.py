@@ -273,7 +273,7 @@ def refuse_form_token(form: dict[str, str], path: str, secret: bytes,
     did."""
     given = form[FORM_TOKEN_FIELD]
     nonce, separator, _ = given.partition(".")
-    if not separator or not re.fullmatch(r"[0-9a-f]{32}", nonce):
+    if not separator:
         return Refusal(403, FORM_EXPIRED)
     expected = form_token(secret, path, form, nonce)
     if given in used_tokens or not hmac.compare_digest(given.encode("utf-8"),
