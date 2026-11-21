@@ -171,6 +171,15 @@ class TestContents:  # VA2, point 2
         assert content["household"]["share"] == [{"member_index": 0, "basis_points": 5000},
                                                  {"member_index": 1, "basis_points": 5000}]
 
+    def test_an_account_with_no_default_is_unattributed_by_month(self, ledger):
+        ledger.add_typed_account("C", "checking")
+        ledger.deposit("gift.csv", "2026-05-02", amount="40.00", account="C")
+        content = ledger.content()
+        may = content["household"]["months"][-1]
+        assert may["unattributed"] == {"transactions": 1, "out_cents": 0, "in_cents": 4_000}
+        assert may["household"]["in_cents"] == 254_000
+        assert validate.unreconciled(content) == []
+
     def test_the_window_holds_its_days_only(self, ledger):
         content = ledger.content(window_days=10)
         assert [each["date"] for each in content["transactions"]] == ["2026-05-01"]
@@ -235,7 +244,12 @@ class TestExclusions:  # VA3, point 3
             assert sentinel in dumped, sentinel
 
     def test_no_excluded_key_is_written(self, ledger):
-        assert validate.excluded_keys(ledger.content()) == []
+        content = ledger.content()
+        assert validate.excluded_keys(content) == []
+        content["transactions"][0]["created_at"] = "x"
+        content["accounts"][0]["last4"] = "1234"
+        assert validate.excluded_keys(content) == ["content.accounts[0].last4",
+                                                   "content.transactions[0].created_at"]
 
 
 def mutated(document, path, value):
@@ -276,6 +290,7 @@ class TestSchema:  # VA4, points 5 and 6
         (("content", "net_worth", "total_cents"), None, "is null, and may not be"),
         (("format",), "other", "snapshot.format is not one of its values"),
         (("content", "period", "month"), "May", "is not of its pattern"),
+        (("content", "period", "month"), "2026-05x", "is not of its pattern"),
     ])
     def test_each_mutation_is_refused(self, path, value, error):
         schema = validate.load_schema()
