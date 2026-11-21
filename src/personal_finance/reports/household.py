@@ -171,3 +171,20 @@ def _facts(conn, account_id) -> dict[str, tuple]:
             {"account": account_id},
         )
     }
+
+
+def household_by_month(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Every month's totals of all transactions: the household's, each member's parts by member
+    ID, and the unattributed, in one pass (D-075 point 2). Members' parts and the unattributed
+    add to the household's exactly, in cents moved out and in."""
+    household = load_household(conn)
+    facts = _facts(conn, None)
+    months = defaultdict(lambda: defaultdict(GroupTotal))
+    for entry in attributed_transactions(conn, household):
+        totals = months[facts[entry.transaction_id][0]]
+        totals[HOUSEHOLD_COLUMN] = totals[HOUSEHOLD_COLUMN].adding(entry.amount_cents)
+        if entry.attribution.kind == UNATTRIBUTED:
+            totals[UNATTRIBUTED] = totals[UNATTRIBUTED].adding(entry.amount_cents)
+        for member_id, cents in entry.attribution.parts:
+            totals[member_id] = totals[member_id].adding(cents)
+    return {month: dict(totals) for month, totals in sorted(months.items())}

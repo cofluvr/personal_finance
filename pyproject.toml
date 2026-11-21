@@ -21,6 +21,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "personal_finance.db" = ["migrations/*.sql"]
+"personal_finance.snapshot" = ["schema_v1.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
