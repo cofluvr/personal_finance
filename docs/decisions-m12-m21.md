@@ -2046,7 +2046,7 @@ planning tables a test drops.
 
 ---
 
-## D-072 M16 plan: safe-to-spend and the cash-flow constraint — Approved, built for review
+## D-072 M16 plan: safe-to-spend and the cash-flow constraint — Approved, M16 accepted
 
 M16 meets PRD §12's protected funds and cash-flow constraint, and records shared-contract §6's
 **safe-to-spend calculation details**. It combines M12 (income and obligations), M13 (budget
@@ -2338,10 +2338,15 @@ links between obligations and loans or reserves, and the emergency restoration a
   the obligation's name only.
 - **Compared as G6:** 163,076 command runs on every kept ledger, before on HEAD (`9a9186a`) and after on a copy of the tree, migrated to 32. 159,929 are identical, every token digest unchanged. The 3,147 that differ are expected: 3,063 are `setting show` listing the seeded `checking_buffer_cents` key, and 84 are on two test ledgers HEAD refused as newer than itself. The first run found `obligation coverage` failing on 49 runs, on ledgers holding a reserve with no terms row: fixed, with a test. A sweep of `safe-to-spend --explain`, `dashboard` and `obligation coverage` at three dates on the 3,310 ledgers at 32, each with the household timezone added, found one more ledger failing: its timezone is `x`, written straight into the table by `test_the_token_covers_the_key_and_the_value`. `setting set` refuses such a name, and M14's `report budget` fails the same way on it, so it is not M16's; but a stored name that is not a zone ends in the unexpected-problem message rather than a refusal. Left for the owner.
 - **SB7's benchmark row,** `--scale --safe-to-spend`: **G9's stopping rule is met by `dashboard`.** `safe-to-spend` takes 0.38s at its slowest date and `dashboard` 1.02s, against 1.0s each; three timings at each of the 12 dates on one ledger put the dashboard at 0.98s to 1.06s. The cost, profiled: `dashboard` computes the month's figures more than once. `safe_to_spend` already calls `budget_report`, and `dashboard_lines` calls it again and then `income_report`, so each dashboard runs 3 income reports and 2 budget reports, each matching obligations over the shape's payments anew (0.66s of a 1.7s profile in text normalization). Not optimized, as G9 says: computing the month once and passing it through is the obvious remedy, for the owner's decision. Figures in [benchmarks.md](benchmarks.md).
+- **Accepted, and the two findings settled (2026-11-20).** The owner accepted M16 and left both
+  to the lead engineer: the dashboard now computes the month once (`safe_to_spend` keeps its
+  budget report, which keeps its income month), 0.647s at its slowest date against 1.021s; and a
+  stored timezone that is not a zone is refused with `STORED_ZONE_UNREADABLE`, repeating nothing
+  stored.
 
 ---
 
-## D-073 M17 plan: the local UI completed, with browser writes — Approved, a security change
+## D-073 M17 plan: the local UI completed, with browser writes — Approved, a security change, built for review
 
 M17 meets PRD §18:
 
@@ -2692,6 +2697,48 @@ the list.
 |---|---|
 | WD1 | Export refuses an unsafe or existing destination, writing nothing, and writes `0600`. A cell starting with each formula character is prefixed. Money round-trips exactly, and missing is empty |
 | WD2 | `--ui` records its figures under G9. Every earlier criterion still passes |
+
+### How M17 was implemented
+
+Built on 2026-11-20 on the owner's notes of that day (M16 accepted, standing approval to continue
+on the lead engineer's choices). The slice plans above were written before each slice.
+Departures and choices, each with its reason:
+
+- **No `urllib.parse` (point 1).** W1 refuses every `urllib` import, so `ui/writes.py` decodes
+  form bodies and the transactions page's query with its own strict decoder, and W1 is unchanged.
+- **Step 9 runs the CLI's own `main`** with the form's values as `--name=value` options, output
+  kept in memory. A browser write is the terminal's command, parser, gate and refusals included,
+  and no value can be read as an option. A positional value may not start with `-`.
+- **The form token binds the route and every hidden field** in the route's order, not only the
+  revisions.
+- **Allowlist as built:** review reject, confirm and undo; complete and dismiss; classify,
+  categorize, correct, separate (from M17.3 to M17.2a, since the transaction page came first), a
+  one-sided transfer, tag and "no tags"; the checking buffer set and undo; liquidity set and
+  undo; obligation covers and uncover. Left in the terminal for now: allocations,
+  consumptions, breakdowns, transfer matches, coverage declarations, category rules, balance
+  observations, fund assignments and priority, the preview-then-add flows, and the other undos.
+  The timezone stays terminal-only, as point 2 says: the settings routes take the buffer key
+  alone.
+- **Pages show no creation time (F2).** Section pages run their commands in memory and leave out
+  `, made <time>`, the one way their text differs from the commands'.
+- **`c` stays at 7 (point 5).** A correction token covers what a corrected value can change, and
+  tags have no fit rule, so no correction changes their outcome. `r15`, `t13` and `d12` keep every
+  pinned digest; only their prefixes move.
+- **`tg1`** digests the undo outlook, which already holds the applied tag IDs, each naming one
+  append-only tag.
+- **The visuals** take their rows from figures existing reports give, and `pf report visuals`
+  prints them as the tables beneath the charts. **The real-browser check of the CSP was not made**:
+  no browser was available. By the CSP specification, `style-src` governs style attributes and
+  elements, which the SVG has none of.
+- **`pf export report NAME`** takes the report's own options after its name, so `--out` comes
+  first, and writes the report's lines one a row.
+- **`--ui`** times its 50 writes on the buffer's undo and set, alternately: the shape holds no
+  review item, and those routes pass every pipeline step and the CLI's own command as a decision
+  does.
+- **Breaks:** M17.1 25 (18 caught, 5 gaps closed, 2 unreachable guards removed); M17.2a 25 (19
+  caught, 4 closed, 1 equivalent simplified, 1 guard removed); M17.2b 20 (16 caught, 2 closed, 1
+  equivalent, 1 bad break); M17.3 25 (20 caught, 2 closed, 2 equivalent removed). Logs under
+  `build/s17/breaks/`, ignored.
 
 ---
 

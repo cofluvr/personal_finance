@@ -147,3 +147,22 @@ def test_the_page_asks_for_a_date_with_no_timezone(tmp_path, capsys):
         assert CHOOSE_AS_OF in browser.get("/visuals").text
     finally:
         browser.close()
+
+
+def test_spending_by_category_is_the_ledger_s(planned):
+    """Summed from the monthly report's months, it equals the whole ledger's income and spending
+    by category, category by category."""
+    from personal_finance.reports.totals import income_and_spending
+    from personal_finance.reports.visuals import spent, visuals
+    from datetime import date
+
+    conn = planned.conn()
+    try:
+        whole = income_and_spending(conn).spending_by_category
+        (chart, *_) = visuals(conn, date.fromisoformat(AS_OF))
+        names = dict(conn.execute("SELECT id, name FROM category"))
+    finally:
+        conn.close()
+    assert [(row.label, row.values) for row in chart.rows] == [
+        (names.get(category_id, "uncategorized"), (spent(group),)) for category_id, group in whole]
+    assert chart.rows

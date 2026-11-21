@@ -92,8 +92,8 @@ and keep its index line.
 | D-069 | M13 plan: budgets and spending allowances — Approved, M13 accepted on 2026-11-16 |
 | D-070 | M14 plan: goals, reserves and the tax reserve — Approved. M14 accepted |
 | D-071 | M15 plan: net worth and loans — Approved. M15 accepted |
-| D-072 | M16 plan: safe-to-spend and the cash-flow constraint — Approved. Built for review |
-| D-073 | M17 plan: the local UI completed, with browser writes — Approved as a security change, not yet built |
+| D-072 | M16 plan: safe-to-spend and the cash-flow constraint — Approved. M16 accepted |
+| D-073 | M17 plan: the local UI completed, with browser writes — Approved as a security change. Built for review |
 | D-074 | M18 plan: financial scenarios — Approved, not yet built |
 | D-075 | M19 plan: snapshots — Approved, not yet built |
 | D-076 | M20 plan: pairing and local-network sync — Approved as a security change, with `segno`, not yet built |

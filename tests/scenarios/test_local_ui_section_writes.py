@@ -150,6 +150,22 @@ class TestPlanningWritesEqualTheCli:  # WB3
         assert unchanged_state(planned.path) == before
 
 
+def test_the_same_values_shown_again_give_a_form_that_works_once(planned):
+    """Undo then set brings the buffer's revision back to one an earlier form showed. Each form
+    shown has its own token, so the later one works, once (WA2)."""
+    browser = Browser(planned.path)
+    try:
+        for number in range(3):
+            for action, typed in (("/setting/buffer-undo", {}),
+                                  ("/setting/buffer-set", {"buffer": f"{500 + number}.00"})):
+                (fields,) = page_forms(browser, "/settings", action)
+                response = browser.post(action, {**fields, **typed})
+                assert response.status == 303, (number, action, response.text)
+                assert browser.post(action, {**fields, **typed}).status == 403
+    finally:
+        browser.close()
+
+
 class TestTerminalOnly:  # WB2
     def test_the_timezone_cannot_be_set_from_the_browser(self, planned):
         browser = Browser(planned.path)

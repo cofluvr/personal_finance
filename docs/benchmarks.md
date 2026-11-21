@@ -603,3 +603,32 @@ twice, since `safe_to_spend` already computes the month's budget report and `das
 computes it and the income report again. Each income report matches obligations over the
 shape's payments anew, 212,400 matches with their text normalization, 0.66s of the 1.7s profile.
 Not optimized: the remedy is for the owner's decision.
+
+**The dashboard computing the month once (M16, settled 2026-11-20),** measured with
+`measure_reconciliation.py --scale --safe-to-spend` on the same shape, nothing else running:
+`dashboard` 0.647s at its slowest date (was 1.021s), `safe-to-spend` 0.410s. Both below 1.0s:
+met.
+
+**The local UI on the same shape (M17, WD2, D-073 point 8),** measured 2026-11-20 with
+`measure_reconciliation.py --scale --ui`, nothing else running: 104,100 transactions. Each page
+once, after a warm-up request, through the real handler over a socket pair; then 50 sequential
+`POST` writes through the whole pipeline (the buffer's undo and set, alternately, since the shape
+holds no review item), against the same CLI write. Output in `build/s17/bench/`, ignored.
+
+| Operation | Time | Provisional target |
+|---|---|---|
+| `/visuals` | 2.194s | Below 2.0s: **missed** |
+| `/` (totals) | 1.607s | Below 2.0s: met |
+| `/household` | about 1.13s | Below 2.0s: met |
+| `/transactions`, every row | about 1.1s | Below 2.0s: met |
+| `/dashboard` | about 0.58s | Below 2.0s: met |
+| Every other page, the search and the transaction page included | below 0.75s | Below 2.0s: met |
+| A browser write, median of 50 (p95, max) | 0.015s (0.032s, 0.033s) | Within 0.1s of the CLI's 0.015s: met |
+
+**G9's stopping rule is met by `/visuals`,** and it is not optimized further. Its cost is the
+reports its rows come from: `household_report` 1.127s, `monthly_report` 0.713s,
+`budget_report` 0.287s, the rest under 0.03s. One remedy was taken before this figure: spending
+by category is summed from the monthly report's months rather than computed again by
+`income_and_spending` (0.50s), from 2.686s. What is left is the household comparison's full
+attribution pass; the remedies (a cheaper household total, or the comparison on its own page)
+are for the owner's decision.

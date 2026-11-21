@@ -796,8 +796,8 @@ with local commits on `feature/m10-rules`. No security control changes, and no `
 
 | Slice | Scope | Status |
 |---|---|---|
-| M16.1 | Inputs: migration 0032, `pf account liquidity show`, `set`, `undo`, `pf obligation coverage`, `covers`, `uncover`, `pf fund restorations`, `restoration`, `restoration-undo`, the checking buffer, `lq1` | Built, for review |
-| M16.2 | The engine: the horizon, the liquid balance, protected funds, the two constraints, provisional reasons, `pf safe-to-spend`, `pf dashboard`, its page, `--safe-to-spend` | Built, for review |
+| M16.1 | Inputs: migration 0032, `pf account liquidity show`, `set`, `undo`, `pf obligation coverage`, `covers`, `uncover`, `pf fund restorations`, `restoration`, `restoration-undo`, the checking buffer, `lq1` | Accepted 2026-11-20 |
+| M16.2 | The engine: the horizon, the liquid balance, protected funds, the two constraints, provisional reasons, `pf safe-to-spend`, `pf dashboard`, its page, `--safe-to-spend` | Accepted 2026-11-20 |
 
 ### M16.1 acceptance criteria
 
@@ -823,6 +823,60 @@ with local commits on `feature/m10-rules`. No security control changes, and no `
 
 Safe to spend per member, intra-day timing, forecasts beyond the next paycheck (M18), automatic
 linking of duplicate reservations, and notifications, as D-072 lists them.
+
+## M17 plan
+
+Approved by the owner on 2026-11-10 as D-073, with A to I, in
+[decisions-m12-m21.md](decisions-m12-m21.md), a security change. The owner's notes of 2026-11-20
+accepted M16 and gave standing approval to continue through the milestones on the lead
+engineer's choices, which is taken as point A's approval. Slice plans for M17.1 and M17.2 are
+under D-073; departures are in its "How M17.n was implemented".
+
+| Slice | Scope | Status |
+|---|---|---|
+| M17.1 | The write pipeline, review decisions from the browser (reject, confirm, undo) | Built, for review |
+| M17.2 | The transaction page and its writes, unresolved records, the accounts, obligations and settings sections and their planning writes | Built, for review |
+| M17.3 | Migration 0033, tags (`tg1`, `r15`, `t13`, `d12`), search, the eight visuals | Built, for review |
+| M17.4 | CSV export, `--ui` | Built, for review |
+
+### M17.1 acceptance criteria
+
+| ID | Test |
+|---|---|
+| WA1 | Each pipeline step refuses alone, on a request correct in every other respect, with the same request passing as the control (UD2) |
+| WA2 | A form token is single-use, bound to its session, route and shown revision tokens. Reuse, another session's token, a changed hidden revision and a missing token are each refused, changing nothing |
+| WA3 | A decision from the browser equals the same CLI decision: the same rows, the same logical digest afterwards. A stale revision token or stale account refuses with the CLI's message, and the UI never reconciles (UD1) |
+| WA4 | Post/Redirect/Get: a reload of the result page writes nothing, and a resubmitted form refuses (UD3). No refusal page repeats a request value, tested with sentinels |
+| WA5 | Each `POST` opens through the gate, and a real ledger whose probe fails refuses with no write (UD4). No request writes to stdout or stderr. Every earlier criterion still passes |
+
+### M17.2 acceptance criteria
+
+| ID | Test |
+|---|---|
+| WB1 | Each section's pages equal their commands line for line, with names holding HTML shown as text (section pages leave out `, made <time>`, F2) |
+| WB2 | The route table equals point 2's allowlist as built, and each terminal-only command has no route. A `POST` to any other path is `404` |
+| WB3 | Each planning write from the browser equals its CLI write, including refusals |
+
+### M17.3 acceptance criteria
+
+| ID | Test |
+|---|---|
+| WC1 | Migration 0033 meets G10. Tag statements follow D-063 and D-065's multi-part model. `r15`, `t13` and `d12` keep every digest without tags, with `tg1` pinned (`c` stays 7: see D-073) |
+| WC2 | Search filters each select exactly, compose with AND, refuse malformed values, and cap at 500 with the rest counted. `pf transactions` with no filter is byte for byte as before |
+| WC3 | Each SVG's mark values equal its table. No script, event attribute, external reference or `style` is present. **The real-browser check of the CSP is not recorded**: no browser was available |
+
+### M17.4 acceptance criteria
+
+| ID | Test |
+|---|---|
+| WD1 | Export refuses an unsafe or existing destination, writing nothing, and writes `0600`. A cell starting with each formula character is prefixed. Money round-trips exactly, and missing is empty |
+| WD2 | `--ui` records its figures under G9. Every earlier criterion still passes |
+
+### Not in M17
+
+Script of any kind, PDF or image export, the UI on any address but loopback, separate logins,
+decision history pages, browser downloads, and for now the browser writes M17.2's slice plan
+point 7 leaves in the terminal.
 
 ## Backlog benchmarks
 

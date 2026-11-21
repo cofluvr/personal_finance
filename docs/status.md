@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-11-19. Branch: `feature/m10-rules`, from `main` at `19ee858`, which holds everything through M9. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
+Last updated: 2026-11-20. Branch: `feature/m10-rules`, from `main` at `19ee858`, which holds everything through M9. The owner intentionally pushed `feature/m1-foundation` up to `643e1b1`, and pushed `feature/m2-review` themselves. This clone records only a push of `673c025`. Live remote state and repository visibility are unverified (see [archive/handoff-history.md](archive/handoff-history.md)). Handoff: [handoff.md](handoff.md).
 
 | Milestone | Status |
 |---|---|
@@ -76,9 +76,13 @@ Last updated: 2026-11-19. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M15.2: loan terms, actual against schedule, projections, payoff orders | Accepted on 2026-11-19 as built, its departures included (D-071) |
 | M15.3: principal and interest, interest in Spending, `--loans` | Accepted on 2026-11-19 as built, its departures included (D-071) |
 | **M14 and M15 overall** | **Complete and accepted** on 2026-11-19. Not on the real ledger, which takes 27 and 28, then 29 to 31, after the earlier milestones' migrations, each after a verified backup |
-| M16.1: liquidity designations, coverage links, restoration, the buffer | Built on 2026-11-19 (D-072, "How M16.1 was implemented"), awaiting the owner's review |
-| M16.2: safe to spend, the dashboard, its page, `--safe-to-spend` | Built on 2026-11-19 (D-072, "How M16.2 was implemented"), awaiting the owner's review |
-| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 to M15 accepted, M16 built for review |
+| M16.1: liquidity designations, coverage links, restoration, the buffer | Accepted on 2026-11-20 as built (D-072) |
+| M16.2: safe to spend, the dashboard, its page, `--safe-to-spend` | Accepted on 2026-11-20 as built, with the two findings settled (D-072) |
+| M17.1: the browser write pipeline, review decisions from the browser | Built on 2026-11-20 (D-073, "How M17 was implemented"), a security change, awaiting the owner's review |
+| M17.2: the transaction page and its writes, the sections and planning writes | Built on 2026-11-20, awaiting the owner's review |
+| M17.3: migration 0033, tags, search, the eight visuals | Built on 2026-11-20, awaiting the owner's review. The real-browser CSP check is not done |
+| M17.4: CSV export, `--ui` | Built on 2026-11-20, awaiting the owner's review |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 to M16 accepted, M17 built for review |
 
 ## What exists
 
@@ -227,6 +231,9 @@ Last updated: 2026-11-19. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `account liquidity show`, `account liquidity set`, `account liquidity undo`,
   `obligation coverage`, `obligation covers`, `obligation uncover`, `fund restorations`,
   `fund restoration`, `fund restoration-undo`, `safe-to-spend`, `dashboard`,
+  `tag add`, `tags`, `review tag`, `review tagging show`, `review tagging undo`,
+  `transactions` with `--search`, `--account`, `--from`, `--to`, `--category`, `--tag`, `--min`
+  and `--max`, `report visuals`, `export transactions`, `export report`,
   `totals`,
   `report monthly`, `report household`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
@@ -261,7 +268,12 @@ Stated here once (D-058 point 9, W2).
   `ui/server.py`, the one module W1 allows to import from `http`, and only `http.server`'s
   `BaseHTTPRequestHandler` and `HTTPServer`. It binds `127.0.0.1` at a port the system picks, with
   no option to change it, looks up no name, and connects to nothing. A request needs the exact
-  Host, and the cookie from that launch's one-use key, and only `GET` is answered.
+  Host, and the cookie from that launch's one-use key. From M17.1, a security change approved
+  with D-073, a `POST` to a route on the allowlist also needs this server's exact `Origin`,
+  same-origin fetch metadata when sent, a plain form of at most 8,192 bytes parsed strictly, and
+  a single-use HMAC form token bound to the route and every hidden field; it then runs the CLI's
+  own command, whose gate and refusals apply. Every other method is refused. Forms work without
+  script, and the CSP is unchanged.
 - **One runtime dependency: pypdf 6.21.2** (D-060 point 1, as amended), pure Python and BSD-3-Clause,
   with no dependency of its own on Python 3.12. Pinned by version and hash in `requirements.txt`,
   installed with `--require-hashes`, and imported by `ingest/pdf_reader.py` alone. W1 parses its
@@ -305,6 +317,17 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
 
 ## Known limitations
 
+- **The browser makes only the writes D-073's allowlist as built names** (review decisions,
+  completion and dismissal, the transaction page's classify, categorize, correct, separate,
+  one-sided transfer and tags, the buffer, liquidity and coverage links). Everything else,
+  including every planning preview-then-add, is made in the terminal. The UI is still one session,
+  one request at a time, on loopback only. **The CSP was not checked in a real browser** for the
+  visuals' presentation attributes or the forms (D-073 point 6), and no browser has submitted a
+  form: the tests post as a browser would, over the real handler.
+- Tags are free labels on a transaction's whole set, entering no total; no renaming, merging or
+  deleting a tag. Search is a plain scan, capped at 500 rows shown.
+- Exports are CSV only: transactions with fixed columns, or a report's lines one a row. No PDF,
+  image or browser download.
 - Categories cover spending only, by a person one transaction at a time, or by category rules on
   spending a person has typed (D-064): no income categories, and no renaming, merging or deleting a
   category (D-063). A ledger shows spending by category only while some categorization reaches a

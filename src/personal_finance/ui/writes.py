@@ -12,6 +12,7 @@ the terminal's, refusals included.
 import hashlib
 import hmac
 import re
+import secrets
 import unicodedata
 from typing import NamedTuple
 
@@ -254,20 +255,27 @@ def acceptable(field: Field, value: str) -> bool:
     raise AssertionError(field.kind)
 
 
-def form_token(secret: bytes, path: str, hidden: dict[str, str]) -> str:
-    """HMAC-SHA256 over the route and every hidden field the form shows, in the route's fixed
-    order. A unit separator keeps the parts apart, since no accepted value may hold one."""
-    parts = [path, *(hidden[field.name] for field in WRITE_ROUTES[path].hidden)]
-    return hmac.new(secret, "\x1f".join(parts).encode("utf-8"), hashlib.sha256).hexdigest()
+def form_token(secret: bytes, path: str, hidden: dict[str, str], nonce: str | None = None) -> str:
+    """A random nonce for this one rendering, a dot, and HMAC-SHA256 over the nonce, the route
+    and every hidden field the form shows, in the route's fixed order. The nonce makes each form
+    shown its own token, so a later form showing the same values as a used one still works once.
+    A unit separator keeps the parts apart, since no accepted value may hold one."""
+    nonce = secrets.token_hex(16) if nonce is None else nonce
+    parts = [nonce, path, *(hidden[field.name] for field in WRITE_ROUTES[path].hidden)]
+    mac = hmac.new(secret, "\x1f".join(parts).encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{nonce}.{mac}"
 
 
 def refuse_form_token(form: dict[str, str], path: str, secret: bytes,
                       used_tokens: set[str]) -> Refusal | None:
-    """Step 8: the token this session's secret gives for the form as shown, never used before.
-    It is spent here, before the command runs, so a resubmitted form refuses whatever the
-    command did."""
+    """Step 8: a token this session's secret gives for the form as shown, never used before. It
+    is spent here, before the command runs, so a resubmitted form refuses whatever the command
+    did."""
     given = form[FORM_TOKEN_FIELD]
-    expected = form_token(secret, path, form)
+    nonce, separator, _ = given.partition(".")
+    if not separator or not re.fullmatch(r"[0-9a-f]{32}", nonce):
+        return Refusal(403, FORM_EXPIRED)
+    expected = form_token(secret, path, form, nonce)
     if given in used_tokens or not hmac.compare_digest(given.encode("utf-8"),
                                                        expected.encode("utf-8")):
         return Refusal(403, FORM_EXPIRED)

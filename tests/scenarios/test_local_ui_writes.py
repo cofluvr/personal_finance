@@ -369,6 +369,9 @@ class TestFormToken:  # WA2
         fields = reject_fields(browser, ledger)
         before = unchanged_state(ledger.path)
         assert browser.post("/review/reject", {**fields, "form_token": "0" * 64}).status == 403
+        nonce, mac = fields["form_token"].split(".")
+        assert browser.post("/review/reject", {**fields, "form_token": f"{'0' * 32}.{mac}"}
+                            ).status == 403
         assert browser.post("/review/reject", {**fields, "form_token": ""}).status == 403
         missing = {name: value for name, value in fields.items() if name != "form_token"}
         assert browser.post("/review/reject", missing).status == 400
@@ -422,7 +425,8 @@ class TestFormToken:  # WA2
         secret = b"k" * 32
         token = writes.form_token(secret, "/review/undo",
                                   {"decision": "d", "account": "a", "revision": "r"})
-        assert len(token) == 64
+        nonce, mac = token.split(".")
+        assert len(nonce) == 32 and len(mac) == 64
         form = {"form_token": token, "decision": "d", "account": "a", "revision": "r"}
         assert writes.refuse_form_token(form, "/review/undo", secret, set()) is None
         assert compared

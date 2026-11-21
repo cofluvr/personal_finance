@@ -15,7 +15,7 @@ from personal_finance.reports.fund_standing import funds_view
 from personal_finance.reports.household import household_report
 from personal_finance.reports.monthly import monthly_report
 from personal_finance.reports.net_worth_report import net_worth
-from personal_finance.reports.totals import income_and_spending
+from personal_finance.reports.totals import combined
 
 UNCATEGORIZED_LABEL = "uncategorized"
 
@@ -46,8 +46,15 @@ def spent(group) -> int:
 def visuals(conn: sqlite3.Connection, as_of: date) -> tuple[Chart, ...]:
     month = as_of.isoformat()[:7]
     names = dict(conn.execute("SELECT id, name FROM category"))
-    groups = income_and_spending(conn)
     months = monthly_report(conn).months
+    # Spending by category over every month, summed from the monthly report rather than computed
+    # again (G9): every transaction is in exactly one month, so the sums are the whole ledger's.
+    by_category = {}
+    for month_report in months:
+        for category_id, group in month_report.income_and_spending.spending_by_category:
+            by_category.setdefault(category_id, []).append(group)
+    categories = sorted(by_category, key=lambda category_id: (category_id is None,
+                                                              category_id or 0))
     budget = budget_report(conn, month, as_of, None)
     funds = [fund_view for fund_view in funds_view(conn, as_of).funds if fund_view.fund.applies]
     household = household_report(conn)
@@ -59,9 +66,10 @@ def visuals(conn: sqlite3.Connection, as_of: date) -> tuple[Chart, ...]:
                                                                    (budget.target_cents,))]
     return (
         Chart("Spending by category", ("spent",), tuple(
-            ChartRow(names.get(category_id, UNCATEGORIZED_LABEL), (spent(group),))
-            for category_id, group in groups.spending_by_category),
-            "" if groups.spending_by_category else "no spending is categorized yet"),
+            ChartRow(names.get(category_id, UNCATEGORIZED_LABEL),
+                     (spent(combined(by_category[category_id])),))
+            for category_id in categories),
+            "" if categories else "no spending is categorized yet"),
         Chart("Spending over time", ("spent",), tuple(
             ChartRow(month_report.month, (spent(month_report.income_and_spending.spending),))
             for month_report in months)),
