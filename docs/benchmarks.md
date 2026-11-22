@@ -665,3 +665,21 @@ runs once untimed first, then is timed in one read transaction.
 **G9's stopping rule is not met.** The gated write is not timed: `build/` is inside the git work
 tree, which the destination check refuses.
 
+**Pairing and delivery on the same shape (M20.3, YC2, D-076),** measured 2026-11-21 with
+`measure_reconciliation.py --scale --sync` on a copy of the tree. Output in
+`build/s20/bench_sync.txt`, ignored. A 366-day window makes the snapshot 7.11 MB, which the shape
+asserts reaches D-076's 5 MB. The reference client pairs, then makes 20 deliveries over real
+loopback TCP, each fetched, checked, installed and acknowledged. Times are round trips seen by
+the client, an upper bound on the server's share. The shape took 246s to build, and the 366-day
+snapshot 2.949s to generate at the start of `serve`, as `--snapshot` times generation.
+
+| Operation | Figure | Provisional target |
+|---|---|---|
+| Pairing, one window, TLS handshake included | 0.005s | Below 1.0s: met |
+| One delivery of 7.11 MB, round trip, median of 20 | 0.017s | Below 2.0s: met |
+| The slowest of the 20 deliveries | 0.021s | Below 2.0s: met |
+| A full sync: fetch, digest, M19's checks, atomic install, acknowledgement (median) | 0.387s | none set |
+
+**G9's stopping rule is not met.** The client's own checks dominate a sync. The server's share,
+one fetch, is about a twentieth of it.
+

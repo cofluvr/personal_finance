@@ -2346,7 +2346,7 @@ links between obligations and loans or reserves, and the emergency restoration a
 
 ---
 
-## D-073 M17 plan: the local UI completed, with browser writes — Approved, a security change, built for review
+## D-073 M17 plan: the local UI completed, with browser writes — Approved, a security change, M17 accepted
 
 M17 meets PRD §18:
 
@@ -2742,7 +2742,7 @@ Departures and choices, each with its reason:
 
 ---
 
-## D-074 M18 plan: financial scenarios — Approved, built for review
+## D-074 M18 plan: financial scenarios — Approved, M18 accepted
 
 M18 meets PRD §15:
 
@@ -3038,7 +3038,7 @@ its reason:
 
 ---
 
-## D-075 M19 plan: snapshots — Approved, built for review
+## D-075 M19 plan: snapshots — Approved, M19 accepted
 
 M19 meets shared-contract §3 and §4, and records §6's **snapshot compatibility policy**. A snapshot
 is:
@@ -3308,7 +3308,7 @@ slices. The format is recorded as shared-contract §6's snapshot compatibility p
 
 ---
 
-## D-076 M20 plan: pairing and local-network sync — Approved, a security change
+## D-076 M20 plan: pairing and local-network sync — Approved, a security change, built for review
 
 M20 meets PRD §19's "explicit sync mode for mobile access" and shared-contract §5, and records §6's
 **pairing protocol**:
@@ -3623,6 +3623,61 @@ time.
 | YC1 | Every row of point 10 has a test with a control that succeeds. TLS 1.2 and plaintext clients are refused |
 | YC2 | `docs/sync-protocol.md` and the runbook exist, are checked through on synthetic data in `build/`, and one real-phone delivery is recorded by the owner. `--sync` records its figures under G9. Every earlier criterion still passes |
 
+### How M20 was implemented
+
+Built on 2026-11-21 on the owner's notes of that day, after M19 was accepted by the same notes,
+without a stop between its slices. Its slice plans are above. Departures and findings, each with
+its reason:
+
+- **openssl names the curve.** LibreSSL 3.3.6 writes point 2's key and certificate with the
+  curve's explicit parameters unless `-pkeyopt ec_param_enc:named_curve` is added. TLS stacks such
+  as BoringSSL refuse explicit parameters, so the phone's likely would too. The pinned command
+  carries the option, and a test checks both files hold prime256v1's OID and no prime field.
+- **segno needs pinned allowances** (the slice plan's "learnt first"). It was fetched once from
+  PyPI by `pip download`, inspected under `build/s20/segno_inspect/` and scanned by W1 before
+  installing offline with `--require-hashes`. No other network use was made.
+- **Two tables more than point 7 lists:** `sync_identity` and its `retired` event, so the ledger
+  knows the current certificate and `dv1` covers it. `sync_acknowledgement` holds point 7's
+  `acknowledged` event as its own table, one per delivery. `paired_device` has no `paired` event:
+  its row is the pairing.
+- **The device's name is typed on the Mac** (`--name`), not posted by the phone, so a phone
+  never names itself. `POST /v1/pair` takes exactly `{"pairing_secret": S}`.
+- **The port is an option, not a stored setting.** The phone learns it from the pairing code, and
+  from the reconnect code `serve` shows, which holds no secret.
+- **One ledger connection per session.** The server checks the device on every request through
+  the command's own connection. SQLite reads what is committed at each statement, so a revocation
+  made by another `pf` process applies on the next request. Opening the ledger per request
+  would run a real ledger's disk-image probes each time.
+- **Refusals beyond point 5's list:** `431` for headers over 8 KB or 100 lines, `413` for a body
+  over 4 KB, `400` `not_delivered` for an acknowledgement matching no delivery to that device,
+  and `503` `busy`. `409` comes only after authentication, so an unauthenticated request learns
+  nothing of the majors.
+- **`serve --as-of`,** as `snapshot create` takes, so a ledger without the household timezone can
+  still serve a dated snapshot. The timezone refusal already named the option.
+- **The suite never connects.** It reaches the server over `socket.socketpair()` through the real
+  TLS handshake and handler, as the local UI's client does, keeping the socket guard. The
+  test-only loopback hook is a subclass in `tests/scenarios/sync_harness.py`. `--sync` alone uses
+  loopback TCP.
+- **The real-phone delivery (YC2) waits** for the iOS app's I3. The runbook's commands that open
+  no listener were run on a synthetic ledger under `build/s20/walk1/`.
+- **Benchmarks** ([benchmarks.md](benchmarks.md)): pairing 0.005s; a 7.11 MB delivery 0.017s
+  median and 0.021s at most over 20; a full sync 0.387s. The stopping rule is not met.
+- **Breaks:** M20.1 23, of which 19 caught, 1 gap closed and caught (`INSERT OR REPLACE` of a
+  delivery under a new ID), 1 equivalent (the early second-identity check, which only spares
+  running openssl), and 2 that showed redundant code, now deleted: the failure count in
+  `window_state`, since the fifth failure closes the window in its own transaction, and the
+  used-once and closed-once indexes, which the no-replace trigger enforces. M20.2 and M20.3 23,
+  of which 17 caught, 5 gaps closed and caught (a retired identity's unrevoked device; unknown
+  and repeated fields with otherwise valid values; `Transfer-Encoding` beside a valid length; a
+  malformed pairing secret counted as a failure), and 1 that hung (`serve` ignoring its deadline)
+  until the limit tests ran it in a thread with a join timeout, then caught. Logs under
+  `build/s20/breaks/`, ignored.
+- **G6:** 208,577 command runs over 3,939 kept ledgers, M19's head (`a4f8ac9`) against M20's
+  code on copies migrated to 36: all byte for byte the same but 215, each on a ledger a test
+  leaves at a version newer than M19's code, which that code refuses and M20's reads. No token
+  moved. Path-only differences in refusals naming a copy's folder were normalized. Scripts and
+  logs under `build/s20/g6/`, ignored.
+
 ---
 
 ## D-077 M21 plan: backend acceptance, stress testing and the security audit — Approved
@@ -3811,6 +3866,61 @@ network approval), D-025's decisions, and §10's user acceptance checks.
 - **F.** Point F, the migration rehearsal and current readiness documents, with the owner (point
   9).
 - **G.** The slices M21.1 to M21.4, in that order.
+
+### M21 slice plans — Approved by the owner's notes of 2026-11-21
+
+Written before any of M21 was built, after M20. The owner's notes of 2026-11-21 give sign-off on
+everything not specifically excepted, which this session takes as approving these choices. These
+fix what D-077 leaves to build time. M21.4 is the owner's, with the lead engineer.
+
+**M21.1, the acceptance matrices.**
+
+1. **`docs/backend-acceptance.md`** maps each PRD §21 box to its named tests, as
+   [m1-acceptance.md](m1-acceptance.md) does. `tests/unit/test_backend_acceptance.py` fails if a
+   box is missing or a named test does not exist.
+2. **One end-to-end test per box,** in `tests/acceptance/test_full_year.py`, on one synthetic
+   household's year built once for the module through the CLI alone: two members, checking,
+   savings, a card and a graduated loan, twelve monthly statements in CSV with one month also as
+   PDF, a third paycheck, an annual reserve and its purchase, a goal, a transfer and the card's
+   payment, then a snapshot. Every figure each box needs is asserted from command output, so no
+   box is closed only by pieces. The module is marked `slow`.
+3. **Shared-contract §6** is emptied from [decisions.md](decisions.md)'s "Not yet decided", each
+   item naming its decision. The pairing protocol is decided by D-076 once M20 is accepted, and
+   the section says so until then.
+4. **§10's checklists** for Phase 1B and 1C go into the same document, each line with its
+   evidence or `Owner` where only the owner can give it.
+
+**M21.2, stress, crashes and fuzzing,** in `tests/stress/`, outside the gating suite (no file is
+named `test_*.py`, so pytest never collects them). Each script records its seed and exits non-zero
+on any failure.
+
+1. **`run_stress.py --minutes N --seed S --writers W --readers R`:** processes over one synthetic
+   ledger. Writers run random valid commands from each write kind, each with the token just shown,
+   and record each token's age. Readers run every report. Every 60 seconds and at the end, it
+   checks `integrity_check`, `foreign_key_check` and the invariants. A command whose evidence
+   changed since its token was shown must have been refused, and every refusal must be a
+   documented message.
+2. **`run_crashes.py --points all --seed S`:** each write command runs in a child process that
+   installs an SQLite trace callback and kills itself with `SIGKILL` at its Nth statement, for
+   every N the command reaches. After each kill, the ledger opens through the gate, its logical
+   digest (`db/backups.py`) equals the before or the after state, and the invariants hold. **No
+   hook in `src/`:** the child is `tests/stress/crash_child.py`, which wraps `connect` before
+   calling `main`. This departs from D-077 point 5's environment variable, so W1 has nothing new
+   to check.
+3. **`run_fuzz.py --target T --examples N --seed S`** with Hypothesis, for each of: `csv`, `pdf`,
+   `amounts` (amounts and dates), `ui` (M17's pipeline), `sync` (after TLS), and `snapshot` (the
+   validator). Each must fail only by its documented refusals, fabricate nothing and write
+   nothing partial. A failing example is written to `tests/stress/seeds/` and becomes a fixed
+   test.
+4. **`--everything`** in `measure_reconciliation.py`: point 3's shape, every figure in one table
+   in [benchmarks.md](benchmarks.md), with a full-scale backup, verify and restore compared byte
+   for byte, and a version-21 copy migrated to the latest version, each step timed.
+
+**M21.3, the security audit:** `docs/security-audit.md` from the code as built, by point 7's
+sections, each finding numbered and fixed when small or made its own decision. D-025's items are
+each given a recommendation, for the owner to decide item by item. Point 7's advisory checks need
+the network, which the owner's notes allow. They are made once, by a search naming only the
+package and its version.
 
 ### M21 acceptance criteria
 

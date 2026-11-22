@@ -78,16 +78,19 @@ Last updated: 2026-11-20. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | **M14 and M15 overall** | **Complete and accepted** on 2026-11-19. Not on the real ledger, which takes 27 and 28, then 29 to 31, after the earlier milestones' migrations, each after a verified backup |
 | M16.1: liquidity designations, coverage links, restoration, the buffer | Accepted on 2026-11-20 as built (D-072) |
 | M16.2: safe to spend, the dashboard, its page, `--safe-to-spend` | Accepted on 2026-11-20 as built, with the two findings settled (D-072) |
-| M17.1: the browser write pipeline, review decisions from the browser | Built on 2026-11-20 (D-073, "How M17 was implemented"), a security change, awaiting the owner's review |
-| M17.2: the transaction page and its writes, the sections and planning writes | Built on 2026-11-20, awaiting the owner's review |
-| M17.3: migration 0033, tags, search, the eight visuals | Built on 2026-11-20, awaiting the owner's review. The real-browser CSP check is not done |
-| M17.4: CSV export, `--ui` | Built on 2026-11-20, awaiting the owner's review |
-| M18.1: migration 0034, scenarios and their inputs, `sc1` | Built on 2026-11-21 (D-074, "How M18 was implemented"), awaiting the owner's review |
-| M18.2: the projection, `scenario compare`, the scenario pages and forms | Built on 2026-11-21, awaiting the owner's review |
-| M18.3: promotion and its undo, `sp1`, `--scenarios` | Built on 2026-11-21, awaiting the owner's review |
-| M19.1: the snapshot builder, canonical JSON, the schema and its validator | Built on 2026-11-21 (D-075, "How M19 was implemented"), awaiting the owner's review |
-| M19.2: snapshot create, verify and the list, migration 0035, `--snapshot` | Built on 2026-11-21, awaiting the owner's review |
-| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 to M16 accepted, M17 to M19 built for review |
+| M17.1: the browser write pipeline, review decisions from the browser | Accepted on 2026-11-21 by the owner's notes, its departures included |
+| M17.2: the transaction page and its writes, the sections and planning writes | Accepted on 2026-11-21 by the owner's notes, its departures included |
+| M17.3: migration 0033, tags, search, the eight visuals | Accepted on 2026-11-21 by the owner's notes, its departures included. The real-browser CSP check is still the owner's to do |
+| M17.4: CSV export, `--ui` | Accepted on 2026-11-21 by the owner's notes, its departures included |
+| M18.1: migration 0034, scenarios and their inputs, `sc1` | Accepted on 2026-11-21 by the owner's notes, its departures included |
+| M18.2: the projection, `scenario compare`, the scenario pages and forms | Accepted on 2026-11-21 by the owner's notes, its departures included |
+| M18.3: promotion and its undo, `sp1`, `--scenarios` | Accepted on 2026-11-21 by the owner's notes, its departures included |
+| M19.1: the snapshot builder, canonical JSON, the schema and its validator | Accepted on 2026-11-21 by the owner's notes, its departures included |
+| M19.2: snapshot create, verify and the list, migration 0035, `--snapshot` | Accepted on 2026-11-21 by the owner's notes, its departures included |
+| M20.1: migration 0036, the sync identity, pairing windows, devices, `dv1` | Built on 2026-11-21 (D-076, "How M20 was implemented"), a security change, awaiting the owner's review |
+| M20.2: `sync serve`, deliveries, acknowledgements, revocation | Built on 2026-11-21, awaiting the owner's review |
+| M20.3: the threat model's tests, the protocol, the runbook, `--sync` | Built on 2026-11-21, awaiting the owner's review. The real-phone delivery (YC2) waits for the iOS app |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 to M19 accepted, M20 built for review |
 
 ## What exists
 
@@ -242,6 +245,8 @@ Last updated: 2026-11-20. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `scenarios`, `scenario show`, `scenario input add`, `scenario input undo`, `scenario undo`,
   `scenario compare`, `scenario promote`, `scenario promotion undo`, `snapshot create`,
   `snapshot verify`, `snapshots`,
+  `sync identity create`, `sync identity show`, `sync identity rotate`, `sync pair`,
+  `sync serve`, `sync devices`, `sync revoke`, `sync deliveries`,
   `totals`,
   `report monthly`, `report household`, `balance record`, `balance list`,
   `balance check`, `balance undo`, `archive verify`, `storage`, `backup create`,
@@ -254,6 +259,9 @@ Last updated: 2026-11-20. Branch: `feature/m10-rules`, from `main` at `19ee858`,
   `scenario show` and `scenario compare`, which the scenario pages render.
 - `personal_finance.snapshot`: canonical JSON, the snapshot builder, the schema document and its
   validator, and creating, verifying and listing snapshot files (D-075).
+- `personal_finance.sync`: the Mac's TLS identity, pairing windows, devices, deliveries and the
+  TLS 1.3 server that hands a paired phone its snapshot (D-076). Its protocol is
+  [sync-protocol.md](sync-protocol.md), executable as `tests/sync_reference_client.py`.
 
 ## What does not exist yet
 
@@ -274,13 +282,16 @@ can be acted on.
 
 Stated here once (D-058 point 9, W2).
 
-- **No network, and no other program but two.** No module under `src/` imports a network module,
-  runs a program or imports dynamically, except `db/volume_probes.py`, which runs
-  `/usr/sbin/diskutil info -plist` and `/usr/bin/hdiutil info -plist`, for a real ledger only,
-  with a 30-second timeout. `tests/unit/test_no_network_imports.py` parses every module and fails
-  on any added use. Every command works with no network connection (PRD §21).
-- **One listening socket, on loopback only** (D-062 point 1). `pf ui` serves read-only pages from
-  `ui/server.py`, the one module W1 allows to import from `http`, and only `http.server`'s
+- **No network but `pf ui`'s loopback and `pf sync`'s, and no other program but three.** No
+  module under `src/` imports a network module, runs a program or imports dynamically, except:
+  `db/volume_probes.py`, which runs `/usr/sbin/diskutil info -plist` and
+  `/usr/bin/hdiutil info -plist`, for a real ledger only, with a 30-second timeout;
+  `sync/identity.py`, which runs `/usr/bin/openssl req …` once per identity (D-076 point 2); and
+  the two servers below. `tests/unit/test_no_network_imports.py` parses every module and fails on
+  any added use, with a failing control for each allowance. Every command but `pf sync pair` and
+  `pf sync serve` works with no network connection (PRD §21).
+- **One listening socket on loopback** (D-062 point 1). `pf ui` serves pages from
+  `ui/server.py`, which W1 allows to import from `http` only `http.server`'s
   `BaseHTTPRequestHandler` and `HTTPServer`. It binds `127.0.0.1` at a port the system picks, with
   no option to change it, looks up no name, and connects to nothing. A request needs the exact
   Host, and the cookie from that launch's one-use key. From M17.1, a security change approved
@@ -289,20 +300,34 @@ Stated here once (D-058 point 9, W2).
   a single-use HMAC form token bound to the route and every hidden field; it then runs the CLI's
   own command, whose gate and refusals apply. Every other method is refused. Forms work without
   script, and the CSP is unchanged.
-- **One runtime dependency: pypdf 6.21.2** (D-060 point 1, as amended), pure Python and BSD-3-Clause,
-  with no dependency of its own on Python 3.12. Pinned by version and hash in `requirements.txt`,
-  installed with `--require-hashes`, and imported by `ingest/pdf_reader.py` alone. W1 parses its
-  modules too. Its one allowance is `subprocess` in its `filters.py`, where its JBIG2 image decoder
-  runs `jbig2dec` if that program is on the path. The reader runs pypdf with that program unset, so
-  it never runs, and silences pypdf's log, which can quote a file's bytes. Otherwise only Python
-  3.12's standard library and its SQLite. Nothing is downloaded or sent at run time: no telemetry,
-  no update check and no log (D-037).
+- **One listening socket on the local network, only while you run it** (D-076, M20, a security
+  change). `pf sync pair` and `pf sync serve` serve HTTPS from `sync/server.py`, the one module W1
+  allows `ssl`, with the same two `http.server` classes. They bind one private IPv4 address
+  (RFC 1918 only: loopback, link-local, public and wildcard are refused before any socket opens)
+  in the foreground, for at most 120 seconds to pair or 60 minutes to serve. They use TLS 1.3 only,
+  with the Mac's self-signed P-256 certificate, which the phone pins. A paired device may only
+  fetch the snapshot built at the start and acknowledge it, authenticated against the ledger on
+  every request. Every answer's body is fixed, and nothing is logged. The key is `0600` in a
+  `0700` `sync/` folder beside the ledger, never printed or backed up. Secrets are stored only as
+  SHA-256 hashes.
+- **Two runtime dependencies.** **pypdf 6.21.2** (D-060 point 1, as amended), pure Python and
+  BSD-3-Clause, imported by `ingest/pdf_reader.py` alone. Its one W1 allowance is `subprocess` in
+  its `filters.py`, where its JBIG2 image decoder runs `jbig2dec` if that program is on the path.
+  The reader runs pypdf with that program unset, so it never runs, and silences pypdf's log,
+  which can quote a file's bytes. **segno 1.6.6** (D-076 point 3, fetched once on 2026-11-21),
+  pure Python and BSD-3-Clause, imported by `sync/pairing.py` alone for `make_qr(...).matrix`.
+  W1 pins each of its seven uses (opening a viewer, a plugin loader, Windows terminal colours,
+  URL quoting) to the function that holds it, none on a path pairing takes. Both are pinned by
+  version and hash in `requirements.txt`, installed with `--require-hashes`. Otherwise only
+  Python 3.12's standard library and its SQLite. Nothing is downloaded or sent at run time: no
+  telemetry, no update check and no log (D-037).
 - **Development dependencies:** pytest 9.2.0 and Hypothesis 6.170.14, pinned in
   `requirements-dev.txt` without hashes, and setuptools `>=68` to build. Installing them and pypdf
   is the only step that needs a network, once. A later build can use another setuptools, and an editable
   install is untested.
 - **The test socket guard** blocks Python sockets in the test process, not subprocesses or native
-  code. The suite never runs the two probes.
+  code. The suite never runs the two probes. It runs openssl for real, and reaches the sync
+  server only over `socket.socketpair()`; the benchmark `--sync` uses loopback TCP.
 - **Not covered:** what the interpreter, macOS, or tools run outside `pf` do on the network.
 
 ## Acceptance criteria progress
@@ -344,6 +369,13 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
   scenario, and maps only point 6's inputs: a loan payoff, a bonus, a borrowing, a home purchase,
   an addition with an end date or without `--account` and `--match` stay scenarios. A withdrawn
   promotion's terms row keeps its date, so a terms row on that same date is refused (D-074).
+- **Sync is not checked with a real phone** (YC2): the iOS app (D-079's I3) does not exist yet,
+  so the protocol is exercised by the reference client alone, and the macOS firewall prompt and
+  a real private address are the owner's to check by [sync-runbook.md](sync-runbook.md).
+- **A restored ledger pairs again:** backups leave out the sync key on purpose (D-076 point 2),
+  and `sync identity rotate` replaces it.
+- **The port is not stored** (the M20.1 slice plan point 7): `--port` defaults to 8443, and
+  `serve` shows a reconnect code holding the address, port and fingerprint.
 - **A snapshot file is unencrypted** (D-075 point 7): it is to be kept on the encrypted image and
   carried to the phone by hand. Members' parts are monthly totals moved out and in, not D-056's
   five groups. Institution names are left out until the owner decides.
