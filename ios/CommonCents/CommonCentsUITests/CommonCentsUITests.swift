@@ -45,6 +45,19 @@ final class CommonCentsUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Safe to spend today"].exists)
     }
 
+    func testTheLargestTextStillShowsTheFigure() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demo", "-unlocked", "-UIPreferredContentSizeCategoryName",
+                               "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 10))
+        // The banners come first at this size: scroll to the figure, as a person would.
+        let figure = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS '$53.57'")).firstMatch
+        for _ in 0..<6 where !figure.exists { app.swipeUp() }
+        XCTAssertTrue(figure.exists)
+    }
+
     func testEveryTabOpens() {
         let app = launched(["-demo", "-unlocked"])
         for (tab, title) in [("Spending", "Spending"), ("Goals", "Goals"), ("Accounts", "Accounts"),

@@ -71,6 +71,8 @@ struct ScopePicker: View {
 struct SafeToSpendHero: View {
     let snapshot: Snapshot
     let notCurrent: Bool
+    /// Follows Dynamic Type from the mock-ups' 46 points.
+    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 46
 
     var body: some View {
         VStack(spacing: 4) {
@@ -78,7 +80,8 @@ struct SafeToSpendHero: View {
                 Text(notCurrent ? "Safe to spend · as of \(Dates.shortDay(snapshot.content.cutoff.asOf))"
                                 : "Safe to spend today")
                     .font(.subheadline).foregroundStyle(.secondary)
-                Text(Money.text(safe.todayCents)).font(.system(size: 46, weight: .bold)).monospacedDigit()
+                Text(Money.text(safe.todayCents)).font(.system(size: heroSize, weight: .bold)).monospacedDigit()
+                    .minimumScaleFactor(0.5).lineLimit(1)
                 Text("\(notCurrent ? "That week" : "This week") \(Money.text(safe.weekCents))")
                 HStack {
                     if let limiting = safe.limiting {
@@ -93,6 +96,7 @@ struct SafeToSpendHero: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -247,7 +251,7 @@ struct FreshnessLine: View {
         let generated = Dates.instant(snapshot.generatedAt)
         let latest = snapshot.content.cutoff.accounts.compactMap(\.lastCoveredDay).max()
         HStack(spacing: 6) {
-            Circle().fill(.green).frame(width: 8, height: 8)
+            Circle().fill(.green).frame(width: 8, height: 8).accessibilityHidden(true)
             Text("Synced \(generated.map { $0.formatted(.relative(presentation: .named)) } ?? "at an unknown time") · bank data through \(Dates.shortDay(latest ?? snapshot.content.cutoff.asOf))")
         }
         .font(.caption).foregroundStyle(.secondary)
