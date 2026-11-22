@@ -102,7 +102,14 @@ Record:
 
 Ambiguous requirements must be resolved or explicitly documented before implementation.
 
-### Snapshot compatibility policy (D-075 point 5, built in M19, for review)
+### Pairing protocol (D-076, built in M20, for review)
+
+Specified in [sync-protocol.md](sync-protocol.md), with `tests/sync_reference_client.py` as its
+executable form: TLS 1.3 with the Mac's self-signed certificate pinned by its SHA-256, a
+single-use 120-second pairing window, device secrets stored as hashes and checked on every
+request, read-only from the phone, atomic installation, acknowledgement and revocation.
+
+### Snapshot compatibility policy (D-075 point 5, built and accepted in M19)
 
 - **The file** is one canonical JSON document: UTF-8, keys sorted, no insignificant whitespace,
   and no float anywhere. Its envelope holds `format` (`"commoncents-snapshot"`), `schema_version`,

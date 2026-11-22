@@ -834,10 +834,10 @@ under D-073; departures are in its "How M17.n was implemented".
 
 | Slice | Scope | Status |
 |---|---|---|
-| M17.1 | The write pipeline, review decisions from the browser (reject, confirm, undo) | Built, for review |
-| M17.2 | The transaction page and its writes, unresolved records, the accounts, obligations and settings sections and their planning writes | Built, for review |
-| M17.3 | Migration 0033, tags (`tg1`, `r15`, `t13`, `d12`), search, the eight visuals | Built, for review |
-| M17.4 | CSV export, `--ui` | Built, for review |
+| M17.1 | The write pipeline, review decisions from the browser (reject, confirm, undo) | Accepted on 2026-11-21 |
+| M17.2 | The transaction page and its writes, unresolved records, the accounts, obligations and settings sections and their planning writes | Accepted on 2026-11-21 |
+| M17.3 | Migration 0033, tags (`tg1`, `r15`, `t13`, `d12`), search, the eight visuals | Accepted on 2026-11-21 |
+| M17.4 | CSV export, `--ui` | Accepted on 2026-11-21 |
 
 ### M17.1 acceptance criteria
 
@@ -887,9 +887,9 @@ was implemented". No security control change: its browser forms run through M17'
 
 | Slice | Scope | Status |
 |---|---|---|
-| M18.1 | Migration 0034, scenarios and inputs of every kind, `target_changed`, `sc1` | Built, for review |
-| M18.2 | The pure projection, `scenario compare`, the scenario pages and forms | Built, for review |
-| M18.3 | Promotion and its undo, `sp1`, `--scenarios` | Built, for review |
+| M18.1 | Migration 0034, scenarios and inputs of every kind, `target_changed`, `sc1` | Accepted on 2026-11-21 |
+| M18.2 | The pure projection, `scenario compare`, the scenario pages and forms | Accepted on 2026-11-21 |
+| M18.3 | Promotion and its undo, `sp1`, `--scenarios` | Accepted on 2026-11-21 |
 
 ### M18 acceptance criteria
 
@@ -919,8 +919,8 @@ and no security control change.
 
 | Slice | Scope | Status |
 |---|---|---|
-| M19.1 | The builder, canonical JSON, the envelope, every §3 section, the schema document and its validator, golden fixtures | Built, for review |
-| M19.2 | Create in one read transaction, the gated atomic write, migration 0035, verify, the list, `--snapshot` | Built, for review |
+| M19.1 | The builder, canonical JSON, the envelope, every §3 section, the schema document and its validator, golden fixtures | Accepted on 2026-11-21 |
+| M19.2 | Create in one read transaction, the gated atomic write, migration 0035, verify, the list, `--snapshot` | Accepted on 2026-11-21 |
 
 ### M19 acceptance criteria
 
@@ -940,6 +940,65 @@ and no security control change.
 
 Encrypting the file, a network, incremental or delta snapshots, phone writes, scenario results,
 and institution names (until the owner says they may appear).
+
+## M20 plan
+
+Approved by the owner on 2026-11-10 as D-076, a security change, with A to I, in
+[decisions-m12-m21.md](decisions-m12-m21.md). Its slice plans were written under D-076 before any
+of it was built, and approved by the owner's notes of 2026-11-21, which also allowed fetching
+`segno` once. Departures are in its "How M20 was implemented". The protocol is
+[sync-protocol.md](sync-protocol.md), and the owner's steps [sync-runbook.md](sync-runbook.md).
+
+| Slice | Scope | Status |
+|---|---|---|
+| M20.1 | Migration 0036, the identity by `/usr/bin/openssl`, pairing windows, the QR and manual codes, devices, `dv1`, W1's three allowances and segno's | Built, for review |
+| M20.2 | `sync serve`, the three endpoints, per-request device checks, deliveries and acknowledgements, revocation | Built, for review |
+| M20.3 | The threat model's tests, the reference client, the protocol and runbook, `--sync` | Built, for review. The real-phone delivery waits for the iOS app (I3) |
+
+### M20 acceptance criteria
+
+| ID | Test |
+|---|---|
+| YA1 | Migration 0036 meets G10. `identity create` runs exactly the pinned command, writes `0600` files in a `0700` folder, and refuses an existing identity. W1 fails without each allowance, and on any other subprocess or network import |
+| YA2 | Pairing succeeds once within the window, and refuses a second use, an expired window, a wrong secret and a sixth attempt. Only hashes are stored. The QR payload decodes to point 3's fields |
+| YA3 | `--address` refuses loopback, link-local, public and wildcard addresses from the CLI |
+| YB1 | The reference client receives exactly the snapshot `serve` built, verifies it, and acknowledges it. The delivery and acknowledgement are recorded idempotently, and a mismatched acknowledgement is refused |
+| YB2 | No secret, a wrong one and a revoked device each give `401`, and revocation applies on the next request with no restart. An unsupported major gives `409` naming the supported one |
+| YB3 | `serve` stops at its time limit and its failure limit, refuses a second concurrent `serve` or `pair`, writes no ledger data but deliveries, and prints counts only |
+| YC1 | Every row of point 10 has a test with a control that succeeds. TLS 1.2 and plaintext clients are refused |
+| YC2 | `docs/sync-protocol.md` and the runbook exist, are checked through on synthetic data in `build/`, and one real-phone delivery is recorded by the owner. `--sync` records its figures under G9. Every earlier criterion still passes |
+
+### Not in M20
+
+Writes from the phone, sync over the internet or a relay, background or scheduled sync,
+discovery, several Macs, push notifications, and a stored port setting.
+
+## M21 plan
+
+Approved by the owner on 2026-11-10 as D-077, with A to G, in
+[decisions-m12-m21.md](decisions-m12-m21.md). Its slice plans were written under D-077 before any
+of it was built, and approved by the owner's notes of 2026-11-21. Departures are in its "How M21
+was implemented". M21 builds no feature.
+
+| Slice | Scope | Status |
+|---|---|---|
+| M21.1 | [backend-acceptance.md](backend-acceptance.md): PRD §21 by named tests and one end-to-end test per box, shared-contract §6 decided, §10's checklists | Built, for review |
+| M21.2 | `tests/stress/`: concurrency stress, crashes at every statement, fuzzing; `--everything` | Built, for review |
+| M21.3 | [security-audit.md](security-audit.md), and D-025 item by item for the owner | Built, for review; D-025's decision is the owner's |
+| M21.4 | Point F on every layout, the migration rehearsal, the readiness documents, with the owner | The owner's |
+
+### M21 acceptance criteria
+
+| ID | Test |
+|---|---|
+| ZA1 | `docs/backend-acceptance.md` maps every PRD §21 box to named tests that exist and pass, checked by a test. Each box has its own end-to-end test |
+| ZA2 | "Not yet decided" in [decisions.md](decisions.md) is empty, and §10's checklists hold evidence for Phase 1B and 1C |
+| ZB1 | `--everything` reaches its stated counts and records every figure, and a full-scale restore and migration compare byte for byte |
+| ZB2 | A 60-minute stress run at three seeds ends with every check passing, no stale token succeeding, and no undocumented refusal |
+| ZB3 | A crash at every enumerated point leaves the before or the after state and every invariant |
+| ZB4 | Every fuzz target runs its examples with no failure, and every recorded seed reproduces |
+| ZC1 | `docs/security-audit.md` covers point 7's sections, and each finding is closed or decided. D-025 is decided |
+| ZD1 | Point F has passed for every layout, the rehearsal has compared clean, and the owner has run the readiness checklist again. Every earlier criterion still passes |
 
 ## Backlog benchmarks
 

@@ -3,7 +3,7 @@
 The index line is in [decisions.md](decisions.md). The product is [PRD-ios.md](PRD-ios.md), and
 the boundary with the backend is [shared-contract.md](shared-contract.md).
 
-## D-079 iOS companion plan — Proposed, for the owner's approval
+## D-079 iOS companion plan — Approved on 2026-11-20, I1 to I3 built for review
 
 Written on 2026-11-19, with the screen mock-ups in [ios-mockups/index.html](ios-mockups/index.html)
 (open the file in a browser). Nothing of it is built. The owner's notes of 2026-11-19 asked for the
@@ -64,3 +64,52 @@ lists, and whether Today shows both sync time and bank-data freshness.
 - **C.** An `ios/` folder beside the backend (point 3).
 - **D.** The mock-ups as the screens to build, with the open questions answered.
 - **E.** M19 before I2, and M20, with its security approval, before I3.
+
+### I1 to I3 slice plan — Approved by the owner's notes of 2026-11-21
+
+Written before any of the app was built, after M20. The owner's notes of 2026-11-21 give sign-off
+on everything not specifically excepted, and ask that iOS work start once the backend's
+milestones are done. This session takes that as approving A to E as recommended, these answers
+to the open questions, and this plan.
+
+**The open questions, answered as the mock-ups recommend:**
+
+- The name stays **CommonCents** until the owner gives another.
+- **Five tabs:** Today, Spending, Goals, Accounts, Sync, with Settings under Sync.
+- **A member view shows budget pace only,** never a per-member safe to spend, until the backend
+  computes one (D-072).
+- **Today shows the most material warning,** and lists the rest under "Why this number".
+- **Today shows both** bank-data freshness and sync time, labelled apart, since they differ
+  (shared-contract §5).
+
+**I1, I2 and I3 together,** since M19 and M20 are built. **Two parts, in `ios/`:**
+
+1. **`ios/CommonCentsKit`, a Swift package** with everything but the screens:
+   - the snapshot's model (`Codable`, every money field `Int` cents);
+   - the validator: canonical bytes, envelope, digest, the schema subset of `schema_v1.json`
+     read from the package's copy, reconciliations and excluded keys, as `snapshot/files.py`'s
+     `verified`;
+   - the store: atomic install, keeping the last valid, refusing another major with both versions
+     named, local deletion;
+   - freshness and the month boundary;
+   - formatting cents;
+   - the pairing payload and manual code;
+   - the sync client of [sync-protocol.md](sync-protocol.md): pinning in a `URLSession`
+     delegate, the Keychain, fetch, install, acknowledge.
+
+   Its tests run with `swift test` on the Mac and on the iOS simulator. They read the backend's
+   golden fixture `tests/fixtures/synthetic/snapshots/v1.0/household.json` and mutated copies, so
+   the two sides are tested against the same bytes. A test fails if a source file under `Sources/`
+   does arithmetic on a money value (point 4).
+2. **`ios/CommonCents`, the SwiftUI app** for iOS 26: every screen of the mock-ups, light and dark;
+   Face ID through `LocalAuthentication`, locking after a minute in the background; the
+   app-switcher blur; and the stale and month-boundary states. A bundled synthetic snapshot is
+   used only when nothing is installed and the app is run with `-demo` from Xcode. A release
+   build never shows it.
+
+**Verification here:** `swift test`; `xcodebuild build` and `test` for the simulator; and screenshots
+from the simulator of each tab in light and dark, under `build/ios/`. The real phone, its Face ID
+and a real pairing are the owner's (I4, YC2).
+
+**Not in I1 to I3:** I4's provisioning guide, which needs the owner's Apple ID and phone; any
+write from the phone; background sync; widgets.

@@ -148,7 +148,35 @@ from personal_finance.planning.projection import LONGEST_MONTHS
 from personal_finance.snapshot.files import SnapshotNotRecorded, SnapshotRefused
 from personal_finance.snapshot.files import create as create_snapshot
 from personal_finance.snapshot.files import records as snapshot_records
+from personal_finance.snapshot.files import build_in_one_read
 from personal_finance.snapshot.files import verified as verified_snapshot
+from personal_finance.sync.devices import DEFAULT_PORT as DEFAULT_SYNC_PORT
+from personal_finance.sync.devices import (
+    PAIRING_WINDOW_SECONDS,
+    SyncRefused,
+    checked_device_name,
+    checked_port,
+    checked_private_address,
+    close_window,
+    find_device,
+    load_deliveries,
+    load_devices,
+    open_window,
+    revoke_device,
+    revoke_revision,
+    rotate_revision,
+    sync_lock,
+    window_failures,
+)
+from personal_finance.sync.devices import create_identity as create_sync_identity
+from personal_finance.sync.devices import rotate_identity as rotate_sync_identity
+from personal_finance.sync.identity import (
+    IdentityRefused,
+    checked_identity_files,
+    current_identity,
+    prepared_sync_folder,
+    required_identity,
+)
 from personal_finance.planning.promotions import promote as promote_scenario
 from personal_finance.planning.promotions import undo_promotion as undo_scenario_promotion
 from personal_finance.planning.scenarios import InputRequest as ScenarioInputRequest
@@ -1137,6 +1165,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     scenario_parsers(commands, command)
     snapshot_parsers(commands, command)
+    sync_parsers(commands, command)
 
     household = commands.add_parser(
         "household", help="name household members, the household share and account defaults")
@@ -5800,17 +5829,14 @@ WINDOW_DAYS_INVALID = "--window-days must be a whole number from 1 to 366."
 
 
 def run_snapshot_create(args) -> int:
-    if not args.window_days.isdigit() or not 1 <= int(args.window_days) <= 366:
-        raise CommandError(WINDOW_DAYS_INVALID)
+    window_days = checked_window_days(args.window_days)
     if args.as_of is not None:
         checked_as_of(args.as_of)
     conn = open_ledger(args.db, read_only=True)
     try:
         as_of = as_of_date(conn, args.as_of)
-        moment = current_utc_time().astimezone(timezone.utc)
-        generated_at = moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
         written = create_snapshot(conn, lambda: open_ledger(args.db), args.out, as_of,
-                                  int(args.window_days), str(uuid.uuid4()), generated_at,
+                                  window_days, str(uuid.uuid4()), utc_now_text(),
                                   is_real_ledger(conn))
     finally:
         conn.close()
@@ -5849,6 +5875,236 @@ def run_snapshots(args) -> int:
     for snapshot_id, version, as_of, window_days, generated_at, digest in found:
         print(f"Snapshot {snapshot_id}: schema {version}, as of {as_of}, {window_days} days, "
               f"generated {generated_at}, digest {digest[:16]}")
+    return 0
+
+
+def sync_parsers(commands, command) -> None:
+    """pf sync (D-076)."""
+    sync = commands.add_parser("sync", help="pair a phone, and hand it the snapshot over the "
+                                            "local network while you watch")
+    sync_commands = sync.add_subparsers(dest="sync_command", required=True)
+    identity = sync_commands.add_parser("identity", help="this Mac's sync key and certificate")
+    identity_commands = identity.add_subparsers(dest="identity_command", required=True)
+    command("create", identity_commands, handler=run_sync_identity_create,
+            help="make the key and certificate once, in a private sync folder beside the ledger")
+    command("show", identity_commands, handler=run_sync_identity_show,
+            help="show the certificate's fingerprint and the rotate revision")
+    rotate = command("rotate", identity_commands, handler=run_sync_identity_rotate,
+                     help="make a new identity, revoking every device, which must pair again")
+    rotate.add_argument("--revision", required=True,
+                        help="the rotate revision from sync identity show")
+    pair = command("pair", sync_commands, handler=run_sync_pair,
+                   help="open a pairing window for 120 seconds, showing a QR code to scan once")
+    pair.add_argument("--name", required=True, help="the device's name, as you will see it")
+    pair.add_argument("--address", required=True,
+                      help="this Mac's private IPv4 address on the local network")
+    pair.add_argument("--port", default=str(DEFAULT_SYNC_PORT),
+                      help=f"the port, 1024 to 65535, {DEFAULT_SYNC_PORT} by default")
+    serve = command("serve", sync_commands, handler=run_sync_serve,
+                    help="build a fresh snapshot and serve it to paired devices, in the "
+                         "foreground, for a few minutes")
+    serve.add_argument("--address", required=True,
+                       help="this Mac's private IPv4 address on the local network")
+    serve.add_argument("--port", default=str(DEFAULT_SYNC_PORT),
+                       help=f"the port, 1024 to 65535, {DEFAULT_SYNC_PORT} by default")
+    serve.add_argument("--minutes", default="10",
+                       help="how long it serves, 1 to 60 minutes, 10 by default")
+    serve.add_argument("--window-days", dest="window_days", default="90",
+                       help="days of transactions the snapshot holds, 1 to 366, 90 by default")
+    serve.add_argument("--as-of", help=TODAY_HELP)
+    command("devices", sync_commands, handler=run_sync_devices,
+            help="list paired devices, with their revoke revisions")
+    revoke = command("revoke", sync_commands, handler=run_sync_revoke,
+                     help="stop a device's access from its next request, keeping it on record")
+    revoke.add_argument("device_id", help="a device ID from sync devices")
+    revoke.add_argument("--revision", required=True, help="the revoke revision from sync devices")
+    deliveries = command("deliveries", sync_commands, handler=run_sync_deliveries,
+                         help="list the snapshots served to devices, and their acknowledgements")
+    deliveries.add_argument("--device", help="only this device's deliveries")
+
+
+SYNC_MINUTES_INVALID = "--minutes must be a whole number from 1 to 60."
+LISTEN_FAILED = ("could not listen on {address}:{port}: the address may not be this Mac's, or the "
+                 "port may be in use. Nothing was changed.")
+
+
+def utc_now_text() -> str:
+    moment = current_utc_time().astimezone(timezone.utc)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+
+
+def checked_window_days(text: str) -> int:
+    if not text.isdigit() or not 1 <= int(text) <= 366:
+        raise CommandError(WINDOW_DAYS_INVALID)
+    return int(text)
+
+
+def listening_server(address, port, make_server):
+    try:
+        return make_server()
+    except OSError:
+        raise CommandError(LISTEN_FAILED.format(address=address, port=port)) from None
+
+
+def run_sync_identity_create(args) -> int:
+    conn = open_ledger(args.db)
+    sync_folder = prepared_sync_folder(args.db)
+    with sync_lock(sync_folder):
+        identity = create_sync_identity(conn, sync_folder)
+    print(f"Sync identity {identity.identity_id} made, its key private in "
+          f"{identity.folder(sync_folder)}.")
+    print(f"  Fingerprint: {identity.certificate_sha256}")
+    print("Pair a phone with sync pair. Backups leave the key out: a restored ledger pairs again.")
+    return 0
+
+
+def run_sync_identity_show(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    identity = current_identity(conn)
+    if identity is None:
+        print("No sync identity. Make one with sync identity create.")
+        return 0
+    print(f"Sync identity {identity.identity_id}, made {identity.created_at}")
+    print(f"  Fingerprint: {identity.certificate_sha256}")
+    print(f"  The phone shows its first 16 digits: {identity.fingerprint_prefix}")
+    print(f"  Rotate revision: {rotate_revision(identity, load_devices(conn))}")
+    return 0
+
+
+def run_sync_identity_rotate(args) -> int:
+    conn = open_ledger(args.db)
+    sync_folder = prepared_sync_folder(args.db)
+    with sync_lock(sync_folder):
+        identity, revoked = rotate_sync_identity(conn, sync_folder, args.revision)
+    print(f"Sync identity rotated to {identity.identity_id}. The old key is deleted.")
+    print(f"  Fingerprint: {identity.certificate_sha256}")
+    print(f"  {len(revoked)} devices revoked. Each must pair again with sync pair.")
+    return 0
+
+
+def run_sync_pair(args) -> int:
+    # Imported here: only pairing draws a QR code, and only the server needs ssl.
+    from personal_finance.sync.pairing import manual_code, pairing_payload, qr_lines
+    from personal_finance.sync.server import PAIR, SyncServer, tls_context
+
+    name = checked_device_name(args.name)
+    address, port = checked_private_address(args.address), checked_port(args.port)
+    conn = open_ledger(args.db)
+    sync_folder = prepared_sync_folder(args.db)
+    with sync_lock(sync_folder):
+        identity = required_identity(conn)
+        key_path, certificate_path = checked_identity_files(identity, sync_folder)
+        server = listening_server(address, port, lambda: SyncServer(
+            address, port, tls_context(certificate_path, key_path), conn, mode=PAIR,
+            minutes=PAIRING_WINDOW_SECONDS / 60, utc_now=current_utc_time, device_name=name))
+        try:
+            window = open_window(conn, identity, address, port, current_utc_time())
+            server.window_id = window.window_id
+            print(f"Pairing {shown(name)} on {address}:{port} until {window.closes_at}, once. "
+                  "Scan this with the phone:")
+            for line in qr_lines(pairing_payload(address, port, identity.certificate_sha256,
+                                                 window.pairing_secret)):
+                print(line)
+            print(f"  Or type this code: {manual_code(address, port, window.pairing_secret)}")
+            print(f"  and check the phone shows {identity.fingerprint_prefix}.")
+            print("Anyone who sees this code can pair until it is used. Stop with Ctrl-C.")
+            sys.stdout.flush()
+            try:
+                server.run()
+            except KeyboardInterrupt:
+                pass
+            close_window(conn, window.window_id)
+        finally:
+            server.server_close()
+    if server.paired is None:
+        print(f"Pairing window closed: no device paired, "
+              f"{window_failures(conn, window.window_id)} failed attempts.")
+        return 0
+    print(f"Paired device {server.paired.device_id}: {shown(name)}. Serve it with sync serve.")
+    return 0
+
+
+def run_sync_serve(args) -> int:
+    from personal_finance.sync.pairing import qr_lines, reconnect_payload
+    from personal_finance.sync.server import SERVE, SyncServer, tls_context
+
+    address, port = checked_private_address(args.address), checked_port(args.port)
+    if not args.minutes.isdigit() or not 1 <= int(args.minutes) <= 60:
+        raise CommandError(SYNC_MINUTES_INVALID)
+    window_days = checked_window_days(args.window_days)
+    if args.as_of is not None:
+        checked_as_of(args.as_of)
+    conn = open_ledger(args.db)
+    sync_folder = prepared_sync_folder(args.db)
+    with sync_lock(sync_folder):
+        identity = required_identity(conn)
+        key_path, certificate_path = checked_identity_files(identity, sync_folder)
+        as_of = as_of_date(conn, args.as_of)
+        data = build_in_one_read(conn, as_of, window_days, str(uuid.uuid4()), utc_now_text())
+        document = verified_snapshot(data)
+        server = listening_server(address, port, lambda: SyncServer(
+            address, port, tls_context(certificate_path, key_path), conn, mode=SERVE,
+            minutes=int(args.minutes), utc_now=current_utc_time, document=document,
+            snapshot=data))
+        try:
+            print(f"Serving snapshot {document['snapshot_id']} as of {as_of.isoformat()} on "
+                  f"{address}:{port} for {args.minutes} minutes, to paired devices only. "
+                  "If the phone asks where, scan:")
+            for line in qr_lines(reconnect_payload(address, port, identity.certificate_sha256)):
+                print(line)
+            print("Stop with Ctrl-C.")
+            sys.stdout.flush()
+            try:
+                server.run()
+            except KeyboardInterrupt:
+                pass
+        finally:
+            server.server_close()
+    counts = server.counts
+    print(f"Stopped: {counts['served']} snapshots served, {counts['acknowledged']} "
+          f"acknowledged, {counts['refused']} requests refused.")
+    return 0
+
+
+def run_sync_devices(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    found = load_devices(conn)
+    print("Paired devices")
+    if not found:
+        print("No devices paired. Pair one with sync pair.")
+    for device in found:
+        state = (f"revoked {device.revoked_at}" if device.revoked_at
+                 else f"active, revoke revision {revoke_revision(device)}")
+        print(f"Device {device.device_id}: {shown(device.name)}, paired {device.created_at}, "
+              f"{state}")
+    return 0
+
+
+def run_sync_revoke(args) -> int:
+    conn = open_ledger(args.db)
+    device = revoke_device(conn, args.device_id, args.revision)
+    print(f"Device {device.device_id} revoked: {shown(device.name)}. Its next request is "
+          "refused. It stays on record.")
+    return 0
+
+
+def run_sync_deliveries(args) -> int:
+    conn = open_ledger(args.db, read_only=True)
+    if args.device is not None:
+        try:
+            find_device(conn, args.device)
+        except DecisionRefused as refused:
+            raise CommandError(str(refused).replace(" Nothing was changed.", "")) from None
+    found = load_deliveries(conn, args.device)
+    print("Deliveries")
+    if not found:
+        print("No snapshots served.")
+    for delivery in found:
+        acknowledged = (f"acknowledged {delivery.acknowledged_at}" if delivery.acknowledged_at
+                        else "not acknowledged")
+        print(f"Snapshot {delivery.snapshot_id} to {shown(delivery.device_name)} "
+              f"({delivery.device_id}), digest {delivery.content_sha256[:16]}, served "
+              f"{delivery.served_at}, {acknowledged}")
     return 0
 
 
@@ -6045,7 +6301,8 @@ def explained_error(error: Exception) -> str:
     """What an error may say, the same in the CLI and the local UI. Expected errors keep their
     sanitized messages, and any other says only that something went wrong (D-037)."""
     if isinstance(error, (CommandError, DecisionRefused, UnsafeLocation, BackupRefused,
-                          ExportRefused, SnapshotRefused, SnapshotNotRecorded)):
+                          ExportRefused, SnapshotRefused, SnapshotNotRecorded, SyncRefused,
+                          IdentityRefused)):
         return str(error)
     if isinstance(error, sqlite3.OperationalError):
         return BUSY_EXPLANATION if "locked" in str(error) else "database error"

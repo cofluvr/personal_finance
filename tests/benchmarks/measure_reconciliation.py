@@ -33,7 +33,7 @@ import io
 import sys
 import tempfile
 import time
-from datetime import date
+from datetime import date, datetime, timezone
 from itertools import islice
 from pathlib import Path
 
@@ -2991,6 +2991,211 @@ def measure_snapshot() -> None:
               flush=True)
 
 
+SYNC_DELIVERIES = 20
+
+
+def measure_sync() -> None:
+    """Pairing and delivery on --safe-to-spend's shape (D-076, YC2): a snapshot with a 366-day
+    window, so it reaches the 5 MB D-076 names, then pairing and 20 deliveries to the reference
+    client over real loopback TCP, each fetched, checked, installed and acknowledged. Times are
+    round trips seen by the client, an upper bound on the server's share. Stops, as G9 says, if
+    pairing misses 1.0s or a delivery 2.0s."""
+    import socket
+    import sqlite3
+    import threading
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from sync_reference_client import ReferenceClient
+
+    from personal_finance.snapshot import files
+    from personal_finance.sync import devices, identity
+    from personal_finance.sync.pairing import pairing_payload
+    from personal_finance.sync.server import PAIR, SERVE, SyncServer, tls_context
+
+    class LoopbackServer(SyncServer):
+        @staticmethod
+        def checked_address(address):
+            assert address == "127.0.0.1"
+
+    def threaded(server):
+        thread = threading.Thread(target=server.run)
+        thread.start()
+        return thread
+
+    def shared_connection(path):
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=rw", uri=True, autocommit=True,
+                               check_same_thread=False)
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        return conn
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _, _ = safe_to_spend_ledger(root)
+        build_seconds = time.perf_counter() - started
+        conn.close()
+        sync_folder = identity.prepared_sync_folder(path)
+        conn = shared_connection(path)
+        made = devices.create_identity(conn, sync_folder)
+        key_path, certificate_path = identity.checked_identity_files(made, sync_folder)
+        context = tls_context(certificate_path, key_path)
+        utc_now = lambda: datetime.now(timezone.utc)  # noqa: E731
+
+        pairing = LoopbackServer("127.0.0.1", 0, context, conn, mode=PAIR, minutes=2,
+                                 utc_now=utc_now, device_name="Benchmark")
+        window = devices.open_window(conn, made, "127.0.0.1", pairing.server_port, utc_now())
+        pairing.window_id = window.window_id
+        thread = threaded(pairing)
+        install = root / "phone"
+        install.mkdir()
+        client = ReferenceClient(
+            install, lambda: socket.create_connection(("127.0.0.1", pairing.server_port)))
+        started = time.perf_counter()
+        assert client.pair(pairing_payload("127.0.0.1", pairing.server_port,
+                                           made.certificate_sha256,
+                                           window.pairing_secret)).status == 200
+        pair_seconds = time.perf_counter() - started
+        thread.join()
+        pairing.server_close()
+
+        reader = connect(path, read_only=True)
+        files.build_in_one_read(reader, SNAPSHOT_AS_OF, 366,
+                                "00000000-0000-4000-8000-000000000001",
+                                "2026-12-20T12:00:00.000Z")
+        started = time.perf_counter()
+        data = files.build_in_one_read(reader, SNAPSHOT_AS_OF, 366,
+                                       "00000000-0000-4000-8000-000000000002",
+                                       "2026-12-20T12:00:00.000Z")
+        generate_seconds = time.perf_counter() - started
+        reader.close()
+        serving = LoopbackServer("127.0.0.1", 0, context, conn, mode=SERVE, minutes=10,
+                                 utc_now=utc_now, document=files.verified(data), snapshot=data)
+        thread = threaded(serving)
+        client.connect = lambda: socket.create_connection(("127.0.0.1", serving.server_port))
+        client.port = serving.server_port
+        fetches, syncs = [], []
+        for _ in range(SYNC_DELIVERIES):
+            started = time.perf_counter()
+            assert client.fetch().status == 200
+            fetches.append(time.perf_counter() - started)
+            started = time.perf_counter()
+            client.sync()
+            syncs.append(time.perf_counter() - started)
+        serving.finished = True
+        thread.join()
+        serving.server_close()
+        conn.close()
+        megabytes = len(data) / 1_000_000
+        print(f"shape build={build_seconds:.1f}s snapshot={len(data)} bytes ({megabytes:.2f} MB), "
+              f"366-day window, generated in {generate_seconds:.3f}s", flush=True)
+        assert len(data) >= 5_000_000, "the shape does not reach D-076's 5 MB"
+        print(f"pair={pair_seconds:7.3f}s", flush=True)
+        print(f"fetch, {SYNC_DELIVERIES} round trips: median={sorted(fetches)[len(fetches) // 2]:.3f}s "
+              f"max={max(fetches):.3f}s", flush=True)
+        print(f"sync (fetch, check, install, acknowledge): median={sorted(syncs)[len(syncs) // 2]:.3f}s "
+              f"max={max(syncs):.3f}s", flush=True)
+        print(f"served={serving.counts['served']} acknowledged={serving.counts['acknowledged']} "
+              f"refused={serving.counts['refused']}", flush=True)
+        stops = [name for name, missed in (("pairing", pair_seconds > 1.0),
+                                           ("delivery", max(fetches) > 2.0)) if missed]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
+EVERYTHING_READS = [
+    ("totals",), ("report", "monthly"), ("report", "household"), ("report", "income"),
+    ("report", "budget", "--month", "2026-12", "--as-of", "2026-12-20"),
+    ("report", "funds", "--as-of", "2026-12-20"), ("report", "net-worth", "--as-of", "2026-12-20"),
+    ("report", "loans", "--as-of", "2026-12-20"), ("safe-to-spend", "--as-of", "2026-12-20"),
+    ("dashboard", "--as-of", "2026-12-20"), ("transactions",), ("review", "list"),
+    ("funds", "--as-of", "2026-12-20"), ("obligations",), ("scenarios",), ("snapshots",),
+    ("storage",),
+]
+
+
+def measure_everything() -> None:
+    """Every read on --safe-to-spend's shape (D-077 point 3, ZB1), each timed once after one
+    untimed run, with 10 scenarios added; then a full-scale backup, verify and restore, every
+    read compared byte for byte between the ledger and its restored copy, and migration 0036
+    timed on a copy set back to 35. Stops, as G9 says, if a report misses 2.0s."""
+    import contextlib
+    import io
+    import shutil
+    import sqlite3
+
+    sys.path[:0] = [str(Path(__file__).resolve().parents[1] / "scenarios"),
+                    str(Path(__file__).resolve().parents[1])]
+    from personal_finance.cli import main
+
+    def run(*words):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(list(words))
+        return code, out.getvalue(), err.getvalue()
+
+    def placed(words, path):
+        position = 2 if words[0] in ("report", "review") else 1
+        return [*words[:position], "--db", str(path), *words[position:]]
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _, _ = safe_to_spend_ledger(root)
+        build_seconds = time.perf_counter() - started
+        (transactions,) = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()
+        (accounts,) = conn.execute("SELECT COUNT(*) FROM account").fetchone()
+        conn.close()
+        for number in range(10):
+            assert run("scenario", "add", "--db", str(path), "--name", f"Scenario {number}")[0] == 0
+        print(f"shape transactions={transactions} accounts={accounts} build={build_seconds:.1f}s",
+              flush=True)
+        assert transactions >= 100_000
+        timings, outputs = {}, {}
+        for words in EVERYTHING_READS:
+            run(*placed(words, path))
+            started = time.perf_counter()
+            outputs[words] = run(*placed(words, path))
+            timings[" ".join(words[:2])] = time.perf_counter() - started
+            assert outputs[words][0] == 0, (words, outputs[words][2])
+        for name, seconds in timings.items():
+            print(f"{name:<24} {seconds:7.3f}s", flush=True)
+        steps = {}
+        for name, words in (("backup create", ["backup", "create", "--db", str(path), "--to",
+                                               str(root / "backup")]),
+                            ("backup verify", ["backup", "verify", "--from", str(root / "backup")]),
+                            ("backup restore", ["backup", "restore", "--from",
+                                                str(root / "backup"), "--to",
+                                                str(root / "restored.db")])):
+            started = time.perf_counter()
+            code, _, err = run(*words)
+            steps[name] = time.perf_counter() - started
+            assert code == 0, (name, err)
+        differing = [words for words in EVERYTHING_READS
+                     if words != ("storage",)
+                     and run(*placed(words, root / "restored.db")) != outputs[words]]
+        set_back = root / "at-35.db"
+        shutil.copy(path, set_back)
+        back = sqlite3.connect(set_back, isolation_level=None)
+        for table in ("sync_acknowledgement", "sync_delivery", "paired_device_event",
+                      "paired_device", "pairing_window_event", "pairing_window",
+                      "sync_identity_event", "sync_identity"):
+            back.execute(f"DROP TABLE {table}")
+        back.execute("PRAGMA user_version = 35")
+        back.close()
+        started = time.perf_counter()
+        assert run("migrate", "--db", str(set_back))[0] == 0
+        steps["migrate 35 to 36"] = time.perf_counter() - started
+        for name, seconds in steps.items():
+            print(f"{name:<24} {seconds:7.3f}s", flush=True)
+        print(f"restored copy: {len(EVERYTHING_READS) - 1 - len(differing)} of "
+              f"{len(EVERYTHING_READS) - 1} reads byte for byte the same; differing: {differing}",
+              flush=True)
+        stops = [name for name, seconds in timings.items() if seconds > 2.0]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
 FUNDS_CONSUMPTIONS = 2_000
 
 LOANS_BREAKDOWNS = 5_000
@@ -3275,6 +3480,12 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--scale", "--snapshot"]:
         measure_snapshot()
+        return
+    if sys.argv[1:] == ["--scale", "--everything"]:
+        measure_everything()
+        return
+    if sys.argv[1:] == ["--scale", "--sync"]:
+        measure_sync()
         return
     if sys.argv[1:] == ["--scale", "--scenarios"]:
         measure_scenarios()

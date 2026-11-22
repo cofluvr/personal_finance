@@ -41,6 +41,7 @@ class TestMigration:  # VB2, G10
         conn.close()
         assert populated.dump(VERSION_34_TABLES) == before
         assert markers(populated) == ["A"]
+        assert populated.run("migrate")[0] == 0
         assert [*shown_now(populated), populated.run("scenarios")] == populated.shown_before
 
     def test_a_ledger_at_34_is_refused_until_migrate(self, populated):

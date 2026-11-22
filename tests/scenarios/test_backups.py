@@ -44,6 +44,7 @@ from test_decisions import (
     TAG_TABLES,
     SCENARIO_TABLES,
     SNAPSHOT_TABLES,
+    SYNC_TABLES,
     CATEGORY_TABLES,
     CHECKING_HEADER,
     HOUSEHOLD_TABLES,
@@ -71,7 +72,7 @@ LEDGER_TABLES = (*ALL_TABLES, "account", "import_run", *REAL_LEDGER_TABLES, *BAC
                  *SETTING_KEY_TABLES, *BUDGET_TABLES, *FUND_TABLES, *CONSUMPTION_TABLES,
                  *LINK_TABLES, *LOAN_TABLES,
                  *BREAKDOWN_TABLES, *LIQUIDITY_TABLES, *TAG_TABLES, *SCENARIO_TABLES,
-                 *SNAPSHOT_TABLES)
+                 *SNAPSHOT_TABLES, *SYNC_TABLES)
 LEDGER_VOLUME = Path("/Volumes/SyntheticLedger")
 BACKUP_VOLUME = Path("/Volumes/SyntheticBackups")
 

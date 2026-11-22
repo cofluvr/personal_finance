@@ -84,15 +84,20 @@ def write_atomically(out_path: Path, data: bytes) -> int:
     return len(data)
 
 
-def record(conn: sqlite3.Connection, document: dict) -> None:
+def insert_record(conn: sqlite3.Connection, document: dict) -> None:
+    """The snapshot's record, inside the caller's write: create's, or a sync delivery's."""
     content = document["content"]
-    in_one_write(conn, lambda: conn.execute(
+    conn.execute(
         """INSERT INTO snapshot_record (snapshot_id, schema_version, as_of, window_days,
                                         generated_at, content_sha256)
            VALUES (?, ?, ?, ?, ?, ?)""",
         (document["snapshot_id"], document["schema_version"], content["cutoff"]["as_of"],
          content["period"]["window_days"], document["generated_at"],
-         document["content_sha256"])))
+         document["content_sha256"]))
+
+
+def record(conn: sqlite3.Connection, document: dict) -> None:
+    in_one_write(conn, lambda: insert_record(conn, document))
 
 
 def create(read_conn: sqlite3.Connection, write_conn_of, out_path: Path, as_of: date,
