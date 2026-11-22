@@ -18,8 +18,17 @@ Needs Xcode 27 with an iOS 26 simulator. No third-party package is used.
 cd ios/CommonCentsKit && swift test                       # the package, on the Mac
 .venv/bin/python ios/interop/run_interop.py --work build/ios/interop   # against the real server
 xcodebuild -project ios/CommonCents/CommonCents.xcodeproj -scheme CommonCents \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test  # builds, then 7 UI tests
 ```
+
+The UI tests run the app on the demo snapshot. They check that:
+
+- the lock shows no figure;
+- an old snapshot is labelled not current and keeps its own month;
+- every tab opens, and "Why?" shows the two limits;
+- a transaction is read-only;
+- Sync waits for pairing, and Settings offers deletion;
+- returning within a minute stays unlocked.
 
 The package's tests read the backend's golden snapshot,
 `tests/fixtures/synthetic/snapshots/v1.0/household.json`, so the phone and the Mac are checked

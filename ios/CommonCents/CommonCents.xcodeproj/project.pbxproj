@@ -10,13 +10,25 @@
 		A1C0FFEE0000000000000001 /* CommonCentsKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1C0FFEE0000000000000005 /* CommonCentsKit */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		A1C0FFEE000000000000010A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1C0FFEE000000000000000E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A1C0FFEE000000000000000F;
+			remoteInfo = CommonCents;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		A1C0FFEE0000000000000007 /* CommonCents.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CommonCents.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1C0FFEE0000000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A1C0FFEE0000000000000100 /* CommonCentsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CommonCentsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A1C0FFEE0000000000000006 /* CommonCents */ = {isa = PBXFileSystemSynchronizedRootGroup; path = CommonCents; sourceTree = "<group>"; };
+		A1C0FFEE0000000000000101 /* CommonCentsUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = CommonCentsUITests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -28,6 +40,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1C0FFEE0000000000000104 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -36,6 +55,7 @@
 			children = (
 				A1C0FFEE0000000000000006 /* CommonCents */,
 				A1C0FFEE0000000000000008 /* Info.plist */,
+				A1C0FFEE0000000000000101 /* CommonCentsUITests */,
 				A1C0FFEE000000000000000A /* Products */,
 			);
 			sourceTree = "<group>";
@@ -44,6 +64,7 @@
 			isa = PBXGroup;
 			children = (
 				A1C0FFEE0000000000000007 /* CommonCents.app */,
+				A1C0FFEE0000000000000100 /* CommonCentsUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -74,7 +95,36 @@
 			productReference = A1C0FFEE0000000000000007 /* CommonCents.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A1C0FFEE0000000000000102 /* CommonCentsUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1C0FFEE0000000000000106 /* Build configuration list for PBXNativeTarget "CommonCentsUITests" */;
+			buildPhases = (
+				A1C0FFEE0000000000000103 /* Sources */,
+				A1C0FFEE0000000000000104 /* Frameworks */,
+				A1C0FFEE0000000000000105 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1C0FFEE0000000000000109 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A1C0FFEE0000000000000101 /* CommonCentsUITests */,
+			);
+			name = CommonCentsUITests;
+			productName = CommonCentsUITests;
+			productReference = A1C0FFEE0000000000000100 /* CommonCentsUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXTargetDependency section */
+		A1C0FFEE0000000000000109 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A1C0FFEE000000000000000F /* CommonCents */;
+			targetProxy = A1C0FFEE000000000000010A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		A1C0FFEE000000000000000E /* Project object */ = {
@@ -102,6 +152,7 @@
 			projectRoot = "";
 			targets = (
 				A1C0FFEE000000000000000F /* CommonCents */,
+				A1C0FFEE0000000000000102 /* CommonCentsUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -114,10 +165,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1C0FFEE0000000000000105 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A1C0FFEE0000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1C0FFEE0000000000000103 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -211,6 +276,36 @@
 			};
 			name = Release;
 		};
+		A1C0FFEE0000000000000107 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = local.commoncents.companion.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = CommonCents;
+			};
+			name = Debug;
+		};
+		A1C0FFEE0000000000000108 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = local.commoncents.companion.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = CommonCents;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -228,6 +323,15 @@
 			buildConfigurations = (
 				A1C0FFEE0000000000000012 /* Debug */,
 				A1C0FFEE0000000000000013 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1C0FFEE0000000000000106 /* Build configuration list for PBXNativeTarget "CommonCentsUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1C0FFEE0000000000000107 /* Debug */,
+				A1C0FFEE0000000000000108 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
