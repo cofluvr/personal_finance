@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "tests"), str(ROOT / "tests" / "scenarios")]
 
-from hypothesis import HealthCheck, given, seed, settings  # noqa: E402
+from hypothesis import HealthCheck, example, given, seed, settings  # noqa: E402
 from hypothesis import strategies as st  # noqa: E402
 
 SEEDS = Path(__file__).resolve().parent / "seeds"
@@ -243,8 +243,12 @@ def served_once(server, data: bytes, tls_context=None) -> bytes:
                 tls.sendall(data)
                 received = b"".join(iter(lambda: tls.recv(65536), b""))
         else:
-            client.sendall(data)
-            client.shutdown(socket.SHUT_WR)
+            try:
+                client.sendall(data)
+                client.shutdown(socket.SHUT_WR)
+            except OSError:
+                # The server answered and closed before the rest was sent, as it may.
+                pass
             received = b"".join(iter(lambda: client.recv(65536), b""))
     finally:
         client.close()
@@ -313,6 +317,7 @@ def target_sync(examples, folder):
     before = logical(path)
 
     @given(request=requests)
+    @example(request=b"\n\x00")
     @settings(max_examples=examples, deadline=None, database=None,
               suppress_health_check=[HealthCheck.too_slow])
     def sync(request):
@@ -320,8 +325,10 @@ def target_sync(examples, folder):
         # timeout, as the stalled-client case of test_sync_threats.py.
         received = served_once(server, request + SENTINEL + b"\r\n\r\n", client_context())
         head, _, body = received.partition(b"\r\n\r\n")
-        assert received == b"" and not request.strip(b"\r\n ") or \
-            head.startswith(b"HTTP/1.0 "), received[:80]
+        # A blank first line gets no answer from http.server: nothing written or echoed.
+        first_line = request.split(b"\n", 1)[0].strip(b"\r ")
+        assert received == b"" and not first_line or head.startswith(b"HTTP/1.0 "), \
+            received[:80]
         assert SENTINEL not in received
         assert received == b"" or body in fixed, body[:120]
         assert logical(path) == before
@@ -341,6 +348,8 @@ def target_ui(examples, folder):
     before = logical(path)
 
     @given(request=requests)
+    @example(request=b"OPTIONS /%00 HTTP/1.1\r\nAuthorization: :\r\nHost: \r\nHost: \r\n"
+                     b"Accept-Snapshot-Major: .:5/.d:2:e-\r\nHost: 24:2:9\r\n\r\nr$\x9fq@\x9c")
     @settings(max_examples=examples, deadline=None, database=None,
               suppress_health_check=[HealthCheck.too_slow])
     def ui(request):

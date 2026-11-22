@@ -59,6 +59,9 @@ def is_ignored(path):
         "backups/anything.txt",
         ".venv/bin/python",
         ".DS_Store",
+        "ios/CommonCentsKit/.build/workspace-state.json",
+        "ios/CommonCents/CommonCents.xcodeproj/xcuserdata/owner.xcuserdatad/x.plist",
+        "ios/CommonCents/CommonCents.xcodeproj/project.xcworkspace/xcuserdata/o/UserInterfaceState.xcuserstate",
     ],
 )
 def test_sensitive_paths_are_ignored(path):
@@ -77,6 +80,10 @@ def test_sensitive_paths_are_ignored(path):
         "src/personal_finance/money.py",
         "docs/decisions.md",
         "requirements-dev.txt",
+        "ios/CommonCents/CommonCents.xcodeproj/project.pbxproj",
+        "ios/CommonCents/CommonCents/demo-snapshot.json",
+        "ios/CommonCentsKit/Package.swift",
+        "ios/CommonCentsKit/Sources/CommonCentsKit/Resources/schema_v1.json",
     ],
 )
 def test_project_files_are_not_ignored(path):

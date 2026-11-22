@@ -10,6 +10,13 @@ dist/
 .coverage
 .DS_Store
 
+# Swift and Xcode builds
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
 # Secrets
 .env
 .env.*

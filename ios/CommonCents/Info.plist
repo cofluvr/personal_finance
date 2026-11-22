@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Face ID unlocks your finances on this phone.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>The camera reads the pairing code your Mac shows.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>CommonCents fetches its snapshot from your Mac over your home network, only when you tap Sync now.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
