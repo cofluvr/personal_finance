@@ -15,7 +15,7 @@ No real layout exists until M6, so nothing here imports a real statement. The le
 backed up and restored empty, which tests the gates and the backup on the owner's own volumes.
 
 Run `pf` as `bin/pf` from this checkout. Below, `L` is `/Volumes/CommonCents/ledger/ledger.db` and
-`B` is `/Volumes/CommonCentsBackups/backups`.
+`B` is `/Volumes/CommonCentsBackup/backups`.
 
 ## 1. Settings outside pf
 
@@ -90,10 +90,10 @@ Created once, in the owner's folder, with its own password:
 
 ```sh
 hdiutil create -size 2g -type SPARSEBUNDLE -fs APFS -encryption AES-256 \
-    -volname CommonCentsBackups ~/CommonCents_LocalBackups/CommonCentsBackups.sparsebundle
-hdiutil attach ~/CommonCents_LocalBackups/CommonCentsBackups.sparsebundle
-sudo diskutil enableOwnership /Volumes/CommonCentsBackups
-mkdir -m 700 /Volumes/CommonCentsBackups/backups
+    -volname CommonCentsBackup ~/CommonCents_LocalBackups/CommonCentsBackup.sparsebundle
+hdiutil attach ~/CommonCents_LocalBackups/CommonCentsBackup.sparsebundle
+sudo diskutil enableOwnership /Volumes/CommonCentsBackup
+mkdir -m 700 /Volumes/CommonCentsBackup/backups
 ```
 
 A new image ignores ownership until `enableOwnership` runs (M5.2), and `pf` refuses it until then,
@@ -108,13 +108,13 @@ pf backup create --db L --to B/2026-11-10
 ```
 
 ```text
-Backup written to /Volumes/CommonCentsBackups/backups/2026-11-10
+Backup written to /Volumes/CommonCentsBackup/backups/2026-11-10
 Ledger: real, with 0 originals
 Files: <bytes> bytes in 2 files, each matching the manifest
 SQLite integrity and foreign key checks: ok
 Schema version: 18
 Logical digest: <digest>, matching the manifest
-Recorded in the ledger. To check it later, run: pf backup verify --from /Volumes/CommonCentsBackups/backups/2026-11-10
+Recorded in the ledger. To check it later, run: pf backup verify --from /Volumes/CommonCentsBackup/backups/2026-11-10
 ```
 
 With documents, the files are the ledger, the manifest and one per original. Each later backup
@@ -154,7 +154,7 @@ pf backup restore --from B/2026-11-10 --to /Volumes/CommonCents/restore-test/led
 ```
 
 ```text
-Restored /Volumes/CommonCents/restore-test/ledger.db from /Volumes/CommonCentsBackups/backups/2026-11-10
+Restored /Volumes/CommonCents/restore-test/ledger.db from /Volumes/CommonCentsBackup/backups/2026-11-10
 Ledger: real, with 0 originals
 Files: <bytes> bytes in 2 files, each matching the manifest
 SQLite integrity and foreign key checks: ok
@@ -181,7 +181,7 @@ Software: <bytes> bytes in <n> files (the personal_finance package; the Python i
 Database: <bytes> bytes in 1 files (the ledger with its journal)
 Originals: 0 bytes in 0 files referenced, 0 bytes in 0 files not referenced
 Backups: <bytes> bytes in 2 files in 1 recorded, as written; their volumes are not read
-  <time> /Volumes/CommonCentsBackups/backups/2026-11-10: <bytes> bytes in 2 files
+  <time> /Volumes/CommonCentsBackup/backups/2026-11-10: <bytes> bytes in 2 files
 ```
 
 ## 8. Closed when unmounted
