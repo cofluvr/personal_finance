@@ -93,10 +93,10 @@ and keep its index line.
 | D-070 | M14 plan: goals, reserves and the tax reserve — Approved. M14 accepted |
 | D-071 | M15 plan: net worth and loans — Approved. M15 accepted |
 | D-072 | M16 plan: safe-to-spend and the cash-flow constraint — Approved. M16 accepted |
-| D-073 | M17 plan: the local UI completed, with browser writes — Approved as a security change. Built for review |
-| D-074 | M18 plan: financial scenarios — Approved. Built for review |
-| D-075 | M19 plan: snapshots — Approved. Built for review; its compatibility policy is in shared-contract §6 |
-| D-076 | M20 plan: pairing and local-network sync — Approved as a security change, with `segno`, not yet built |
+| D-073 | M17 plan: the local UI completed, with browser writes — Approved as a security change. M17 accepted on 2026-11-21 |
+| D-074 | M18 plan: financial scenarios — Approved. M18 accepted on 2026-11-21 |
+| D-075 | M19 plan: snapshots — Approved. M19 accepted on 2026-11-21; its compatibility policy is in shared-contract §6 |
+| D-076 | M20 plan: pairing and local-network sync — Approved as a security change, with `segno`. Built for review; the protocol is [sync-protocol.md](sync-protocol.md) |
 | D-077 | M21 plan: backend acceptance, stress testing and the security audit — Approved, not yet built |
 | D-078 | Test suite cost: a copied test ledger, a narrower W1 check and a `slow` tier — Approved and built |
 | D-079 | iOS companion plan, with screen mock-ups — Proposed, for the owner's approval ([decisions-ios.md](decisions-ios.md)) |
@@ -209,12 +209,10 @@ One line per approved rule, moved from the handoff. The decision named in the la
 
 ## Not yet decided
 
-From `shared-contract.md` §6: safe-to-spend details and loan projection assumptions
-(Phase 1B), and pairing protocol and snapshot compatibility (Phase 1C). Transfer matching
-was decided in D-054, resource benchmarks in D-057, and backup and recovery in D-058. The four
-still open are approved as plans on 2026-11-10: safe-to-spend in D-072, loan projection assumptions
-in D-071 point 5, snapshot compatibility in D-075 point 5 and pairing in D-076. Each is decided once
-its milestone is built and accepted, and M21 empties this section (D-077, ZA2).
+This section is empty: every `shared-contract.md` §6 item is decided, each named in
+[backend-acceptance.md](backend-acceptance.md) (D-077, ZA2). The last four were safe to spend
+(D-072, M16), loan projection assumptions (D-071 point 5, M15), snapshot compatibility (D-075
+point 5, M19) and the pairing protocol (D-076, M20, built for review).
 
 ## D-065 M11 plan: household members, attribution and allocations — Approved
 

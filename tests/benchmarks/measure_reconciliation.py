@@ -3103,6 +3103,99 @@ def measure_sync() -> None:
               flush=True)
 
 
+EVERYTHING_READS = [
+    ("totals",), ("report", "monthly"), ("report", "household"), ("report", "income"),
+    ("report", "budget", "--month", "2026-12", "--as-of", "2026-12-20"),
+    ("report", "funds", "--as-of", "2026-12-20"), ("report", "net-worth", "--as-of", "2026-12-20"),
+    ("report", "loans", "--as-of", "2026-12-20"), ("safe-to-spend", "--as-of", "2026-12-20"),
+    ("dashboard", "--as-of", "2026-12-20"), ("transactions",), ("review", "list"),
+    ("funds", "--as-of", "2026-12-20"), ("obligations",), ("scenarios",), ("snapshots",),
+    ("storage",),
+]
+
+
+def measure_everything() -> None:
+    """Every read on --safe-to-spend's shape (D-077 point 3, ZB1), each timed once after one
+    untimed run, with 10 scenarios added; then a full-scale backup, verify and restore, every
+    read compared byte for byte between the ledger and its restored copy, and migration 0036
+    timed on a copy set back to 35. Stops, as G9 says, if a report misses 2.0s."""
+    import contextlib
+    import io
+    import shutil
+    import sqlite3
+
+    sys.path[:0] = [str(Path(__file__).resolve().parents[1] / "scenarios"),
+                    str(Path(__file__).resolve().parents[1])]
+    from personal_finance.cli import main
+
+    def run(*words):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(list(words))
+        return code, out.getvalue(), err.getvalue()
+
+    def placed(words, path):
+        position = 2 if words[0] in ("report", "review") else 1
+        return [*words[:position], "--db", str(path), *words[position:]]
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        started = time.perf_counter()
+        conn, path, _, _ = safe_to_spend_ledger(root)
+        build_seconds = time.perf_counter() - started
+        (transactions,) = conn.execute("SELECT COUNT(*) FROM ledger_transaction").fetchone()
+        (accounts,) = conn.execute("SELECT COUNT(*) FROM account").fetchone()
+        conn.close()
+        for number in range(10):
+            assert run("scenario", "add", "--db", str(path), "--name", f"Scenario {number}")[0] == 0
+        print(f"shape transactions={transactions} accounts={accounts} build={build_seconds:.1f}s",
+              flush=True)
+        assert transactions >= 100_000
+        timings, outputs = {}, {}
+        for words in EVERYTHING_READS:
+            run(*placed(words, path))
+            started = time.perf_counter()
+            outputs[words] = run(*placed(words, path))
+            timings[" ".join(words[:2])] = time.perf_counter() - started
+            assert outputs[words][0] == 0, (words, outputs[words][2])
+        for name, seconds in timings.items():
+            print(f"{name:<24} {seconds:7.3f}s", flush=True)
+        steps = {}
+        for name, words in (("backup create", ["backup", "create", "--db", str(path), "--to",
+                                               str(root / "backup")]),
+                            ("backup verify", ["backup", "verify", "--from", str(root / "backup")]),
+                            ("backup restore", ["backup", "restore", "--from",
+                                                str(root / "backup"), "--to",
+                                                str(root / "restored.db")])):
+            started = time.perf_counter()
+            code, _, err = run(*words)
+            steps[name] = time.perf_counter() - started
+            assert code == 0, (name, err)
+        differing = [words for words in EVERYTHING_READS
+                     if words != ("storage",)
+                     and run(*placed(words, root / "restored.db")) != outputs[words]]
+        set_back = root / "at-35.db"
+        shutil.copy(path, set_back)
+        back = sqlite3.connect(set_back, isolation_level=None)
+        for table in ("sync_acknowledgement", "sync_delivery", "paired_device_event",
+                      "paired_device", "pairing_window_event", "pairing_window",
+                      "sync_identity_event", "sync_identity"):
+            back.execute(f"DROP TABLE {table}")
+        back.execute("PRAGMA user_version = 35")
+        back.close()
+        started = time.perf_counter()
+        assert run("migrate", "--db", str(set_back))[0] == 0
+        steps["migrate 35 to 36"] = time.perf_counter() - started
+        for name, seconds in steps.items():
+            print(f"{name:<24} {seconds:7.3f}s", flush=True)
+        print(f"restored copy: {len(EVERYTHING_READS) - 1 - len(differing)} of "
+              f"{len(EVERYTHING_READS) - 1} reads byte for byte the same; differing: {differing}",
+              flush=True)
+        stops = [name for name, seconds in timings.items() if seconds > 2.0]
+        print("stopping rule: " + (f"MET by {', '.join(stops)}" if stops else "not met"),
+              flush=True)
+
+
 FUNDS_CONSUMPTIONS = 2_000
 
 LOANS_BREAKDOWNS = 5_000
@@ -3387,6 +3480,9 @@ def main() -> None:
         return
     if sys.argv[1:] == ["--scale", "--snapshot"]:
         measure_snapshot()
+        return
+    if sys.argv[1:] == ["--scale", "--everything"]:
+        measure_everything()
         return
     if sys.argv[1:] == ["--scale", "--sync"]:
         measure_sync()
