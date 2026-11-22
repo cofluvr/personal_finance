@@ -97,9 +97,9 @@ and keep its index line.
 | D-074 | M18 plan: financial scenarios — Approved. M18 accepted on 2026-11-21 |
 | D-075 | M19 plan: snapshots — Approved. M19 accepted on 2026-11-21; its compatibility policy is in shared-contract §6 |
 | D-076 | M20 plan: pairing and local-network sync — Approved as a security change, with `segno`. Built for review; the protocol is [sync-protocol.md](sync-protocol.md) |
-| D-077 | M21 plan: backend acceptance, stress testing and the security audit — Approved, not yet built |
+| D-077 | M21 plan: backend acceptance, stress testing and the security audit — Approved. M21.1 to M21.3 built for review; M21.4 is the owner's |
 | D-078 | Test suite cost: a copied test ledger, a narrower W1 check and a `slow` tier — Approved and built |
-| D-079 | iOS companion plan, with screen mock-ups — Proposed, for the owner's approval ([decisions-ios.md](decisions-ios.md)) |
+| D-079 | iOS companion plan, with screen mock-ups — Approved on 2026-11-20; I1 to I3 built for review on 2026-11-21 ([decisions-ios.md](decisions-ios.md)) |
 
 ## Rules in brief
 

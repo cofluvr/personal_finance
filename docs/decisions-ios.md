@@ -3,7 +3,7 @@
 The index line is in [decisions.md](decisions.md). The product is [PRD-ios.md](PRD-ios.md), and
 the boundary with the backend is [shared-contract.md](shared-contract.md).
 
-## D-079 iOS companion plan — Proposed, for the owner's approval
+## D-079 iOS companion plan — Approved on 2026-11-20, I1 to I3 built for review
 
 Written on 2026-11-19, with the screen mock-ups in [ios-mockups/index.html](ios-mockups/index.html)
 (open the file in a browser). Nothing of it is built. The owner's notes of 2026-11-19 asked for the

@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "tests"), str(ROOT / "tests" / "scenarios")]
 CHILD = Path(__file__).resolve().parent / "crash_child.py"
 CLOCK = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
+RANDOM_DIGEST = re.compile(r"'[0-9a-f]{64}'")
 AS_OF = "2026-05-04"
 
 
@@ -56,7 +57,9 @@ def state(path: Path) -> dict:
         tables = [name for name, in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
             "ORDER BY name")]
-        return {table: sorted(CLOCK.sub("T", repr(row))
+        # A new identity's certificate digest is random by nature: openssl makes a new key.
+        return {table: sorted(RANDOM_DIGEST.sub("H", CLOCK.sub("T", repr(row)))
+                              if table == "sync_identity" else CLOCK.sub("T", repr(row))
                               for row in conn.execute(f"SELECT * FROM {table}"))
                 for table in tables} | {
             "user_version": conn.execute("PRAGMA user_version").fetchone()[0]}
@@ -91,11 +94,14 @@ def child(kill_at: int, words: list[str], count_file: Path) -> subprocess.Comple
              "HOME": str(count_file.parent)})
 
 
-def interrupted_import_only(now: dict, before: dict) -> bool:
+def interrupted_import_only(now: dict, before: dict, after: dict) -> bool:
     """D-023: an import commits each file on its own after writing its run's row, and marks the
-    run finished last. A kill between leaves that row without finished_at, and nothing else."""
+    run finished last. A kill between leaves that row without finished_at, with every other
+    table as before (no file committed) or as after (the file committed), and nothing else."""
     extra = sorted(set(now["import_run"]) - set(before["import_run"]))
-    return (all(now[table] == before[table] for table in now if table != "import_run")
+    others = [table for table in now if table != "import_run"]
+    return ((all(now[table] == before[table] for table in others)
+             or all(now[table] == after[table] for table in others))
             and len(extra) == 1 and extra[0].endswith(", None)")
             and set(before["import_run"]) <= set(now["import_run"]))
 
@@ -207,7 +213,7 @@ def main() -> int:
             path = folder / source.name
             problems = sound(path)
             now = state(path)
-            if now not in (before, after) and not interrupted_import_only(now, before):
+            if now not in (before, after) and not interrupted_import_only(now, before, after):
                 changed = [table for table in now if now[table] not in (before.get(table),
                                                                         after.get(table))]
                 problems.append(f"neither before nor after: {changed[:5]}")
