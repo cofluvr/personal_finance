@@ -1,5 +1,5 @@
 {
- "about": "The CommonCents snapshot, version 1.0 (D-075). Each node states its type, whether it may be null, and for an object each field and whether it is required. Every field ending _cents states its value kind. A consumer accepts any 1.x and ignores fields it does not know; it refuses another major version.",
+ "about": "The CommonCents snapshot, version 1.1 (D-075; 1.1 adds budget.members, D-080). Each node states its type, whether it may be null, and for an object each field and whether it is required. Every field ending _cents states its value kind. A consumer accepts any 1.x and ignores fields it does not know; it refuses another major version.",
  "deprecated": [],
  "document": {
   "fields": {
@@ -52,6 +52,64 @@
         "nullable": false,
         "required": true,
         "type": "integer"
+       },
+       "members": {
+        "items": {
+         "fields": {
+          "actual_cents": {
+           "nullable": false,
+           "required": true,
+           "type": "integer",
+           "value_kind": "actual"
+          },
+          "member_index": {
+           "nullable": false,
+           "required": true,
+           "type": "integer"
+          },
+          "original_daily_cents": {
+           "nullable": true,
+           "required": true,
+           "type": "integer",
+           "value_kind": "projected"
+          },
+          "provisional": {
+           "nullable": false,
+           "required": true,
+           "type": "boolean"
+          },
+          "remaining_capacity_cents": {
+           "nullable": true,
+           "required": true,
+           "type": "integer",
+           "value_kind": "projected"
+          },
+          "revised_daily_cents": {
+           "nullable": true,
+           "required": true,
+           "type": "integer",
+           "value_kind": "projected"
+          },
+          "revised_weekly_cents": {
+           "nullable": true,
+           "required": true,
+           "type": "integer",
+           "value_kind": "projected"
+          },
+          "target_cents": {
+           "nullable": true,
+           "required": true,
+           "type": "integer",
+           "value_kind": "projected"
+          }
+         },
+         "nullable": false,
+         "required": true,
+         "type": "object"
+        },
+        "nullable": false,
+        "required": false,
+        "type": "array"
        },
        "month": {
         "nullable": false,
@@ -1077,5 +1135,5 @@
   "nullable": false,
   "type": "object"
  },
- "schema_version": "1.0"
+ "schema_version": "1.1"
 }

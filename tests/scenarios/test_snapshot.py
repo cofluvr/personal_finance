@@ -17,7 +17,10 @@ from test_safe_to_spend import AS_OF
 from personal_finance.money import format_cents
 from personal_finance.snapshot import builder, canonical, validate
 
-FIXTURES = Path(__file__).parents[1] / "fixtures" / "synthetic" / "snapshots" / "v1.0"
+SNAPSHOTS = Path(__file__).parents[1] / "fixtures" / "synthetic" / "snapshots"
+FIXTURES = SNAPSHOTS / "v1.1"
+# The previous minor, kept to show 1.1 only added optional fields (D-080).
+EARLIER_MINOR = SNAPSHOTS / "v1.0"
 SNAPSHOT_ID = "0b4a4b64-6f2e-4c4e-9a8e-3c8f9d7c1a22"
 GENERATED_AT = "2026-05-04T17:00:00.000Z"
 # Every import is given this time, so the last import's date is fixed in a golden fixture.
@@ -57,7 +60,7 @@ def deterministic_ids(monkeypatch):
     monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=next(counter), version=4))
 
 
-def household(ledger):
+def household(ledger, members=()):
     """The test ledgers' two members, Alex and Bea, sharing A 50/50, a salary paid into A on 1 May, power paid on 5 April, a
     card with a categorized purchase, a mortgage with terms and an owed balance, a reserve, a
     budget plan and a buffer."""
@@ -76,7 +79,7 @@ def household(ledger):
     ledger.observe("Mortgage", "2026-04-20", "200000.00", option="--owed")
     ledger.reserve = ledger.add_fund_ok(name="Insurance", kind="reserve", target="1200.00",
                                         cadence="annual:06-10", as_of=AS_OF)
-    ledger.budget_plan_ok(from_month="2026-05", allowance="1500.00", as_of=AS_OF)
+    ledger.budget_plan_ok(from_month="2026-05", allowance="1500.00", as_of=AS_OF, members=members)
     ledger.set_buffer("500.00")
     return ledger
 
@@ -100,7 +103,7 @@ class TestFormat:  # VA1, point 1
         assert sorted(document) == ["content", "content_sha256", "format", "generated_at",
                                     "schema_version", "snapshot_id"]
         assert (document["format"], document["schema_version"], document["snapshot_id"],
-                document["generated_at"]) == ("commoncents-snapshot", "1.0", SNAPSHOT_ID,
+                document["generated_at"]) == ("commoncents-snapshot", builder.SCHEMA_VERSION, SNAPSHOT_ID,
                                               GENERATED_AT)
         assert document["content_sha256"] == canonical.sha256_of(document["content"])
 
@@ -340,3 +343,55 @@ class TestGoldenFixtures:  # VA5, point 5
         assert builder.SCHEMA_VERSION == version
         for fixture in FIXTURES.glob("*.json"):
             assert json.loads(fixture.read_bytes())["schema_version"] == version
+
+
+class TestMembersBudget:  # D-080
+    """Snapshot 1.1: each member's budget pace, as report budget --member prints it."""
+
+    def test_a_plan_without_members_parts_gives_nulls_never_zero(self, ledger):
+        members = ledger.content()["budget"]["members"]
+        assert [member["member_index"] for member in members] == [0, 1]
+        for member in members:
+            assert member["target_cents"] is None and member["revised_daily_cents"] is None
+            assert member["actual_cents"] == 0
+
+    def test_each_member_agrees_with_report_budget(self, tmp_path, capsys, deterministic_ids):
+        built = household(SnapshotLedger(tmp_path, capsys), members=("Alex=900.00", "Bea=600.00"))
+        built.pay("groceries.csv", "2026-05-02", amount="-40.00", text="SYNTHETIC GROCER")
+        content = built.content()
+        budget = content["budget"]
+        assert sum(member["target_cents"] for member in budget["members"]) == budget["target_cents"]
+        labels = {"target_cents": "Target, planned", "remaining_capacity_cents": "Remaining capacity",
+                  "original_daily_cents": "Original daily allowance",
+                  "revised_daily_cents": "Revised daily allowance",
+                  "revised_weekly_cents": "Revised weekly allowance"}
+        for member in budget["members"]:
+            name = content["household"]["members"][member["member_index"]]["name"]
+            code, out, err = built.run("report", "budget", "--month", "2026-05", "--as-of", AS_OF,
+                                       "--member", name)
+            assert (code, err) == (0, ""), err
+            for field, label in labels.items():
+                line = next(line for line in out.splitlines() if line.strip().startswith(label))
+                assert line.endswith(f": {format_cents(member[field])}"), (name, line)
+            assert member["provisional"] is ("Remaining capacity, budget pace, provisional:" in out)
+            assert member["provisional"] is False
+        # Money out not yet classified rests every member's capacity on a guess (D-069).
+        built.deposit("unknown.csv", "2026-05-03", amount="-12.00", text="SYNTHETIC UNKNOWN",
+                      financial_type=None)
+        for member in built.content()["budget"]["members"]:
+            name = content["household"]["members"][member["member_index"]]["name"]
+            out = built.run("report", "budget", "--month", "2026-05", "--as-of", AS_OF,
+                            "--member", name)[1]
+            assert member["provisional"] is True
+            assert "Remaining capacity, budget pace, provisional:" in out
+
+    def test_the_earlier_minor_still_validates(self):
+        """1.1 only adds optional fields: a 1.0 snapshot on a phone still reads (D-080 point 2)."""
+        schema = validate.load_schema()
+        earlier = sorted(EARLIER_MINOR.glob("*.json"))
+        assert earlier
+        for fixture in earlier:
+            document = canonical.parsed_canonical(fixture.read_bytes())
+            assert document["schema_version"] == "1.0"
+            assert validate.validate(document, schema) == [], fixture.name
+            assert "members" not in document["content"]["budget"]

@@ -113,6 +113,20 @@ public struct Snapshot: Decodable, Sendable {
         public let revisedDailyCents: Int
         public let revisedWeeklyCents: Int
         public let daysRemaining: Int
+        /// Snapshot 1.1 (D-080): each member's budget pace. Nil from a 1.0 snapshot.
+        public let members: [MemberBudget]?
+    }
+
+    public struct MemberBudget: Decodable, Sendable {
+        public let memberIndex: Int
+        /// Nil where the plan gives this member no part: never shown as 0.
+        public let targetCents: Int?
+        public let actualCents: Int
+        public let remainingCapacityCents: Int?
+        public let originalDailyCents: Int?
+        public let revisedDailyCents: Int?
+        public let revisedWeeklyCents: Int?
+        public let provisional: Bool
     }
 
     public struct Reason: Decodable, Sendable, Hashable {

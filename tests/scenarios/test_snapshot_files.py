@@ -58,13 +58,14 @@ class TestCreate:  # VB2, point 7
         assert sorted(os.listdir(ledger.vault)) == ["phone.json"]
         document = json.loads(path.read_bytes())
         (row,) = records(ledger)
-        assert row[:6] == (document["snapshot_id"], "1.0", AS_OF, 90, document["generated_at"],
+        assert row[:6] == (document["snapshot_id"], builder.SCHEMA_VERSION, AS_OF, 90, document["generated_at"],
                            document["content_sha256"])
         assert str(path) not in repr(row) and "phone" not in repr(row)
-        assert re.search(r"^Snapshot \S+ written to .*: \d+ bytes, schema 1\.0, as of "
+        assert re.search(r"^Snapshot \S+ written to .*: \d+ bytes, schema "
+                         + re.escape(builder.SCHEMA_VERSION) + r", as of "
                          r"2026-05-04, 2 transactions over 90 days\.$", out, re.MULTILINE)
         listed = ledger.run("snapshots")[1]
-        assert f"Snapshot {document['snapshot_id']}: schema 1.0, as of {AS_OF}, 90 days" in listed
+        assert f"Snapshot {document['snapshot_id']}: schema {builder.SCHEMA_VERSION}, as of {AS_OF}, 90 days" in listed
 
     def test_an_existing_file_is_refused_and_kept(self, ledger):
         path = ledger.vault / "phone.json"

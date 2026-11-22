@@ -32,11 +32,10 @@ struct TodayView: View {
             StatusBanners(snapshot: snapshot, freshness: freshness, boundary: boundary)
             ScopePicker(snapshot: snapshot, scope: $scope)
             Section {
-                if case .household = scope {
-                    SafeToSpendHero(snapshot: snapshot, notCurrent: notCurrent)
+                if case let .member(index) = scope {
+                    MemberPace(snapshot: snapshot, memberIndex: index)
                 } else {
-                    Text("Per-member safe to spend is not computed on the Mac yet. Budget pace below is the household's.")
-                        .font(.callout).foregroundStyle(.secondary)
+                    SafeToSpendHero(snapshot: snapshot, notCurrent: notCurrent)
                 }
                 FreshnessLine(snapshot: snapshot)
             }
@@ -94,6 +93,34 @@ struct SafeToSpendHero: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// A member's budget pace (D-080), never a member's safe to spend, which the Mac does not compute.
+struct MemberPace: View {
+    let snapshot: Snapshot
+    let memberIndex: Int
+
+    var body: some View {
+        let name = snapshot.member(memberIndex)?.name ?? "This member"
+        if let pace = snapshot.content.budget?.members?.first(where: { $0.memberIndex == memberIndex }) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(name)'s budget pace").font(.headline)
+                Row("Revised daily allowance", Money.text(pace.revisedDailyCents, missing: "No part in the plan"),
+                    note: "budget pace")
+                Row("Revised weekly allowance", Money.text(pace.revisedWeeklyCents, missing: "No part in the plan"),
+                    note: "budget pace")
+                Row("Spent, actual", "\(Money.text(pace.actualCents)) of \(Money.text(pace.targetCents, missing: "no target"))")
+                if pace.provisional {
+                    Tag("Provisional: some spending is not yet attributed", tone: .orange)
+                }
+                Text("Safe to spend is the household's: the Mac does not divide cash between members.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        } else {
+            Text("The Mac has not sent members' figures in this snapshot. Sync to update.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
     }
 }
 

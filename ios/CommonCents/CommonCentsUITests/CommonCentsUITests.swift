@@ -35,6 +35,16 @@ final class CommonCentsUITests: XCTestCase {
                        "an old snapshot never says today")
     }
 
+    func testAMemberViewShowsTheirBudgetPaceNeverAZero() {
+        let app = launched(["-demo", "-unlocked"])
+        app.buttons["Alex"].tap()
+        XCTAssertTrue(app.staticTexts["Alex's budget pace"].waitForExistence(timeout: 5))
+        // The demo plan gives members no part: said so, never shown as $0.00.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'No part in the plan'"))
+            .firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["Safe to spend today"].exists)
+    }
+
     func testEveryTabOpens() {
         let app = launched(["-demo", "-unlocked"])
         for (tab, title) in [("Spending", "Spending"), ("Goals", "Goals"), ("Accounts", "Accounts"),
