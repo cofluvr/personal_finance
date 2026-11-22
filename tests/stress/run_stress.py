@@ -158,18 +158,21 @@ def checked(db: Path) -> list[str]:
 
 
 def stale_successes(records: list[dict]) -> list[dict]:
+    """Writes accepted with a token another write had already spent. Every write here changes
+    its target's state, and a token is a digest of that state, so two successive successful
+    writes to one target (in commit order) can never carry the same token: if they do, the
+    second was accepted stale. A token may recur after other writes return the state to one
+    it described (a share set, then undone), and its use is then correct: the state it covers
+    is the state now. Earlier versions of this check counted that as stale."""
     by_target = {}
     for record in records:
         if record.get("ok") and "target" in record:
             by_target.setdefault(record["target"], []).append(record)
     stale = []
     for successes in by_target.values():
-        for this in successes:
-            for other in successes:
-                if other is not this and other["attempt_start"] > this["shown_end"] and \
-                        other["attempt_end"] < this["attempt_start"]:
-                    stale.append(this)
-                    break
+        successes.sort(key=lambda record: record["attempt_end"])
+        stale += [later for earlier, later in zip(successes, successes[1:])
+                  if earlier["token"] == later["token"]]
     return stale
 
 
