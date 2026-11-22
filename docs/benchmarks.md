@@ -683,3 +683,31 @@ snapshot 2.949s to generate at the start of `serve`, as `--snapshot` times gener
 **G9's stopping rule is not met.** The client's own checks dominate a sync. The server's share,
 one fetch, is about a twentieth of it.
 
+**Everything on one shape (M21.2, ZB1, D-077 point 3),** measured 2026-11-22 with
+`measure_reconciliation.py --scale --everything` on a copy of the tree, nothing else running.
+Output is in `build/s21/bench_everything.txt`, ignored.
+
+- **The shape:** `--safe-to-spend`'s, 104,100 transactions over 60 months and 8 accounts (not
+  point 3's 30; D-077's "How M21 was implemented"), with 10 scenarios added.
+- **Reads:** each timed once, after one untimed run.
+- **Backup:** a full-scale backup, verify and restore, then every read compared byte for byte on
+  the restored copy.
+
+| Operation | Figure | Provisional target |
+|---|---|---|
+| `totals` | 1.733s | Below 2.0s: met |
+| `report household` | 1.076s | Below 2.0s: met |
+| `report monthly` | 0.775s | Below 2.0s: met |
+| `dashboard` | 0.578s | Below 2.0s: met |
+| `transactions` | 0.494s | Below 2.0s: met |
+| `report funds` | 0.443s | Below 2.0s: met |
+| `safe-to-spend` | 0.353s | Below 2.0s: met |
+| `report budget` | 0.279s | Below 2.0s: met |
+| Every other read (income, net worth, loans, review list, funds, obligations, scenarios, snapshots, storage) | 0.015s to 0.160s | Below 2.0s: met |
+| `backup create` | 10.864s | none set |
+| `backup verify` | 5.850s | none set |
+| `backup restore` | 11.839s | none set |
+| Migration 0036, 35 to 36 | 0.018s | none set |
+| The restored copy, all 16 reads | Byte for byte the same | Must be: met |
+
+**G9's stopping rule is not met.**

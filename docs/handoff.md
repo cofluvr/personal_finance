@@ -1,32 +1,42 @@
-# Session Handoff: M17 to M19 Built, Awaiting Review
+# Session Handoff: M20, M21.1 to M21.3, the iPhone app and snapshot 1.1 built, awaiting review
 
-For a fresh session. Written 2026-11-21. **M1 to M16 are complete and accepted.** `main` holds M1
-to M9 at `19ee858`. M10 to M19 are on `feature/m10-rules`, not merged and not pushed.
+For a fresh session. Written 2026-11-21. **M1 to M19 are complete and accepted** (M17 to M19 on the
+owner's notes of 2026-11-21, M17's real-browser check still the owner's). `feature/m10-rules`, M10
+to M21.3 and the app, was merged into `main` on GitHub by the owner on 2026-11-21. The commits
+after `28d4959` are local on `feature/m10-rules`, not pushed.
 
-**M17, M18 and M19 are built, for the owner's review,** each without a stop between its slices,
-on the owner's notes of 2026-11-20. M17 (D-073) is a security change: browser writes. M18
-(D-074): scenarios and their inputs, migration 0034, `sc1`; the pure monthly projection,
-`scenario compare` and the scenario pages and forms; promotion with its undo, `sp1`. M19
-(D-075): the snapshot builder, canonical JSON, the schema document and its validator, golden
-fixtures; `snapshot create` in one read transaction to a destination gated as `pf export`'s,
-migration 0035, `snapshot verify`, `snapshots`. Each milestone's departures are in its decision's
-"How M1n was implemented", and the snapshot compatibility policy is shared-contract §6.
+**Built on 2026-11-21, for the owner's review,** each recorded in its decision's "How
+implemented":
 
-**Latest results:** see "Latest gating run" below. Breaks per slice are counted in each
-decision. Benchmarks in [benchmarks.md](benchmarks.md): `scenario compare` 0.521s at 24 months
-and 1.402s at 120, promote 0.553s; snapshot generation 2.621s, 1.81 MB. None meets the stopping
-rule. `/visuals` (M17) still does: 2.194s against 2.0s. **G6:** 197,641 command runs over 3,736 kept ledgers, M17's head (`43f29eb`) against this code on migrated copies: 197,549 byte for byte the same. The 92 that differ are all on two ledgers a test leaves at version 34, which M17's code refuses as newer than itself and this code asks to migrate. No token moved.
+- **M20 (D-076), pairing and local-network sync.** This is a security change: TLS 1.3 on one
+  private address, `/usr/bin/openssl` and `segno`. Its protocol is
+  [sync-protocol.md](sync-protocol.md), and the owner's steps [sync-runbook.md](sync-runbook.md).
+- **M21.1 to M21.3 (D-077):**
+  - [backend-acceptance.md](backend-acceptance.md), with B1 to B15 end to end;
+  - `tests/stress/` (crashes, fuzz, stress) and `--everything`;
+  - [security-audit.md](security-audit.md).
+- **The iPhone app, I1 to I3 (D-079), in `ios/`:** CommonCentsKit and the SwiftUI app
+  ([ios/README.md](../ios/README.md)).
+- **D-080, snapshot 1.1:** each member's budget pace, on the phone's member view.
+
+**Latest results:**
+
+- **The full suite:** see "Latest gating run" below.
+- **Swift:** 28 package tests on the Mac and the iOS 26 simulator, and 9 UI tests. Interop
+  against the real server on loopback passes.
+- **Crashes:** 484 kill points over 10 commands, every one leaving the before or the after
+  state.
+- **Fuzz:** every target passes 500 examples at seeds 1 and 2.
+- **Stress:** three 60-minute seeds, 4 writers and 2 readers each: 350,387 writes (129,297 accepted) and 696,041 reads; every minute's integrity, foreign-key and reconciliation check passed, no read failed, every refusal was a documented one, and no accepted write reused its target's token. Seeds 1 and 2 ran before the rule's correction and were checked again under it; seed 3 ran on it.
+- **`--everything`:** every read below 2.0s on 104,100 transactions (`totals` 1.733s); backup 10.9s, verify 5.9s, restore 11.8s, and all 16 reads byte for byte the same on the restored copy; migration 0036 in 0.018s ([benchmarks.md](benchmarks.md)).
 
 **Nothing from M10 on is on the real ledger.** It stays at version 20 until the owner makes a
 verified backup and runs `pf migrate` one milestone at a time (G10): 21 (M10), 22 and 23 (M11),
-24 and 25 (M12), 26 (M13), 27 and 28 (M14), 29 to 31 (M15), 32 (M16), then 33 (M17), 34 (M18)
-and 35 (M19) once each is accepted. After 26, the owner sets the household timezone with
+24 and 25 (M12), 26 (M13), 27 and 28 (M14), 29 to 31 (M15), 32 (M16), 33 (M17), 34 (M18), 35
+(M19), then 36 (M20) once it is accepted. After 26, the owner sets the household timezone with
 `pf setting set`.
 
-Every fixture is invented. Point F with the owner on their already-imported files is still open.
-
-Earlier history is in [archive/handoff-history.md](archive/handoff-history.md). Read it only when
-a task needs a specific section.
+Every fixture is invented. Earlier history is in [archive/handoff-history.md](archive/handoff-history.md).
 
 Standing rules are in [CLAUDE.md](../CLAUDE.md), loaded automatically. Do not restate them here.
 
@@ -34,42 +44,54 @@ Standing rules are in [CLAUDE.md](../CLAUDE.md), loaded automatically. Do not re
 
 Rewritten by each session for the next. The kickoff prompt carries only the owner's notes.
 
-- **Stop for the owner's review of M17, M18 and M19.** A change the owner asks for in any of
-  them comes first, in the order given. Gate each change on its slice's files, then the full
-  suite before stopping.
-- **Then, only if the owner's notes allow:** D-079's iOS I1 can start on the snapshot schema now
-  written down (shared-contract §6, `snapshot/schema_v1.json`); I2 needs M19 accepted. **M20 is
-  not next on its own:** it needs network and a new dependency (`segno`), which no session has
-  been given. M21 follows M20.
-- **Read first for review changes:** D-073's, D-074's and D-075's "How M1n was implemented".
-  M18's code is `planning/scenarios.py`, `projection.py` and `promotions.py`,
-  `reports/scenario_report.py`, and the scenario routes in `ui/writes.py` and `ui/server.py`;
-  M19's is `snapshot/`. Tests: `test_scenarios.py`, `test_scenario_compare.py`,
-  `test_scenario_promotion.py`, `test_scenario_migration.py`, `tests/unit/test_scenario_projection.py`,
-  `test_snapshot.py`, `test_snapshot_files.py`, `test_snapshot_migration.py`.
+- **Stop for the owner's review** of:
+  - M20 (a security change);
+  - M21.1 to M21.3, with D-025 item by item in [security-audit.md](security-audit.md) §7;
+  - the app;
+  - D-080.
+
+  A change the owner asks for in any of them comes first, in the order given. Gate each change on
+  its files, then on the full suite before stopping. For the app, also run `swift test` and the UI
+  tests (commands in [ios/README.md](../ios/README.md)).
+- **Then, only if the owner's notes allow:**
+  - **I4 with the owner:** putting the app on the phone, and one real-phone delivery (YC2).
+  - **M21.4 with the owner:** point F, the migration rehearsal, and the readiness checklist.
+  - **Any new milestone** needs its plan as the next free decision number, D-081. Candidates are
+    PRD §13's later items: receipt photography, mobile categorization, notifications. Each needs
+    a write-capable sync contract first (shared-contract §5).
+- **Read first for review changes:**
+  - **M20:** D-076's slice plans and "How M20 was implemented", `sync/`, and the `test_sync_*.py`
+    files.
+  - **M21:** D-077's slice plans and "How M21 was implemented".
+  - **The app:** D-079's I1 to I3 slice plan in [decisions-ios.md](decisions-ios.md).
+  - **Snapshot 1.1:** D-080 in [decisions.md](decisions.md).
 - **Warnings:**
-  - A new migration joins the set-backs before `drop_snapshot_tables`.
-  - The income, obligation and fund terms loaders leave out rows of an undone promotion
-    (`kept_terms` in `planning/schedules.py`): a new reader of a terms table needs the same.
-  - The golden snapshot fixture is rewritten only with `PF_WRITE_SNAPSHOT_FIXTURES=1`, and only
-    with a conscious version change under the compatibility policy.
-  - Breaks run with `build/s18/breaks/run_breaks.py` on a copy of the tree.
-  - The benchmark shapes take about four minutes to build.
-- **Done when:** the owner's review changes are made and gated, and the full suite passes.
+  - **A new migration** joins the set-backs before `drop_sync_tables`.
+  - **A snapshot change** needs:
+    - a version change and its own `snapshots/vX.Y/` fixture;
+    - the app's schema copy and demo snapshot updated, which `test_ios_copies.py` checks;
+    - the Swift tests run.
+  - **segno** is pinned to 1.6.6, and W1 pins its uses to their functions. Review any upgrade.
+  - **Stress tokens recur legitimately** when a state is restored. Read
+    `run_stress.py`'s rule before calling one stale.
+  - **The suite takes about 23 minutes;** the stress seeds an hour each.
+- **Done when:** the owner's review changes are made and gated, and the full suite, `swift test`
+  and the UI tests pass.
 
 ## Current state
 
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `main` holds everything through M9 at `19ee858`. M10 to M19 are on `feature/m10-rules`, created from `main` at `19ee858`, not pushed |
-| Latest commit | Run `git log -1`. M17 from `57a7532` to `43f29eb`; M18 from `2dad560` to `38f2f6f`; M19 from `c1736c6` to `1075cb6`, then this handoff's commit. Earlier commits are in the archive |
-| Latest gating run | The full suite, slow tests included, on M19 with its records: 4,217 passed in 0:19:20, exit code 0, chained to `1075cb6` |
+| Branch | `main` on GitHub holds M10 to M21.3 and the app, merged by the owner on 2026-11-21. Local `main` is at `19ee858`, behind it. Later work is on `feature/m10-rules`, local, not pushed |
+| Latest commit | Run `git log -1`. M20 from `af4a9d7` to `3dc0654`; M21 from `ef3a9e6`; the app `a3d209b`; D-080 `73bcfff`. Earlier commits are in the archive |
+| Latest gating run | The full suite, slow tests included, on D-080 and the app's last change with M21's records: 4,500 passed in 0:20:44, exit code 0, before the handoff's commit. Swift: `swift test` 28 passed; the UI tests 9 passed |
 | Python | 3.12.6, project `.venv` already present |
+| Xcode | 27.2 with an iOS 26.3 simulator (iPhone 17 Pro); Swift 6.4 |
 | macOS | Golden Gate 27.2, as stated by the owner |
 | Owner's data folder | `/Users/michaelbattaile/Documents/commoncents_data`, outside this repository. It holds the owner's statements, which no session reads, lists or runs a command against. Its `ledger/` is no longer the real ledger's folder, and the owner has restored statements into the image. Backups go on an encrypted disk image whose file the owner keeps in `~/CommonCents_LocalBackups`, mounted at `/Volumes/CommonCentsBackup` (D-058 point 7, as amended). Never read, list or search that volume either. That folder is the owner's too: never read, list or search it |
 | Real ledger's image | `~/CommonCents.sparsebundle`, mounted by the owner only when needed at `/Volumes/CommonCents`, with the ledger folder `/Volumes/CommonCents/ledger` (`0700`, the owner's). It holds the owner's statements: never read, list or search it. Run diskutil, hdiutil or `stat` on it only with the owner's approval each time. Checked 2026-11-09: encrypted as an image file (`image-encrypted` true), its APFS volume not (`Encryption` false), ownership honoured, so the gate accepts it. The owner ran the readiness checklist on it on 2026-11-09, so the real ledger lives at `/Volumes/CommonCents/ledger/ledger.db` |
-| Runtime dependencies | pypdf 6.21.2, pinned by hash in `requirements.txt`, already in `.venv` (D-060 point 1, as amended) |
+| Runtime dependencies | pypdf 6.21.2 (D-060 point 1, as amended) and segno 1.6.6 (D-076), each pinned by hash in `requirements.txt`, already in `.venv` |
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
 | Entry point | `bin/pf`, using this checkout's `.venv`. An installed `pf` script also works |
 | Data | Synthetic only. Keep databases outside the repository. Institution fixtures in `tests/fixtures/synthetic/statements` are invented |
@@ -87,6 +109,25 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
 
 Then only what the task needs:
 
+- For changes to M20:
+  - D-076's slice plans and "How M20 was implemented", YA1 to YC2 in [plan.md](plan.md);
+  - `sync/` (`identity.py`, `devices.py`, `pairing.py`, `server.py`) and migration 0036;
+  - `tests/scenarios/sync_harness.py`, `tests/sync_reference_client.py` and the
+    `test_sync_*.py` files;
+  - W1's sync and segno tests in `tests/unit/test_no_network_imports.py`.
+- For changes to M21:
+  - D-077's slice plans and "How M21 was implemented", and ZA1 to ZD1;
+  - [backend-acceptance.md](backend-acceptance.md), `tests/acceptance/`, `tests/stress/` and
+    [security-audit.md](security-audit.md).
+- For changes to the app:
+  - D-079's I1 to I3 slice plan, and D-080;
+  - `ios/CommonCentsKit` (`SnapshotValidator.swift` mirrors `snapshot/files.py`'s `verified`, and
+    `Sync.swift` [sync-protocol.md](sync-protocol.md));
+  - `ios/CommonCents`, and `ios/interop/run_interop.py`.
+- For changes to the snapshot (M19, D-080):
+  - D-075's slice plans, `snapshot/`, and shared-contract §6;
+  - the fixtures under `tests/fixtures/synthetic/snapshots/`, of which `v1.1` is current;
+  - `tests/unit/test_ios_copies.py`.
 - For changes to M5.1: `db/real_ledger.py`, `run_init`, `open_ledger`, `run_migrate` and
   `run_import` in `cli.py`, migration 0017, `tests/scenarios/test_real_ledger.py`,
   `tests/scenarios/test_real_ledger_migration.py`, and "How M5.1 was implemented" under D-058.
@@ -228,63 +269,43 @@ Then only what the task needs:
 
 ## Open follow-ups
 
-**F2. Legacy identity timestamps. Partly done.** An ID retired before migration 0004 has no stored
-`created_at`, so a revival uses its first record's link time (D-029), and `trace` labels it as
-approximate. Nothing marks `ledger_transaction.created_at` itself as a fallback. **A stored marker is
-a prerequisite before any UI or export presents legacy creation timestamps.**
-
 **F3. Merge-heavy benchmark. Backlog.** See "Backlog benchmarks" in [plan.md](plan.md).
 
-F1 and F4 are fixed, and recorded in the archive.
+F1, F2 and F4 are closed. F2 closed on 2026-11-21 as not needed: nothing but `pf trace` shows a
+creation time, and `test_no_legacy_timestamps_shown.py` keeps it so.
 
 ## Awaiting the owner
 
-- Point F for `us_bank_card_activity_pdf_v1`, by the PDF section of
-  [layout-verification.md](layout-verification.md).
-- Point F per layout, by [layout-verification.md](layout-verification.md), and its results. The
-  owner's layouts are already imported into the real ledger, so point F reuses those files in a
-  throwaway ledger, with the owner, at the final review.
-- [real-data-readiness.md](real-data-readiness.md) names the backup volume `CommonCentsBackups`.
-  The owner's is `/Volumes/CommonCentsBackup`. A doc fix, not made.
-- **The review of M17,** a security change, with its departures under D-073, and a check in a
-  real browser: one decision, one tag form, `/visuals`, and any CSP console error.
-- M17's inputs (D-073): whether the browser should take more of point 2's allowlist, and the
-  `/visuals` remedy.
-- **The review of M18 and M19,** with their departures under D-074 and D-075: notably promotion
-  undo withdrawing terms rows, the FLAG form field, and what is not promotable.
-- M19's inputs (D-075): the transaction window (90 days by default), and whether institution
-  names may appear on the phone (left out until then).
-- M16's inputs (D-072): the checking buffer, which accounts are liquid, the links between
-  obligations and loans or reserves, and the emergency restoration amount, entered once the real
-  ledger reaches 32. Naming each card's payment obligation after the card, or saying how else to
-  tie them.
-- M15's inputs (D-071): graduated-loan documents (redacted), aggregates and subaccounts, any
-  ownership differing from attribution, and the payoff extra or the debt goal, entered once the
-  real ledger reaches 31.
-- Whether the tax reserve may start in a closed month (a correction flag, as D-069's), if the
-  owner wants it accruing from the start of the year.
-- The household timezone, the monthly allowance, members' parts and any category allowances
-  (D-069's inputs), and the bills to confirm first (D-068's), entered by the owner on the real
-  ledger once it reaches 26.
-- M14's inputs (D-070): goals, the emergency minimum, annual expenses, the tax percentage, the
-  priority and current assignments, entered by the owner once the real ledger reaches 27.
-- A delivery deadline, if any (D-066).
-- Each milestone's own inputs, listed in its decision, when it starts.
-- On the real ledger, a verified backup, then `pf migrate` to version 21 for M10, verified, then
-  22 and 23 for M11, then the owner's members, the 50/50 share and each account's default,
-  entered by the owner, then 24 and 25 for M12, then 26 for M13, then 27 and 28 for M14, then 29
-  to 31 for M15, then 32 for M16, then 33, 34 and 35 as M17, M18 and M19 are accepted.
-- Merging `feature/m10-rules` into `main`. Needs the owner's approval.
-- Pushing. Not authorized from here.
+- **The review of M20, M21.1 to M21.3, the app and D-080.** M20 is a security change.
+- **D-025, item by item,** by [security-audit.md](security-audit.md) §7. It is about the
+  development agent's own environment.
+- **The app on the phone (I4):** signing with your Apple ID, then one real-phone delivery (YC2).
+  The steps are in [ios/README.md](../ios/README.md) and [sync-runbook.md](sync-runbook.md).
+- **M21.4:**
+  - point F per layout, by [layout-verification.md](layout-verification.md), in a throwaway
+    ledger with your already-imported files;
+  - a migration rehearsal on a restored backup;
+  - the readiness checklist run again.
+- **M17's real-browser check:** one decision, one tag form, `/visuals`, and any CSP console
+  error.
+- **The inputs each milestone lists:**
+  - M14: goals, the emergency minimum, the tax percentage and the priority;
+  - M15: graduated-loan documents, redacted;
+  - M16: the checking buffer, liquid accounts and coverage links;
+  - M19: the transaction window, and whether institution names may appear.
+
+  Each is entered on the real ledger once it reaches that milestone's version.
+- **On the real ledger:** a verified backup, then `pf migrate` one milestone at a time, as above.
+- **Pushing** the commits after `28d4959`. Needs your approval.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits | Approved on 2026-11-20 on `feature/m10-rules` for M18 and M19, by the owner's notes. Used for M18 and M19 | Renewed by each kickoff's notes |
+| Local commits | Approved on 2026-11-21 on `feature/m10-rules` by the owner's notes, with sign-off on everything not excepted. Used for M20, M21, the app and D-080 | Renewed by each kickoff's notes |
 | M11 | Accepted on 2026-11-10. Not yet on the real ledger | The real-ledger migrations 21, 22 and 23, each after a verified backup |
-| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077), including M17's and M20's security changes. M12 to M16 accepted. M17 built on 2026-11-20, its security change taken as approved by the owner's notes of that day. M18 and M19 built on 2026-11-21, with their slice plans and M19's snapshot destination approved by the owner's notes of 2026-11-20 | The review of M17 to M19. M20 needs network and a new dependency (`segno`, pinned with its hash, W1's check), which no session has been given |
-| iOS (D-079) | Plan and mock-ups accepted on 2026-11-20. Not built | I1 can start on M19's schema, written down in shared-contract §6; I2 needs M19 accepted |
+| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077). M12 to M19 accepted. M20 and M21.1 to M21.3 built on 2026-11-21 under the owner's notes of that day, segno and its one fetch included | The review of M20 and M21. M21.4 with the owner |
+| iOS (D-079) | Plan and mock-ups accepted on 2026-11-20. I1 to I3 built on 2026-11-21, with D-080's snapshot 1.1 | The review; I4 with the owner |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |
@@ -293,7 +314,7 @@ F1 and F4 are fixed, and recorded in the archive.
 | M10 | Accepted on 2026-11-10. Not yet verified on the real ledger | The owner's backup and `pf migrate` to 21. Merging into `main` needs approval |
 | Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
 | Installing dependencies | Approved for the declared dependencies and build requirements, and on 2026-11-09 for pypdf 6.21.2 | Ask for anything new, an upgrade of pypdf included |
-| Network access | Approved for the clean-install dependencies, and on 2026-11-09 for pypdf's release list and install. Used, and now closed | Ask for any use |
+| Network access | Used on 2026-11-21 under the owner's notes: segno's download, and one advisory search per dependency (the audit). Now closed | Ask for any use |
 
 Never approved, and not to be assumed: see [CLAUDE.md](../CLAUDE.md).
 

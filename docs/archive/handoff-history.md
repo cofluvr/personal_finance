@@ -1117,3 +1117,31 @@ today.
 
 No security control changed, no dependency was added, and the UI stays read-only. Every fixture
 is invented. Point F with the owner on their already-imported files is still open.
+
+
+## M17 to M19's handoff state, as built for review (2026-11-21)
+
+Moved from the handoff when M20 was built; M17 to M19 were accepted on the owner's notes of
+2026-11-21.
+
+**M17, M18 and M19 are built, for the owner's review,** each without a stop between its slices,
+on the owner's notes of 2026-11-20. M17 (D-073) is a security change: browser writes. M18
+(D-074): scenarios and their inputs, migration 0034, `sc1`; the pure monthly projection,
+`scenario compare` and the scenario pages and forms; promotion with its undo, `sp1`. M19
+(D-075): the snapshot builder, canonical JSON, the schema document and its validator, golden
+fixtures; `snapshot create` in one read transaction to a destination gated as `pf export`'s,
+migration 0035, `snapshot verify`, `snapshots`. Each milestone's departures are in its decision's
+"How M1n was implemented", and the snapshot compatibility policy is shared-contract §6.
+
+**Latest results:** see "Latest gating run" below. Breaks per slice are counted in each
+decision. Benchmarks in [benchmarks.md](benchmarks.md): `scenario compare` 0.521s at 24 months
+and 1.402s at 120, promote 0.553s; snapshot generation 2.621s, 1.81 MB. None meets the stopping
+rule. `/visuals` (M17) still does: 2.194s against 2.0s. **G6:** 197,641 command runs over 3,736 kept ledgers, M17's head (`43f29eb`) against this code on migrated copies: 197,549 byte for byte the same. The 92 that differ are all on two ledgers a test leaves at version 34, which M17's code refuses as newer than itself and this code asks to migrate. No token moved.
+
+**Nothing from M10 on is on the real ledger.** It stays at version 20 until the owner makes a
+verified backup and runs `pf migrate` one milestone at a time (G10): 21 (M10), 22 and 23 (M11),
+24 and 25 (M12), 26 (M13), 27 and 28 (M14), 29 to 31 (M15), 32 (M16), then 33 (M17), 34 (M18)
+and 35 (M19) once each is accepted. After 26, the owner sets the household timezone with
+`pf setting set`.
+
+Every fixture is invented. Point F with the owner on their already-imported files is still open.

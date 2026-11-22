@@ -3935,6 +3935,51 @@ package and its version.
 | ZC1 | `docs/security-audit.md` covers point 7's sections, and each finding is closed or decided. D-025 is decided |
 | ZD1 | Point F has passed for every layout, the rehearsal has compared clean, and the owner has run the readiness checklist again. Every earlier criterion still passes |
 
+### How M21 was implemented
+
+M21.1 to M21.3 were built on 2026-11-21 on the owner's notes of that day, after M20, without a
+stop between slices. M21.4 is the owner's. Departures and results:
+
+- **The end-to-end household is one month's, not a full year's.** `test_full_year.py` builds
+  `test_snapshot.py`'s household through the CLI: two members, a salary, a bill, a card, a
+  mortgage with terms, a reserve, a budget plan and a buffer. Each of B1 to B15 adds what its box
+  is about and ends with a snapshot that verifies. B2's CSV layout is test-only, so that one file
+  goes through `import_files`. A twelve-month household would add build time and no new rule.
+  B15's real check, the network interface down, is the owner's.
+- **Crashes need no hook in `src/`.** `tests/stress/crash_child.py` wraps `sqlite3.connect`
+  before importing the CLI, sets a trace callback that kills the process at its Nth statement,
+  and makes `uuid4` count, so a completed run matches the reference after-state exactly. W1 has
+  nothing new to check, which departs from point 5's environment variable. **Result:** 484 kills
+  over 10 commands, every statement of each: import, classify, categorize, consume, fund add,
+  fund assign, setting undo, scenario add, sync identity create, and migration 0036. Each left
+  the before or the after state, opened through the gate, and passed `integrity_check` and
+  `foreign_key_check`. The checker allows two in-between states, each found by the run and
+  neither a partial write: an import's run row without `finished_at`, beside either state
+  (D-023, the audit's finding 1); and a new identity's certificate digest, random by nature.
+- **Fuzzing:** amounts and dates (with an exact oracle), CSV (fabricating nothing: imported
+  amounts equal the generated ones), mutated PDFs, mutated snapshots, sync requests after TLS,
+  and UI requests. Every target passed 500 examples at seeds 1 and 2. The two failing inputs
+  found along the way were harness bugs, and are pinned as `@example`s.
+- **Stress** contends on three token-guarded targets: the household share (`h1`), the checking
+  buffer (`st1`) and classifying 20 rows (`t13`). A broader write mix would need each kind's
+  show-then-write helper, for no new rule: every kind shares D-043's check (G3).
+- **`--everything` uses `--safe-to-spend`'s shape,** about 104,000 transactions over 60 months
+  but only the accounts that shape has, not 30. It adds 10 scenarios, then times every read and
+  runs a full-scale backup, verify and restore compared byte for byte. The migration it times is
+  0036 on a copy set back to 35. A version-21 ledger of this shape needs M10's code to build,
+  which the owner's rehearsal (M21.4) covers on the real ledger's own backup.
+- **The audit** ([security-audit.md](security-audit.md)) checked advisories once, by one web
+  search per package. It left D-025 to the owner: its proposal is about the development agent's
+  environment, which no product control supersedes.
+- **The stale-token rule was corrected after seed 1.** As first written, it counted a write as
+  stale when another write to its target committed between its show and its write. Seed 1
+  reported 123 such writes. Each held a token for a state that other writes had left and then
+  restored (a share set, then undone), so its acceptance was correct. The rule now checks what
+  must hold: every write here changes its target's state, so successive accepted writes to one
+  target never share a token. A planted reuse is found.
+- **Stress results:** three 60-minute seeds, 4 writers and 2 readers each: 350,387 writes (129,297 accepted) and 696,041 reads; every minute's integrity, foreign-key and reconciliation check passed, no read failed, every refusal was a documented one, and no accepted write reused its target's token. Seeds 1 and 2 ran before the rule's correction and were checked again under it; seed 3 ran on it.
+- **`--everything` results:** every read below 2.0s on 104,100 transactions (`totals` 1.733s); backup 10.9s, verify 5.9s, restore 11.8s, and all 16 reads byte for byte the same on the restored copy; migration 0036 in 0.018s ([benchmarks.md](benchmarks.md)).
+
 ---
 
 ## Summary for implementation
