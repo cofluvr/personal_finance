@@ -24,6 +24,7 @@ from sync_reference_client import SyncFailed
 from test_decisions import ALL_TABLES, SNAPSHOT_TABLES, SYNC_TABLES
 
 from personal_finance import cli
+from personal_finance.snapshot.builder import SCHEMA_VERSION
 from personal_finance.sync import server as sync_server
 from personal_finance.sync.server import AUTHENTICATION_FAILURE_LIMIT
 
@@ -67,10 +68,10 @@ class TestDelivery:  # YB1
         ((snapshot_id, version, as_of, window_days, generated_at, digest, _),) = ledger.table(
             "snapshot_record")
         assert (snapshot_id, version, as_of, window_days, generated_at, digest) == (
-            serving.document["snapshot_id"], "1.0", "2026-05-04", 90,
+            serving.document["snapshot_id"], SCHEMA_VERSION, "2026-05-04", 90,
             "2026-05-04T17:00:00.000Z", serving.document["content_sha256"])
         _, out, _ = ledger.run("snapshots")
-        assert f"Snapshot {snapshot_id}: schema 1.0, as of 2026-05-04" in out
+        assert f"Snapshot {snapshot_id}: schema {SCHEMA_VERSION}, as of 2026-05-04" in out
 
     def test_a_delivery_and_its_acknowledgement_are_recorded_once(self, ledger, serving):
         ledger.client.sync()

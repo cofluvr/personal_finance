@@ -32,7 +32,7 @@ from personal_finance.reports.safe_to_spend import last_covered_day, safe_to_spe
 from personal_finance.snapshot.canonical import canonical_bytes, sha256_of
 
 FORMAT = "commoncents-snapshot"
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 DEFAULT_WINDOW_DAYS = 90
 LONGEST_WINDOW_DAYS = 366
 
@@ -201,7 +201,27 @@ def budget_section(conn, as_of: date, zone, warnings) -> dict | None:
             "original_daily_cents": pace.original_daily_cents,
             "revised_daily_cents": pace.revised_daily_cents,
             "revised_weekly_cents": pace.revised_weekly_cents,
-            "days_remaining": pace.days_remaining}
+            "days_remaining": pace.days_remaining,
+            "members": members_budget(conn, as_of)}
+
+
+def members_budget(conn, as_of: date) -> list[dict]:
+    """Each member's budget pace, as report budget --member prints it (D-080): null where the
+    plan gives that member no part, never 0."""
+    found = []
+    for index, member in enumerate(load_household(conn).members):
+        report = budget_report(conn, as_of.isoformat()[:7], as_of, member.name)
+        pace = report.pace
+        found.append({
+            "member_index": index,
+            "target_cents": None if pace is None else pace.target_cents,
+            "actual_cents": report.actual_cents,
+            "remaining_capacity_cents": None if pace is None else pace.remaining_capacity_cents,
+            "original_daily_cents": None if pace is None else pace.original_daily_cents,
+            "revised_daily_cents": None if pace is None else pace.revised_daily_cents,
+            "revised_weekly_cents": None if pace is None else pace.revised_weekly_cents,
+            "provisional": report.provisional})
+    return found
 
 
 def safe_to_spend_section(conn, as_of: date, zone, warnings) -> dict | None:

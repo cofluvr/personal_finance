@@ -90,7 +90,13 @@ Last updated: 2026-11-20. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | M20.1: migration 0036, the sync identity, pairing windows, devices, `dv1` | Built on 2026-11-21 (D-076, "How M20 was implemented"), a security change, awaiting the owner's review |
 | M20.2: `sync serve`, deliveries, acknowledgements, revocation | Built on 2026-11-21, awaiting the owner's review |
 | M20.3: the threat model's tests, the protocol, the runbook, `--sync` | Built on 2026-11-21, awaiting the owner's review. The real-phone delivery (YC2) waits for the iOS app |
-| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 to M19 accepted, M20 built for review |
+| M21.1: the acceptance matrix, B1 to B15 end to end, §6 decided, §10's checklists | Built on 2026-11-21 (D-077, "How M21 was implemented"), awaiting the owner's review |
+| M21.2: crash, fuzz and stress suites, `--everything` | Built on 2026-11-21: 484 crash points hold; every fuzz target passes 500 examples at two seeds; stress at three 60-minute seeds |
+| M21.3: [security-audit.md](security-audit.md) | Built on 2026-11-21. D-025's item-by-item decision is the owner's |
+| M21.4: point F, the migration rehearsal, the readiness checklist | The owner's |
+| iOS I1 to I3 (D-079): CommonCentsKit and the app | Built on 2026-11-21, awaiting the owner's review: 28 package tests on the Mac and the simulator, 8 UI tests, and interop against the real server. I4 and the real phone are the owner's ([ios/README.md](../ios/README.md)) |
+| D-080: snapshot 1.1, each member's budget pace | Built on 2026-11-21, awaiting the owner's review |
+| **M12 to M21** | **Approved** on 2026-11-10: the sequence (D-066) and each milestone's plan (D-067 to D-077, [decisions-m12-m21.md](decisions-m12-m21.md)). M12 to M19 accepted, M20 and M21.1 to M21.3 built for review |
 
 ## What exists
 
@@ -369,9 +375,9 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
   scenario, and maps only point 6's inputs: a loan payoff, a bonus, a borrowing, a home purchase,
   an addition with an end date or without `--account` and `--match` stay scenarios. A withdrawn
   promotion's terms row keeps its date, so a terms row on that same date is refused (D-074).
-- **Sync is not checked with a real phone** (YC2): the iOS app (D-079's I3) does not exist yet,
-  so the protocol is exercised by the reference client alone, and the macOS firewall prompt and
-  a real private address are the owner's to check by [sync-runbook.md](sync-runbook.md).
+- **Sync is not checked with a real phone** (YC2): the app (D-079's I3) passes against the real
+  server on loopback, but the macOS firewall prompt, a real private address and a real phone are
+  the owner's to check by [sync-runbook.md](sync-runbook.md) and [ios/README.md](../ios/README.md).
 - **A restored ledger pairs again:** backups leave out the sync key on purpose (D-076 point 2),
   and `sync identity rotate` replaces it.
 - **The port is not stored** (the M20.1 slice plan point 7): `--port` defaults to 8443, and

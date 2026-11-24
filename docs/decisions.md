@@ -100,6 +100,7 @@ and keep its index line.
 | D-077 | M21 plan: backend acceptance, stress testing and the security audit — Approved. M21.1 to M21.3 built for review; M21.4 is the owner's |
 | D-078 | Test suite cost: a copied test ledger, a narrower W1 check and a `slow` tier — Approved and built |
 | D-079 | iOS companion plan, with screen mock-ups — Approved on 2026-11-20; I1 to I3 built for review on 2026-11-21 ([decisions-ios.md](decisions-ios.md)) |
+| D-080 | Snapshot 1.1: each member's budget pace on the phone — Approved by the owner's notes of 2026-11-21 |
 
 ## Rules in brief
 
@@ -813,3 +814,36 @@ Not adopted: selecting tests from a coverage map (a new dependency, and blind to
 migrations and triggers), pytest-xdist (a new dependency), and fewer Hypothesis examples. Full
 suite after 1 and 2: 3,255 passed in 10m40s.
 
+
+## D-080 Snapshot 1.1: each member's budget pace — Approved by the owner's notes of 2026-11-21
+
+Written before any of it was built. The owner's notes of 2026-11-21 give sign-off on everything not
+specifically excepted. The phone's member view (D-079's answered question) shows budget pace only,
+and snapshot 1.0 carries the household's alone. M13 already computes each member's: `pf report
+budget --member NAME` prints their part of the allowance, their actual and revised allowances, and
+provisional while anything is unattributed (D-069). This carries those figures to the phone. It
+computes nothing new.
+
+1. **A minor version, 1.1** (shared-contract §6): `budget` gains one optional field, `members`,
+   a list holding, for each member in `household.members`' order:
+   - `member_index`;
+   - `target_cents`, `remaining_capacity_cents`, `original_daily_cents`, `revised_daily_cents`
+     and `revised_weekly_cents`, `projected`, each null when the plan gives that member no part;
+   - `actual_cents`, `actual`;
+   - `provisional`, a boolean.
+
+   Each is taken from `budget_report(conn, month, as_of, member_name)`, the report the command
+   prints. Nothing else changes.
+2. **The backend emits 1.1 only.** The golden fixture moves to `snapshots/v1.1/`. The 1.0 fixture
+   stays, and a test checks that 1.1's schema accepts it, so a 1.0 snapshot on a phone still
+   reads, as a consumer must accept any minor.
+3. **The phone** decodes `members` when present, and its member view shows that member's budget
+   pace, labelled provisional when so. Without it, a 1.0 snapshot, the view says the Mac has not
+   sent members' figures. Its schema copy and demo snapshot follow the backend's, by the copies
+   test.
+4. **Tests:** each member's figures agree with `report budget --member` on the same ledger and
+   `as_of`; the members' targets add to the household's when the plan divides it all; a member
+   without a part has nulls, never 0. One break run on the new code.
+
+**Not in D-080:** per-member safe to spend, which needs a backend decision on dividing liquidity
+(D-072 left it out).

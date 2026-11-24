@@ -15,4 +15,4 @@ def test_the_apps_schema_is_the_backends():
 
 def test_the_apps_demo_snapshot_is_the_golden_fixture():
     assert (ROOT / "ios/CommonCents/CommonCents/demo-snapshot.json").read_bytes() == (
-        ROOT / "tests/fixtures/synthetic/snapshots/v1.0/household.json").read_bytes()
+        ROOT / "tests/fixtures/synthetic/snapshots/v1.1/household.json").read_bytes()

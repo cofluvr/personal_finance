@@ -9,6 +9,9 @@ let repository = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
 let golden = try! Data(contentsOf: repository
+    .appendingPathComponent("tests/fixtures/synthetic/snapshots/v1.1/household.json"))
+/// The previous minor, which this app must still read (shared-contract §6, D-080).
+let earlierMinor = try! Data(contentsOf: repository
     .appendingPathComponent("tests/fixtures/synthetic/snapshots/v1.0/household.json"))
 
 /// The golden document changed by `change`, its digest recomputed unless told not to.
@@ -46,9 +49,22 @@ func refusal(_ data: Data) -> String? {
     @Test func theGoldenSnapshotIsAcceptedAndDecodes() throws {
         #expect(refusal(golden) == nil)
         let snapshot = try Snapshot.decoded(fromVerified: golden)
-        #expect(snapshot.schemaVersion == "1.0")
+        #expect(snapshot.schemaVersion == "1.1")
         #expect(snapshot.content.accounts.isEmpty == false)
         #expect(snapshot.content.cutoff.asOf == snapshot.content.period.windowLastDay)
+    }
+
+    @Test func theEarlierMinorIsReadWithoutMembers() throws {
+        #expect(refusal(earlierMinor) == nil)
+        let snapshot = try Snapshot.decoded(fromVerified: earlierMinor)
+        #expect(snapshot.schemaVersion == "1.0" && snapshot.content.budget?.members == nil)
+    }
+
+    @Test func membersBudgetPaceIsDecodedWithNullsKept() throws {
+        let snapshot = try Snapshot.decoded(fromVerified: golden)
+        let members = try #require(snapshot.content.budget?.members)
+        #expect(members.map(\.memberIndex) == [0, 1])
+        #expect(members.allSatisfy { $0.targetCents == nil && $0.actualCents == 0 })
     }
 
     @Test func reencodingGivesTheSameBytes() throws {
