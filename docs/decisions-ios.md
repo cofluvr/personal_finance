@@ -113,3 +113,36 @@ and a real pairing are the owner's (I4, YC2).
 
 **Not in I1 to I3:** I4's provisioning guide, which needs the owner's Apple ID and phone; any
 write from the phone; background sync; widgets.
+
+### The owner's review of 2026-11-23: I1 to I3 approved, with charts
+
+The owner approved the app and D-080, and asked for "graphs and graphics wherever possible". Made
+as a review change, in `ios/CommonCents/CommonCents/Visuals.swift`, with Swift Charts (a system
+framework, so B holds):
+
+| Screen | Chart |
+|---|---|
+| Today | The two daily limits as bars, the lower in color; the budget's spent-of-target bar; original against revised daily allowance; each goal's assigned and still-needed bar |
+| Member view | That member's spent-of-target bar, drawn only where the plan gives them a part |
+| Why this number | The two limits; liquid against protected |
+| Spending | Income and spending by month (tapping a month chooses it); the month's categories, largest first; the members' split of the month's spending |
+| Transactions | Money in and out each day over the window |
+| Goals | Each goal's assigned and still-needed bar |
+| Accounts | Each account's counted balance either side of zero; each loan's due periods, colored by state |
+
+**Point 4 still holds.** A chart is given only figures the snapshot holds, and every amount it
+shows as text is one of them, through `Money.text`. A bar's length, a stack and an axis scale are
+Swift Charts' drawing, not a figure the app states: no total, share or difference appears that
+the Mac did not write. Axis ticks use `Money.dollars`, `Money.text` without its cents. Every chart
+sits beside the rows that give its exact figures, and `noSourceDoesArithmeticOnMoney` covers the
+new file.
+
+**Color** follows the data-viz reference palette, light and dark steps: one hue for sizes, fixed
+categorical slots by member index, blue and red either side of zero, and the reserved status
+colors for loan states, each named in the legend. **VoiceOver** reads single-series bars mark by
+mark; the grouped and dated charts (the monthly trend, the cash flow, the loan dues) speak as one
+element whose value lists each figure, since Swift Charts would otherwise read them as raw cents.
+
+**Tests:** `testChartsSpeakTheSnapshotsFigures` checks the charts reach VoiceOver with the
+snapshot's own figures; `testATransactionIsReadOnly` now opens a transaction by its description,
+since the first cell is the cash-flow chart. The Transactions link moved up, under the trend.

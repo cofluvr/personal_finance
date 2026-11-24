@@ -45,7 +45,7 @@ and keep its index line.
 | D-022 | Repeat imports of identical bytes — Default, with approved rules below |
 | D-023 | Failure handling — Default |
 | D-024 | Coverage is not extraction — Approved |
-| D-025 | Security controls proposal — Not applied |
+| D-025 | Security controls proposal — Every item decided "apply" by the owner on 2026-11-23 ([security-audit.md](security-audit.md) §7); not yet applied |
 | D-026 | Identifier guarantees are persisted — Approved, implemented in slice 3 |
 | D-027 | Effective coverage for metadata claims — Approved, implemented in slice 3 |
 | D-028 | Single-day overlaps apply to ID-less matching only — Approved |
@@ -96,11 +96,11 @@ and keep its index line.
 | D-073 | M17 plan: the local UI completed, with browser writes — Approved as a security change. M17 accepted on 2026-11-21 |
 | D-074 | M18 plan: financial scenarios — Approved. M18 accepted on 2026-11-21 |
 | D-075 | M19 plan: snapshots — Approved. M19 accepted on 2026-11-21; its compatibility policy is in shared-contract §6 |
-| D-076 | M20 plan: pairing and local-network sync — Approved as a security change, with `segno`. Built for review; the protocol is [sync-protocol.md](sync-protocol.md) |
-| D-077 | M21 plan: backend acceptance, stress testing and the security audit — Approved. M21.1 to M21.3 built for review; M21.4 is the owner's |
+| D-076 | M20 plan: pairing and local-network sync — Approved as a security change, with `segno`. M20 approved on 2026-11-23; the protocol is [sync-protocol.md](sync-protocol.md) |
+| D-077 | M21 plan: backend acceptance, stress testing and the security audit — Approved. M21.1 to M21.3 approved on 2026-11-23; M21.4 is the owner's |
 | D-078 | Test suite cost: a copied test ledger, a narrower W1 check and a `slow` tier — Approved and built |
-| D-079 | iOS companion plan, with screen mock-ups — Approved on 2026-11-20; I1 to I3 built for review on 2026-11-21 ([decisions-ios.md](decisions-ios.md)) |
-| D-080 | Snapshot 1.1: each member's budget pace on the phone — Approved by the owner's notes of 2026-11-21 |
+| D-079 | iOS companion plan, with screen mock-ups — Approved on 2026-11-20; I1 to I3 approved on 2026-11-23, with charts added on review ([decisions-ios.md](decisions-ios.md)) |
+| D-080 | Snapshot 1.1: each member's budget pace on the phone — Approved by the owner's notes of 2026-11-21; built and approved on 2026-11-23 |
 
 ## Rules in brief
 
@@ -119,7 +119,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Transfers (M3) | Suspected transfers never increase safe-to-spend | D-011 |
 | Totals wording | Account inflows, account outflows, net account movement | D-010 |
 | Repository | Do not move it. Real data needs the M5 gate first | D-019 |
-| Security proposal | **Unapplied.** Unverified, and not active protection | D-025 |
+| Security proposal | **Decided, unapplied.** The owner applies it. Until then, not active protection | D-025 |
 | External-ID matching | Validated and account-scoped. A differing description alone does not conflict for a reliable ID, and both are preserved. Conflicts in amount, status or a date present on both records are flagged | D-006 |
 | Single-day overlap | ID-less matches stay possible duplicates, including under `user_declared` coverage. An intentional conservative policy, not a mathematical requirement. Does not override a confident reliable-ID match | D-007 |
 | Candidate discovery | Needs evidence beyond amount and date: similar merchant or description, a validated identifier, or a documented source-specific relationship. Different descriptions alone are not evidence. The date window is a configurable heuristic. Candidates create review items and never authorize a merge | D-006 |

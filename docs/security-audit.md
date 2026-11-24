@@ -163,4 +163,7 @@ recommendation for each item, for the owner to decide:
 | Deny `mcp__claude-vscode__getDiagnostics` | Apply, or drop as harmless |
 | The verification canaries | Run them once after applying |
 
-Until the owner applies it, D-025 stays **unapplied**, and provides no protection.
+**Decided by the owner on 2026-11-23:** every recommendation above is accepted, so each item is
+to be applied as written. Applying it changes the development agent's own permissions and sandbox,
+which CLAUDE.md leaves to the owner, so no session has applied it. Until the owner does, D-025
+provides no protection.

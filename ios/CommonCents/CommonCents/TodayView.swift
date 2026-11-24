@@ -36,6 +36,9 @@ struct TodayView: View {
                     MemberPace(snapshot: snapshot, memberIndex: index)
                 } else {
                     SafeToSpendHero(snapshot: snapshot, notCurrent: notCurrent)
+                    if let safe = snapshot.content.safeToSpend {
+                        TwoLimitsChart(safe: safe)
+                    }
                 }
                 FreshnessLine(snapshot: snapshot)
             }
@@ -110,6 +113,7 @@ struct MemberPace: View {
         if let pace = snapshot.content.budget?.members?.first(where: { $0.memberIndex == memberIndex }) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("\(name)'s budget pace").font(.headline)
+                SpentGauge(actualCents: pace.actualCents, targetCents: pace.targetCents)
                 Row("Revised daily allowance", Money.text(pace.revisedDailyCents, missing: "No part in the plan"),
                     note: "budget pace")
                 Row("Revised weekly allowance", Money.text(pace.revisedWeeklyCents, missing: "No part in the plan"),
@@ -138,6 +142,11 @@ struct BudgetSection: View {
                 if case let .passed(own, _) = boundary {
                     Text("\(monthName(own))'s final figures. Sync for this month's.").font(.footnote).foregroundStyle(.orange)
                 }
+                SpentGauge(actualCents: budget.actualCents, targetCents: budget.targetCents)
+                    .padding(.vertical, 4)
+                ComparisonBars([("Original, daily", budget.originalDailyCents, false),
+                                ("Revised, daily", budget.revisedDailyCents, true)],
+                               emphasisNote: ", the pace for the rest of the month")
                 Row("Original daily allowance", Money.text(budget.originalDailyCents))
                 Row("Revised daily allowance", Money.text(budget.revisedDailyCents), note: "budget pace")
                 Row("Revised weekly allowance", Money.text(budget.revisedWeeklyCents), note: "budget pace")
@@ -157,7 +166,10 @@ struct GoalsGlance: View {
         if !funds.isEmpty {
             Section("Goals") {
                 ForEach(Array(funds)) { fund in
-                    Row(fund.name, Money.text(fund.assignedCents), note: fund.due.map { "due \(Dates.shortDay($0))" } ?? fund.kind)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Row(fund.name, Money.text(fund.assignedCents), note: fund.due.map { "due \(Dates.shortDay($0))" } ?? fund.kind)
+                        FundProgressBar(fund: fund)
+                    }
                 }
             }
         }
@@ -187,12 +199,14 @@ struct WhyView: View {
         List {
             if let safe = snapshot.content.safeToSpend {
                 Section("Two limits, the lower wins") {
+                    TwoLimitsChart(safe: safe)
                     Row("Budget, daily", Money.text(safe.budgetDailyCents), note: "budget pace",
                         mark: safe.limiting == "budget")
                     Row("Cash until payday, daily", Money.text(safe.liquidityDailyCents), note: "estimated",
                         mark: safe.limiting == "liquidity")
                 }
                 Section("Cash until payday · \(safe.horizonDays) days to \(Dates.shortDay(safe.horizonLastDay))") {
+                    ComparisonBars([("Liquid", safe.liquidCents, true), ("Protected", safe.protectedCents, false)])
                     Row("Next paycheck", Dates.shortDay(safe.nextPaycheck))
                     Row("Liquid balance", Money.text(safe.liquidCents), note: "estimated")
                     Row("Protected", Money.text(safe.protectedCents), note: "reserved")
@@ -224,6 +238,17 @@ struct WhyView: View {
 }
 
 // Shared pieces.
+
+/// The two daily limits as bars, the lower one, which sets today's figure, in color.
+struct TwoLimitsChart: View {
+    let safe: Snapshot.SafeToSpend
+
+    var body: some View {
+        ComparisonBars([("Budget", safe.budgetDailyCents, safe.limiting == "budget"),
+                        ("Cash to payday", safe.liquidityDailyCents, safe.limiting == "liquidity")],
+                       emphasisNote: ", the lower: it sets today's figure")
+    }
+}
 
 struct StatusBanners: View {
     let snapshot: Snapshot
