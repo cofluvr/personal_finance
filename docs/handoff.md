@@ -49,9 +49,15 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
     included. Use interpolation, `append`, or `compactMap`.
   - **Swift Charts reads grouped or dated bars as raw cents** to VoiceOver. Such a chart speaks as
     one element whose value lists each figure through `Money.text`.
-  - **Disk space.** Old pytest folders under `build/tmp/pytest-of-*` reached 12 GB and filled the
-    disk halfway through a full run, which then failed with errors. Check `df -h .` first; a full
-    run needs about 6 GB.
+  - **Disk space.** Old pytest folders under `build/tmp/pytest-of-*` once filled the disk halfway
+    through a full run, which then failed with errors. A full run needs about 6 GB: check
+    `df -h .` first. On 2026-11-25 the owner cleaned `build/` (all but `ios/`, `charts/` and
+    `s21/`): every SQLite ledger, `pytest-of-*` folder and cache is gone; scripts, logs, notes and
+    G6 capture JSONs remain. Past slices' kept ledgers (such as `s18/g6/ledgers*`,
+    `baseline-e9745ec`'s, `s20/walk1`'s) cannot be compared again: rebuild one from its commit.
+    The owner's PR `chore/prune-build` adds `bin/prune-build` and a disk rule to CLAUDE.md; once
+    it is merged, follow CLAUDE.md instead of this note.
+  - **`build/wt-prune/` is that PR's worktree.** Do not edit, prune or remove it.
   - **Two simulators share the name iPhone 17 Pro** (iOS 26.3 and 27.2): pass the destination by
     `id=`.
   - **A snapshot change** needs a version change and its own `snapshots/vX.Y/` fixture, the app's
