@@ -27,6 +27,8 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "--strict-markers"
+# Keep only the latest run's pytest-of-* folder; old ones reached 12 GB under build/tmp.
+tmp_path_retention_count = 1
 markers = [
     "slow: a test function over about 3 seconds, mostly order and generated-ledger property tests. Commit gates during a slice skip them with -m 'not slow'; the gate before review runs everything (D-078).",
 ]

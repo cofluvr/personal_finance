@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Frees disk space under build/ by removing the bulk that walkthroughs, breaks and benchmarks
+leave behind: SQLite ledgers, bytecode caches and pytest temporary folders.
+
+Scripts, notes, logs and captures stay, so the decisions' references to build/ still resolve. The
+top-level folders whose files changed most recently are left whole, as are git worktrees and any
+folder named with --keep.
+
+Dry run by default. Pass --delete to remove. Do not run it while a suite or capture is running.
+"""
+import argparse
+import os
+import sys
+from pathlib import Path
+
+BULK_FILE_SUFFIXES = (".db", ".db-wal", ".db-shm", ".db-journal", ".pyc")
+
+
+def is_bulk_directory_name(directory_name: str) -> bool:
+    return directory_name.startswith("pytest-of-") or "cache" in directory_name
+
+
+def find_bulk_files(build_directory: Path, kept_folder_names: set[str]) -> list[Path]:
+    bulk_files = []
+    for top_level_folder in sorted(build_directory.iterdir()):
+        if not top_level_folder.is_dir() or top_level_folder.is_symlink():
+            continue
+        if top_level_folder.name in kept_folder_names:
+            continue
+        for directory, subdirectory_names, file_names in os.walk(top_level_folder):
+            directory_path = Path(directory)
+            inside_bulk_directory = any(
+                is_bulk_directory_name(part)
+                for part in directory_path.relative_to(build_directory).parts)
+            for file_name in file_names:
+                if inside_bulk_directory or file_name.endswith(BULK_FILE_SUFFIXES):
+                    bulk_files.append(directory_path / file_name)
+    return bulk_files
+
+
+def latest_file_modification_time(folder: Path) -> float:
+    """A folder's own time changes when files are removed from it, so read its files' times."""
+    latest_time = 0.0
+    for directory, _, file_names in os.walk(folder):
+        for file_name in file_names:
+            latest_time = max(latest_time, (Path(directory) / file_name).lstat().st_mtime)
+    return latest_time
+
+
+def protected_folder_names(build_directory: Path, newest_count: int) -> set[str]:
+    """The newest folders by their files' times, and every git worktree, whatever its age."""
+    folders = [path for path in build_directory.iterdir()
+               if path.is_dir() and not path.is_symlink()]
+    worktree_names = {path.name for path in folders if (path / ".git").exists()}
+    folders.sort(key=latest_file_modification_time, reverse=True)
+    return worktree_names | {path.name for path in folders[:newest_count]}
+
+
+def remove_empty_directories(top_level_folder: Path) -> None:
+    for directory, _, _ in os.walk(top_level_folder, topdown=False):
+        directory_path = Path(directory)
+        if directory_path != top_level_folder and not any(directory_path.iterdir()):
+            directory_path.rmdir()
+
+
+def main(arguments: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--build-directory", type=Path,
+                        default=Path(__file__).resolve().parent.parent / "build")
+    parser.add_argument("--keep-newest", type=int, default=3,
+                        help="leave this many most recently changed folders whole (default 3)")
+    parser.add_argument("--keep", action="append", default=[], metavar="FOLDER",
+                        help="leave this top-level folder whole; repeatable")
+    parser.add_argument("--delete", action="store_true", help="remove; without it, a dry run")
+    options = parser.parse_args(arguments)
+
+    build_directory = options.build_directory
+    if not build_directory.is_dir():
+        print(f"Error: no build directory at {build_directory}.", file=sys.stderr)
+        return 2
+
+    kept_folder_names = set(options.keep) | protected_folder_names(build_directory,
+                                                                   options.keep_newest)
+    bulk_files = find_bulk_files(build_directory, kept_folder_names)
+    total_bytes = sum(path.lstat().st_size for path in bulk_files)
+
+    print(f"Kept whole: {', '.join(sorted(kept_folder_names)) or 'none'}")
+    if options.delete:
+        for path in bulk_files:
+            path.unlink()
+        for top_level_folder in build_directory.iterdir():
+            if top_level_folder.is_dir() and top_level_folder.name not in kept_folder_names:
+                remove_empty_directories(top_level_folder)
+        print(f"Removed {len(bulk_files)} files, {total_bytes / 2**30:.1f} GB.")
+    else:
+        print(f"Would remove {len(bulk_files)} files, {total_bytes / 2**30:.1f} GB. "
+              "Rerun with --delete.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

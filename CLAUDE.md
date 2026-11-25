@@ -114,7 +114,13 @@ reach the cost it claims to measure.
 - **Learn an outside tool's output from a real run before designing on it** (diskutil in M5.2).
 - **Shell.** Never pipe a gate: redirect to a file and chain the commit to pytest itself. An
   unquoted `--include=*.py` fails, and `echo ====` is read as a command. `mktemp -d` ignores
-  `TMPDIR` here. The harness refuses `rm -rf` of a `build/` folder, so use a new folder.
+  `TMPDIR` here. The harness refuses `rm -rf` of a `build/` folder: reuse a slice's folder rather
+  than adding `_2`, `_3` copies.
+- **Disk space.** Ledgers left under `build/` reached 112 GB and filled the disk. At the end of a
+  slice, and before a full run if `df -h .` shows under 10 GB free, run `bin/prune-build` (a dry
+  run), then `bin/prune-build --delete`, never while a suite or capture is running. It keeps whole
+  the three folders with the newest files, git worktrees and any `--keep` folder, and elsewhere
+  removes ledgers, caches and pytest folders only.
 - **Long runs read the source live.** Run a baseline from `git archive HEAD` under `build/`, and an
   after-capture from a copy of `src/`. The export has no `.git` or `.venv`, so
   `test_ignore_rules.py`, `test_entry_point.py` and one `test_pdf_reader.py` test fail there by
