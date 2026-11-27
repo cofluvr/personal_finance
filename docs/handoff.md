@@ -82,7 +82,7 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
 | Branch | `feature/d081-folder-ledger` (D-081), on `feature/m10-rules`. `main`, here and on GitHub, holds everything to `5cac64e` (merge `637a72a`, the owner's). The charts commit after it is local, not pushed |
 | Latest commit | Run `git log -1`: the app's charts. M20 from `af4a9d7` to `3dc0654`; M21 from `ef3a9e6`; the app `a3d209b`; D-080 `73bcfff`. Earlier commits are in the archive |
-| Latest gating run | The full suite, slow tests included, on the charts commit's tree: 4,500 passed in 0:21:30, exit code 0. Swift: `swift test` 28 passed; the UI tests 10 passed |
+| Latest gating run | The full suite, slow tests included, on D-081's tree (`269906e`): 4,536 passed in 0:20:34, exit code 0. Swift, unchanged since the charts commit: `swift test` 28 passed; the UI tests 10 passed |
 | Python | 3.12.6, project `.venv` already present |
 | Xcode | 27.2 with an iOS 26.3 simulator (iPhone 17 Pro); Swift 6.4 |
 | macOS | Golden Gate 27.2, as stated by the owner |
