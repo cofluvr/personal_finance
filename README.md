@@ -162,6 +162,38 @@ To run it by name, add the `bin` folder to `PATH`, or link `bin/pf` from a folde
 | 2 | The command stopped: bad usage, a validation error, a busy ledger, or an unexpected problem |
 | 141 | The program reading the output closed it early, as in `bin/pf transactions \| head` |
 
+## Choosing Where Real Data Lives
+
+A ledger for actual financial data is made with `pf init --real`, and it chooses one of two protections. Neither can be changed later.
+
+| | Encrypted disk image (the default) | Private folder |
+|---|---|---|
+| Made with | `pf init --real --db PATH` | `pf init --real --protection private-folder --db PATH` |
+| Where it lives | A folder on a mounted, encrypted disk image you create | Any folder you own, iCloud Drive or Dropbox included |
+| Setup | Create and mount the image first ([readiness checklist](docs/real-data-readiness.md)) | None beyond making the folder |
+| Two Macs | No: synced folders are refused | Yes, through iCloud Drive, one Mac at a time |
+| Encrypted at rest by | The disk image, checked on every open | FileVault and iCloud, which pf cannot check |
+| Backups | Must go on a different mounted volume | Any folder outside a git checkout |
+
+Choose the disk image if the ledger must stay protected even from someone using your unlocked Mac account. Otherwise the private folder is enough, as long as FileVault is on (System Settings, Privacy & Security).
+
+### A private folder in iCloud Drive, shared by two Macs
+
+1. On the first Mac, make a folder for the ledger alone, then create the ledger in it:
+
+   ```sh
+   mkdir ~/Library/Mobile\ Documents/com~apple~CloudDocs/CommonCents
+   bin/pf init --real --protection private-folder \
+     --db ~/Library/Mobile\ Documents/com~apple~CloudDocs/CommonCents/ledger.db
+   ```
+
+2. In Finder, open iCloud Drive, Control-click the `CommonCents` folder and choose **Keep Downloaded**, so macOS never removes the files from either Mac to save space. Do the same on the second Mac once the folder appears there.
+3. Use the same `--db` path on both Macs. pf makes the folder and its files private to you each time it opens the ledger, since iCloud resets their permissions when it syncs.
+4. **Use one Mac at a time.** Before switching, quit `pf ui` and wait until Finder shows the folder fully synced. If both Macs change the ledger before iCloud catches up, iCloud keeps a second copy, such as `ledger 2.db`. pf then refuses to open the ledger until you choose one: look at each with `--db`, keep the one to go on with as `ledger.db`, and move the other out of the folder.
+5. Back up regularly with `bin/pf backup create --db LEDGER --to FOLDER/NEW_NAME`, ideally to an external drive. A copy in iCloud alone does not protect you against a mistake that iCloud then syncs to both Macs.
+
+For end-to-end encryption in iCloud, turn on Advanced Data Protection (System Settings, your name, iCloud). Rules and limits: [D-081](docs/decisions.md) and [status](docs/status.md).
+
 ## Synthetic Example
 
 Run these from the repository root. Keep real data out of this repository, and databases outside it. Totals are account movements, not income or spending.

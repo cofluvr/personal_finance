@@ -1145,3 +1145,32 @@ and 35 (M19) once each is accepted. After 26, the owner sets the household timez
 `pf setting set`.
 
 Every fixture is invented. Point F with the owner on their already-imported files is still open.
+
+## M20, M21.1 to M21.3, the app and D-080, as built for review (2026-11-21)
+
+Approved by the owner on 2026-11-23. Moved from the handoff unchanged.
+
+**Built on 2026-11-21, for the owner's review,** each recorded in its decision's "How
+implemented":
+
+- **M20 (D-076), pairing and local-network sync.** This is a security change: TLS 1.3 on one
+  private address, `/usr/bin/openssl` and `segno`. Its protocol is
+  [sync-protocol.md](../sync-protocol.md), and the owner's steps [sync-runbook.md](../sync-runbook.md).
+- **M21.1 to M21.3 (D-077):**
+  - [backend-acceptance.md](../backend-acceptance.md), with B1 to B15 end to end;
+  - `tests/stress/` (crashes, fuzz, stress) and `--everything`;
+  - [security-audit.md](../security-audit.md).
+- **The iPhone app, I1 to I3 (D-079), in `ios/`:** CommonCentsKit and the SwiftUI app
+  ([ios/README.md](../../ios/README.md)).
+- **D-080, snapshot 1.1:** each member's budget pace, on the phone's member view.
+
+**Latest results:**
+
+- **The full suite:** see "Latest gating run" below.
+- **Swift:** 28 package tests on the Mac and the iOS 26 simulator, and 9 UI tests. Interop
+  against the real server on loopback passes.
+- **Crashes:** 484 kill points over 10 commands, every one leaving the before or the after
+  state.
+- **Fuzz:** every target passes 500 examples at seeds 1 and 2.
+- **Stress:** three 60-minute seeds, 4 writers and 2 readers each: 350,387 writes (129,297 accepted) and 696,041 reads; every minute's integrity, foreign-key and reconciliation check passed, no read failed, every refusal was a documented one, and no accepted write reused its target's token. Seeds 1 and 2 ran before the rule's correction and were checked again under it; seed 3 ran on it.
+- **`--everything`:** every read below 2.0s on 104,100 transactions (`totals` 1.733s); backup 10.9s, verify 5.9s, restore 11.8s, and all 16 reads byte for byte the same on the restored copy; migration 0036 in 0.018s ([benchmarks.md](../benchmarks.md)).

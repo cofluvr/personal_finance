@@ -14,11 +14,22 @@ struct SpendingView: View {
                 let months = snapshot.content.months.map(\.month)
                 let chosen = month ?? months.last!
                 List {
-                    Picker("Month", selection: Binding(get: { chosen }, set: { month = $0 })) {
-                        ForEach(months.reversed(), id: \.self) { Text(monthName($0) + " " + $0.prefix(4)).tag($0) }
+                    Section {
+                        MonthlyTrendChart(months: snapshot.content.months, chosenMonth: chosen) { month = $0 }
+                        Picker("Month", selection: Binding(get: { chosen }, set: { month = $0 })) {
+                            ForEach(months.reversed(), id: \.self) { Text(monthName($0) + " " + $0.prefix(4)).tag($0) }
+                        }
+                    } footer: {
+                        Text("Tap a month to choose it.")
+                    }
+                    Section {
+                        NavigationLink("Transactions, last \(snapshot.content.period.windowDays) days") {
+                            TransactionsView(snapshot: snapshot)
+                        }
                     }
                     if let row = snapshot.content.months.first(where: { $0.month == chosen }) {
                         Section("By category · actual") {
+                            CategoryBars(categories: row.spendingByCategory)
                             ForEach(row.spendingByCategory, id: \.category) { category in
                                 Row(category.category ?? "Uncategorized", Money.text(category.outCents),
                                     note: "\(category.transactions) transactions")
@@ -29,16 +40,12 @@ struct SpendingView: View {
                     if let household = snapshot.content.household.months.first(where: { $0.month == chosen }) {
                         Section(header: Text("Members · actual"),
                                 footer: Text("Members' parts add exactly to the household total, as the Mac checks.")) {
+                            MemberSplitBar(snapshot: snapshot, householdMonth: household)
                             ForEach(household.members, id: \.memberIndex) { part in
                                 Row(snapshot.member(part.memberIndex)?.name ?? "Member", Money.text(part.outCents), note: "allocated")
                             }
                             Row("Unattributed", Money.text(household.unattributed.outCents))
                             Row("Household", Money.text(household.household.outCents))
-                        }
-                    }
-                    Section {
-                        NavigationLink("Transactions, last \(snapshot.content.period.windowDays) days") {
-                            TransactionsView(snapshot: snapshot)
                         }
                     }
                 }
@@ -59,7 +66,15 @@ struct TransactionsView: View {
             search.isEmpty || (transaction.description ?? "").localizedCaseInsensitiveContains(search)
                 || (transaction.category ?? "").localizedCaseInsensitiveContains(search)
         }
-        List(shown) { transaction in
+        List {
+            if search.isEmpty {
+                Section {
+                    CashFlowChart(transactions: snapshot.content.transactions)
+                } footer: {
+                    Text("Money in and out each day, as posted and pending.")
+                }
+            }
+            ForEach(shown) { transaction in
             NavigationLink {
                 TransactionDetail(snapshot: snapshot, transaction: transaction)
             } label: {
@@ -74,6 +89,7 @@ struct TransactionsView: View {
                         .compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary)
                 }
+            }
             }
         }
         .searchable(text: $search, prompt: "Search the last \(snapshot.content.period.windowDays) days")
@@ -116,6 +132,7 @@ struct GoalsView: View {
                         Section {
                             Row(fund.name, fund.standing.replacingOccurrences(of: "_", with: " ").capitalized,
                                 note: [fund.kind, fund.due.map { "due \(Dates.shortDay($0))" }].compactMap { $0 }.joined(separator: " · "))
+                            FundProgressBar(fund: fund)
                             Row("Assigned", Money.text(fund.assignedCents), note: "reserved")
                             Row("Still needed", Money.text(fund.outstandingCents), note: "planned")
                             Row("Planned this month", Money.text(fund.plannedContributionCents), note: "planned")
@@ -152,6 +169,7 @@ struct AccountsView: View {
                         }
                     }
                     Section("Balances, with the date each was observed") {
+                        NetWorthBars(snapshot: snapshot)
                         ForEach(worth.accounts) { account in
                             Row(snapshot.account(account.accountIndex)?.displayName ?? "Account",
                                 Money.text(account.balanceCents, missing: "No balance"),
@@ -164,6 +182,7 @@ struct AccountsView: View {
                                 Row(snapshot.account(loan.accountIndex)?.displayName ?? "Loan",
                                     Money.text(loan.owedCents, missing: "No balance"),
                                     note: loan.observedOn.map { "owed as of \(Dates.shortDay($0))" })
+                                LoanDueChart(loan: loan)
                                 if let next = loan.duePeriods.first(where: { $0.state == "upcoming" }) {
                                     Row("Next payment", Money.text(next.dueCents), note: Dates.shortDay(next.due))
                                 }

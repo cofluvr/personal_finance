@@ -18,7 +18,7 @@ Needs Xcode 27 with an iOS 26 simulator. No third-party package is used.
 cd ios/CommonCentsKit && swift test                       # the package, on the Mac
 .venv/bin/python ios/interop/run_interop.py --work build/ios/interop   # against the real server
 xcodebuild -project ios/CommonCents/CommonCents.xcodeproj -scheme CommonCents \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test  # builds, then 9 UI tests
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test  # builds, then 10 UI tests
 ```
 
 The UI tests run the app on the demo snapshot. They check that:
@@ -30,7 +30,14 @@ The UI tests run the app on the demo snapshot. They check that:
 - Sync waits for pairing, and Settings offers deletion;
 - returning within a minute stays unlocked;
 - a member view shows that member's budget pace, never $0.00 for no part (D-080);
-- the largest accessibility text size still shows Today's figure.
+- the largest accessibility text size still shows Today's figure;
+- the charts reach VoiceOver with the snapshot's own figures.
+
+**Charts** are in `CommonCents/Visuals.swift`, with Swift Charts. Each plots figures the snapshot
+holds and sits beside the rows that give them exactly (D-079, the review of 2026-11-23).
+
+If more than one simulator is named iPhone 17 Pro, pass `-destination 'id=<UDID>'` from
+`xcrun simctl list devices available`.
 
 The package's tests read the backend's golden snapshot,
 `tests/fixtures/synthetic/snapshots/v1.0/household.json`, so the phone and the Mac are checked

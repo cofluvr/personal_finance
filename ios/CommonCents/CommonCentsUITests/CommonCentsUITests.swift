@@ -67,6 +67,28 @@ final class CommonCentsUITests: XCTestCase {
         }
     }
 
+    /// The charts (review of 2026-11-23) reach VoiceOver with the snapshot's own figures.
+    func testChartsSpeakTheSnapshotsFigures() {
+        let app = launched(["-demo", "-unlocked"])
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 10))
+        let labelled = { (label: String) in
+            app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+        }
+        XCTAssertTrue(labelled("Budget").exists, "the two limits' chart")
+        let spent = labelled("Spent, actual")
+        for _ in 0..<6 where !spent.exists { app.swipeUp() }
+        XCTAssertTrue(spent.exists, "the budget's spent-of-target bar")
+        app.tabBars.buttons["Spending"].tap()
+        let trend = labelled("Income and spending by month")
+        XCTAssertTrue(trend.waitForExistence(timeout: 5), "the monthly trend chart")
+        XCTAssertTrue((trend.value as? String ?? "").contains("May: income $2,500.00, spending $0.00"))
+        app.tabBars.buttons["Accounts"].tap()
+        XCTAssertTrue(labelled("Mortgage").waitForExistence(timeout: 5), "the net worth chart")
+        let dues = labelled("Payments due")
+        for _ in 0..<6 where !dues.exists { app.swipeUp() }
+        XCTAssertTrue((dues.value as? String ?? "").contains("Mon 5 Jan: $1,500.00 due, $0.00 paid, Missed"))
+    }
+
     func testWhyExplainsTheTwoLimits() {
         let app = launched(["-demo", "-unlocked"])
         app.navigationBars["Today"].buttons["Why?"].tap()
@@ -78,7 +100,8 @@ final class CommonCentsUITests: XCTestCase {
     func testATransactionIsReadOnly() {
         let app = launched(["-demo", "-unlocked", "-tab", "1"])
         app.buttons["Transactions, last 90 days"].tap()
-        let first = app.cells.firstMatch
+        // The first cell is the cash-flow chart: open a transaction by its description.
+        let first = app.cells.containing(.staticText, identifier: "SYNTHETIC PAYROLL").firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         first.tap()
         XCTAssertTrue(app.staticTexts["To change it, use the Mac. The phone is read-only."]

@@ -18,6 +18,11 @@ public enum Money {
         let sign = cents < 0 ? "\u{2212}" : ""
         return "\(sign)$\(String(grouped.reversed())).\(padded.suffix(2))"
     }
+
+    /// "$1,234", for a chart's axis ticks: Money.text without its cents, by dropping text.
+    public static func dollars(_ cents: Int) -> String {
+        String(text(cents).dropLast(3))
+    }
 }
 
 public enum Freshness: Equatable, Sendable {
@@ -43,6 +48,9 @@ public enum Dates {
     }
 
     public static func instant(_ text: String) -> Date? { instantFormatter().date(from: text) }
+
+    /// A YYYY-MM-DD date as midnight UTC, for placing it on a chart's time axis.
+    public static func day(_ day: String) -> Date? { dayFormatter("yyyy-MM-dd").date(from: day) }
 
     /// A YYYY-MM-DD date as "Mon 4 May", in UTC so the backend's date is never shifted.
     public static func shortDay(_ day: String?) -> String {

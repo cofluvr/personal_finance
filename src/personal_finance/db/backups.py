@@ -3,10 +3,12 @@
 A backup is a new folder holding `ledger.db`, copied with SQLite's online backup API, every
 referenced original under `originals/`, and `manifest.json`: each file's SHA-256 and size, the
 schema and code versions, and the ledger's logical digest. Nothing here overwrites: a backup is
-written only into a folder it creates, and a restore only to a new path. A real ledger's backup and
-restore pass the location and encrypted-volume gates, and a backup must be on a mounted volume other
-than the ledger's. Two disk images whose files share a disk are not detected (point 7, as amended).
-A synthetic ledger's backup and restore are not gated, as nothing else about it is.
+written only into a folder it creates, and a restore only to a new path. An encrypted-disk-image
+ledger's backup and restore pass the location and encrypted-volume gates, and a backup must be on a
+mounted volume other than the ledger's. Two disk images whose files share a disk are not detected
+(point 7, as amended). A private-folder ledger's backup goes in any existing folder outside a git
+work tree, and its restore passes the private-folder rules (D-081). A synthetic ledger's backup and
+restore are not gated, as nothing else about it is.
 
 The manifest shows that a backup is whole and unchanged. It is not signed, so it proves nothing
 against someone who rewrites the manifest too.
@@ -34,8 +36,12 @@ from personal_finance.db.originals import (
     verify_originals,
 )
 from personal_finance.db.real_ledger import (
+    ENCRYPTED_DISK_IMAGE,
+    PRIVATE_FOLDER,
     UnsafeLocation,
     is_real_ledger,
+    real_ledger_protection,
+    refuse_unsafe_location_for_protection,
     refuse_unsafe_real_ledger_location,
 )
 
@@ -161,9 +167,22 @@ def remove_written(path: Path) -> None:
 
 # Creating a backup.
 
-def refuse_unsafe_backup_destination(database_path: Path, backup_folder: Path) -> None:
-    """Points 2 and 3 for the folder that will hold the backup, and a volume other than the
-    ledger's."""
+def refuse_unsafe_backup_destination(database_path: Path, backup_folder: Path,
+                                     protection: str = ENCRYPTED_DISK_IMAGE) -> None:
+    """For an encrypted-disk-image ledger, points 2 and 3 for the folder that will hold the backup,
+    and a volume other than the ledger's. For a private-folder ledger, an existing folder outside a
+    git work tree: the backup folder itself is made private, so the folder holding it need not
+    be."""
+    if protection == PRIVATE_FOLDER:
+        holding_folder = Path(os.path.abspath(backup_folder)).parent.resolve()
+        if not holding_folder.is_dir():
+            raise BackupRefused(f"the folder for a backup must already exist: {holding_folder}")
+        work_tree = real_ledger.git_work_tree_containing(holding_folder)
+        if work_tree is not None:
+            raise BackupRefused(
+                f"the backup destination is refused: a backup cannot be inside a git work tree: "
+                f"{work_tree}")
+        return
     try:
         refuse_unsafe_real_ledger_location(backup_folder)
     except UnsafeLocation as refusal:
@@ -193,9 +212,9 @@ def create_backup(conn: sqlite3.Connection, database_path: Path, backup_folder: 
     backup_folder = Path(os.path.abspath(backup_folder))
     if os.path.lexists(backup_folder):
         raise BackupRefused(f"a backup is always a new folder, and {backup_folder} already exists")
-    is_real = is_real_ledger(conn)
-    if is_real:
-        refuse_unsafe_backup_destination(database_path, backup_folder)
+    protection = real_ledger_protection(conn)
+    if protection is not None:
+        refuse_unsafe_backup_destination(database_path, backup_folder, protection)
         refuse_unless_archive_intact(conn, database_path)
     try:
         backup_folder.mkdir(mode=0o700)
@@ -414,6 +433,15 @@ def check_ledger_copy(ledger_path: Path, manifest: dict) -> None:
 
 # Restoring a backup.
 
+def protection_of_ledger_copy(ledger_path: Path) -> str:
+    """The protection a checked backup's real ledger copy records, read without writing beside it."""
+    conn = sqlite3.connect(f"{ledger_path.resolve().as_uri()}?mode=ro&immutable=1", uri=True)
+    try:
+        return real_ledger_protection(conn)
+    finally:
+        conn.close()
+
+
 def restore_backup(backup_folder: Path, database_path: Path) -> CheckedBackup:
     """Restore to database_path, which must not exist, with a real ledger's originals beside it.
     The backup is checked, then the written copies are checked again, and any failure removes
@@ -426,7 +454,8 @@ def restore_backup(backup_folder: Path, database_path: Path) -> CheckedBackup:
     originals_folder = folder / ORIGINALS_FOLDER_NAME
     if checked.is_real:
         try:
-            refuse_unsafe_real_ledger_location(database_path)
+            refuse_unsafe_location_for_protection(
+                protection_of_ledger_copy(backup_folder / BACKUP_LEDGER_NAME), database_path)
         except UnsafeLocation as refusal:
             raise BackupRefused(f"the restore destination is refused: {refusal}") from None
         if os.path.lexists(originals_folder):

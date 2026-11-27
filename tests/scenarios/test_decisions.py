@@ -157,8 +157,14 @@ SYNC_TABLES = ("sync_acknowledgement", "sync_delivery", "paired_device_event", "
                "pairing_window_event", "pairing_window", "sync_identity_event", "sync_identity")
 
 
+def drop_real_ledger_protection(conn) -> None:
+    """Undo 0037, which adds a column rather than a table, on a ledger at the latest version."""
+    conn.execute("ALTER TABLE real_ledger DROP COLUMN protection")
+
+
 def drop_sync_tables(conn) -> None:
-    """Undo 0036 on a ledger at the latest version, before setting it back further."""
+    """Undo 0037 and 0036 on a ledger at the latest version, before setting it back further."""
+    drop_real_ledger_protection(conn)
     for table in SYNC_TABLES:
         assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         conn.execute(f"DROP TABLE {table}")

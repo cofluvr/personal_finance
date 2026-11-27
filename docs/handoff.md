@@ -1,39 +1,33 @@
-# Session Handoff: M20, M21.1 to M21.3, the iPhone app and snapshot 1.1 built, awaiting review
+# Session Handoff: D-081, a private-folder real ledger, built for review; the app's charts awaiting review
 
-For a fresh session. Written 2026-11-21. **M1 to M19 are complete and accepted** (M17 to M19 on the
-owner's notes of 2026-11-21, M17's real-browser check still the owner's). `feature/m10-rules`, M10
-to M21.3 and the app, was merged into `main` on GitHub by the owner on 2026-11-21. The commits
-after `28d4959` are local on `feature/m10-rules`, not pushed.
+For a fresh session. Written 2026-11-24, updated 2026-11-26. **M1 to M21.3, the iPhone app (I1 to I3) and D-080 are
+complete and accepted**, M20 to M21.3 and the app on the owner's notes of 2026-11-23, M17's
+real-browser check still the owner's. `main` on GitHub holds everything to `5cac64e`, merged by
+the owner. The commit after it, the app's charts, is local on `feature/m10-rules`, not pushed.
 
-**Built on 2026-11-21, for the owner's review,** each recorded in its decision's "How
-implemented":
+**Built on 2026-11-26, for the owner's review:** D-081 in [decisions.md](decisions.md), on the
+owner's request of that day: `pf init --real --protection private-folder`, a real ledger in any
+folder you own, iCloud Drive included, for people who do not need an encrypted disk image. The
+default and the owner's own ledger are unchanged. It is on branch `feature/d081-folder-ledger`,
+made from `feature/m10-rules` at `c61165c`, so it sits on the charts commit. Not pushed. User steps
+are in the README's "Choosing Where Real Data Lives".
 
-- **M20 (D-076), pairing and local-network sync.** This is a security change: TLS 1.3 on one
-  private address, `/usr/bin/openssl` and `segno`. Its protocol is
-  [sync-protocol.md](sync-protocol.md), and the owner's steps [sync-runbook.md](sync-runbook.md).
-- **M21.1 to M21.3 (D-077):**
-  - [backend-acceptance.md](backend-acceptance.md), with B1 to B15 end to end;
-  - `tests/stress/` (crashes, fuzz, stress) and `--everything`;
-  - [security-audit.md](security-audit.md).
-- **The iPhone app, I1 to I3 (D-079), in `ios/`:** CommonCentsKit and the SwiftUI app
-  ([ios/README.md](../ios/README.md)).
-- **D-080, snapshot 1.1:** each member's budget pace, on the phone's member view.
+**Built on 2026-11-24, for the owner's review:** the app's charts, the owner's one change on
+review ("graphs and graphics wherever possible"). What each screen gained, and why D-079 point 4
+still holds, is in D-079's "The owner's review of 2026-11-23" in
+[decisions-ios.md](decisions-ios.md). Screenshots of each tab, light and dark, are in
+`build/charts/shots/final-*.png`.
 
-**Latest results:**
+**D-025 is decided:** the owner accepted every recommendation in
+[security-audit.md](security-audit.md) §7. Applying it is the owner's (CLAUDE.md).
 
-- **The full suite:** see "Latest gating run" below.
-- **Swift:** 28 package tests on the Mac and the iOS 26 simulator, and 9 UI tests. Interop
-  against the real server on loopback passes.
-- **Crashes:** 484 kill points over 10 commands, every one leaving the before or the after
-  state.
-- **Fuzz:** every target passes 500 examples at seeds 1 and 2.
-- **Stress:** three 60-minute seeds, 4 writers and 2 readers each: 350,387 writes (129,297 accepted) and 696,041 reads; every minute's integrity, foreign-key and reconciliation check passed, no read failed, every refusal was a documented one, and no accepted write reused its target's token. Seeds 1 and 2 ran before the rule's correction and were checked again under it; seed 3 ran on it.
-- **`--everything`:** every read below 2.0s on 104,100 transactions (`totals` 1.733s); backup 10.9s, verify 5.9s, restore 11.8s, and all 16 reads byte for byte the same on the restored copy; migration 0036 in 0.018s ([benchmarks.md](benchmarks.md)).
+Earlier results (stress, fuzz, crashes, `--everything`) are in the archive's "M20, M21.1 to
+M21.3, the app and D-080, as built for review" and [benchmarks.md](benchmarks.md).
 
 **Nothing from M10 on is on the real ledger.** It stays at version 20 until the owner makes a
 verified backup and runs `pf migrate` one milestone at a time (G10): 21 (M10), 22 and 23 (M11),
 24 and 25 (M12), 26 (M13), 27 and 28 (M14), 29 to 31 (M15), 32 (M16), 33 (M17), 34 (M18), 35
-(M19), then 36 (M20) once it is accepted. After 26, the owner sets the household timezone with
+(M19) and 36 (M20). After 26, the owner sets the household timezone with
 `pf setting set`.
 
 Every fixture is invented. Earlier history is in [archive/handoff-history.md](archive/handoff-history.md).
@@ -44,48 +38,51 @@ Standing rules are in [CLAUDE.md](../CLAUDE.md), loaded automatically. Do not re
 
 Rewritten by each session for the next. The kickoff prompt carries only the owner's notes.
 
-- **Stop for the owner's review** of:
-  - M20 (a security change);
-  - M21.1 to M21.3, with D-025 item by item in [security-audit.md](security-audit.md) §7;
-  - the app;
-  - D-080.
-
-  A change the owner asks for in any of them comes first, in the order given. Gate each change on
-  its files, then on the full suite before stopping. For the app, also run `swift test` and the UI
-  tests (commands in [ios/README.md](../ios/README.md)).
+- **Stop for the owner's review of D-081 and of the app's charts** (D-079, "The owner's review of
+  2026-11-23"). A change the owner asks for comes first. For D-081, read its full text,
+  `db/real_ledger.py`, migration 0037 and `tests/scenarios/test_private_folder_ledger.py`; gate
+  on that file, `test_real_ledger.py`, `test_backups.py` and `test_exports.py`, then the full suite. Gate it on `swift test` and the UI tests
+  (commands in [ios/README.md](../ios/README.md)), and on the full suite before stopping if any
+  Python or snapshot file changes.
 - **Then, only if the owner's notes allow:**
   - **I4 with the owner:** putting the app on the phone, and one real-phone delivery (YC2).
   - **M21.4 with the owner:** point F, the migration rehearsal, and the readiness checklist.
-  - **Any new milestone** needs its plan as the next free decision number, D-081. Candidates are
+  - **Any new milestone** needs its plan as the next free decision number, D-082. Candidates are
     PRD §13's later items: receipt photography, mobile categorization, notifications. Each needs
     a write-capable sync contract first (shared-contract §5).
-- **Read first for review changes:**
-  - **M20:** D-076's slice plans and "How M20 was implemented", `sync/`, and the `test_sync_*.py`
-    files.
-  - **M21:** D-077's slice plans and "How M21 was implemented".
-  - **The app:** D-079's I1 to I3 slice plan in [decisions-ios.md](decisions-ios.md).
-  - **Snapshot 1.1:** D-080 in [decisions.md](decisions.md).
+- **Read first for chart changes:** D-079's review section, `ios/CommonCents/CommonCents/Visuals.swift`,
+  and the screens that use it (`TodayView.swift`, `SpendingView.swift`).
 - **Warnings:**
-  - **A new migration** joins the set-backs before `drop_sync_tables`.
-  - **A snapshot change** needs:
-    - a version change and its own `snapshots/vX.Y/` fixture;
-    - the app's schema copy and demo snapshot updated, which `test_ios_copies.py` checks;
-    - the Swift tests run.
+  - **No money arithmetic on the phone.** `noSourceDoesArithmeticOnMoney` fails on any line that
+    names a `…Cents` value beside `+`, `-`, `*` or `/` followed by a space, string joining
+    included. Use interpolation, `append`, or `compactMap`.
+  - **Swift Charts reads grouped or dated bars as raw cents** to VoiceOver. Such a chart speaks as
+    one element whose value lists each figure through `Money.text`.
+  - **Disk space.** Old pytest folders under `build/tmp/pytest-of-*` once filled the disk halfway
+    through a full run, which then failed with errors. A full run needs about 6 GB: check
+    `df -h .` first. On 2026-11-25 the owner cleaned `build/` (all but `ios/`, `charts/` and
+    `s21/`): every SQLite ledger, `pytest-of-*` folder and cache is gone; scripts, logs, notes and
+    G6 capture JSONs remain. Past slices' kept ledgers (such as `s18/g6/ledgers*`,
+    `baseline-e9745ec`'s, `s20/walk1`'s) cannot be compared again: rebuild one from its commit.
+    The owner's PR `chore/prune-build` adds `bin/prune-build` and a disk rule to CLAUDE.md; once
+    it is merged, follow CLAUDE.md instead of this note.
+  - **`build/wt-prune/` is that PR's worktree.** Do not edit, prune or remove it.
+  - **Two simulators share the name iPhone 17 Pro** (iOS 26.3 and 27.2): pass the destination by
+    `id=`.
+  - **A snapshot change** needs a version change and its own `snapshots/vX.Y/` fixture, the app's
+    schema copy and demo snapshot updated (`test_ios_copies.py`), and the Swift tests run.
   - **segno** is pinned to 1.6.6, and W1 pins its uses to their functions. Review any upgrade.
-  - **Stress tokens recur legitimately** when a state is restored. Read
-    `run_stress.py`'s rule before calling one stale.
   - **The suite takes about 23 minutes;** the stress seeds an hour each.
-- **Done when:** the owner's review changes are made and gated, and the full suite, `swift test`
-  and the UI tests pass.
+- **Done when:** the owner's changes to D-081 and the charts are made and gated.
 
 ## Current state
 
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `main` on GitHub holds M10 to M21.3 and the app, merged by the owner on 2026-11-21. Local `main` is at `19ee858`, behind it. Later work is on `feature/m10-rules`, local, not pushed |
-| Latest commit | Run `git log -1`. M20 from `af4a9d7` to `3dc0654`; M21 from `ef3a9e6`; the app `a3d209b`; D-080 `73bcfff`. Earlier commits are in the archive |
-| Latest gating run | The full suite, slow tests included, on D-080 and the app's last change with M21's records: 4,500 passed in 0:20:44, exit code 0, before the handoff's commit. Swift: `swift test` 28 passed; the UI tests 9 passed |
+| Branch | `feature/d081-folder-ledger` (D-081), on `feature/m10-rules`. `main`, here and on GitHub, holds everything to `5cac64e` (merge `637a72a`, the owner's). The charts commit after it is local, not pushed |
+| Latest commit | Run `git log -1`: the app's charts. M20 from `af4a9d7` to `3dc0654`; M21 from `ef3a9e6`; the app `a3d209b`; D-080 `73bcfff`. Earlier commits are in the archive |
+| Latest gating run | The full suite, slow tests included, on D-081's tree (`269906e`): 4,536 passed in 0:20:34, exit code 0. Swift, unchanged since the charts commit: `swift test` 28 passed; the UI tests 10 passed |
 | Python | 3.12.6, project `.venv` already present |
 | Xcode | 27.2 with an iOS 26.3 simulator (iPhone 17 Pro); Swift 6.4 |
 | macOS | Golden Gate 27.2, as stated by the owner |
@@ -95,7 +92,7 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
 | Dev dependencies | pinned in `requirements-dev.txt` (pytest 9.2.0, Hypothesis 6.170.14) |
 | Entry point | `bin/pf`, using this checkout's `.venv`. An installed `pf` script also works |
 | Data | Synthetic only. Keep databases outside the repository. Institution fixtures in `tests/fixtures/synthetic/statements` are invented |
-| Remote | The owner pushes branches themselves. Nothing has been pushed from here since `673c025`, and GitHub's live state is unverified. Details in the archive |
+| Remote | The owner pushed `feature/m10-rules` to `5cac64e` and merged it on 2026-11-23 (PR #28). Nothing has been pushed from a session. Details in the archive |
 
 ## Read first
 
@@ -232,6 +229,8 @@ Then only what the task needs:
   `drop_obligation_tables` and `drop_budget_tables`, and grows with each later migration's tables,
   down to `drop_snapshot_tables` for 0035, through `drop_tag_tables` (0033) and
   `drop_scenario_tables` (0034).
+  0037 adds a column, so `drop_sync_tables` first calls `drop_real_ledger_protection`; a
+  later migration's undo goes before that.
   Also add the tables to `tests/unit/test_migrations.py`, `planning_digest.py`'s
   `PLANNING_TABLES` (planning tables only: scenarios are, snapshot records are not),
   `test_review_show.py`'s and `test_backups.py`'s `LEDGER_TABLES`, and the hand-added migrations of
@@ -276,9 +275,11 @@ creation time, and `test_no_legacy_timestamps_shown.py` keeps it so.
 
 ## Awaiting the owner
 
-- **The review of M20, M21.1 to M21.3, the app and D-080.** M20 is a security change.
-- **D-025, item by item,** by [security-audit.md](security-audit.md) §7. It is about the
-  development agent's own environment.
+- **The review of D-081** and of **the app's charts** (D-079's review section; screenshots in
+  `build/charts/shots/`).
+- **Applying D-025,** decided on 2026-11-23: [security-controls-proposal.md](security-controls-proposal.md)'s
+  settings, version check first, then its canaries. It changes the agent's own permissions, so it
+  is yours to apply.
 - **The app on the phone (I4):** signing with your Apple ID, then one real-phone delivery (YC2).
   The steps are in [ios/README.md](../ios/README.md) and [sync-runbook.md](sync-runbook.md).
 - **M21.4:**
@@ -296,23 +297,23 @@ creation time, and `test_no_legacy_timestamps_shown.py` keeps it so.
 
   Each is entered on the real ledger once it reaches that milestone's version.
 - **On the real ledger:** a verified backup, then `pf migrate` one milestone at a time, as above.
-- **Pushing** the commits after `28d4959`. Needs your approval.
+- **Pushing** the charts commit and D-081's branch. Needs your approval.
 
 ## Permissions
 
 | Permission | Status | Next session |
 |---|---|---|
-| Local commits | Approved on 2026-11-21 on `feature/m10-rules` by the owner's notes, with sign-off on everything not excepted. Used for M20, M21, the app and D-080 | Renewed by each kickoff's notes |
+| Local commits | Approved on 2026-11-23 on `feature/m10-rules` by the owner's notes. Used for the app's charts | Renewed by each kickoff's notes |
 | M11 | Accepted on 2026-11-10. Not yet on the real ledger | The real-ledger migrations 21, 22 and 23, each after a verified backup |
-| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077). M12 to M19 accepted. M20 and M21.1 to M21.3 built on 2026-11-21 under the owner's notes of that day, segno and its one fetch included | The review of M20 and M21. M21.4 with the owner |
-| iOS (D-079) | Plan and mock-ups accepted on 2026-11-20. I1 to I3 built on 2026-11-21, with D-080's snapshot 1.1 | The review; I4 with the owner |
+| M12 to M21 | Plans approved on 2026-11-10 (D-066 to D-077). M12 to M21.3 accepted, M20 and M21.1 to M21.3 on 2026-11-23. Not yet on the real ledger | M21.4 with the owner |
+| iOS (D-079) | Plan and mock-ups accepted on 2026-11-20. I1 to I3 and D-080 accepted on 2026-11-23, with charts asked for on review and built on 2026-11-24 | The charts' review; I4 with the owner |
 | M1 to M5 | Accepted. Readiness checklist run by the owner on 2026-11-09 | None |
 | M6 | Complete, recorded by the owner on 2026-11-09 | Point F results. A layout correction needs approval |
 | M7 | Complete, recorded by the owner on 2026-11-09 | Point F for `us_bank_card_activity_pdf_v1`. A layout correction needs approval |
 | M8 | Complete, verified by the owner in a browser on 2026-11-09 | Decisions from the browser (M8.4) need a new approval, as a security change |
 | M9 | Accepted on 2026-11-09, verified on the real ledger | None |
-| M10 | Accepted on 2026-11-10. Not yet verified on the real ledger | The owner's backup and `pf migrate` to 21. Merging into `main` needs approval |
-| Pushing | Not approved. Earlier pushes were the owner's own | **Explicit approval for each push** |
+| M10 | Accepted on 2026-11-10, merged into `main` by the owner. Not yet verified on the real ledger | The owner's backup and `pf migrate` to 21 |
+| Pushing | Not approved for this commit. The owner pushed `5cac64e` on 2026-11-23 | **Explicit approval for each push** |
 | Installing dependencies | Approved for the declared dependencies and build requirements, and on 2026-11-09 for pypdf 6.21.2 | Ask for anything new, an upgrade of pypdf included |
 | Network access | Used on 2026-11-21 under the owner's notes: segno's download, and one advisory search per dependency (the audit). Now closed | Ask for any use |
 

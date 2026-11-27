@@ -45,7 +45,7 @@ and keep its index line.
 | D-022 | Repeat imports of identical bytes — Default, with approved rules below |
 | D-023 | Failure handling — Default |
 | D-024 | Coverage is not extraction — Approved |
-| D-025 | Security controls proposal — Not applied |
+| D-025 | Security controls proposal — Every item decided "apply" by the owner on 2026-11-23 ([security-audit.md](security-audit.md) §7); not yet applied |
 | D-026 | Identifier guarantees are persisted — Approved, implemented in slice 3 |
 | D-027 | Effective coverage for metadata claims — Approved, implemented in slice 3 |
 | D-028 | Single-day overlaps apply to ID-less matching only — Approved |
@@ -96,11 +96,12 @@ and keep its index line.
 | D-073 | M17 plan: the local UI completed, with browser writes — Approved as a security change. M17 accepted on 2026-11-21 |
 | D-074 | M18 plan: financial scenarios — Approved. M18 accepted on 2026-11-21 |
 | D-075 | M19 plan: snapshots — Approved. M19 accepted on 2026-11-21; its compatibility policy is in shared-contract §6 |
-| D-076 | M20 plan: pairing and local-network sync — Approved as a security change, with `segno`. Built for review; the protocol is [sync-protocol.md](sync-protocol.md) |
-| D-077 | M21 plan: backend acceptance, stress testing and the security audit — Approved. M21.1 to M21.3 built for review; M21.4 is the owner's |
+| D-076 | M20 plan: pairing and local-network sync — Approved as a security change, with `segno`. M20 approved on 2026-11-23; the protocol is [sync-protocol.md](sync-protocol.md) |
+| D-077 | M21 plan: backend acceptance, stress testing and the security audit — Approved. M21.1 to M21.3 approved on 2026-11-23; M21.4 is the owner's |
 | D-078 | Test suite cost: a copied test ledger, a narrower W1 check and a `slow` tier — Approved and built |
-| D-079 | iOS companion plan, with screen mock-ups — Approved on 2026-11-20; I1 to I3 built for review on 2026-11-21 ([decisions-ios.md](decisions-ios.md)) |
-| D-080 | Snapshot 1.1: each member's budget pace on the phone — Approved by the owner's notes of 2026-11-21 |
+| D-079 | iOS companion plan, with screen mock-ups — Approved on 2026-11-20; I1 to I3 approved on 2026-11-23, with charts added on review ([decisions-ios.md](decisions-ios.md)) |
+| D-080 | Snapshot 1.1: each member's budget pace on the phone — Approved by the owner's notes of 2026-11-21; built and approved on 2026-11-23 |
+| D-081 | A simpler protection for real ledgers: a private folder, iCloud Drive included — Approved as a security change by the owner's notes of 2026-11-26; built for review |
 
 ## Rules in brief
 
@@ -119,7 +120,7 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Transfers (M3) | Suspected transfers never increase safe-to-spend | D-011 |
 | Totals wording | Account inflows, account outflows, net account movement | D-010 |
 | Repository | Do not move it. Real data needs the M5 gate first | D-019 |
-| Security proposal | **Unapplied.** Unverified, and not active protection | D-025 |
+| Security proposal | **Decided, unapplied.** The owner applies it. Until then, not active protection | D-025 |
 | External-ID matching | Validated and account-scoped. A differing description alone does not conflict for a reliable ID, and both are preserved. Conflicts in amount, status or a date present on both records are flagged | D-006 |
 | Single-day overlap | ID-less matches stay possible duplicates, including under `user_declared` coverage. An intentional conservative policy, not a mathematical requirement. Does not override a confident reliable-ID match | D-007 |
 | Candidate discovery | Needs evidence beyond amount and date: similar merchant or description, a validated identifier, or a documented source-specific relationship. Different descriptions alone are not evidence. The date window is a configurable heuristic. Candidates create review items and never authorize a merge | D-006 |
@@ -206,7 +207,8 @@ One line per approved rule, moved from the handoff. The decision named in the la
 | Rule precedence | A person's categorization first, in every state. Agreeing rules apply, disagreeing ones leave `rule_conflict`, disclosed | D-064 |
 | Rules in reports | Spending by category counts a person's category, else the rules'. Rules' disclosures show only while a rule's outcome reaches a transaction | D-064 |
 | Rule tokens | `rule add` needs the `p1` preview of every change, and `rule undo` the `q1` outlook of every change. `r11`, `t9`, `d8`, `c4` and `g2` add rules, keeping digests while none reaches | D-064 |
-| Backups | A new folder, on a mounted volume other than a real ledger's and gated as its folder is, holding the ledger, its referenced originals and a manifest of hashes, sizes, versions and a logical digest. Restore never overwrites, and checks every file, integrity, foreign keys, schema and digest first | D-058 |
+| Real ledger protection | Set once by `init --real`, never changed. `encrypted_disk_image`, the default and every ledger's before 0037: D-058's gates. `private_folder`: any folder you own outside a git work tree, synced folders included, made private on every open, refused while a sync conflict's copy sits beside it | D-058, D-081 |
+| Backups | A new folder, on a mounted volume other than an encrypted-disk-image ledger's and gated as its folder is (a private-folder ledger's: any existing folder outside a git work tree), holding the ledger, its referenced originals and a manifest of hashes, sizes, versions and a logical digest. Restore never overwrites, and checks every file, integrity, foreign keys, schema and digest first | D-058 |
 
 ## Not yet decided
 
@@ -847,3 +849,45 @@ computes nothing new.
 
 **Not in D-080:** per-member safe to spend, which needs a backend decision on dividing liquidity
 (D-072 left it out).
+
+## D-081 A simpler protection for real ledgers: a private folder — Approved as a security change by the owner's notes of 2026-11-26
+
+**The owner's request, 2026-11-26:** D-058's real ledger needs a separate encrypted disk image,
+which is too much for most people. Offer another option for those who do not need it: the data in
+a folder, possibly an iCloud folder that a desktop and a laptop can both reach. The owner approved
+every recommendation here and asked for it to be built for review. It does not reopen D-058: that
+protection is unchanged and stays the default.
+
+1. **Two protections, chosen once.** `pf init --real` takes `--protection encrypted-disk-image`
+   (the default, D-058 exactly) or `--protection private-folder`. Migration 0037 adds
+   `real_ledger.protection`, `CHECK`ed to those two, defaulting to `encrypted_disk_image`, so every
+   existing real ledger, the owner's included, keeps D-058's gates. The marker's append-only
+   triggers already refuse an update, so no command loosens a ledger. `--protection` without
+   `--real` refuses.
+2. **A private folder's rules, on `init` and every open:** the folder exists; it is not inside a git
+   work tree; you own the folder and the database. A symbolic link is followed and the rules apply
+   where it leads. Synced folders are accepted. No disk image probe runs.
+3. **Modes are made private, not refused.** The folder, the database and `originals/` lose every
+   group and other permission on each open. A sync client restores its own modes on each download,
+   so a refusal would stop every switch between computers. Only permissions are removed, never
+   added, and a path someone else owns still refuses.
+4. **A sync conflict refuses every open.** A file named like `ledger 2.db` beside `ledger.db` is the
+   copy iCloud Drive or Dropbox keeps when two computers changed the ledger before syncing
+   finished. Each copy then lacks the other's changes, and SQLite cannot merge them, so every open
+   refuses, naming the copy, until the owner keeps one. The copy itself opens, to compare.
+5. **Files leaving the ledger.** Imports still refuse a file inside a git work tree, and originals
+   are archived beside the ledger as before. Exports and snapshots keep every destination rule but
+   the encrypted image: no synced folder, not in a work tree, private. A backup goes in a new
+   folder inside any existing folder outside a git work tree, with no other-volume rule, and keeps
+   the archive-intact check. A restore applies the backup's own protection, read from its copied
+   ledger, so the manifest format is unchanged.
+6. **Said, not enforced:** use one computer at a time, and let the folder finish syncing before
+   switching; quit `pf ui` before switching. Locks are local to one computer, and a synced folder
+   carries no lock between them. Rule 4 catches the conflicts a sync client reports.
+7. **Tests:** `tests/scenarios/test_private_folder_ledger.py`, on a synthetic home's iCloud Drive,
+   with every disk image probe failing the test, plus one test that an encrypted-disk-image
+   ledger's export still needs an image. 29 breaks.
+
+**Not in D-081:** changing a ledger's protection (a new ledger and its imports again, as no command
+copies between ledgers); a lock or lease between computers; detecting a conflict a sync client
+names some other way; the phone, which reads snapshots and is unchanged.
