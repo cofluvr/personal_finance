@@ -101,10 +101,11 @@ def record(conn: sqlite3.Connection, document: dict) -> None:
 
 
 def create(read_conn: sqlite3.Connection, write_conn_of, out_path: Path, as_of: date,
-           window_days: int, snapshot_id: str, generated_at: str, real_ledger: bool) -> Written:
+           window_days: int, snapshot_id: str, generated_at: str,
+           requires_encrypted_disk_image: bool) -> Written:
     """Build, write and record one snapshot. write_conn_of opens the write connection the record
     needs, after the file is written."""
-    refuse_unsafe_export_destination(out_path, real_ledger, SNAPSHOT)
+    refuse_unsafe_export_destination(out_path, requires_encrypted_disk_image, SNAPSHOT)
     data = build_in_one_read(read_conn, as_of, window_days, snapshot_id, generated_at)
     document = parsed_canonical(data)
     written = write_atomically(out_path, data)

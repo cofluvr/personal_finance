@@ -31,6 +31,7 @@ Last updated: 2026-11-20. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 | **M4 overall** | **Complete and accepted** |
 | M5.1: real ledgers, their location and file permissions | Accepted (D-058) |
 | M5.2: encryption, an encrypted volume checked on every open | Accepted (D-002, D-058) |
+| D-081: the private-folder protection for a real ledger, iCloud Drive included | Built on 2026-11-26 for the owner's review |
 | M5.3: archiving originals, and storage by kind | Accepted (D-017, D-058) |
 | M5.4: backup, verification and restore | Accepted (D-058) |
 | M5.5: network and dependency behaviour, and the readiness checklist | Accepted (D-058) |
@@ -103,8 +104,10 @@ Last updated: 2026-11-20. Branch: `feature/m10-rules`, from `main` at `19ee858`,
 - `personal_finance.money`: exact parsing and formatting of amounts.
 - `personal_finance.db.migrate`: database creation, connections, migrations.
 - `personal_finance.db.id_lists`: any number of IDs as one SQL parameter (D-057).
-- `personal_finance.db.real_ledger`: the real-ledger mark, and the location, encrypted-volume and
-  import checks every open of a real ledger runs, with its temporary files kept in memory (D-058).
+- `personal_finance.db.real_ledger`: the real-ledger mark and its protection, and the location,
+  encrypted-volume and import checks every open of a real ledger runs, with its temporary files
+  kept in memory (D-058). A private-folder ledger's open makes its files private and refuses while
+  a sync conflict's copy sits beside it (D-081).
 - `personal_finance.db.originals`: archiving a real ledger's originals on import, and verifying
   them (D-017, D-058).
 - `personal_finance.reports.report_text`: the text of `totals`, `report monthly`, `documents`,
@@ -623,9 +626,20 @@ rewriting their outcomes, and `totals` runs at 1.9s with or without rules, close
 - `create_database` leaves its file behind if a migration fails, and a later
   attempt then refuses to overwrite it.
 - Edited migration files are not detected. Only the version number is tracked.
-- A synthetic ledger is not encrypted, and gets `0600` at creation only. A real ledger is checked
-  for privacy and for an encrypted disk image on every open, and refused rather than repaired.
-  The image's password, and the location of the image file itself, are not checked (D-058).
+- A synthetic ledger is not encrypted, and gets `0600` at creation only. An encrypted-disk-image
+  ledger is checked for privacy and for an encrypted disk image on every open, and refused rather
+  than repaired. The image's password, and the location of the image file itself, are not checked
+  (D-058).
+- A private-folder ledger (D-081) is encrypted at rest only as its disk is: FileVault on the Mac,
+  and in iCloud Drive Apple's encryption, end to end only with Advanced Data Protection on. Neither
+  is checked. Its modes are made private on each open rather than refused.
+- Nothing stops two computers using one private-folder ledger at once: SQLite's locks do not cross
+  a synced folder. A conflict is caught only when the sync client keeps a copy named like
+  `ledger 2.db`, and only on the next open. A sync that uploads the database mid-write, between it
+  and its `-journal` file, is not detected. Using one computer at a time, and letting the folder
+  finish syncing first, is the owner's.
+- A ledger's protection cannot be changed. Moving to the other means a new ledger and importing
+  the statements again.
 - iCloud's Desktop and Documents sync cannot be detected from a path. A real ledger now lives
   under `/Volumes`, which it does not reach, but an image file kept in `~/Desktop` or
   `~/Documents` would sync. The owner confirmed it off on 2026-11-08.

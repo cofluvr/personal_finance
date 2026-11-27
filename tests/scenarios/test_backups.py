@@ -721,9 +721,12 @@ class TestRestore:
         ledger.card("jan.csv", CAFE)
         backup_folder = tmp_path / "backup"
         created(ledger, backup_folder)
-        # The newest migration's tables, dropped, make the copy a ledger of the version before.
+        # The newest migration's tables and added columns, dropped, make the copy a ledger of the
+        # version before.
         newest = load_migrations()[-1].path.read_text()
-        tables = reversed(re.findall(r"^CREATE TABLE (\w+)", newest, re.MULTILINE))
+        tables = list(reversed(re.findall(r"^CREATE TABLE (\w+)", newest, re.MULTILINE)))
+        added_columns = re.findall(r"^ALTER TABLE (\w+) ADD COLUMN (\w+)", newest, re.MULTILINE)
+        assert tables or added_columns
         # And any setting key it seeds, taken out past its append-only trigger.
         keys = re.findall(r"^INSERT INTO ledger_setting_key \(setting_key\) VALUES \('(\w+)'\)",
                           newest, re.MULTILINE)
@@ -735,6 +738,8 @@ class TestRestore:
                      *(f"DELETE FROM ledger_setting_key WHERE setting_key = '{key}'"
                        for key in keys), trigger] if keys else [])
         change_ledger_copy(backup_folder, *(f"DROP TABLE {table}" for table in tables),
+                           *(f"ALTER TABLE {table} DROP COLUMN {column}"
+                             for table, column in added_columns),
                            *unseeded, f"PRAGMA user_version = {LATEST - 1}")
         rewrite_manifest(backup_folder, digest=True, schema_version=LATEST - 1)
         restored = tmp_path / "restored.db"

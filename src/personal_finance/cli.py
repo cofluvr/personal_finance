@@ -39,12 +39,14 @@ from personal_finance.db.originals import (
     verify_originals,
 )
 from personal_finance.db.real_ledger import (
+    PRIVATE_FOLDER,
     UnsafeLocation,
     check_real_ledger_on_open,
     is_real_ledger,
     mark_real_ledger,
     refuse_import_from_git_work_tree,
-    refuse_unsafe_real_ledger_location,
+    refuse_unsafe_location_for_protection,
+    requires_encrypted_disk_image,
 )
 from personal_finance.ingest.coverage import DATE_BASES, declare_complete
 from personal_finance.ingest.errors import ImportFailure
@@ -645,6 +647,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--real",
         action="store_true",
         help="for actual financial data: the ledger's location is checked on every open",
+    )
+    init.add_argument(
+        "--protection",
+        choices=("encrypted-disk-image", "private-folder"),
+        help="with --real: encrypted-disk-image (the default) keeps the ledger on a mounted "
+             "encrypted disk image, never in a synced folder; private-folder accepts any folder "
+             "you own, iCloud Drive included, and makes it private to you",
     )
     command("migrate", handler=run_migrate, help="upgrade a ledger to the current schema")
 
@@ -1997,17 +2006,25 @@ def find_account(conn, reference: str) -> str:
 
 
 def run_init(args) -> int:
+    if args.protection is not None and not args.real:
+        raise CommandError("--protection applies only to a real ledger: add --real")
+    protection = (args.protection or "encrypted-disk-image").replace("-", "_")
     if args.real:
-        refuse_unsafe_real_ledger_location(args.db)
+        refuse_unsafe_location_for_protection(protection, args.db)
     try:
         create_database(args.db)
     except FileExistsError:
         raise CommandError(f"refusing to overwrite existing file: {args.db}") from None
     if args.real:
         conn = connect(args.db)
-        mark_real_ledger(conn)
+        mark_real_ledger(conn, protection)
         conn.close()
-        print(f"Created real ledger {args.db}")
+        if protection == PRIVATE_FOLDER:
+            print(f"Created real ledger {args.db}, protected by its private folder")
+            print("  Use it from one computer at a time, and let a synced folder finish syncing "
+                  "before switching.")
+        else:
+            print(f"Created real ledger {args.db}")
     else:
         print(f"Created {args.db}")
     return 0
@@ -4613,7 +4630,7 @@ def run_export_transactions(args) -> int:
         raise CommandError("--from is after --to. Nothing was written.")
     rows = transaction_export_rows(conn, account_id, first, last)
     written = write_export(args.out, csv_text(TRANSACTION_COLUMNS, rows, EXPORT_AMOUNT_COLUMNS),
-                           is_real_ledger(conn))
+                           requires_encrypted_disk_image(conn))
     print(f"Exported {len(rows)} transactions to {args.out}: {written} bytes.")
     print(f"  {EXPORT_NOTICE}")
     return 0
@@ -4627,7 +4644,7 @@ def run_export_report(args) -> int:
     lines = lines_of(report_args)
     conn = open_ledger(args.db, read_only=True)
     written = write_export(args.out, csv_text(("line",), [(line.text,) for line in lines]),
-                           is_real_ledger(conn))
+                           requires_encrypted_disk_image(conn))
     print(f"Exported {len(lines)} lines of {args.report_name} to {args.out}: {written} bytes.")
     print(f"  {EXPORT_NOTICE}")
     return 0
@@ -5837,7 +5854,7 @@ def run_snapshot_create(args) -> int:
         as_of = as_of_date(conn, args.as_of)
         written = create_snapshot(conn, lambda: open_ledger(args.db), args.out, as_of,
                                   window_days, str(uuid.uuid4()), utc_now_text(),
-                                  is_real_ledger(conn))
+                                  requires_encrypted_disk_image(conn))
     finally:
         conn.close()
     print(f"Snapshot {written.snapshot_id} written to {args.out}: {written.bytes_written} bytes, "

@@ -1,9 +1,16 @@
-# Session Handoff: M20 to M21.3, the app and D-080 approved; charts added to the app
+# Session Handoff: D-081, a private-folder real ledger, built for review; the app's charts awaiting review
 
-For a fresh session. Written 2026-11-24. **M1 to M21.3, the iPhone app (I1 to I3) and D-080 are
+For a fresh session. Written 2026-11-24, updated 2026-11-26. **M1 to M21.3, the iPhone app (I1 to I3) and D-080 are
 complete and accepted**, M20 to M21.3 and the app on the owner's notes of 2026-11-23, M17's
 real-browser check still the owner's. `main` on GitHub holds everything to `5cac64e`, merged by
 the owner. The commit after it, the app's charts, is local on `feature/m10-rules`, not pushed.
+
+**Built on 2026-11-26, for the owner's review:** D-081 in [decisions.md](decisions.md), on the
+owner's request of that day: `pf init --real --protection private-folder`, a real ledger in any
+folder you own, iCloud Drive included, for people who do not need an encrypted disk image. The
+default and the owner's own ledger are unchanged. It is on branch `feature/d081-folder-ledger`,
+made from `feature/m10-rules` at `c61165c`, so it sits on the charts commit. Not pushed. User steps
+are in the README's "Choosing Where Real Data Lives".
 
 **Built on 2026-11-24, for the owner's review:** the app's charts, the owner's one change on
 review ("graphs and graphics wherever possible"). What each screen gained, and why D-079 point 4
@@ -31,14 +38,16 @@ Standing rules are in [CLAUDE.md](../CLAUDE.md), loaded automatically. Do not re
 
 Rewritten by each session for the next. The kickoff prompt carries only the owner's notes.
 
-- **Stop for the owner's review of the app's charts** (D-079, "The owner's review of
-  2026-11-23"). A change the owner asks for comes first. Gate it on `swift test` and the UI tests
+- **Stop for the owner's review of D-081 and of the app's charts** (D-079, "The owner's review of
+  2026-11-23"). A change the owner asks for comes first. For D-081, read its full text,
+  `db/real_ledger.py`, migration 0037 and `tests/scenarios/test_private_folder_ledger.py`; gate
+  on that file, `test_real_ledger.py`, `test_backups.py` and `test_exports.py`, then the full suite. Gate it on `swift test` and the UI tests
   (commands in [ios/README.md](../ios/README.md)), and on the full suite before stopping if any
   Python or snapshot file changes.
 - **Then, only if the owner's notes allow:**
   - **I4 with the owner:** putting the app on the phone, and one real-phone delivery (YC2).
   - **M21.4 with the owner:** point F, the migration rehearsal, and the readiness checklist.
-  - **Any new milestone** needs its plan as the next free decision number, D-081. Candidates are
+  - **Any new milestone** needs its plan as the next free decision number, D-082. Candidates are
     PRD §13's later items: receipt photography, mobile categorization, notifications. Each needs
     a write-capable sync contract first (shared-contract §5).
 - **Read first for chart changes:** D-079's review section, `ios/CommonCents/CommonCents/Visuals.swift`,
@@ -64,14 +73,14 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
     schema copy and demo snapshot updated (`test_ios_copies.py`), and the Swift tests run.
   - **segno** is pinned to 1.6.6, and W1 pins its uses to their functions. Review any upgrade.
   - **The suite takes about 23 minutes;** the stress seeds an hour each.
-- **Done when:** the owner's changes to the charts are made and gated.
+- **Done when:** the owner's changes to D-081 and the charts are made and gated.
 
 ## Current state
 
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `feature/m10-rules`. `main`, here and on GitHub, holds everything to `5cac64e` (merge `637a72a`, the owner's). The charts commit after it is local, not pushed |
+| Branch | `feature/d081-folder-ledger` (D-081), on `feature/m10-rules`. `main`, here and on GitHub, holds everything to `5cac64e` (merge `637a72a`, the owner's). The charts commit after it is local, not pushed |
 | Latest commit | Run `git log -1`: the app's charts. M20 from `af4a9d7` to `3dc0654`; M21 from `ef3a9e6`; the app `a3d209b`; D-080 `73bcfff`. Earlier commits are in the archive |
 | Latest gating run | The full suite, slow tests included, on the charts commit's tree: 4,500 passed in 0:21:30, exit code 0. Swift: `swift test` 28 passed; the UI tests 10 passed |
 | Python | 3.12.6, project `.venv` already present |
@@ -220,6 +229,8 @@ Then only what the task needs:
   `drop_obligation_tables` and `drop_budget_tables`, and grows with each later migration's tables,
   down to `drop_snapshot_tables` for 0035, through `drop_tag_tables` (0033) and
   `drop_scenario_tables` (0034).
+  0037 adds a column, so `drop_sync_tables` first calls `drop_real_ledger_protection`; a
+  later migration's undo goes before that.
   Also add the tables to `tests/unit/test_migrations.py`, `planning_digest.py`'s
   `PLANNING_TABLES` (planning tables only: scenarios are, snapshot records are not),
   `test_review_show.py`'s and `test_backups.py`'s `LEDGER_TABLES`, and the hand-added migrations of
@@ -264,7 +275,7 @@ creation time, and `test_no_legacy_timestamps_shown.py` keeps it so.
 
 ## Awaiting the owner
 
-- **The review of the app's charts** (D-079's review section; screenshots in
+- **The review of D-081** and of **the app's charts** (D-079's review section; screenshots in
   `build/charts/shots/`).
 - **Applying D-025,** decided on 2026-11-23: [security-controls-proposal.md](security-controls-proposal.md)'s
   settings, version check first, then its canaries. It changes the agent's own permissions, so it
@@ -286,7 +297,7 @@ creation time, and `test_no_legacy_timestamps_shown.py` keeps it so.
 
   Each is entered on the real ledger once it reaches that milestone's version.
 - **On the real ledger:** a verified backup, then `pf migrate` one milestone at a time, as above.
-- **Pushing** the charts commit. Needs your approval.
+- **Pushing** the charts commit and D-081's branch. Needs your approval.
 
 ## Permissions
 

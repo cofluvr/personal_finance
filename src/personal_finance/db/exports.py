@@ -2,9 +2,9 @@
 
 An export writes one new file only. Its folder passes the real-ledger folder checks (D-058): no
 symbolic link on the way, not in a git work tree, not in a synced folder, private to you, and for
-a real ledger on an encrypted disk image. An existing file is refused, the file is created 0600
-with O_EXCL, so nothing is overwritten and no temporary copy is made, and a failure while writing
-removes what was written. Cells a spreadsheet would read as a formula are prefixed with an
+a real ledger protected by an encrypted disk image, on one too (D-081). An existing file is
+refused, the file is created 0600 with O_EXCL, so nothing is overwritten and no temporary copy is
+made, and a failure while writing removes what was written. Cells a spreadsheet would read as a formula are prefixed with an
 apostrophe; amounts, which are never text, keep their sign.
 """
 
@@ -28,7 +28,7 @@ def protected_cell(text: str) -> str:
     return "'" + text if text.startswith(FORMULA_STARTS) else text
 
 
-def refuse_unsafe_export_destination(out_path: Path, real_ledger: bool,
+def refuse_unsafe_export_destination(out_path: Path, requires_encrypted_disk_image: bool,
                                      noun: str = "an export") -> None:
     """The checks every file leaving the ledger folder passes: a pf export, and a snapshot
     (D-075 point 7), which names itself in the refusal."""
@@ -51,7 +51,7 @@ def refuse_unsafe_export_destination(out_path: Path, real_ledger: bool,
         if synced_folder is not None:
             raise UnsafeLocation(f"{noun} cannot be inside a synced folder: {synced_folder}")
         checks.refuse_unless_private(folder, private_mode="700")
-        if real_ledger:
+        if requires_encrypted_disk_image:
             checks.refuse_unless_on_encrypted_disk_image(folder)
     except UnsafeLocation as refusal:
         raise ExportRefused(f"the {noun.split(' ', 1)[1]} destination is refused: {refusal}. "
@@ -69,10 +69,10 @@ def csv_text(header: tuple[str, ...], rows, amount_columns: frozenset[str] = fro
     return buffer.getvalue()
 
 
-def write_export(out_path: Path, text: str, real_ledger: bool) -> int:
+def write_export(out_path: Path, text: str, requires_encrypted_disk_image: bool) -> int:
     """Write text to a new private file at out_path, refusing an unsafe destination. Returns the
     bytes written."""
-    refuse_unsafe_export_destination(out_path, real_ledger)
+    refuse_unsafe_export_destination(out_path, requires_encrypted_disk_image)
     content = text.encode("utf-8")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     try:

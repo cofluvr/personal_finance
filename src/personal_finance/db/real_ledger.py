@@ -1,17 +1,27 @@
-"""Where a real ledger may live, and where its imports may come from (D-058, M5.1 and M5.2).
+"""Where a real ledger may live, and where its imports may come from (D-058, M5.1, M5.2, D-081).
 
-A real ledger holds actual financial data. It is marked once, by `pf init --real`, and every open
-checks its location before anything else. A synthetic ledger is never checked and behaves as before.
-Each check refuses, naming the rule. None repairs: a wrong mode is reported with the command to fix it.
+A real ledger holds actual financial data. It is marked once, by `pf init --real`, with one of two
+protections, and every open checks its location before anything else. A synthetic ledger is never
+checked and behaves as before.
 
-The location must be a folder inside a mounted disk image whose APFS volume honours file ownership,
-and which diskutil reports encrypted or hdiutil reports encrypted as an image. FileVault on the
-startup volume does not count (D-058 point 3, as amended). Any answer other than a clear yes refuses.
+`encrypted_disk_image` (D-058, the default): the location must be a folder inside a mounted disk
+image whose APFS volume honours file ownership, and which diskutil reports encrypted or hdiutil
+reports encrypted as an image. FileVault on the startup volume does not count (D-058 point 3, as
+amended). Any answer other than a clear yes refuses. Each check refuses, naming the rule. None
+repairs: a wrong mode is reported with the command to fix it.
+
+`private_folder` (D-081): any existing folder you own outside a git work tree, synced folders such
+as iCloud Drive included, so two Macs can share one ledger. The folder, the database and the
+originals folder are made private to you on every open, as a sync client restores its own file
+modes on each download. A copy a sync client kept after a conflict, such as `ledger 2.db` beside
+`ledger.db`, refuses every open until the owner keeps one of them.
 """
 
 import os
 import plistlib
+import re
 import sqlite3
+import stat
 from pathlib import Path
 from xml.parsers.expat import ExpatError
 
@@ -20,6 +30,10 @@ from personal_finance.db import volume_probes
 # Folders a sync client copies off this machine. Relative to the home folder.
 SYNCED_FOLDERS_UNDER_HOME = ("Library/Mobile Documents", "Library/CloudStorage", "Dropbox")
 
+# A real ledger's protections, as migration 0037 stores them (D-081).
+ENCRYPTED_DISK_IMAGE = "encrypted_disk_image"
+PRIVATE_FOLDER = "private_folder"
+
 
 class UnsafeLocation(Exception):
     pass
@@ -27,15 +41,32 @@ class UnsafeLocation(Exception):
 
 def is_real_ledger(conn: sqlite3.Connection) -> bool:
     """A ledger is real when it holds the marker row. Before migration 0017 none is."""
+    return real_ledger_protection(conn) is not None
+
+
+def real_ledger_protection(conn: sqlite3.Connection) -> str | None:
+    """A real ledger's protection, or None for a synthetic ledger. Before migration 0037 every
+    real ledger is protected by an encrypted disk image."""
     has_marker_table = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'real_ledger'"
     ).fetchone()
-    return bool(has_marker_table) and bool(conn.execute("SELECT 1 FROM real_ledger").fetchone())
+    if not has_marker_table or not conn.execute("SELECT 1 FROM real_ledger").fetchone():
+        return None
+    marker_columns = {row[1] for row in conn.execute("PRAGMA table_info(real_ledger)")}
+    if "protection" not in marker_columns:
+        return ENCRYPTED_DISK_IMAGE
+    return conn.execute("SELECT protection FROM real_ledger").fetchone()[0]
 
 
-def mark_real_ledger(conn: sqlite3.Connection) -> None:
+def requires_encrypted_disk_image(conn: sqlite3.Connection) -> bool:
+    """Whether files leaving this ledger, such as exports and snapshots, must go to an encrypted
+    disk image too."""
+    return real_ledger_protection(conn) == ENCRYPTED_DISK_IMAGE
+
+
+def mark_real_ledger(conn: sqlite3.Connection, protection: str = ENCRYPTED_DISK_IMAGE) -> None:
     """Mark a ledger holding nothing yet as real. The schema refuses any other ledger."""
-    conn.execute("INSERT INTO real_ledger (only_row) VALUES (1)")
+    conn.execute("INSERT INTO real_ledger (only_row, protection) VALUES (1, ?)", (protection,))
 
 
 def git_work_tree_containing(path: Path) -> Path | None:
@@ -55,8 +86,20 @@ def synced_folder_containing(path: Path) -> Path | None:
     return None
 
 
+def refuse_unsafe_location_for_protection(protection: str, database_path: Path) -> None:
+    """The location rules of a real ledger with this protection, for its database path."""
+    if protection == ENCRYPTED_DISK_IMAGE:
+        refuse_unsafe_real_ledger_location(database_path)
+    elif protection == PRIVATE_FOLDER:
+        refuse_unsafe_private_folder_location(database_path)
+    else:
+        raise UnsafeLocation(f"this real ledger names a protection this code does not know: "
+                             f"{protection}")
+
+
 def refuse_unsafe_real_ledger_location(database_path: Path) -> None:
-    """Refuse a real ledger's database path, existing or not, unless every rule holds."""
+    """Refuse an encrypted-disk-image ledger's database path, existing or not, unless every rule
+    holds."""
     absolute_path = Path(os.path.abspath(database_path))
     resolved_path = database_path.resolve()
     if resolved_path != absolute_path:
@@ -86,6 +129,57 @@ def refuse_unless_private(path: Path, *, private_mode: str) -> None:
     if status.st_mode & 0o077:
         raise UnsafeLocation(
             f"a real ledger's files must be private to you: {path}. Run: chmod {private_mode} {path}"
+        )
+
+
+def refuse_unsafe_private_folder_location(database_path: Path) -> None:
+    """Refuse a private-folder ledger's database path, existing or not, unless its folder exists
+    outside a git work tree and is yours, then make the folder, the database and any originals
+    folder private. A symbolic link is followed, and the rules apply where it leads. A synced
+    folder is accepted."""
+    resolved_path = database_path.resolve()
+    folder = resolved_path.parent
+    if not folder.is_dir():
+        raise UnsafeLocation(f"the folder for a real ledger must already exist: {folder}")
+    work_tree = git_work_tree_containing(folder)
+    if work_tree is not None:
+        raise UnsafeLocation(f"a real ledger cannot be inside a git work tree: {work_tree}")
+    make_private(folder)
+    if resolved_path.exists():
+        make_private(resolved_path)
+    # Named here, not imported, as originals.py imports this module.
+    originals_folder = folder / "originals"
+    if originals_folder.is_dir() and not originals_folder.is_symlink():
+        make_private(originals_folder)
+
+
+def make_private(path: Path) -> None:
+    """Remove every permission others have on a path you own. A path someone else owns refuses."""
+    status = path.stat()
+    if status.st_uid != os.geteuid():
+        raise UnsafeLocation(f"a real ledger's files must be owned by you: {path}")
+    if status.st_mode & 0o077:
+        os.chmod(path, stat.S_IMODE(status.st_mode) & ~0o077)
+
+
+def conflicting_copies_beside(database_path: Path) -> list[Path]:
+    """Copies a sync client keeps after a conflict, named like `ledger 2.db` beside `ledger.db`."""
+    resolved_path = database_path.resolve()
+    copy_name = re.compile(
+        rf"{re.escape(resolved_path.stem)} \d+{re.escape(resolved_path.suffix)}")
+    return sorted(entry for entry in resolved_path.parent.iterdir()
+                  if copy_name.fullmatch(entry.name))
+
+
+def refuse_conflicting_copies(database_path: Path) -> None:
+    copies = conflicting_copies_beside(database_path)
+    if copies:
+        names = ", ".join(copy.name for copy in copies)
+        raise UnsafeLocation(
+            f"a sync service kept a conflicting copy of this ledger beside it: {names}. Two "
+            "computers changed the ledger before syncing finished, so each copy holds changes the "
+            "other lacks. Nothing was opened. Look at each copy with --db, keep the one to go on "
+            f"with as {database_path.resolve().name}, and move the other out of this folder"
         )
 
 
@@ -180,12 +274,17 @@ def probe_answer(ask, *, could_not_ask: str, could_not_describe: str) -> dict:
 
 
 def check_real_ledger_on_open(conn: sqlite3.Connection, database_path: Path) -> None:
-    """When the ledger is real, refuse an unsafe location, then keep SQLite's temporary files in
-    memory, so no sort or index spills to the system temp folder (D-058 point 4). A synthetic
+    """When the ledger is real, refuse an unsafe location for its protection, then keep SQLite's
+    temporary files in memory, so no sort or index spills to the system temp folder (D-058 point
+    4). A private-folder ledger with a sync conflict's copy beside it refuses too. A synthetic
     ledger is neither checked nor changed."""
-    if is_real_ledger(conn):
-        refuse_unsafe_real_ledger_location(database_path)
-        conn.execute("PRAGMA temp_store = MEMORY")
+    protection = real_ledger_protection(conn)
+    if protection is None:
+        return
+    refuse_unsafe_location_for_protection(protection, database_path)
+    if protection == PRIVATE_FOLDER:
+        refuse_conflicting_copies(database_path)
+    conn.execute("PRAGMA temp_store = MEMORY")
 
 
 def refuse_import_from_git_work_tree(import_path: Path) -> None:
