@@ -128,11 +128,28 @@ button { font: inherit; font-size: 13px; font-weight: 600; padding: 6px 14px; cu
 button:hover { filter: brightness(1.1); }
 form[action$="undo"] button, form[action$="uncover"] button {
   color: var(--negative); background: transparent; border-color: var(--negative); }
-.report { margin: 0 0 18px; padding: 14px 18px; background: var(--surface);
-          border: 1px solid var(--border); border-radius: 10px;
-          font: 12.5px/1.6 ui-monospace, Menlo, monospace; }
+.report { margin: 0 0 18px; padding: 14px 20px; background: var(--surface);
+          border: 1px solid var(--border); border-radius: 10px; }
 .report:empty { display: none; }
 .line, .hint-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+.line { padding: 2px 0; }
+.line .lead { display: none; }
+.line[data-depth="1"] { padding-left: 22px; }
+.line[data-depth="2"] { padding-left: 44px; }
+.line[data-depth="3"] { padding-left: 66px; }
+.line[data-depth="4"] { padding-left: 88px; }
+.line[data-role="heading"] { margin-top: 14px; padding-top: 10px; font-weight: 600;
+                             border-top: 1px solid var(--border); }
+.line[data-role="heading"]:first-child { margin-top: 0; padding-top: 2px; border-top: 0; }
+.line[data-role="disclosure"] { font-size: 13px; color: var(--muted); }
+.line[data-role="columns"] { padding-left: 0; font: 12.5px/1.7 ui-monospace, Menlo, monospace; }
+.line[data-role="columns"] .lead { display: inline; }
+.hint-line { font: 12.5px/1.6 ui-monospace, Menlo, monospace; }
+.amount { font-weight: 600; white-space: nowrap; }
+/* Money out is red only in rows laid out as columns, the transaction list: in prose a negative
+   figure can be good news, such as spending below the budget's pace. */
+.line[data-role="columns"] .amount.negative { color: var(--negative); }
+.line[data-role="disclosure"] .amount { font-weight: inherit; }
 .chart { margin: 0 0 16px; padding: 14px 16px; background: var(--surface);
          border: 1px solid var(--border); border-radius: 10px; }
 .chart svg { display: block; max-width: 100%; height: auto; }
@@ -976,14 +993,60 @@ def escaped(text: str) -> str:
     return html.escape(visible, quote=True)
 
 
-def rendered_line(line) -> str:
+# A plain decimal amount as format_cents writes it, standing alone: not part of a date, time,
+# version or identifier (D-083 point 2). It runs on escaped text, where an amount reads the same.
+AMOUNT = re.compile(r"(?<![\w.])-?\d+\.\d{2}(?![\w.])")
+# Two spaces after a line's first word: a line laid out in columns, such as a transaction row
+# or the household table, which keeps a fixed-width font.
+COLUMNS = re.compile(r"\S {2,}")
+DEEPEST_INDENT = 4
+
+
+def indent_of(text: str) -> int:
+    return len(text) - len(text.lstrip(" "))
+
+
+def with_amounts_marked(text: str) -> str:
+    """Text escaped for HTML, each amount in a span that aligns it, marked when negative."""
+    return AMOUNT.sub(
+        lambda found: (f'<span class="amount{" negative" if found[0][0] == "-" else ""}">'
+                       f"{found[0]}</span>"),
+        escaped(text))
+
+
+def line_role(text: str, next_text: str | None) -> str:
+    """What a line is, read from how the CLI prints it: columns, a heading (a top-level line
+    ending in a colon, or one that lines below it are indented under), a disclosure, or text."""
+    if COLUMNS.search(text.lstrip(" ")):
+        return "columns"
+    if not text.startswith(" ") and (text.endswith(":") or (
+            next_text is not None and indent_of(next_text) > 0)):
+        return "heading"
+    if text.startswith("- "):
+        return "disclosure"
+    return "text"
+
+
+def rendered_line(line, next_line=None) -> str:
+    """One report line as one div whose text is exactly the line (D-062): its leading spaces kept
+    in a span the stylesheet replaces with an indent, its shape in data attributes, its amounts
+    marked, and the review item or transaction it names linked."""
+    text = line.text
+    role = line_role(text, None if next_line is None else next_line.text)
+    indent = indent_of(text)
+    depth = min(indent // 2, DEEPEST_INDENT)
+    lead, body = text[:indent], text[indent:]
+    shown = with_amounts_marked(body)
     for linked_id, page in ((line.linked_review_item_id, "/review/item"),
                             (line.linked_transaction_id, "/transaction")):
-        if linked_id and linked_id in line.text:
-            before, _, after = line.text.partition(linked_id)
+        if linked_id and linked_id in body:
+            before, _, after = body.partition(linked_id)
             link = f'<a href="{page}?id={escaped(linked_id)}">{escaped(linked_id)}</a>'
-            return f'<div class="line">{escaped(before)}{link}{escaped(after)}</div>'
-    return f'<div class="line">{escaped(line.text)}</div>'
+            shown = f"{with_amounts_marked(before)}{link}{with_amounts_marked(after)}"
+            break
+    lead_html = f'<span class="lead">{lead}</span>' if lead else ""
+    return (f'<div class="line" data-role="{role}" data-depth="{depth}">'
+            f"{lead_html}{shown}</div>")
 
 
 def navigation(current_path) -> str:
@@ -1004,7 +1067,8 @@ def render_page(heading, lines, *, notice="", form="", figures="", after="",
                 current_path="") -> str:
     """A page: the sidebar, the heading, any notice, the filter form, any figures drawn from the
     report's own rows, the report's lines, then what follows them (forms that write, hints)."""
-    report = "".join(rendered_line(line) for line in lines)
+    report = "".join(rendered_line(line, next_line)
+                     for line, next_line in zip(lines, [*lines[1:], None]))
     notice_html = f'<p class="notice">{escaped(notice)}</p>' if notice else ""
     toolbar = f'<div class="toolbar">{form}</div>' if form else ""
     actions = f'<div class="actions">{after}</div>' if after else ""
