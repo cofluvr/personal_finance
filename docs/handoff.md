@@ -242,6 +242,8 @@ Then only what the task needs:
   `drop_scenario_tables` (0034).
   0037 adds a column, so `drop_sync_tables` first calls `drop_real_ledger_protection`; a
   later migration's undo goes before that.
+  A new table is append-only, with `_no_update`, `_no_delete` and `_no_replace` triggers, or is
+  named in `MUTABLE_TABLES` in `tests/unit/test_append_only.py`.
   Also add the tables to `tests/unit/test_migrations.py`, `planning_digest.py`'s
   `PLANNING_TABLES` (planning tables only: scenarios are, snapshot records are not),
   `test_review_show.py`'s and `test_backups.py`'s `LEDGER_TABLES`, and the hand-added migrations of

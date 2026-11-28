@@ -982,7 +982,16 @@ estimates, which counted repeated lines without checking how many differed:
   shared check exactly; 11 differ and stay. Three breaks survive on both the old and new tests, a
   broader refusal standing in (CLAUDE.md): with the fixture's child rows, foreign keys refuse a
   DELETE without `scenario_no_delete` or `loan_payment_breakdown_no_delete`, and the primary key
-  refuses the test's plain `INSERT … SELECT *` without `fund_no_replace`. Not closed here: an
-  `INSERT OR REPLACE` and a childless row would test those triggers alone.
+  refuses the test's plain `INSERT … SELECT *` without `fund_no_replace`. Closed the same day, on
+  the owner's request: see the follow-up below.
 - **S3 as built:** `add_undo_command` (11 undo subcommands) and `add_supersedes_options` (4).
   Most of the parser's repetition is single lines a helper cannot shorten.
+- **Follow-up, the append-only gaps (owner's request, 2026-11-27):** `tests/unit/test_append_only.py`
+  tests each of the 112 append-only tables on its own three triggers alone: its columns copied with
+  no constraint, the triggers exactly as a new ledger holds them, then an update, a delete and a
+  duplicate (`INSERT` and `INSERT OR REPLACE`) refused, and a different row taken as the control
+  (`real_ledger` holds one row, so a second is refused). Every other table is named in
+  `MUTABLE_TABLES`, so a new table, or one that loses a trigger, fails until it is guarded or named.
+  10 breaks, all caught: the three S2 survivors, a trigger dropped from 0001, 0033 and all of
+  0034's `scenario`, a replace trigger that never fires, one that fires on every row,
+  `real_ledger` taking a second row, and a new table with no triggers.
