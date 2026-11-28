@@ -37,8 +37,11 @@ from personal_finance.reports.report_text import (
     account_choices,
     document_list_lines,
     budget_report_lines,
+    dashboard_card_rows,
+    dashboard_figures,
     dashboard_lines,
     funds_report_lines,
+    goal_progress,
     net_worth_report_lines,
     household_report_lines,
     income_report_lines,
@@ -162,6 +165,19 @@ form[action$="undo"] button, form[action$="uncover"] button {
 .field { display: grid; gap: 4px; }
 .field textarea { box-sizing: border-box; width: 100%; font-family: ui-monospace, Menlo, monospace; }
 .field input { max-width: 100%; box-sizing: border-box; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;
+         margin: 0 0 16px; }
+.card { display: block; padding: 14px 16px; color: inherit; text-decoration: none;
+        background: var(--surface); border: 1px solid var(--border);
+        border-top: 3px solid var(--border-strong); border-radius: 10px; }
+.card[data-state="good"] { border-top-color: var(--positive); }
+.card[data-state="warning"] { border-top-color: var(--warning); }
+a.card:hover { border-color: var(--accent); }
+.card-label { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+.card-value { margin: 6px 0 2px; font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+.card-detail { margin: 0; font-size: 12.5px; color: var(--muted); }
+.badge { margin-left: 6px; padding: 0 7px; font-size: 11px; font-weight: 600;
+         color: var(--warning); border: 1px solid currentColor; border-radius: 999px; }
 @media (max-width: 760px) {
   .app { grid-template-columns: minmax(0, 1fr); }
   .sidebar { position: static; height: auto; border-right: 0;
@@ -754,7 +770,12 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         if today is None:
             return self.send_page(200, "Dashboard", notice=SAFE_TO_SPEND_TIMEZONE, form=form)
         as_of = today if text is None else date.fromisoformat(checked_as_of(text))
-        self.send_page(200, "Dashboard", dashboard_lines(conn, as_of), form=form)
+        figures = dashboard_figures(conn, as_of)
+        progress = goal_progress(figures.active_funds)
+        drawn = (f'<div class="chart">{charts.chart_svg(progress)}</div>' if progress.rows
+                 else "")
+        self.send_page(200, "Dashboard", dashboard_lines(conn, as_of, figures), form=form,
+                       figures=dashboard_cards(figures) + drawn)
 
     def send_page(self, status, heading, lines=(), *, notice="", form="", figures="", after="",
                   extra_headers=()):
@@ -1052,6 +1073,23 @@ def rendered_line(line, next_line=None) -> str:
     lead_html = f'<span class="lead">{lead}</span>' if lead else ""
     return (f'<div class="line" data-role="{role}" data-depth="{depth}">'
             f"{lead_html}{shown}</div>")
+
+
+def dashboard_card(card) -> str:
+    """One card: a figure the dashboard's lines print, large, with what qualifies it."""
+    badge = f'<span class="badge">{escaped(card.badge)}</span>' if card.badge else ""
+    inner = (f'<p class="card-label">{escaped(card.label)}{badge}</p>'
+             f'<p class="card-value">{escaped(card.value)}</p>'
+             f'<p class="card-detail">{escaped(card.detail)}</p>')
+    if card.link:
+        return f'<a class="card" data-state="{card.state}" href="{card.link}">{inner}</a>'
+    return f'<div class="card" data-state="{card.state}">{inner}</div>'
+
+
+def dashboard_cards(figures) -> str:
+    """The dashboard's headline figures (D-083 point 3), as dashboard_card_rows words them."""
+    cards = "".join(dashboard_card(card) for card in dashboard_card_rows(figures))
+    return f'<section class="cards" aria-label="Headline figures">{cards}</section>'
 
 
 def navigation(current_path) -> str:
