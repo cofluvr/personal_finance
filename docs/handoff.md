@@ -1,9 +1,16 @@
-# Session Handoff: D-081, a private-folder real ledger, built for review; the app's charts awaiting review
+# Session Handoff: D-082, less code with the same behaviour, proposed; the benchmark trim built
 
-For a fresh session. Written 2026-11-24, updated 2026-11-26. **M1 to M21.3, the iPhone app (I1 to I3) and D-080 are
+For a fresh session. Written 2026-11-24, updated 2026-11-27. **M1 to M21.3, the iPhone app (I1 to I3) and D-080 are
 complete and accepted**, M20 to M21.3 and the app on the owner's notes of 2026-11-23, M17's
-real-browser check still the owner's. `main` on GitHub holds everything to `5cac64e`, merged by
-the owner. The commit after it, the app's charts, is local on `feature/m10-rules`, not pushed.
+real-browser check still the owner's. `main` on GitHub holds everything to `d0c0a1a`, the owner's
+merge of D-081 (PR #29), the app's charts included.
+
+**Built on 2026-11-27, on the owner's request of that day:** D-082 in [decisions.md](decisions.md),
+approved by the owner that day: four slices that cut repeated code without changing behaviour.
+Its first part is on branch `chore/d082-simplify`: the benchmark script's M2 and M3 one-off modes
+removed, and 12.6 GB of ledgers and pytest folders freed under `build/` by `bin/prune-build`'s
+rules. The owner approved committing, pushing and a PR for it and for each of S0 to S3, as
+stacked branches `chore/d082-s0` to `chore/d082-s3`.
 
 **Built on 2026-11-26, for the owner's review:** D-081 in [decisions.md](decisions.md), on the
 owner's request of that day: `pf init --real --protection private-folder`, a real ledger in any
@@ -38,6 +45,9 @@ Standing rules are in [CLAUDE.md](../CLAUDE.md), loaded automatically. Do not re
 
 Rewritten by each session for the next. The kickoff prompt carries only the owner's notes.
 
+- **D-082, approved 2026-11-27:** its slices S0 to S3 in order, each its own commit, with
+  the gates D-082 names. Read D-082, `reconcile/stated_fields.py`, `reports/stated_evidence.py`
+  and the `review <kind> show` and undo handlers in `cli.py` first.
 - **Stop for the owner's review of D-081 and of the app's charts** (D-079, "The owner's review of
   2026-11-23"). A change the owner asks for comes first. For D-081, read its full text,
   `db/real_ledger.py`, migration 0037 and `tests/scenarios/test_private_folder_ledger.py`; gate
@@ -80,7 +90,7 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `feature/d081-folder-ledger` (D-081), on `feature/m10-rules`. `main`, here and on GitHub, holds everything to `5cac64e` (merge `637a72a`, the owner's). The charts commit after it is local, not pushed |
+| Branch | `chore/d082-simplify` (D-082), from `main` at `d0c0a1a`, which holds D-081 and the charts, merged by the owner. `chore/prune-build` (`bin/prune-build`) is the owner's, not merged |
 | Latest commit | Run `git log -1`: the app's charts. M20 from `af4a9d7` to `3dc0654`; M21 from `ef3a9e6`; the app `a3d209b`; D-080 `73bcfff`. Earlier commits are in the archive |
 | Latest gating run | The full suite, slow tests included, on D-081's tree (`269906e`): 4,536 passed in 0:20:34, exit code 0. Swift, unchanged since the charts commit: `swift test` 28 passed; the UI tests 10 passed |
 | Python | 3.12.6, project `.venv` already present |
