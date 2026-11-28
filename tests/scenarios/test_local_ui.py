@@ -560,6 +560,8 @@ class TestShapedLines:  # D-083 point 2
         ("Disclosures:", "- These are account movements.", "heading"),
         ("Safe to spend as of 2026-05-04: today 50.00", "  Horizon: 4 days", "heading"),
         ("Account inflows: 333.33", "Account outflows: 106.50", "text"),
+        ("Budget pace, never safe to spend. " + "x" * 57, "  Plan in effect", "text"),
+        ("Budget pace, never safe to spend. " + "x" * 56, "  Plan in effect", "heading"),
         ("Account inflows: 333.33", None, "text"),
         ("  purchase: 1 transactions, -100.00", "  income: 1", "text"),
         ("- These are account movements.", None, "disclosure"),

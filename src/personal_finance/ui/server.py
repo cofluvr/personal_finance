@@ -1000,6 +1000,9 @@ AMOUNT = re.compile(r"(?<![\w.])-?\d+\.\d{2}(?![\w.])")
 # or the household table, which keeps a fixed-width font.
 COLUMNS = re.compile(r"\S {2,}")
 DEEPEST_INDENT = 4
+# A heading by the lines indented under it is a short line, such as "Safe to spend as of ...":
+# a long one is a sentence explaining them, which reads better as text.
+LONGEST_HEADING = 90
 
 
 def indent_of(text: str) -> int:
@@ -1016,11 +1019,13 @@ def with_amounts_marked(text: str) -> str:
 
 def line_role(text: str, next_text: str | None) -> str:
     """What a line is, read from how the CLI prints it: columns, a heading (a top-level line
-    ending in a colon, or one that lines below it are indented under), a disclosure, or text."""
+    ending in a colon, or a short one that lines below it are indented under), a disclosure, or
+    text."""
     if COLUMNS.search(text.lstrip(" ")):
         return "columns"
     if not text.startswith(" ") and (text.endswith(":") or (
-            next_text is not None and indent_of(next_text) > 0)):
+            len(text) <= LONGEST_HEADING and next_text is not None
+            and indent_of(next_text) > 0)):
         return "heading"
     if text.startswith("- "):
         return "disclosure"
