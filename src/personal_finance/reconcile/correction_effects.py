@@ -12,13 +12,6 @@ from dataclasses import dataclass
 from personal_finance.reconcile.supersession import STATE_ACTIVE, supersession_chain_states
 
 CORRECTABLE_FIELDS = ("amount", "transaction_date", "posting_date", "description")
-# The ledger_transaction column holding each field's source value (D-030).
-SOURCE_COLUMN_BY_FIELD = {
-    "amount": "amount_cents",
-    "transaction_date": "transaction_date",
-    "posting_date": "posting_date",
-    "description": "description",
-}
 
 FIELD_APPLIED = "applied"
 FIELD_IN_CONFLICT = "conflict"

@@ -76,13 +76,6 @@ def type_of_account(conn: sqlite3.Connection, account_id: str) -> str:
     return conn.execute("SELECT account_type FROM account WHERE id = ?", (account_id,)).fetchone()[0]
 
 
-def classification_chain_states(
-    conn: sqlite3.Connection, account_id: str, treated_as_undone: str | None = None
-) -> tuple[dict[str, str], dict[str, str]]:
-    """Each classification's state, and each superseded one's successor, under D-048's rule."""
-    return stated_fields.chain_states(conn, TYPE_STATEMENTS, account_id, treated_as_undone)
-
-
 def load_active_classifications(
     conn: sqlite3.Connection, account_id: str, treated_as_undone: str | None = None
 ) -> tuple[ActiveCorrection, ...]:

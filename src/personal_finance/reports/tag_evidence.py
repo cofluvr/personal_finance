@@ -11,7 +11,6 @@ from personal_finance.reconcile.tag_effects import TAG_STATEMENTS, effective_tag
 from personal_finance.reports.stated_evidence import (
     StoredStatement,
     digest,
-    list_statements,
     load_statement,
     undo_outlook,
 )
@@ -24,10 +23,6 @@ TAGGING_REVISION_VERSION = 1
 class TaggingUndoOutlook:
     revision: str
     state_by_transaction: tuple[tuple[str, str | None, str | None], ...]
-
-
-def list_taggings(conn: sqlite3.Connection, account_id: str | None = None) -> list[tuple]:
-    return list_statements(conn, TAG_STATEMENTS, account_id)
 
 
 def load_tagging(conn: sqlite3.Connection, statement_id: str) -> StoredStatement | None:
