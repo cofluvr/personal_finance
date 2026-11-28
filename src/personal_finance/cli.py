@@ -3079,10 +3079,7 @@ def run_review_decision_show(args) -> int:
             )
         print(f"  {UNDO_NOTICE}")
         if stale:
-            print(
-                "This account has not been reconciled under the current matching rules, so "
-                "undo will be refused until it is. Run reconcile."
-            )
+            print(STALE_ACCOUNT_UNDO_WARNING)
     return 0
 
 
@@ -3176,66 +3173,95 @@ PREVIEW_STATES = {
 }
 
 
+STALE_ACCOUNT_UNDO_WARNING = (
+    "This account has not been reconciled under the current matching rules, so undo will be "
+    "refused until it is. Run reconcile."
+)
+
+
+def print_stated_show(conn, statement, *, noun: str, statement_id: str, supersedes_id,
+                      value_line: str, undo_preview, later_noun: str | None = None) -> int:
+    """review <kind>-show for one stated kind's statement: what it states, its chain and bound
+    records, then, while it is in effect, its undo revision and preview. noun names the kind, as
+    "tag statement"; later_noun, when given, replaces it where a sentence names the kind again.
+    undo_preview gives the revision and the preview's lines, and runs only for a statement in
+    effect. Corrections and classifications name their IDs their own way, so every caller passes
+    statement_id and supersedes_id."""
+    later_noun = later_noun or noun
+    print(f"{noun.capitalize()} {statement_id}")
+    print(f"  Account: {shown(statement.account_name)} ({statement.account_id})")
+    print(f"  {value_line}")
+    print(f"  Status: {statement.state}")
+    print(f"  Made: {statement.created_at}")
+    if statement.undone_at:
+        print(f"  Undone: {statement.undone_at}. It stays on record and no longer applies.")
+    if statement.superseded_by:
+        print(f"  Superseded by {noun} {statement.superseded_by}. It stays on record and no "
+              f"longer applies, unless that {later_noun} is undone.")
+    if statement.newest_of_chain != statement.superseded_by:
+        print(f"  Newest of its chain: {noun} {statement.newest_of_chain}, the only one that "
+              f"can be undone. Each undo restores the {later_noun} before it.")
+    if supersedes_id:
+        print(f"  Supersedes {noun} {supersedes_id}")
+    print(f"  From transaction: {statement.target_transaction_id}")
+    print("Bound records:")
+    for record in statement.bound_records:
+        print(f"  {shown(record.file_name)} row {record.row}, now in "
+              f"{record.transaction_id or 'no transaction'}")
+    if statement.state == STATE_ACTIVE:
+        revision, preview_lines = undo_preview()
+        print(f"  Revision: {revision}")
+        print(f"Undoing this {noun} now:")
+        if supersedes_id:
+            print(f"  Restores {noun} {supersedes_id}, which it superseded")
+        for line in preview_lines:
+            print(line)
+        if stale_accounts(conn, DEFAULT_RULES, statement.account_id):
+            print(STALE_ACCOUNT_UNDO_WARNING)
+    return 0
+
+
+def preview_of(outlook, preview_states) -> tuple[str, list[str]]:
+    """An undo outlook's revision, and a line for each transaction it reaches: its state now and
+    after, in the kind's words."""
+    return outlook.revision, [
+        f"  Transaction {transaction_id}: {preview_states[state_now]} now, "
+        f"{preview_states[state_after]} after"
+        for transaction_id, state_now, state_after in outlook.state_by_transaction]
+
+
+def print_stated_undone(noun: str, statement_id: str, restored) -> None:
+    """The first lines of every stated kind's undo: it is undone, and what it superseded applies
+    again."""
+    print(f"{noun.capitalize()} {statement_id} undone. It stays on record and no longer applies.")
+    if restored:
+        print(f"  {noun.capitalize()} {restored}, which it superseded, applies again.")
+
+
 def run_review_correction_show(args) -> int:
     conn = open_ledger(args.db, read_only=True)
     correction = load_correction(conn, args.correction_id)
     if correction is None:
         raise CommandError("correction not found. Run review corrections.")
 
-    print(f"Correction {correction.correction_id}")
-    print(f"  Account: {shown(correction.account_name)} ({correction.account_id})")
-    print(f"  Field: {correction.field}")
-    print(f"  Status: {correction.state}")
-    print(f"  Made: {correction.created_at}")
-    if correction.undone_at:
-        print(f"  Undone: {correction.undone_at}. It stays on record and no longer applies.")
-    if correction.superseded_by:
-        print(
-            f"  Superseded by correction {correction.superseded_by}. It stays on record and no "
-            "longer applies, unless that correction is undone."
-        )
-    if correction.newest_of_chain != correction.superseded_by:
-        print(
-            f"  Newest of its chain: correction {correction.newest_of_chain}, the only one that "
-            "can be undone. Each undo restores the correction before it."
-        )
-    if correction.supersedes_correction_id:
-        print(f"  Supersedes correction {correction.supersedes_correction_id}")
-    print(f"  From transaction: {correction.target_transaction_id}")
-    print("Bound records:")
-    for record in correction.bound_records:
-        where = record.transaction_id or "no transaction"
-        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
-
-    if correction.state == STATE_ACTIVE:
+    def undo_preview():
         outlook = correction_undo_outlook(conn, correction)
-        print(f"  Revision: {outlook.revision}")
-        print("Undoing this correction now:")
-        if correction.supersedes_correction_id:
-            print(
-                f"  Restores correction {correction.supersedes_correction_id}, which it superseded"
-            )
-        for transaction_id, state_now, state_after in outlook.field_state_by_transaction:
-            print(
-                f"  Transaction {transaction_id}, {correction.field}: {PREVIEW_STATES[state_now]} "
-                f"now, {PREVIEW_STATES[state_after]} after"
-            )
-        if stale_accounts(conn, DEFAULT_RULES, correction.account_id):
-            print(
-                "This account has not been reconciled under the current matching rules, so "
-                "undo will be refused until it is. Run reconcile."
-            )
-    return 0
+        return outlook.revision, [
+            f"  Transaction {transaction_id}, {correction.field}: {PREVIEW_STATES[state_now]} "
+            f"now, {PREVIEW_STATES[state_after]} after"
+            for transaction_id, state_now, state_after in outlook.field_state_by_transaction]
+
+    return print_stated_show(
+        conn, correction, noun="correction", statement_id=correction.correction_id,
+        supersedes_id=correction.supersedes_correction_id,
+        value_line=f"Field: {correction.field}", undo_preview=undo_preview)
 
 
 def run_review_correction_undo(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
     result = undo_correction(conn, account_id, args.correction_id, args.revision)
-
-    print(f"Correction {args.correction_id} undone. It stays on record and no longer applies.")
-    if result.restored:
-        print(f"  Correction {result.restored}, which it superseded, applies again.")
+    print_stated_undone("correction", args.correction_id, result.restored)
     print_newly_unsettled(result.newly_unsettled_fields)
     print_newly_unclassified(result.newly_unclassified_transactions)
     print_newly_unmatched(result.newly_unsettled_matches)
@@ -3319,52 +3345,13 @@ def run_review_classification_show(args) -> int:
     classification = load_classification(conn, args.classification_id)
     if classification is None:
         raise CommandError("classification not found. Run review classifications.")
-
-    print(f"Classification {classification.classification_id}")
-    print(f"  Account: {shown(classification.account_name)} ({classification.account_id})")
-    print(f"  Type: {classification.financial_type}")
-    print(f"  Status: {classification.state}")
-    print(f"  Made: {classification.created_at}")
-    if classification.undone_at:
-        print(f"  Undone: {classification.undone_at}. It stays on record and no longer applies.")
-    if classification.superseded_by:
-        print(
-            f"  Superseded by classification {classification.superseded_by}. It stays on record "
-            "and no longer applies, unless that classification is undone."
-        )
-    if classification.newest_of_chain != classification.superseded_by:
-        print(
-            f"  Newest of its chain: classification {classification.newest_of_chain}, the only "
-            "one that can be undone. Each undo restores the classification before it."
-        )
-    if classification.supersedes_classification_id:
-        print(f"  Supersedes classification {classification.supersedes_classification_id}")
-    print(f"  From transaction: {classification.target_transaction_id}")
-    print("Bound records:")
-    for record in classification.bound_records:
-        where = record.transaction_id or "no transaction"
-        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
-
-    if classification.state == STATE_ACTIVE:
-        outlook = classification_undo_outlook(conn, classification)
-        print(f"  Revision: {outlook.revision}")
-        print("Undoing this classification now:")
-        if classification.supersedes_classification_id:
-            print(
-                f"  Restores classification {classification.supersedes_classification_id}, which "
-                "it superseded"
-            )
-        for transaction_id, state_now, state_after in outlook.state_by_transaction:
-            print(
-                f"  Transaction {transaction_id}: {CLASSIFICATION_PREVIEW_STATES[state_now]} now, "
-                f"{CLASSIFICATION_PREVIEW_STATES[state_after]} after"
-            )
-        if stale_accounts(conn, DEFAULT_RULES, classification.account_id):
-            print(
-                "This account has not been reconciled under the current matching rules, so "
-                "undo will be refused until it is. Run reconcile."
-            )
-    return 0
+    return print_stated_show(
+        conn, classification, noun="classification",
+        statement_id=classification.classification_id,
+        supersedes_id=classification.supersedes_classification_id,
+        value_line=f"Type: {classification.financial_type}",
+        undo_preview=lambda: preview_of(
+            classification_undo_outlook(conn, classification), CLASSIFICATION_PREVIEW_STATES))
 
 
 RULE_UNDO_NOTICE = (
@@ -4168,64 +4155,20 @@ def run_review_categorization_show(args) -> int:
     categorization = load_categorization(conn, args.categorization_id)
     if categorization is None:
         raise CommandError("categorization not found. Run review categorizations.")
-
-    print(f"Categorization {categorization.statement_id}")
-    print(f"  Account: {shown(categorization.account_name)} ({categorization.account_id})")
-    print(f"  Category: {shown(categorization.shown_value)}")
-    print(f"  Status: {categorization.state}")
-    print(f"  Made: {categorization.created_at}")
-    if categorization.undone_at:
-        print(f"  Undone: {categorization.undone_at}. It stays on record and no longer applies.")
-    if categorization.superseded_by:
-        print(
-            f"  Superseded by categorization {categorization.superseded_by}. It stays on record "
-            "and no longer applies, unless that categorization is undone."
-        )
-    if categorization.newest_of_chain != categorization.superseded_by:
-        print(
-            f"  Newest of its chain: categorization {categorization.newest_of_chain}, the only "
-            "one that can be undone. Each undo restores the categorization before it."
-        )
-    if categorization.supersedes_id:
-        print(f"  Supersedes categorization {categorization.supersedes_id}")
-    print(f"  From transaction: {categorization.target_transaction_id}")
-    print("Bound records:")
-    for record in categorization.bound_records:
-        where = record.transaction_id or "no transaction"
-        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
-
-    if categorization.state == STATE_ACTIVE:
-        outlook = categorization_undo_outlook(conn, categorization)
-        print(f"  Revision: {outlook.revision}")
-        print("Undoing this categorization now:")
-        if categorization.supersedes_id:
-            print(
-                f"  Restores categorization {categorization.supersedes_id}, which it superseded"
-            )
-        for transaction_id, state_now, state_after in outlook.state_by_transaction:
-            print(
-                f"  Transaction {transaction_id}: {CATEGORIZATION_PREVIEW_STATES[state_now]} now, "
-                f"{CATEGORIZATION_PREVIEW_STATES[state_after]} after"
-            )
-        if stale_accounts(conn, DEFAULT_RULES, categorization.account_id):
-            print(
-                "This account has not been reconciled under the current matching rules, so "
-                "undo will be refused until it is. Run reconcile."
-            )
-    return 0
+    return print_stated_show(
+        conn, categorization, noun="categorization",
+        statement_id=categorization.statement_id,
+        supersedes_id=categorization.supersedes_id,
+        value_line=f"Category: {shown(categorization.shown_value)}",
+        undo_preview=lambda: preview_of(
+            categorization_undo_outlook(conn, categorization), CATEGORIZATION_PREVIEW_STATES))
 
 
 def run_review_categorization_undo(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
     result = undo_categorization(conn, account_id, args.categorization_id, args.revision)
-
-    print(
-        f"Categorization {args.categorization_id} undone. It stays on record and no longer "
-        "applies."
-    )
-    if result.restored:
-        print(f"  Categorization {result.restored}, which it superseded, applies again.")
+    print_stated_undone("categorization", args.categorization_id, result.restored)
     if result.newly_uncategorized_transactions:
         print(
             f"  Categorized transactions now {UNCATEGORIZED}, because categorizations disagree, "
@@ -4298,59 +4241,20 @@ def run_review_allocation_show(args) -> int:
     allocation = load_allocation(conn, args.allocation_id)
     if allocation is None:
         raise CommandError("allocation not found. Run review allocations.")
-
-    print(f"Allocation {allocation.statement_id}")
-    print(f"  Account: {shown(allocation.account_name)} ({allocation.account_id})")
-    print(f"  Allocation: {describe_allocation(member_names(conn), allocation.shown_value)}")
-    print(f"  Status: {allocation.state}")
-    print(f"  Made: {allocation.created_at}")
-    if allocation.undone_at:
-        print(f"  Undone: {allocation.undone_at}. It stays on record and no longer applies.")
-    if allocation.superseded_by:
-        print(
-            f"  Superseded by allocation {allocation.superseded_by}. It stays on record and no "
-            "longer applies, unless that allocation is undone."
-        )
-    if allocation.newest_of_chain != allocation.superseded_by:
-        print(
-            f"  Newest of its chain: allocation {allocation.newest_of_chain}, the only one that "
-            "can be undone. Each undo restores the allocation before it."
-        )
-    if allocation.supersedes_id:
-        print(f"  Supersedes allocation {allocation.supersedes_id}")
-    print(f"  From transaction: {allocation.target_transaction_id}")
-    print("Bound records:")
-    for record in allocation.bound_records:
-        where = record.transaction_id or "no transaction"
-        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
-
-    if allocation.state == STATE_ACTIVE:
-        outlook = allocation_undo_outlook(conn, allocation)
-        print(f"  Revision: {outlook.revision}")
-        print("Undoing this allocation now:")
-        if allocation.supersedes_id:
-            print(f"  Restores allocation {allocation.supersedes_id}, which it superseded")
-        for transaction_id, state_now, state_after in outlook.state_by_transaction:
-            print(
-                f"  Transaction {transaction_id}: {ALLOCATION_PREVIEW_STATES[state_now]} now, "
-                f"{ALLOCATION_PREVIEW_STATES[state_after]} after"
-            )
-        if stale_accounts(conn, DEFAULT_RULES, allocation.account_id):
-            print(
-                "This account has not been reconciled under the current matching rules, so "
-                "undo will be refused until it is. Run reconcile."
-            )
-    return 0
+    return print_stated_show(
+        conn, allocation, noun="allocation",
+        statement_id=allocation.statement_id,
+        supersedes_id=allocation.supersedes_id,
+        value_line=f"Allocation: {describe_allocation(member_names(conn), allocation.shown_value)}",
+        undo_preview=lambda: preview_of(
+            allocation_undo_outlook(conn, allocation), ALLOCATION_PREVIEW_STATES))
 
 
 def run_review_allocation_undo(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
     result = undo_allocation(conn, account_id, args.allocation_id, args.revision)
-
-    print(f"Allocation {args.allocation_id} undone. It stays on record and no longer applies.")
-    if result.restored:
-        print(f"  Allocation {result.restored}, which it superseded, applies again.")
+    print_stated_undone("allocation", args.allocation_id, result.restored)
     print_newly_unattributed(result.newly_unattributed_transactions)
     print(f"  {ALLOCATION_UNDO_NOTICE}")
     return 0
@@ -4429,57 +4333,20 @@ def run_review_consumption_show(args) -> int:
         raise CommandError("consumption not found. Run review consumptions.")
     fund_id = conn.execute("SELECT fund_id FROM fund_consumption WHERE id = ?",
                            (consumption.statement_id,)).fetchone()[0]
-    print(f"Consumption {consumption.statement_id}")
-    print(f"  Account: {shown(consumption.account_name)} ({consumption.account_id})")
-    print(f"  Paid from: fund {fund_id} ({shown(consumption.shown_value)})")
-    print(f"  Status: {consumption.state}")
-    print(f"  Made: {consumption.created_at}")
-    if consumption.undone_at:
-        print(f"  Undone: {consumption.undone_at}. It stays on record and no longer applies.")
-    if consumption.superseded_by:
-        print(
-            f"  Superseded by consumption {consumption.superseded_by}. It stays on record and no "
-            "longer applies, unless that consumption is undone."
-        )
-    if consumption.newest_of_chain != consumption.superseded_by:
-        print(
-            f"  Newest of its chain: consumption {consumption.newest_of_chain}, the only one that "
-            "can be undone. Each undo restores the consumption before it."
-        )
-    if consumption.supersedes_id:
-        print(f"  Supersedes consumption {consumption.supersedes_id}")
-    print(f"  From transaction: {consumption.target_transaction_id}")
-    print("Bound records:")
-    for record in consumption.bound_records:
-        where = record.transaction_id or "no transaction"
-        print(f"  {shown(record.file_name)} row {record.row}, now in {where}")
-
-    if consumption.state == STATE_ACTIVE:
-        outlook = consumption_undo_outlook(conn, consumption)
-        print(f"  Revision: {outlook.revision}")
-        print("Undoing this consumption now:")
-        if consumption.supersedes_id:
-            print(f"  Restores consumption {consumption.supersedes_id}, which it superseded")
-        for transaction_id, state_now, state_after in outlook.state_by_transaction:
-            print(
-                f"  Transaction {transaction_id}: {CONSUMPTION_PREVIEW_STATES[state_now]} now, "
-                f"{CONSUMPTION_PREVIEW_STATES[state_after]} after"
-            )
-        if stale_accounts(conn, DEFAULT_RULES, consumption.account_id):
-            print(
-                "This account has not been reconciled under the current matching rules, so "
-                "undo will be refused until it is. Run reconcile."
-            )
-    return 0
+    return print_stated_show(
+        conn, consumption, noun="consumption",
+        statement_id=consumption.statement_id,
+        supersedes_id=consumption.supersedes_id,
+        value_line=f"Paid from: fund {fund_id} ({shown(consumption.shown_value)})",
+        undo_preview=lambda: preview_of(
+            consumption_undo_outlook(conn, consumption), CONSUMPTION_PREVIEW_STATES))
 
 
 def run_review_consumption_undo(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
     result = undo_consumption(conn, account_id, args.consumption_id, args.revision)
-    print(f"Consumption {args.consumption_id} undone. It stays on record and no longer applies.")
-    if result.restored:
-        print(f"  Consumption {result.restored}, which it superseded, applies again.")
+    print_stated_undone("consumption", args.consumption_id, result.restored)
     print_newly_unconsumed(result.newly_unsettled_transactions)
     print(f"  {CONSUMPTION_UNDO_NOTICE}")
     return 0
@@ -4549,48 +4416,20 @@ def run_review_breakdown_show(args) -> int:
     breakdown = load_breakdown(conn, args.breakdown_id)
     if breakdown is None:
         raise CommandError("breakdown not found. Run review breakdowns.")
-    print(f"Breakdown {breakdown.statement_id}")
-    print(f"  Account: {shown(breakdown.account_name)} ({breakdown.account_id})")
-    print(f"  Stated: {describe_breakdown(breakdown.shown_value)}")
-    print(f"  Status: {breakdown.state}")
-    print(f"  Made: {breakdown.created_at}")
-    if breakdown.undone_at:
-        print(f"  Undone: {breakdown.undone_at}. It stays on record and no longer applies.")
-    if breakdown.superseded_by:
-        print(f"  Superseded by breakdown {breakdown.superseded_by}. It stays on record and no "
-              "longer applies, unless that breakdown is undone.")
-    if breakdown.newest_of_chain != breakdown.superseded_by:
-        print(f"  Newest of its chain: breakdown {breakdown.newest_of_chain}, the only one that "
-              "can be undone. Each undo restores the breakdown before it.")
-    if breakdown.supersedes_id:
-        print(f"  Supersedes breakdown {breakdown.supersedes_id}")
-    print(f"  From transaction: {breakdown.target_transaction_id}")
-    print("Bound records:")
-    for record in breakdown.bound_records:
-        print(f"  {shown(record.file_name)} row {record.row}, now in "
-              f"{record.transaction_id or 'no transaction'}")
-    if breakdown.state == STATE_ACTIVE:
-        outlook = breakdown_undo_outlook(conn, breakdown)
-        print(f"  Revision: {outlook.revision}")
-        print("Undoing this breakdown now:")
-        if breakdown.supersedes_id:
-            print(f"  Restores breakdown {breakdown.supersedes_id}, which it superseded")
-        for transaction_id, state_now, state_after in outlook.state_by_transaction:
-            print(f"  Transaction {transaction_id}: {BREAKDOWN_PREVIEW_STATES[state_now]} now, "
-                  f"{BREAKDOWN_PREVIEW_STATES[state_after]} after")
-        if stale_accounts(conn, DEFAULT_RULES, breakdown.account_id):
-            print("This account has not been reconciled under the current matching rules, so "
-                  "undo will be refused until it is. Run reconcile.")
-    return 0
+    return print_stated_show(
+        conn, breakdown, noun="breakdown",
+        statement_id=breakdown.statement_id,
+        supersedes_id=breakdown.supersedes_id,
+        value_line=f"Stated: {describe_breakdown(breakdown.shown_value)}",
+        undo_preview=lambda: preview_of(
+            breakdown_undo_outlook(conn, breakdown), BREAKDOWN_PREVIEW_STATES))
 
 
 def run_review_breakdown_undo(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
     result = undo_breakdown(conn, account_id, args.breakdown_id, args.revision)
-    print(f"Breakdown {args.breakdown_id} undone. It stays on record and no longer applies.")
-    if result.restored:
-        print(f"  Breakdown {result.restored}, which it superseded, applies again.")
+    print_stated_undone("breakdown", args.breakdown_id, result.restored)
     print_newly_unbroken(result.newly_unsettled_transactions)
     print("  The payment counts whole in confirmed transfers again, or as the breakdown this one "
           "superseded divides it.")
@@ -4697,49 +4536,21 @@ def run_review_tagging_show(args) -> int:
     statement = load_tagging(conn, args.tag_statement_id)
     if statement is None:
         raise CommandError("tag statement not found. Run review transaction show.")
-    print(f"Tag statement {statement.statement_id}")
-    print(f"  Account: {shown(statement.account_name)} ({statement.account_id})")
-    print(f"  Stated: {shown(statement.shown_value)}")
-    print(f"  Status: {statement.state}")
-    print(f"  Made: {statement.created_at}")
-    if statement.undone_at:
-        print(f"  Undone: {statement.undone_at}. It stays on record and no longer applies.")
-    if statement.superseded_by:
-        print(f"  Superseded by tag statement {statement.superseded_by}. It stays on record and "
-              "no longer applies, unless that statement is undone.")
-    if statement.newest_of_chain != statement.superseded_by:
-        print(f"  Newest of its chain: tag statement {statement.newest_of_chain}, the only one "
-              "that can be undone. Each undo restores the statement before it.")
-    if statement.supersedes_id:
-        print(f"  Supersedes tag statement {statement.supersedes_id}")
-    print(f"  From transaction: {statement.target_transaction_id}")
-    print("Bound records:")
-    for record in statement.bound_records:
-        print(f"  {shown(record.file_name)} row {record.row}, now in "
-              f"{record.transaction_id or 'no transaction'}")
-    if statement.state == STATE_ACTIVE:
-        outlook = tagging_undo_outlook(conn, statement)
-        print(f"  Revision: {outlook.revision}")
-        print("Undoing this tag statement now:")
-        if statement.supersedes_id:
-            print(f"  Restores tag statement {statement.supersedes_id}, which it superseded")
-        for transaction_id, state_now, state_after in outlook.state_by_transaction:
-            print(f"  Transaction {transaction_id}: {TAGGING_PREVIEW_STATES[state_now]} now, "
-                  f"{TAGGING_PREVIEW_STATES[state_after]} after")
-        if stale_accounts(conn, DEFAULT_RULES, statement.account_id):
-            print("This account has not been reconciled under the current matching rules, so "
-                  "undo will be refused until it is. Run reconcile.")
-    return 0
+    return print_stated_show(
+        conn, statement, noun="tag statement",
+        statement_id=statement.statement_id,
+        supersedes_id=statement.supersedes_id,
+        value_line=f"Stated: {shown(statement.shown_value)}",
+        undo_preview=lambda: preview_of(
+            tagging_undo_outlook(conn, statement), TAGGING_PREVIEW_STATES),
+        later_noun="statement")
 
 
 def run_review_tagging_undo(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
     result = undo_tagging(conn, account_id, args.tag_statement_id, args.revision)
-    print(f"Tag statement {args.tag_statement_id} undone. It stays on record and no longer "
-          "applies.")
-    if result.restored:
-        print(f"  Tag statement {result.restored}, which it superseded, applies again.")
+    print_stated_undone("tag statement", args.tag_statement_id, result.restored)
     if result.newly_unsettled_transactions:
         print(f"  Transactions now with no tags applying, because statements disagree or lost "
               f"their basis: {result.newly_unsettled_transactions}.")
@@ -4772,13 +4583,7 @@ def run_review_classification_undo(args) -> int:
     conn = open_ledger(args.db)
     account_id = find_account(conn, args.account)
     result = undo_classification(conn, account_id, args.classification_id, args.revision)
-
-    print(
-        f"Classification {args.classification_id} undone. It stays on record and no longer "
-        "applies."
-    )
-    if result.restored:
-        print(f"  Classification {result.restored}, which it superseded, applies again.")
+    print_stated_undone("classification", args.classification_id, result.restored)
     print_newly_unclassified(result.newly_unclassified_transactions)
     print_newly_unmatched(result.newly_unsettled_matches)
     print(f"  {CLASSIFICATION_UNDO_NOTICE}")
@@ -5050,10 +4855,7 @@ def run_review_resolution_show(args) -> int:
                 )
         print(f"  {RESOLUTION_UNDO_NOTICE}")
         if stale_accounts(conn, DEFAULT_RULES, resolution.account_id):
-            print(
-                "This account has not been reconciled under the current matching rules, so "
-                "undo will be refused until it is. Run reconcile."
-            )
+            print(STALE_ACCOUNT_UNDO_WARNING)
     return 0
 
 
