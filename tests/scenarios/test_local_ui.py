@@ -5,6 +5,7 @@ Requests go to the real handler over a socket pair (local_ui_client), so no test
 anything and the suite's socket guard is unchanged.
 """
 
+import re
 import socket
 import sqlite3
 import tempfile
@@ -552,3 +553,45 @@ class TestPageShell:  # D-083 point 1
         response = client.exchange(b"GARBAGE\r\n\r\n")
         assert response.status == 400
         assert "aria-current" not in response.text
+
+
+class TestShapedLines:  # D-083 point 2
+    @pytest.mark.parametrize(("text", "next_text", "role"), [
+        ("Disclosures:", "- These are account movements.", "heading"),
+        ("Safe to spend as of 2026-05-04: today 50.00", "  Horizon: 4 days", "heading"),
+        ("Account inflows: 333.33", "Account outflows: 106.50", "text"),
+        ("Budget pace, never safe to spend. " + "x" * 57, "  Plan in effect", "text"),
+        ("Budget pace, never safe to spend. " + "x" * 56, "  Plan in effect", "heading"),
+        ("Account inflows: 333.33", None, "text"),
+        ("  purchase: 1 transactions, -100.00", "  income: 1", "text"),
+        ("- These are account movements.", None, "disclosure"),
+        ("t1  2026-02-02         -6.50  posted    CAFE", None, "columns"),
+        ("            Alex  Bea", "Income  1.00  2.00", "columns"),
+    ])
+    def test_a_lines_role_is_read_from_its_printed_shape(self, text, next_text, role):
+        assert ui_server.line_role(text, next_text) == role
+
+    @pytest.mark.parametrize(("text", "amounts"), [
+        ("net -93.54 and 1400.00", ["-93.54", "1400.00"]),
+        ("on 2026-05-04 at 16.502Z, v1.10, id x1.25, 6.5 percent, 1.234", []),
+        ("<b>12.50</b> & 'q'", ["12.50"]),
+    ])
+    def test_only_standalone_amounts_are_marked(self, text, amounts):
+        marked = ui_server.with_amounts_marked(text)
+        assert re.findall(r'<span class="amount[^"]*">([^<]*)</span>', marked) == amounts
+        assert re.sub(r"<span[^>]*>|</span>", "", marked) == ui_server.escaped(text)
+        assert all(('negative">' + amount) in marked
+                   for amount in amounts if amount.startswith("-"))
+
+    def test_shaped_lines_keep_their_text_and_depth(self, ledger, client):
+        body = client.get("/").text
+        assert page_text(client.get("/").body) == cli_output_for(ledger, "totals")
+        assert 'data-role="heading" data-depth="0">Disclosures:</div>' in body
+        assert '<span class="lead">  </span>' in body
+        assert re.search(r'data-depth="1"><span class="lead">  </span>\w', body)
+
+
+def cli_output_for(ledger, *words):
+    code, out, err = ledger.run(*words)
+    assert code == 0, err
+    return out
