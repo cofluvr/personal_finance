@@ -1,4 +1,4 @@
-# Session Handoff: D-082, less code with the same behaviour, proposed; the benchmark trim built
+# Session Handoff: D-082, less code with the same behaviour, built for review as five stacked PRs
 
 For a fresh session. Written 2026-11-24, updated 2026-11-27. **M1 to M21.3, the iPhone app (I1 to I3) and D-080 are
 complete and accepted**, M20 to M21.3 and the app on the owner's notes of 2026-11-23, M17's
@@ -6,11 +6,11 @@ real-browser check still the owner's. `main` on GitHub holds everything to `d0c0
 merge of D-081 (PR #29), the app's charts included.
 
 **Built on 2026-11-27, on the owner's request of that day:** D-082 in [decisions.md](decisions.md),
-approved by the owner that day: four slices that cut repeated code without changing behaviour.
-Its first part is on branch `chore/d082-simplify`: the benchmark script's M2 and M3 one-off modes
-removed, and 12.6 GB of ledgers and pytest folders freed under `build/` by `bin/prune-build`'s
-rules. The owner approved committing, pushing and a PR for it and for each of S0 to S3, as
-stacked branches `chore/d082-s0` to `chore/d082-s3`.
+approved by the owner that day and built: the benchmark trim, then S0 to S3, 2,012 lines fewer in
+`src/` and `tests/` with behaviour unchanged ("How D-082 was built"). Five stacked PRs, each on the
+one before: `chore/d082-simplify` (#30, on `main`), then `chore/d082-s0` to `chore/d082-s3`. Merge
+them in that order. 12.6 GB of ledgers and pytest folders were freed under `build/` by
+`bin/prune-build`'s rules.
 
 **Built on 2026-11-26, for the owner's review:** D-081 in [decisions.md](decisions.md), on the
 owner's request of that day: `pf init --real --protection private-folder`, a real ledger in any
@@ -45,9 +45,10 @@ Standing rules are in [CLAUDE.md](../CLAUDE.md), loaded automatically. Do not re
 
 Rewritten by each session for the next. The kickoff prompt carries only the owner's notes.
 
-- **D-082, approved 2026-11-27:** its slices S0 to S3 in order, each its own commit, with
-  the gates D-082 names. Read D-082, `reconcile/stated_fields.py`, `reports/stated_evidence.py`
-  and the `review <kind> show` and undo handlers in `cli.py` first.
+- **Stop for the owner's review of D-082's five PRs.** A change the owner asks for comes first.
+  Read "How D-082 was built". New review commands of a stated kind use `print_stated_show`,
+  `print_stated_undone` and `add_undo_command`; a new migration's tests use
+  `tests/scenarios/migration_checks.py`.
 - **Stop for the owner's review of D-081 and of the app's charts** (D-079, "The owner's review of
   2026-11-23"). A change the owner asks for comes first. For D-081, read its full text,
   `db/real_ledger.py`, migration 0037 and `tests/scenarios/test_private_folder_ledger.py`; gate
@@ -57,7 +58,7 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
 - **Then, only if the owner's notes allow:**
   - **I4 with the owner:** putting the app on the phone, and one real-phone delivery (YC2).
   - **M21.4 with the owner:** point F, the migration rehearsal, and the readiness checklist.
-  - **Any new milestone** needs its plan as the next free decision number, D-082. Candidates are
+  - **Any new milestone** needs its plan as the next free decision number, D-083. Candidates are
     PRD §13's later items: receipt photography, mobile categorization, notifications. Each needs
     a write-capable sync contract first (shared-contract §5).
 - **Read first for chart changes:** D-079's review section, `ios/CommonCents/CommonCents/Visuals.swift`,
@@ -90,9 +91,9 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `chore/d082-simplify` (D-082), from `main` at `d0c0a1a`, which holds D-081 and the charts, merged by the owner. `chore/prune-build` (`bin/prune-build`) is the owner's, not merged |
+| Branch | `chore/d082-s3`, the top of D-082's stack (`chore/d082-simplify`, then `-s0` to `-s3`), from `main` at `d0c0a1a`, which holds D-081 and the charts, merged by the owner. `chore/prune-build` (`bin/prune-build`) is the owner's, not merged |
 | Latest commit | Run `git log -1`: the app's charts. M20 from `af4a9d7` to `3dc0654`; M21 from `ef3a9e6`; the app `a3d209b`; D-080 `73bcfff`. Earlier commits are in the archive |
-| Latest gating run | The full suite, slow tests included, on D-081's tree (`269906e`): 4,536 passed in 0:20:34, exit code 0. Swift, unchanged since the charts commit: `swift test` 28 passed; the UI tests 10 passed |
+| Latest gating run | The full suite, slow tests included, on D-082 S3's tree (`c53af4c`, the same tree as `5c8a1b7`): 4,536 passed in 0:24:32, exit 0, run beside two other suites. S1's and S2's trees: 4,536 passed each. Swift unchanged since the charts commit: `swift test` 28 passed; the UI tests 10 passed |
 | Python | 3.12.6, project `.venv` already present |
 | Xcode | 27.2 with an iOS 26.3 simulator (iPhone 17 Pro); Swift 6.4 |
 | macOS | Golden Gate 27.2, as stated by the owner |
@@ -241,6 +242,8 @@ Then only what the task needs:
   `drop_scenario_tables` (0034).
   0037 adds a column, so `drop_sync_tables` first calls `drop_real_ledger_protection`; a
   later migration's undo goes before that.
+  A new table is append-only, with `_no_update`, `_no_delete` and `_no_replace` triggers, or is
+  named in `MUTABLE_TABLES` in `tests/unit/test_append_only.py`.
   Also add the tables to `tests/unit/test_migrations.py`, `planning_digest.py`'s
   `PLANNING_TABLES` (planning tables only: scenarios are, snapshot records are not),
   `test_review_show.py`'s and `test_backups.py`'s `LEDGER_TABLES`, and the hand-added migrations of

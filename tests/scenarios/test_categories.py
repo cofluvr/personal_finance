@@ -9,10 +9,10 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from migration_checks import markers, migrations_up_to
 from test_classifications import ClassificationLedger, single
 from test_decisions import ALL_TABLES, CATEGORY_TABLES, drop_category_tables
 from test_real_ledger import RealLedger, vault  # noqa: F401
-from test_transfer_migration import markers, migrations_up_to
 
 from personal_finance import cli
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version

@@ -8,10 +8,10 @@ version 16, is a version 16 ledger: 0017 creates a table and its triggers only. 
 import sqlite3
 
 import pytest
+from migration_checks import markers, migrations_up_to
 from test_balance_observations import BalanceLedger
 from test_decisions import ALL_TABLES, BACKUP_TABLES, REAL_LEDGER_TABLES, drop_category_tables
 from test_one_sided_transfers import stated
-from test_transfer_migration import markers, migrations_up_to
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 from personal_finance.db.real_ledger import is_real_ledger

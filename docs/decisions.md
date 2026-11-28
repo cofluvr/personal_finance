@@ -102,7 +102,7 @@ and keep its index line.
 | D-079 | iOS companion plan, with screen mock-ups — Approved on 2026-11-20; I1 to I3 approved on 2026-11-23, with charts added on review ([decisions-ios.md](decisions-ios.md)) |
 | D-080 | Snapshot 1.1: each member's budget pace on the phone — Approved by the owner's notes of 2026-11-21; built and approved on 2026-11-23 |
 | D-081 | A simpler protection for real ledgers: a private folder, iCloud Drive included — Approved as a security change by the owner's notes of 2026-11-26; built for review |
-| D-082 | Less code, same behaviour: shared stated-kind commands, table-driven migration tests, a shorter parser — Approved by the owner on 2026-11-27; the benchmark trim built that day, S0 to S3 in progress |
+| D-082 | Less code, same behaviour: shared stated-kind commands, table-driven migration tests, a shorter parser — Approved by the owner on 2026-11-27; built that day, S0 to S3 for review |
 
 ## Rules in brief
 
@@ -959,3 +959,39 @@ Order: S0, S1, S2, S3, each its own commit, the full suite before stopping for r
 HTTP servers, which share a base but not their rules; the iOS schema copy, which the bundle needs
 and `test_ios_copies.py` keeps equal; renaming existing names; the docs, which hold the product's
 rules.
+
+**How D-082 was built (2026-11-27).** The owner approved committing, pushing and a PR for each part,
+stacked: the plan and benchmark trim, then S0 to S3, each its own branch `chore/d082-s0` to
+`chore/d082-s3`. Behaviour is unchanged throughout. The savings are smaller than the plan's
+estimates, which counted repeated lines without checking how many differed:
+
+| Part | Lines out, in | Check |
+|---|---|---|
+| Benchmark trim | 1,557, 107 (with this plan) | The default mode ran at 10 rows a month |
+| S0 | 23, 0 | Nothing named them |
+| S1 | 325, 127, all `cli.py` | 1,145 calls of the 16 handlers touched, old and new `cli.py` on the same ledger, across 53 scenario files: 0 differences |
+| S2 | 524, 300 | Collected test IDs identical (3,632); 20 breaks, the same outcome and catching test on the old tests and the new |
+| S3 | 121, 87, all `cli.py` | Every command's `--help` and argument settings, 222 parsers: identical |
+
+- **S1 as built:** `print_stated_show` with a per-kind noun, value line and undo preview, rather
+  than a table. `print_stated_undone` gives each undo its first two lines; their follow-up lines
+  differ by kind and stay. `STALE_ACCOUNT_UNDO_WARNING` replaces eight copies.
+- **S2 as built:** assertion helpers in `tests/scenarios/migration_checks.py`, called from each
+  test under its own name, rather than one parametrized module: test IDs, counts and the
+  acceptance docs' references are unchanged. A test was rewritten only where its body matched the
+  shared check exactly; 11 differ and stay. Three breaks survive on both the old and new tests, a
+  broader refusal standing in (CLAUDE.md): with the fixture's child rows, foreign keys refuse a
+  DELETE without `scenario_no_delete` or `loan_payment_breakdown_no_delete`, and the primary key
+  refuses the test's plain `INSERT … SELECT *` without `fund_no_replace`. Closed the same day, on
+  the owner's request: see the follow-up below.
+- **S3 as built:** `add_undo_command` (11 undo subcommands) and `add_supersedes_options` (4).
+  Most of the parser's repetition is single lines a helper cannot shorten.
+- **Follow-up, the append-only gaps (owner's request, 2026-11-27):** `tests/unit/test_append_only.py`
+  tests each of the 112 append-only tables on its own three triggers alone: its columns copied with
+  no constraint, the triggers exactly as a new ledger holds them, then an update, a delete and a
+  duplicate (`INSERT` and `INSERT OR REPLACE`) refused, and a different row taken as the control
+  (`real_ledger` holds one row, so a second is refused). Every other table is named in
+  `MUTABLE_TABLES`, so a new table, or one that loses a trigger, fails until it is guarded or named.
+  10 breaks, all caught: the three S2 survivors, a trigger dropped from 0001, 0033 and all of
+  0034's `scenario`, a replace trigger that never fires, one that fires on every row,
+  `real_ledger` taking a second row, and a new table with no triggers.
