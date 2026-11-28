@@ -2273,10 +2273,6 @@ SAFE_TO_SPEND_NOTICE = (
     "here moves money, and the liquid balance is an estimate, never a balance.")
 
 
-def amount_or_none(cents) -> str:
-    return "not evaluated" if cents is None else format_cents(cents)
-
-
 def safe_to_spend_lines(conn, as_of, explain: bool = False, view=None) -> ReportLines:
     """pf safe-to-spend's lines, and the first part of the dashboard's, which passes the view it
     computed so the month is computed once."""
