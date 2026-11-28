@@ -632,6 +632,23 @@ def print_report(lines: ReportLines) -> None:
 TODAY_HELP = "today, YYYY-MM-DD, else today in the household's timezone"
 
 
+def add_undo_command(command, name: str, commands, *, handler, help: str, id_name: str,
+                     id_help: str, revision_help: str, account_help: str = "account name or ID"):
+    """An undo subcommand, made by build_parser's command: the ID of what it undoes, then
+    --account and --revision, both required."""
+    undo = command(name, commands, handler=handler, help=help)
+    undo.add_argument(id_name, help=id_help)
+    undo.add_argument("--account", required=True, help=account_help)
+    undo.add_argument("--revision", required=True, help=revision_help)
+    return undo
+
+
+def add_supersedes_options(parser, *, supersedes_help: str, revision_help: str) -> None:
+    """--supersedes and --supersedes-revision, for a statement that replaces the one applying."""
+    parser.add_argument("--supersedes", help=supersedes_help)
+    parser.add_argument("--supersedes-revision", help=revision_help)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pf")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -858,9 +875,9 @@ def build_parser() -> argparse.ArgumentParser:
                               "it exactly; repeat")
         sub.add_argument("--category", action="append", metavar="NAME=AMOUNT",
                          help="a category's allowance a month, a cap of its own; repeat")
-        sub.add_argument("--supersedes", help="the plan this one replaces")
-        sub.add_argument("--supersedes-revision",
-                         help="the supersede revision from budget show of the plan it replaces")
+        add_supersedes_options(
+            sub, supersedes_help="the plan this one replaces",
+            revision_help="the supersede revision from budget show of the plan it replaces")
         sub.add_argument("--correct-closed-month", action="store_true",
                          help="allow a change to a closed month's plan, disclosed on its reports")
         sub.add_argument("--as-of", help=f"{TODAY_HELP}: a month before it is closed")
@@ -1381,13 +1398,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     decision_show.add_argument("decision_id", help="a decision ID from review decisions")
 
-    undo = command(
-        "undo", review_commands, handler=run_review_undo,
+    add_undo_command(
+        command, "undo", review_commands, handler=run_review_undo,
         help="re-derive from current evidence without a decision, keeping it on record",
-    )
-    undo.add_argument("decision_id", help="a decision ID from review decisions")
-    undo.add_argument("--account", required=True, help="account name or ID")
-    undo.add_argument("--revision", required=True, help="the revision from review decision show")
+        id_name="decision_id", id_help="a decision ID from review decisions",
+        revision_help="the revision from review decision show")
 
     transaction = review_commands.add_parser("transaction", help="inspect one transaction")
     transaction_commands = transaction.add_subparsers(dest="transaction_command", required=True)
@@ -1438,15 +1453,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="show what a correction binds and what undoing it would do",
     )
     correction_show.add_argument("correction_id", help="a correction ID from review corrections")
-    correction_undo = command(
-        "undo", correction_commands, handler=run_review_correction_undo,
-        help="stop a correction applying, keeping it on record",
-    )
-    correction_undo.add_argument("correction_id", help="a correction ID from review corrections")
-    correction_undo.add_argument("--account", required=True, help="account name or ID")
-    correction_undo.add_argument(
-        "--revision", required=True, help="the revision from review correction show"
-    )
+    add_undo_command(
+        command, "undo", correction_commands, handler=run_review_correction_undo,
+        help="stop a correction applying, keeping it on record", id_name="correction_id",
+        id_help="a correction ID from review corrections",
+        revision_help="the revision from review correction show")
 
     classify = command(
         "classify", review_commands, handler=run_review_classify,
@@ -1487,17 +1498,11 @@ def build_parser() -> argparse.ArgumentParser:
     classification_show.add_argument(
         "classification_id", help="a classification ID from review classifications"
     )
-    classification_undo = command(
-        "undo", classification_commands, handler=run_review_classification_undo,
-        help="stop a classification applying, keeping it on record",
-    )
-    classification_undo.add_argument(
-        "classification_id", help="a classification ID from review classifications"
-    )
-    classification_undo.add_argument("--account", required=True, help="account name or ID")
-    classification_undo.add_argument(
-        "--revision", required=True, help="the revision from review classification show"
-    )
+    add_undo_command(
+        command, "undo", classification_commands, handler=run_review_classification_undo,
+        help="stop a classification applying, keeping it on record", id_name="classification_id",
+        id_help="a classification ID from review classifications",
+        revision_help="the revision from review classification show")
 
     categorize = command(
         "categorize", review_commands, handler=run_review_categorize,
@@ -1537,17 +1542,11 @@ def build_parser() -> argparse.ArgumentParser:
     categorization_show.add_argument(
         "categorization_id", help="a categorization ID from review categorizations"
     )
-    categorization_undo = command(
-        "undo", categorization_commands, handler=run_review_categorization_undo,
-        help="stop a categorization applying, keeping it on record",
-    )
-    categorization_undo.add_argument(
-        "categorization_id", help="a categorization ID from review categorizations"
-    )
-    categorization_undo.add_argument("--account", required=True, help="account name or ID")
-    categorization_undo.add_argument(
-        "--revision", required=True, help="the revision from review categorization show"
-    )
+    add_undo_command(
+        command, "undo", categorization_commands, handler=run_review_categorization_undo,
+        help="stop a categorization applying, keeping it on record", id_name="categorization_id",
+        id_help="a categorization ID from review categorizations",
+        revision_help="the revision from review categorization show")
 
     transfers = command(
         "transfers", review_commands, handler=run_review_transfers,
@@ -1595,15 +1594,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="show what an allocation binds and what undoing it would do",
     )
     allocation_show.add_argument("allocation_id", help="an allocation ID from review allocations")
-    allocation_undo = command(
-        "undo", allocation_commands, handler=run_review_allocation_undo,
-        help="stop an allocation applying, keeping it on record",
-    )
-    allocation_undo.add_argument("allocation_id", help="an allocation ID from review allocations")
-    allocation_undo.add_argument("--account", required=True, help="account name or ID")
-    allocation_undo.add_argument(
-        "--revision", required=True, help="the revision from review allocation show"
-    )
+    add_undo_command(
+        command, "undo", allocation_commands, handler=run_review_allocation_undo,
+        help="stop an allocation applying, keeping it on record", id_name="allocation_id",
+        id_help="an allocation ID from review allocations",
+        revision_help="the revision from review allocation show")
 
     consume = command(
         "consume", review_commands, handler=run_review_consume,
@@ -1615,14 +1610,12 @@ def build_parser() -> argparse.ArgumentParser:
     consume.add_argument(
         "--revision", required=True, help="the revision from review transaction show"
     )
-    consume.add_argument(
-        "--supersedes",
-        help="the consumption applying to this transaction now, which this one replaces",
-    )
-    consume.add_argument(
-        "--supersedes-revision",
-        help="the revision from review consumption show for the consumption being replaced",
-    )
+    add_supersedes_options(
+        consume,
+        supersedes_help="the consumption applying to this transaction now, which this one "
+                        "replaces",
+        revision_help="the revision from review consumption show for the consumption being "
+                      "replaced")
     consumptions = command(
         "consumptions", review_commands, handler=run_review_consumptions,
         help="list stored fund consumptions",
@@ -1637,16 +1630,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     consumption_show.add_argument("consumption_id",
                                   help="a consumption ID from review consumptions")
-    consumption_undo = command(
-        "undo", consumption_commands, handler=run_review_consumption_undo,
-        help="stop a consumption applying, keeping it on record",
-    )
-    consumption_undo.add_argument("consumption_id",
-                                  help="a consumption ID from review consumptions")
-    consumption_undo.add_argument("--account", required=True, help="account name or ID")
-    consumption_undo.add_argument(
-        "--revision", required=True, help="the revision from review consumption show"
-    )
+    add_undo_command(
+        command, "undo", consumption_commands, handler=run_review_consumption_undo,
+        help="stop a consumption applying, keeping it on record", id_name="consumption_id",
+        id_help="a consumption ID from review consumptions",
+        revision_help="the revision from review consumption show")
 
     breakdown = command(
         "breakdown", review_commands, handler=run_review_breakdown,
@@ -1659,26 +1647,21 @@ def build_parser() -> argparse.ArgumentParser:
     breakdown.add_argument(
         "--revision", required=True, help="the revision from review transaction show"
     )
-    breakdown.add_argument(
-        "--supersedes",
-        help="the breakdown applying to this transaction now, which this one replaces",
-    )
-    breakdown.add_argument(
-        "--supersedes-revision",
-        help="the revision from review breakdown-show for the breakdown being replaced",
-    )
+    add_supersedes_options(
+        breakdown,
+        supersedes_help="the breakdown applying to this transaction now, which this one replaces",
+        revision_help="the revision from review breakdown-show for the breakdown being replaced")
     breakdowns = command("breakdowns", review_commands, handler=run_review_breakdowns,
                          help="list stored loan payment breakdowns")
     breakdowns.add_argument("--account", help="account name or ID")
     breakdown_show = command("breakdown-show", review_commands, handler=run_review_breakdown_show,
                              help="show what a breakdown binds and what undoing it would do")
     breakdown_show.add_argument("breakdown_id", help="a breakdown ID from review breakdowns")
-    breakdown_undo = command("breakdown-undo", review_commands, handler=run_review_breakdown_undo,
-                             help="stop a breakdown applying, keeping it on record")
-    breakdown_undo.add_argument("breakdown_id", help="a breakdown ID from review breakdowns")
-    breakdown_undo.add_argument("--account", required=True, help="account name or ID")
-    breakdown_undo.add_argument("--revision", required=True,
-                                help="the revision from review breakdown-show")
+    add_undo_command(
+        command, "breakdown-undo", review_commands, handler=run_review_breakdown_undo,
+        help="stop a breakdown applying, keeping it on record", id_name="breakdown_id",
+        id_help="a breakdown ID from review breakdowns",
+        revision_help="the revision from review breakdown-show")
 
     review_tag = command(
         "tag", review_commands, handler=run_review_tag,
@@ -1692,26 +1675,22 @@ def build_parser() -> argparse.ArgumentParser:
     review_tag.add_argument(
         "--revision", required=True, help="the revision from review transaction show"
     )
-    review_tag.add_argument(
-        "--supersedes", help="the tag statement applying to this transaction now, which this one "
-        "replaces")
-    review_tag.add_argument(
-        "--supersedes-revision",
-        help="the revision from review tagging show for the statement being replaced",
-    )
+    add_supersedes_options(
+        review_tag,
+        supersedes_help="the tag statement applying to this transaction now, which this one "
+                        "replaces",
+        revision_help="the revision from review tagging show for the statement being replaced")
     tagging = review_commands.add_parser("tagging", help="inspect or undo one tag statement")
     tagging_commands = tagging.add_subparsers(dest="tagging_command", required=True)
     tagging_show = command("show", tagging_commands, handler=run_review_tagging_show,
                            help="show what a tag statement binds and what undoing it would do")
     tagging_show.add_argument("tag_statement_id",
                               help="a tag statement ID from review transaction show")
-    tagging_undo = command("undo", tagging_commands, handler=run_review_tagging_undo,
-                           help="stop a tag statement applying, keeping it on record")
-    tagging_undo.add_argument("tag_statement_id",
-                              help="a tag statement ID from review transaction show")
-    tagging_undo.add_argument("--account", required=True, help="account name or ID")
-    tagging_undo.add_argument("--revision", required=True,
-                              help="the revision from review tagging show")
+    add_undo_command(
+        command, "undo", tagging_commands, handler=run_review_tagging_undo,
+        help="stop a tag statement applying, keeping it on record", id_name="tag_statement_id",
+        id_help="a tag statement ID from review transaction show",
+        revision_help="the revision from review tagging show")
 
     transfer = review_commands.add_parser(
         "transfer", help="match, inspect or undo a transfer between two accounts"
@@ -1754,17 +1733,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     transfer_show.add_argument(
         "transfer_id", help="a match or one-sided transfer ID from review transfers")
-    transfer_undo = command(
-        "undo", transfer_commands, handler=run_review_transfer_undo,
+    add_undo_command(
+        command, "undo", transfer_commands, handler=run_review_transfer_undo,
         help="stop a transfer match or one-sided transfer applying, keeping it on record",
-    )
-    transfer_undo.add_argument(
-        "transfer_id", help="a match or one-sided transfer ID from review transfers")
-    transfer_undo.add_argument("--account", required=True,
-                               help="the name or ID of either of its accounts")
-    transfer_undo.add_argument(
-        "--revision", required=True, help="the revision from review transfer show"
-    )
+        id_name="transfer_id", id_help="a match or one-sided transfer ID from review transfers",
+        revision_help="the revision from review transfer show",
+        account_help="the name or ID of either of its accounts")
 
     complete = command(
         "complete", review_commands, handler=run_review_complete,
@@ -1801,15 +1775,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="show what a resolution resolved and what undoing it would do",
     )
     resolution_show.add_argument("resolution_id", help="a resolution ID from review resolutions")
-    resolution_undo = command(
-        "undo", resolution_commands, handler=run_review_resolution_undo,
+    add_undo_command(
+        command, "undo", resolution_commands, handler=run_review_resolution_undo,
         help="make a resolved row unresolved again, keeping the resolution on record",
-    )
-    resolution_undo.add_argument("resolution_id", help="a resolution ID from review resolutions")
-    resolution_undo.add_argument("--account", required=True, help="account name or ID")
-    resolution_undo.add_argument(
-        "--revision", required=True, help="the revision from review resolution show"
-    )
+        id_name="resolution_id", id_help="a resolution ID from review resolutions",
+        revision_help="the revision from review resolution show")
 
     coverage = review_commands.add_parser("coverage", help="inspect or declare a document's coverage")
     coverage_commands = coverage.add_subparsers(dest="coverage_command", required=True)
@@ -1838,15 +1808,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="list coverage declared after import",
     )
     coverage_history.add_argument("--account", help="account name or ID")
-    coverage_undo = command(
-        "undo", coverage_commands, handler=run_review_coverage_undo,
+    add_undo_command(
+        command, "undo", coverage_commands, handler=run_review_coverage_undo,
         help="stop a coverage declaration applying, keeping it on record",
-    )
-    coverage_undo.add_argument("declaration_id", help="a declaration ID from review coverage history")
-    coverage_undo.add_argument("--account", required=True, help="account name or ID")
-    coverage_undo.add_argument(
-        "--revision", required=True, help="the revision from review coverage show"
-    )
+        id_name="declaration_id", id_help="a declaration ID from review coverage history",
+        revision_help="the revision from review coverage show")
 
     totals = command("totals", handler=run_totals, help="show account movement")
     totals.add_argument("--account", help="account name or ID")
