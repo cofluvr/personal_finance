@@ -12,15 +12,19 @@ import html
 from personal_finance.money import format_cents
 from personal_finance.reports.report_text import shown
 
-# Mid-tone blue and orange: each keeps at least 3:1 contrast against both the light page
-# (#ffffff) and the dark one (#1d1d1f), as marks need (WCAG 1.4.11).
+# Mid-tone blue and orange: each keeps at least 3:1 contrast against the light card (#ffffff)
+# and the dark one (#202023), as marks need (WCAG 1.4.11).
 SERIES_COLOURS = ("#2f6fde", "#d0661f")
-WIDTH = 640
-LABEL_WIDTH = 220
-BAR_WIDTH = 400
-BAR_HEIGHT = 14
-ROW_GAP = 8
-TOP = 28
+# The drawing's own units. It scales to the card's width (D-083 point 4), and at a desktop
+# window's width one unit is about one pixel.
+WIDTH = 920
+LABEL_WIDTH = 200
+# Room each side of the bars for a value's words, such as -12345.67.
+VALUE_ROOM = 84
+BAR_HEIGHT = 16
+ROW_GAP = 10
+LEGEND_Y = 40
+TOP = 56
 
 
 def attribute(text: str) -> str:
@@ -35,32 +39,48 @@ def mark_title(label: str, series: str, value_cents: int, note: str) -> str:
 
 
 def chart_svg(chart) -> str:
-    """One chart as inline SVG, or nothing when it has no rows."""
+    """One chart as inline SVG, or nothing when it has no rows. Bars run from a zero line,
+    negative values to its left, each labelled with its value as the table words it."""
     if not chart.rows:
         return ""
-    largest = max((abs(value) for row in chart.rows for value in row.values), default=0) or 1
+    values = [value for row in chart.rows for value in row.values]
+    below, above = max(0, -min(values)), max(0, max(values))
+    extent = (below + above) or 1
+    # The bars' span, less room for a value's words on each side a value can reach.
+    span = WIDTH - LABEL_WIDTH - VALUE_ROOM * ((below > 0) + 1)
+    zero_x = LABEL_WIDTH + (VALUE_ROOM if below else 0) + round(span * below / extent)
     row_height = len(chart.series) * BAR_HEIGHT + ROW_GAP
-    height = TOP + row_height * len(chart.rows) + ROW_GAP
-    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" role="img" width="{WIDTH}" '
-             f'height="{height}" viewBox="0 0 {WIDTH} {height}">',
+    height = TOP + row_height * len(chart.rows)
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" role="img" width="100%" '
+             f'viewBox="0 0 {WIDTH} {height}">',
              f"<title>{attribute(chart.title)}</title>",
-             f'<text x="0" y="16" font-size="14" font-weight="bold" fill="currentColor">'
+             f'<text x="0" y="18" font-size="15" font-weight="bold" fill="currentColor">'
              f"{attribute(chart.title)}</text>"]
     for number, (series, colour) in enumerate(zip(chart.series, SERIES_COLOURS)):
-        x = LABEL_WIDTH + number * 120
-        parts.append(f'<rect x="{x}" y="6" width="10" height="10" fill="{colour}"/>'
-                     f'<text x="{x + 14}" y="15" font-size="11" fill="currentColor">'
-                     f"{attribute(series)}</text>")
+        x = number * 130
+        parts.append(f'<rect x="{x}" y="{LEGEND_Y - 10}" width="10" height="10" '
+                     f'rx="2" fill="{colour}"/>'
+                     f'<text x="{x + 15}" y="{LEGEND_Y - 1}" font-size="12" '
+                     f'fill="currentColor">{attribute(series)}</text>')
+    parts.append(f'<line x1="{zero_x}" y1="{TOP - 6}" x2="{zero_x}" y2="{height - ROW_GAP + 4}" '
+                 'stroke="currentColor" stroke-opacity="0.35"/>')
     for index, row in enumerate(chart.rows):
         y = TOP + index * row_height
-        parts.append(f'<text x="0" y="{y + BAR_HEIGHT - 3}" font-size="12" '
-                     f'fill="currentColor">{attribute(shown(row.label)[:34])}</text>')
+        label_y = y + (len(chart.series) * BAR_HEIGHT) // 2 + 4
+        parts.append(f'<text x="0" y="{label_y}" font-size="13" '
+                     f'fill="currentColor">{attribute(shown(row.label)[:30])}</text>')
         for number, (series, value) in enumerate(zip(chart.series, row.values)):
-            length = round(BAR_WIDTH * abs(value) / largest)
+            length = max(round(span * abs(value) / extent), 1)
+            bar_x = zero_x - length if value < 0 else zero_x
             bar_y = y + number * BAR_HEIGHT
             words = attribute(mark_title(row.label, series, value, row.note))
-            parts.append(f'<rect x="{LABEL_WIDTH}" y="{bar_y}" width="{max(length, 1)}" '
-                         f'height="{BAR_HEIGHT - 2}" fill="{SERIES_COLOURS[number]}">'
+            parts.append(f'<rect x="{bar_x}" y="{bar_y}" width="{length}" '
+                         f'height="{BAR_HEIGHT - 3}" rx="2" fill="{SERIES_COLOURS[number]}">'
                          f"<title>{words}</title></rect>")
+            value_x, anchor = ((bar_x - 6, "end") if value < 0
+                               else (zero_x + length + 6, "start"))
+            parts.append(f'<text x="{value_x}" y="{bar_y + BAR_HEIGHT - 5}" font-size="11.5" '
+                         f'text-anchor="{anchor}" fill="currentColor" fill-opacity="0.8">'
+                         f"{format_cents(value)}</text>")
     parts.append("</svg>")
     return "".join(parts)

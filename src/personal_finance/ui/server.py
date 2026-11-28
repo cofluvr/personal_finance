@@ -37,8 +37,11 @@ from personal_finance.reports.report_text import (
     account_choices,
     document_list_lines,
     budget_report_lines,
+    dashboard_card_rows,
+    dashboard_figures,
     dashboard_lines,
     funds_report_lines,
+    goal_progress,
     net_worth_report_lines,
     household_report_lines,
     income_report_lines,
@@ -128,11 +131,28 @@ button { font: inherit; font-size: 13px; font-weight: 600; padding: 6px 14px; cu
 button:hover { filter: brightness(1.1); }
 form[action$="undo"] button, form[action$="uncover"] button {
   color: var(--negative); background: transparent; border-color: var(--negative); }
-.report { margin: 0 0 18px; padding: 14px 18px; background: var(--surface);
-          border: 1px solid var(--border); border-radius: 10px;
-          font: 12.5px/1.6 ui-monospace, Menlo, monospace; }
+.report { margin: 0 0 18px; padding: 14px 20px; background: var(--surface);
+          border: 1px solid var(--border); border-radius: 10px; }
 .report:empty { display: none; }
 .line, .hint-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+.line { padding: 2px 0; }
+.line .lead { display: none; }
+.line[data-depth="1"] { padding-left: 22px; }
+.line[data-depth="2"] { padding-left: 44px; }
+.line[data-depth="3"] { padding-left: 66px; }
+.line[data-depth="4"] { padding-left: 88px; }
+.line[data-role="heading"] { margin-top: 14px; padding-top: 10px; font-weight: 600;
+                             border-top: 1px solid var(--border); }
+.line[data-role="heading"]:first-child { margin-top: 0; padding-top: 2px; border-top: 0; }
+.line[data-role="disclosure"] { font-size: 13px; color: var(--muted); }
+.line[data-role="columns"] { padding-left: 0; font: 12.5px/1.7 ui-monospace, Menlo, monospace; }
+.line[data-role="columns"] .lead { display: inline; }
+.hint-line { font: 12.5px/1.6 ui-monospace, Menlo, monospace; }
+.amount { font-weight: 600; white-space: nowrap; }
+/* Money out is red only in rows laid out as columns, the transaction list: in prose a negative
+   figure can be good news, such as spending below the budget's pace. */
+.line[data-role="columns"] .amount.negative { color: var(--negative); }
+.line[data-role="disclosure"] .amount { font-weight: inherit; }
 .chart { margin: 0 0 16px; padding: 14px 16px; background: var(--surface);
          border: 1px solid var(--border); border-radius: 10px; }
 .chart svg { display: block; max-width: 100%; height: auto; }
@@ -143,8 +163,22 @@ form[action$="undo"] button, form[action$="uncover"] button {
 .actions form[method="get"] { display: flex; flex-wrap: wrap; align-items: flex-end;
                               gap: 10px 16px; margin: 0 0 16px; }
 .field { display: grid; gap: 4px; }
-.field textarea { box-sizing: border-box; width: 100%; font-family: ui-monospace, Menlo, monospace; }
+.field textarea { box-sizing: border-box; width: 100%;
+                  font-family: ui-monospace, Menlo, monospace; }
 .field input { max-width: 100%; box-sizing: border-box; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;
+         margin: 0 0 16px; }
+.card { display: block; padding: 14px 16px; color: inherit; text-decoration: none;
+        background: var(--surface); border: 1px solid var(--border);
+        border-top: 3px solid var(--border-strong); border-radius: 10px; }
+.card[data-state="good"] { border-top-color: var(--positive); }
+.card[data-state="warning"] { border-top-color: var(--warning); }
+a.card:hover { border-color: var(--accent); }
+.card-label { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+.card-value { margin: 6px 0 2px; font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+.card-detail { margin: 0; font-size: 12.5px; color: var(--muted); }
+.badge { margin-left: 6px; padding: 0 7px; font-size: 11px; font-weight: 600;
+         color: var(--warning); border: 1px solid currentColor; border-radius: 999px; }
 @media (max-width: 760px) {
   .app { grid-template-columns: minmax(0, 1fr); }
   .sidebar { position: static; height: auto; border-right: 0;
@@ -737,7 +771,12 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         if today is None:
             return self.send_page(200, "Dashboard", notice=SAFE_TO_SPEND_TIMEZONE, form=form)
         as_of = today if text is None else date.fromisoformat(checked_as_of(text))
-        self.send_page(200, "Dashboard", dashboard_lines(conn, as_of), form=form)
+        figures = dashboard_figures(conn, as_of)
+        progress = goal_progress(figures.active_funds)
+        drawn = (f'<div class="chart">{charts.chart_svg(progress)}</div>' if progress.rows
+                 else "")
+        self.send_page(200, "Dashboard", dashboard_lines(conn, as_of, figures), form=form,
+                       figures=dashboard_cards(figures) + drawn)
 
     def send_page(self, status, heading, lines=(), *, notice="", form="", figures="", after="",
                   extra_headers=()):
@@ -976,14 +1015,82 @@ def escaped(text: str) -> str:
     return html.escape(visible, quote=True)
 
 
-def rendered_line(line) -> str:
+# A plain decimal amount as format_cents writes it, standing alone: not part of a date, time,
+# version or identifier (D-083 point 2). It runs on escaped text, where an amount reads the same.
+AMOUNT = re.compile(r"(?<![\w.])-?\d+\.\d{2}(?![\w.])")
+# Two spaces after a line's first word: a line laid out in columns, such as a transaction row
+# or the household table, which keeps a fixed-width font.
+COLUMNS = re.compile(r"\S {2,}")
+DEEPEST_INDENT = 4
+# A heading by the lines indented under it is a short line, such as "Safe to spend as of ...":
+# a long one is a sentence explaining them, which reads better as text.
+LONGEST_HEADING = 90
+
+
+def indent_of(text: str) -> int:
+    return len(text) - len(text.lstrip(" "))
+
+
+def with_amounts_marked(text: str) -> str:
+    """Text escaped for HTML, each amount in a span that aligns it, marked when negative."""
+    return AMOUNT.sub(
+        lambda found: (f'<span class="amount{" negative" if found[0][0] == "-" else ""}">'
+                       f"{found[0]}</span>"),
+        escaped(text))
+
+
+def line_role(text: str, next_text: str | None) -> str:
+    """What a line is, read from how the CLI prints it: columns, a heading (a top-level line
+    ending in a colon, or a short one that lines below it are indented under), a disclosure, or
+    text."""
+    if COLUMNS.search(text.lstrip(" ")):
+        return "columns"
+    if not text.startswith(" ") and (text.endswith(":") or (
+            len(text) <= LONGEST_HEADING and next_text is not None
+            and indent_of(next_text) > 0)):
+        return "heading"
+    if text.startswith("- "):
+        return "disclosure"
+    return "text"
+
+
+def rendered_line(line, next_line=None) -> str:
+    """One report line as one div whose text is exactly the line (D-062): its leading spaces kept
+    in a span the stylesheet replaces with an indent, its shape in data attributes, its amounts
+    marked, and the review item or transaction it names linked."""
+    text = line.text
+    role = line_role(text, None if next_line is None else next_line.text)
+    indent = indent_of(text)
+    depth = min(indent // 2, DEEPEST_INDENT)
+    lead, body = text[:indent], text[indent:]
+    shown = with_amounts_marked(body)
     for linked_id, page in ((line.linked_review_item_id, "/review/item"),
                             (line.linked_transaction_id, "/transaction")):
-        if linked_id and linked_id in line.text:
-            before, _, after = line.text.partition(linked_id)
+        if linked_id and linked_id in body:
+            before, _, after = body.partition(linked_id)
             link = f'<a href="{page}?id={escaped(linked_id)}">{escaped(linked_id)}</a>'
-            return f'<div class="line">{escaped(before)}{link}{escaped(after)}</div>'
-    return f'<div class="line">{escaped(line.text)}</div>'
+            shown = f"{with_amounts_marked(before)}{link}{with_amounts_marked(after)}"
+            break
+    lead_html = f'<span class="lead">{lead}</span>' if lead else ""
+    return (f'<div class="line" data-role="{role}" data-depth="{depth}">'
+            f"{lead_html}{shown}</div>")
+
+
+def dashboard_card(card) -> str:
+    """One card: a figure the dashboard's lines print, large, with what qualifies it."""
+    badge = f'<span class="badge">{escaped(card.badge)}</span>' if card.badge else ""
+    inner = (f'<p class="card-label">{escaped(card.label)}{badge}</p>'
+             f'<p class="card-value">{escaped(card.value)}</p>'
+             f'<p class="card-detail">{escaped(card.detail)}</p>')
+    if card.link:
+        return f'<a class="card" data-state="{card.state}" href="{card.link}">{inner}</a>'
+    return f'<div class="card" data-state="{card.state}">{inner}</div>'
+
+
+def dashboard_cards(figures) -> str:
+    """The dashboard's headline figures (D-083 point 3), as dashboard_card_rows words them."""
+    cards = "".join(dashboard_card(card) for card in dashboard_card_rows(figures))
+    return f'<section class="cards" aria-label="Headline figures">{cards}</section>'
 
 
 def navigation(current_path) -> str:
@@ -1004,7 +1111,8 @@ def render_page(heading, lines, *, notice="", form="", figures="", after="",
                 current_path="") -> str:
     """A page: the sidebar, the heading, any notice, the filter form, any figures drawn from the
     report's own rows, the report's lines, then what follows them (forms that write, hints)."""
-    report = "".join(rendered_line(line) for line in lines)
+    report = "".join(rendered_line(line, next_line)
+                     for line, next_line in zip(lines, [*lines[1:], None]))
     notice_html = f'<p class="notice">{escaped(notice)}</p>' if notice else ""
     toolbar = f'<div class="toolbar">{form}</div>' if form else ""
     actions = f'<div class="actions">{after}</div>' if after else ""

@@ -1,11 +1,19 @@
-# Session Handoff: D-082, less code with the same behaviour, built for review as five stacked PRs
+# Session Handoff: D-083, a clearer local UI, built for review as four stacked PRs
 
 For a fresh session. Written 2026-11-24, updated 2026-11-27. **M1 to M21.3, the iPhone app (I1 to I3) and D-080 are
 complete and accepted**, M20 to M21.3 and the app on the owner's notes of 2026-11-23, M17's
 real-browser check still the owner's. `main` on GitHub holds everything to `d0c0a1a`, the owner's
 merge of D-081 (PR #29), the app's charts included.
 
-**Built on 2026-11-27, on the owner's request of that day:** D-082 in [decisions.md](decisions.md),
+**Built on 2026-11-27, on the owner's request of that day:** D-083 in [decisions.md](decisions.md),
+a clearer `pf ui`, approved by the owner that day and built in four phases, each its own PR, stacked
+on D-082's top (`chore/d082-trigger-gaps`): `feature/d083-p1-shell` (sidebar, tokens, toolbar
+forms), `-p2-lines` (lines shaped from their printed text), `-p3-dashboard` (headline cards and goal
+chart), `-p4-charts` (zero line, value labels, fluid width). Merge D-082's stack first, then these in
+order. Screenshots, light and dark, on the synthetic demo ledger: `build/ui-d083/shots/` (`before/`,
+`p1/`, `p2/`, `final/`); `build/ui-d083/shoot.py` retakes them.
+
+**Built earlier on 2026-11-27, on the owner's request of that day:** D-082 in [decisions.md](decisions.md),
 approved by the owner that day and built: the benchmark trim, then S0 to S3, 2,012 lines fewer in
 `src/` and `tests/` with behaviour unchanged ("How D-082 was built"). Five stacked PRs, each on the
 one before: `chore/d082-simplify` (#30, on `main`), then `chore/d082-s0` to `chore/d082-s3`. Merge
@@ -45,6 +53,13 @@ Standing rules are in [CLAUDE.md](../CLAUDE.md), loaded automatically. Do not re
 
 Rewritten by each session for the next. The kickoff prompt carries only the owner's notes.
 
+- **Stop for the owner's review of D-083's four PRs, after D-082's.** A change the owner asks for
+  comes first. Read D-083, then `ui/server.py` (`render_page`, `rendered_line`, `line_role`,
+  `dashboard_cards`), `ui/charts.py`, and `DashboardFigures`, `dashboard_card_rows` in
+  `reports/report_text.py`. Every page line stays one `div.line` whose text equals the CLI's;
+  shape goes in `data-` attributes and spans. The server still imports only the CLI, `report_text`
+  and `ui` (UB8). Gate on the six `test_local_ui*.py` files, `test_visuals.py`,
+  `test_dashboard_cards.py`, `test_safe_to_spend.py` and `test_no_network_imports.py`.
 - **Stop for the owner's review of D-082's five PRs.** A change the owner asks for comes first.
   Read "How D-082 was built". New review commands of a stated kind use `print_stated_show`,
   `print_stated_undone` and `add_undo_command`; a new migration's tests use
@@ -91,9 +106,9 @@ Rewritten by each session for the next. The kickoff prompt carries only the owne
 | Item | Value |
 |---|---|
 | Repository | `personal_finance/`, its own git repo. Open this folder directly |
-| Branch | `chore/d082-s3`, the top of D-082's stack (`chore/d082-simplify`, then `-s0` to `-s3`), from `main` at `d0c0a1a`, which holds D-081 and the charts, merged by the owner. `chore/prune-build` (`bin/prune-build`) is the owner's, not merged |
+| Branch | `feature/d083-p4-charts`, the top of D-083's stack (`-p1-shell`, `-p2-lines`, `-p3-dashboard`, `-p4-charts`), on `chore/d082-trigger-gaps`, the top of D-082's stack, from `main` at `d0c0a1a`. `chore/prune-build` (`bin/prune-build`) is the owner's, not merged |
 | Latest commit | Run `git log -1`: the app's charts. M20 from `af4a9d7` to `3dc0654`; M21 from `ef3a9e6`; the app `a3d209b`; D-080 `73bcfff`. Earlier commits are in the archive |
-| Latest gating run | The full suite, slow tests included, on D-082 S3's tree (`c53af4c`, the same tree as `5c8a1b7`): 4,536 passed in 0:24:32, exit 0, run beside two other suites. S1's and S2's trees: 4,536 passed each. Swift unchanged since the charts commit: `swift test` 28 passed; the UI tests 10 passed |
+| Latest gating run | The full suite, slow tests included, on each D-083 tip in a `build/` worktree, four run side by side: P4 (`9588ef3`) 5,132 passed in 0:40:16, P3 (`22ffead`) 5,129 passed; P1 (`5b10fae`) 5,100 passed; P2 (`82b46bb`) 5,114 passed, each in about 0:40. Each also failed `test_ignore_rules.py`'s `.venv/bin/python` case alone, as did the D-082 baseline (`0923ef3`, 5,097 passed): a worktree's `.venv` is a symlink, which the `.venv/` rule does not match. That file passes in the checkout (51 passed). Swift unchanged |
 | Python | 3.12.6, project `.venv` already present |
 | Xcode | 27.2 with an iOS 26.3 simulator (iPhone 17 Pro); Swift 6.4 |
 | macOS | Golden Gate 27.2, as stated by the owner |

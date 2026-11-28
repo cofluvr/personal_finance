@@ -68,11 +68,12 @@ from personal_finance.reconcile.transfer_effects import (
 from personal_finance.reports.coverage_evidence import load_document_coverage
 from personal_finance.reports.budget_report import budget_report
 from personal_finance.reports.fund_report import funds_report
-from personal_finance.reports.fund_standing import funds_view
-from personal_finance.reports.net_worth_report import net_worth
+from personal_finance.reports.fund_standing import FundView, funds_view
+from personal_finance.reports.net_worth_report import NetWorth, net_worth
 from personal_finance.reports.safe_to_spend import (
     CLEARS,
     ROWS,
+    SafeToSpend,
     last_covered_day,
     safe_to_spend,
 )
@@ -92,7 +93,7 @@ from personal_finance.reports.review_evidence import (
     review_revision,
     rows_sharing_a_document,
 )
-from personal_finance.reports.visuals import visuals
+from personal_finance.reports.visuals import goal_progress, visuals  # noqa: F401, for the UI
 from personal_finance.reports.totals import (
     LOAN_INTEREST,
     GroupTotal,
@@ -2360,41 +2361,37 @@ def add_explanation(out: ReportLines, view) -> None:
                         f"({item.entry_id}): {format_cents(item.cents)}, {item.detail}")
 
 
-def dashboard_lines(conn, as_of) -> ReportLines:
-    """pf dashboard's lines, which its UI page renders (D-072 point 7). It never calls totals."""
+@dataclass(frozen=True)
+class DashboardFigures:
+    """What pf dashboard reports, computed once: its lines print from it, and the UI's cards show
+    the same figures (D-083 point 3)."""
+
+    as_of: date
+    safe_to_spend: SafeToSpend
+    active_funds: list[FundView]
+    worth: NetWorth
+    oldest_valuation: str | None
+    income_received_cents: int
+    income_planned_cents: int
+    open_review_items: int
+    unconfirmed_transfer_kinds: int
+    # (account name, last covered day or None, last import's date or None), by name.
+    freshness: list[tuple[str, str | None, str | None]]
+
+    @property
+    def budget_pace(self):
+        return self.safe_to_spend.budget.pace
+
+
+def dashboard_figures(conn, as_of) -> DashboardFigures:
+    """pf dashboard's figures. It never calls totals."""
     view = safe_to_spend(conn, as_of)
-    out = safe_to_spend_lines(conn, as_of, view=view)
-    text, month = as_of.isoformat(), as_of.isoformat()[:7]
     # The month's budget and income, as safe to spend computed them (G9: computed once).
-    budget = view.budget
-    if budget.pace is None:
-        out.add(f"Budget pace, {month}: no plan in effect")
-    else:
-        out.add(f"Budget pace, {month}: remaining capacity "
-                f"{format_cents(budget.pace.remaining_capacity_cents)}, revised daily "
-                f"{format_cents(budget.pace.revised_daily_cents)}, against pace "
-                f"{format_cents(budget.pace.against_pace_cents)}")
-    view = funds_view(conn, as_of)
-    active = [fund_view for fund_view in view.funds if fund_view.fund.applies]
-    out.add(f"Funds: {len(active)} active")
-    for fund_view in active:
-        standing = fund_view.standing
-        outstanding = ("" if standing.outstanding_cents is None
-                       else f", outstanding, planned {format_cents(standing.outstanding_cents)}")
-        out.add(f"  Fund {shown(fund_view.fund.name)} ({fund_view.fund.kind}): "
-                f"{standing.state.replace('_', ' ')}, assigned, reserved "
-                f"{format_cents(standing.assigned_cents)}{outstanding}")
-    worth = net_worth(conn, text)
+    income_month = view.budget.income_month
+    active = [fund_view for fund_view in funds_view(conn, as_of).funds if fund_view.fund.applies]
+    worth = net_worth(conn, as_of.isoformat())
     dates = [valuation.observation.observed_on for valuation in worth.valued
              if valuation.how == "counted"]
-    oldest = f", oldest valuation {min(dates)}" if dates else ""
-    out.add(f"Net worth, observed: {format_cents(worth.total_cents)}, "
-            f"{len(worth.not_valued)} not valued{oldest}")
-    income_month = budget.income_month
-    planned = income_month.total("baseline", "planned") if income_month else 0
-    received = income_month.total("baseline", "received") if income_month else 0
-    out.add(f"Income, {month}: baseline received, actual {format_cents(received)}, against "
-            f"baseline, planned {format_cents(planned)}")
     (open_items,) = conn.execute(
         "SELECT COUNT(*) FROM review_issue WHERE status = 'open'").fetchone()
     (transfer_kinds,) = conn.execute(
@@ -2403,17 +2400,106 @@ def dashboard_lines(conn, as_of) -> ReportLines:
                 ON kind.transaction_id = entry.id AND kind.state = 'applied'
             WHERE kind.financial_type IN ({", ".join("?" for _ in TRANSFER_TYPES)})
               AND NOT ({CONFIRMED_TRANSFER_SQL})""", tuple(TRANSFER_TYPES)).fetchone()
-    out.add(f"Review: {open_items} open review items, {transfer_kinds} unconfirmed transfer "
-            "kinds")
-    out.add("Freshness, from institution data:")
+    freshness = []
     for account_id, name in conn.execute(
             "SELECT id, display_name FROM account ORDER BY display_name").fetchall():
-        covered = last_covered_day(conn, account_id)
         (imported,) = conn.execute(
             """SELECT MAX(document.imported_at) FROM source_document document
                WHERE EXISTS (SELECT 1 FROM source_record record
                              WHERE record.source_document_id = document.id
                                AND record.account_id = ?)""", (account_id,)).fetchone()
+        freshness.append((name, last_covered_day(conn, account_id),
+                          imported[:10] if imported else None))
+    return DashboardFigures(
+        as_of, view, active, worth, min(dates) if dates else None,
+        income_month.total("baseline", "received") if income_month else 0,
+        income_month.total("baseline", "planned") if income_month else 0,
+        open_items, transfer_kinds, freshness)
+
+
+class DashboardCard(NamedTuple):
+    """One headline figure on the dashboard page: good, warning or neutral by its meaning."""
+
+    label: str
+    value: str
+    detail: str
+    state: str = "neutral"
+    badge: str = ""
+    link: str = ""
+
+
+def dashboard_card_rows(figures) -> list[DashboardCard]:
+    """The dashboard page's headline cards (D-083 point 3), each a figure its lines print, and
+    each state read from the figure's own meaning."""
+    view, pace = figures.safe_to_spend, figures.budget_pace
+    if view.today_cents is None:
+        safe = DashboardCard("Safe to spend today", "Not available",
+                             "Neither constraint is evaluated", "warning")
+    else:
+        short = view.liquidity_evaluated and view.surplus_cents < 0
+        safe = DashboardCard(
+            "Safe to spend today", format_cents(view.today_cents),
+            f"This week {format_cents(view.week_cents)}"
+            + (f", limited by {view.limiting}" if view.limiting else ""),
+            "warning" if short or view.provisional else "good",
+            badge="Provisional" if view.provisional else "")
+    if pace is None:
+        budget = DashboardCard("Budget left this month", "No plan", "No budget plan in effect")
+    else:
+        # against_pace_cents is actual less pace to date: positive is above pace (budget_pace).
+        above = pace.against_pace_cents > 0
+        budget = DashboardCard(
+            "Budget left this month", format_cents(pace.remaining_capacity_cents),
+            f"Daily {format_cents(pace.revised_daily_cents)}, "
+            f"{'above' if above else 'at or below'} pace by "
+            f"{format_cents(abs(pace.against_pace_cents))}",
+            "warning" if above else "good")
+    worth = figures.worth
+    oldest = f", oldest {figures.oldest_valuation}" if figures.oldest_valuation else ""
+    net = DashboardCard("Net worth, observed", format_cents(worth.total_cents),
+                        f"{len(worth.not_valued)} not valued{oldest}",
+                        "warning" if worth.not_valued else "neutral")
+    income = DashboardCard("Income received", format_cents(figures.income_received_cents),
+                           f"Of {format_cents(figures.income_planned_cents)} planned, baseline")
+    waiting = figures.open_review_items or figures.unconfirmed_transfer_kinds
+    review = DashboardCard("Open review items", str(figures.open_review_items),
+                           f"{figures.unconfirmed_transfer_kinds} unconfirmed transfer kinds",
+                           "warning" if waiting else "good", link="/review")
+    return [safe, budget, net, income, review]
+
+
+def dashboard_lines(conn, as_of, figures=None) -> ReportLines:
+    """pf dashboard's lines, which its UI page renders (D-072 point 7), from its figures."""
+    figures = dashboard_figures(conn, as_of) if figures is None else figures
+    out = safe_to_spend_lines(conn, as_of, view=figures.safe_to_spend)
+    month = as_of.isoformat()[:7]
+    pace = figures.budget_pace
+    if pace is None:
+        out.add(f"Budget pace, {month}: no plan in effect")
+    else:
+        out.add(f"Budget pace, {month}: remaining capacity "
+                f"{format_cents(pace.remaining_capacity_cents)}, revised daily "
+                f"{format_cents(pace.revised_daily_cents)}, against pace "
+                f"{format_cents(pace.against_pace_cents)}")
+    out.add(f"Funds: {len(figures.active_funds)} active")
+    for fund_view in figures.active_funds:
+        standing = fund_view.standing
+        outstanding = ("" if standing.outstanding_cents is None
+                       else f", outstanding, planned {format_cents(standing.outstanding_cents)}")
+        out.add(f"  Fund {shown(fund_view.fund.name)} ({fund_view.fund.kind}): "
+                f"{standing.state.replace('_', ' ')}, assigned, reserved "
+                f"{format_cents(standing.assigned_cents)}{outstanding}")
+    oldest = (f", oldest valuation {figures.oldest_valuation}" if figures.oldest_valuation
+              else "")
+    out.add(f"Net worth, observed: {format_cents(figures.worth.total_cents)}, "
+            f"{len(figures.worth.not_valued)} not valued{oldest}")
+    out.add(f"Income, {month}: baseline received, actual "
+            f"{format_cents(figures.income_received_cents)}, against baseline, planned "
+            f"{format_cents(figures.income_planned_cents)}")
+    out.add(f"Review: {figures.open_review_items} open review items, "
+            f"{figures.unconfirmed_transfer_kinds} unconfirmed transfer kinds")
+    out.add("Freshness, from institution data:")
+    for name, covered, imported in figures.freshness:
         out.add(f"  Account {shown(name)}: last covered day {covered or 'none'}, last import "
-                f"{imported[:10] + ' (UTC)' if imported else 'none'}")
+                f"{imported + ' (UTC)' if imported else 'none'}")
     return out
