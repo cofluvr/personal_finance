@@ -43,6 +43,15 @@ def spent(group) -> int:
     return group.out_cents - group.in_cents
 
 
+def goal_progress(active_funds) -> Chart:
+    """Each active fund's assigned and outstanding amounts, as the visuals and the dashboard
+    draw them (D-083 point 3)."""
+    return Chart("Goal progress", ("assigned", "outstanding"), tuple(
+        ChartRow(fund_view.fund.name, (fund_view.standing.assigned_cents,
+                                       fund_view.standing.outstanding_cents or 0))
+        for fund_view in active_funds), "" if active_funds else "no fund is active")
+
+
 def visuals(conn: sqlite3.Connection, as_of: date) -> tuple[Chart, ...]:
     month = as_of.isoformat()[:7]
     names = dict(conn.execute("SELECT id, name FROM category"))
@@ -76,10 +85,7 @@ def visuals(conn: sqlite3.Connection, as_of: date) -> tuple[Chart, ...]:
         Chart(f"Budget, {month}: target against actual", ("amount",), (
             *budget_rows, ChartRow("Actual", (budget.actual_cents,))),
             "" if budget_rows else "no plan in effect"),
-        Chart("Goal progress", ("assigned", "outstanding"), tuple(
-            ChartRow(fund_view.fund.name, (fund_view.standing.assigned_cents,
-                                           fund_view.standing.outstanding_cents or 0))
-            for fund_view in funds), "" if funds else "no fund is active"),
+        goal_progress(funds),
         Chart("Household comparison", ("spent",), tuple(
             ChartRow(column.heading, (spent(column.groups.spending),))
             for column in household.columns)),
