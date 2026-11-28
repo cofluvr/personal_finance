@@ -7,13 +7,17 @@ a version 14 ledger: 0015 creates tables only. Migration stops at 15, so that on
 import sqlite3
 
 import pytest
+from migration_checks import (
+    assert_a_failure_leaves_everything_as_it_was,
+    markers,
+    migrations_up_to,
+)
 from test_decisions import ALL_TABLES, BACKUP_TABLES, BALANCE_TABLES, ONE_SIDED_TABLES, REAL_LEDGER_TABLES, drop_category_tables
 from test_one_sided_transfers import OneSidedLedger, stated
 from test_supersession import holding
-from test_transfer_migration import markers, migrations_up_to
 from test_transfers import matched
 
-from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
+from personal_finance.db.migrate import connect, migrate
 
 VERSION_14_TABLES = tuple(table for table in ALL_TABLES
                           if table not in (*ONE_SIDED_TABLES, *BALANCE_TABLES))
@@ -61,19 +65,9 @@ class TestMigration:
         assert populated.matches() == [("applied", ("out.csv",), ("in.csv",))]
 
     def test_a_failure_leaves_everything_as_it_was(self, populated, tmp_path):
-        folder = migrations_up_to(tmp_path / "broken", 15)
-        fifteenth = load_migrations()[14].path
-        (folder / fifteenth.name).write_text(fifteenth.read_text() + "SELECT no_such_function();")
-        before = populated.dump(VERSION_14_TABLES)
-        conn = connect(populated.path)
-        with pytest.raises(sqlite3.Error):
-            migrate(conn, folder)
-        assert not conn.in_transaction
-        assert schema_version(conn) == 14
-        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
-        assert not names & set(ONE_SIDED_TABLES)
-        conn.close()
-        assert populated.dump(VERSION_14_TABLES) == before
+        assert_a_failure_leaves_everything_as_it_was(
+            populated, tmp_path, version=15, migration_name="0015_one_sided_transfers.sql",
+            tables_before=VERSION_14_TABLES, new_tables=ONE_SIDED_TABLES)
 
 
 @pytest.fixture

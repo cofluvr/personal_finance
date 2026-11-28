@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from migration_checks import markers, migrations_up_to
 from test_categorizations import CategoryLedger
 from test_classifications import single
 from test_decisions import (
@@ -21,7 +22,6 @@ from test_decisions import (
 )
 from test_spending_by_category import generated, rows
 from test_supersession import holding
-from test_transfer_migration import markers, migrations_up_to
 
 from personal_finance import cli
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version

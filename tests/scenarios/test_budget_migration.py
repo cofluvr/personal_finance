@@ -5,6 +5,13 @@ until migrate, a failure leaves everything as it was, and every stated table is 
 import sqlite3
 
 import pytest
+from migration_checks import (
+    assert_a_failure_leaves_everything_as_it_was,
+    assert_refused_until_migrate,
+    assert_rows_refuse_update_delete_and_replace,
+    markers,
+    migrations_up_to,
+)
 from test_decisions import (
     ALL_TABLES,
     ALLOCATION_TABLES,
@@ -20,9 +27,8 @@ from test_decisions import (
 )
 from test_income_sources import IncomeLedger
 from test_supersession import holding
-from test_transfer_migration import markers, migrations_up_to
 
-from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
+from personal_finance.db.migrate import connect, migrate
 
 VERSION_25_TABLES = (*ALL_TABLES, "account", *CATEGORY_TABLES, *CATEGORIZATION_TABLES,
                      *CATEGORY_RULE_TABLES, *HOUSEHOLD_TABLES, *ALLOCATION_TABLES, *INCOME_TABLES,
@@ -73,26 +79,12 @@ class TestMigration:  # IB1
         assert shown_now(populated) == populated.shown_before
 
     def test_a_ledger_at_25_is_refused_until_migrate(self, populated):
-        code, _, err = populated.run("income", "sources")
-        assert code == 2 and "migrate" in err
-        assert populated.run("migrate")[0] == 0
-        assert populated.run("income", "sources")[0] == 0
+        assert_refused_until_migrate(populated, "income", "sources")
 
     def test_a_failure_leaves_everything_as_it_was(self, populated, tmp_path):
-        folder = migrations_up_to(tmp_path / "broken", 26)
-        newest = load_migrations()[25].path
-        assert newest.name == "0026_settings_and_budgets.sql"
-        (folder / newest.name).write_text(newest.read_text() + "SELECT no_such_function();")
-        before = populated.dump(VERSION_25_TABLES)
-        conn = connect(populated.path)
-        with pytest.raises(sqlite3.Error):
-            migrate(conn, folder)
-        assert not conn.in_transaction
-        assert schema_version(conn) == 25
-        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
-        assert not names & {*BUDGET_TABLES, *SETTING_KEY_TABLES}
-        conn.close()
-        assert populated.dump(VERSION_25_TABLES) == before
+        assert_a_failure_leaves_everything_as_it_was(
+            populated, tmp_path, version=26, migration_name="0026_settings_and_budgets.sql",
+            tables_before=VERSION_25_TABLES, new_tables={*BUDGET_TABLES,*SETTING_KEY_TABLES})
 
 
 @pytest.fixture
@@ -119,14 +111,7 @@ EVERY_TABLE = (*SETTING_KEY_TABLES, *BUDGET_TABLES)
 class TestAppendOnly:  # BA1, G2
     @pytest.mark.parametrize("table", EVERY_TABLE)
     def test_rows_refuse_update_delete_and_replace(self, stated, table):
-        before = stated.dump(EVERY_TABLE)
-        conn = stated.conn()
-        for statement in (f"UPDATE {table} SET rowid = rowid", f"DELETE FROM {table}",
-                          f"INSERT INTO {table} SELECT * FROM {table}"):
-            with pytest.raises(sqlite3.DatabaseError):
-                conn.execute(statement)
-        conn.close()
-        assert stated.dump(EVERY_TABLE) == before
+        assert_rows_refuse_update_delete_and_replace(stated, table, EVERY_TABLE)
 
     def test_a_control_insert_of_each_succeeds(self, stated):
         conn = stated.conn()
