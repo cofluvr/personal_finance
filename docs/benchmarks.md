@@ -3,6 +3,11 @@
 Reconciliation measurements, moved out of [status.md](status.md) on 2026-11-08, unchanged. Read
 this when a task touches performance or adds a benchmark, and add new measurements here.
 
+**Removed modes (D-082).** The M2 and M3 one-off modes below, `--constrained` to `--income`, are
+no longer in the script. Their figures stand. To rerun one, check out
+`tests/benchmarks/measure_reconciliation.py` from commit `d0c0a1a`. The default mode, `--scale`
+and every `--scale --<row>` remain.
+
 
 Measured 2026-11-05 with `tests/benchmarks/measure_reconciliation.py`.
 

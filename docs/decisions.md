@@ -102,6 +102,7 @@ and keep its index line.
 | D-079 | iOS companion plan, with screen mock-ups — Approved on 2026-11-20; I1 to I3 approved on 2026-11-23, with charts added on review ([decisions-ios.md](decisions-ios.md)) |
 | D-080 | Snapshot 1.1: each member's budget pace on the phone — Approved by the owner's notes of 2026-11-21; built and approved on 2026-11-23 |
 | D-081 | A simpler protection for real ledgers: a private folder, iCloud Drive included — Approved as a security change by the owner's notes of 2026-11-26; built for review |
+| D-082 | Less code, same behaviour: shared stated-kind commands, table-driven migration tests, a shorter parser — Approved by the owner on 2026-11-27; the benchmark trim built that day, S0 to S3 in progress |
 
 ## Rules in brief
 
@@ -891,3 +892,70 @@ protection is unchanged and stays the default.
 **Not in D-081:** changing a ledger's protection (a new ledger and its imports again, as no command
 copies between ledgers); a lock or lease between computers; detecting a conflict a sync client
 names some other way; the phone, which reads snapshots and is unchanged.
+
+## D-082 Less code, same behaviour — Approved by the owner on 2026-11-27
+
+**The owner's request, 2026-11-27:** cut as much code as possible, for simplicity, without
+changing what the application does. Principles 2 and 5 (CLAUDE.md). Measured on `d0c0a1a`: source
+41,595 lines, tests 46,121. Dead code is nearly none: four definitions, below. What can go is
+the same pattern written out once per kind.
+
+**Rule for every slice: no behaviour change.** Every command's output, refusal and exit code stays
+byte for byte the same, as does `--help`. No schema, migration, token or snapshot change. Tests are
+moved or merged, never weakened: each check that ran on each migration or kind still runs on it.
+
+**Built on the owner's request of 2026-11-27, before this plan's approval:**
+
+- **The benchmark trim.** `tests/benchmarks/measure_reconciliation.py` lost its thirteen M2 and M3
+  one-off modes (`--worst` to `--income`), 3,550 to 2,017 lines. Their figures stay in
+  [benchmarks.md](benchmarks.md), which says how to rerun one from `d0c0a1a`. The default mode,
+  `--scale` and every `--scale --<row>` (G9) remain. No test imports it. Checked by a run of the
+  default mode at 10 rows a month.
+- **Disk space,** outside git: `bin/prune-build`'s rules (branch `chore/prune-build`) with
+  `--keep-newest 0`, keeping `ios/`, `charts/`, `s21/`, `ui-demo/` and the `wt-prune/` worktree,
+  freed 12.6 GB under `build/`. D-081's baseline ledgers are among them: rebuild from `269906e` to
+  compare again. The SwiftPM cache `ios/CommonCentsKit/.build` was removed; `swift test` rebuilds it.
+
+**Proposed, for approval, one slice at a time:**
+
+1. **Dead code (S0).** Remove `SOURCE_COLUMN_BY_FIELD` (correction_effects.py),
+   `classification_chain_states` (classification_effects.py, unused since the benchmark trim),
+   `list_taggings` (tag_evidence.py) and `amount_or_none` (report_text.py). About 20 lines.
+   `sync/pairing.py`'s `parsed_payload` and `parsed_manual_code` stay: the sync tests and the
+   reference client use them to check the protocol.
+2. **The stated kinds' review commands (S1).** Correction, classification, categorization,
+   allocation, consumption, breakdown and tagging each have a `review <kind> show` and an undo
+   handler in `cli.py` that differ only in nouns, the value line, the preview states and the
+   outlook function. One `print_stated_show` and one `print_stated_undo`, driven by a small
+   per-kind table, replace the seven pairs. Per-kind notices and value lines stay in the table.
+   Corrections and classifications name their fields `correction_id` and
+   `supersedes_correction_id` where the later kinds' `StoredStatement` says `statement_id` and
+   `supersedes_id`. The shared handler reads them through the table rather than renaming them
+   (principle 6's wholesale renaming is the owner's). The thin `list_<kind>`/`load_<kind>` wrappers
+   in `reports/*_evidence.py` stay where any caller outside `cli.py` names them. Expected: 400 to
+   600 lines fewer. Gate: `test_review_show.py`, `test_cli.py` and each kind's scenario file;
+   then a capture of every `review <kind> show` and undo on the suite's kept ledgers (as M9.3:
+   `--basetemp` under `build/`, per-ID shows capped), compared byte for byte before and after.
+3. **Table-driven migration tests (S2).** 25 `test_*_migration.py` files, 4,522 lines, repeat the
+   same checks: a failure leaves everything as it was (all 25), rows refuse update, delete and
+   replace (11), empty tables and nothing shown changes (10 plus 5 variants), history refuses change
+   (8), control inserts succeed (11). One `tests/scenarios/test_migration_rules.py` runs them,
+   parametrized by a `MigrationCase` per migration: version, its tables, its populated fixture,
+   its `shown_now`, and its append-only tables. What only one migration has stays in its file. The
+   lessons hold: each case stops at its own version or drops newer tables; each refusal has a
+   control insert; helpers take keywords. Count the cases run before and after: no migration may
+   lose a check. Expected: 2,000 to 3,000 lines fewer. Gate: the migration tests and
+   `tests/unit/test_migrations.py`, slow included. About 20 breaks on migrations and triggers, run
+   against the old files first and then the new, each catch recorded by test.
+4. **A shorter parser (S3).** `build_parser` is 1,329 lines, with `--account` added 69 times and
+   `--revision` 50. Helpers for the repeated options, and one builder for each stated kind's
+   `list`, `show` and `undo` subcommands. Gate: `--help` of every command and subcommand captured
+   before and after, byte for byte, then `test_cli.py` and the full suite. Expected: 300 to 400
+   lines fewer.
+
+Order: S0, S1, S2, S3, each its own commit, the full suite before stopping for review.
+
+**Not in D-082:** the `*_effects.py` wrappers, already a few lines over `stated_fields.py`; the two
+HTTP servers, which share a base but not their rules; the iOS schema copy, which the bundle needs
+and `test_ios_copies.py` keeps equal; renaming existing names; the docs, which hold the product's
+rules.
