@@ -166,3 +166,43 @@ def test_spending_by_category_is_the_ledger_s(planned):
     assert [(row.label, row.values) for row in chart.rows] == [
         (names.get(category_id, "uncategorized"), (spent(group),)) for category_id, group in whole]
     assert chart.rows
+
+
+class TestTheDrawing:  # D-083 point 4
+    def drawn(self, *rows, series=("balance",)):
+        from personal_finance.reports.visuals import Chart, ChartRow
+        from personal_finance.ui import charts
+
+        chart = Chart("Signed", series, tuple(ChartRow(label, values) for label, values in rows))
+        svg = ElementTree.fromstring(charts.chart_svg(chart))
+        zero = svg.find(f"{SVG}line")
+        bars = {rect.find(f"{SVG}title").text: rect for rect in svg.iter(f"{SVG}rect")
+                if rect.find(f"{SVG}title") is not None}
+        labels = [text.text for text in svg.iter(f"{SVG}text")]
+        return svg, float(zero.get("x1")), bars, labels, charts
+
+    def test_bars_run_from_the_zero_line_negatives_to_its_left(self):
+        svg, zero, bars, labels, charts = self.drawn(("A", (500000,)), ("Card", (-15000,)),
+                                                     ("S", (200000,)))
+        assert svg.get("width") == "100%" and svg.get("height") is None
+        assert svg.get("viewBox").startswith(f"0 0 {charts.WIDTH} ")
+        card, first = bars["Card: balance -150.00"], bars["A: balance 5000.00"]
+        assert float(card.get("x")) + float(card.get("width")) == zero
+        assert float(first.get("x")) == zero == float(bars["S: balance 2000.00"].get("x"))
+        widths = {title: float(bar.get("width")) for title, bar in bars.items()}
+        assert widths["A: balance 5000.00"] > widths["S: balance 2000.00"] > widths[
+            "Card: balance -150.00"]
+        assert zero + widths["A: balance 5000.00"] <= charts.WIDTH - charts.VALUE_ROOM
+        assert float(card.get("x")) >= charts.LABEL_WIDTH + charts.VALUE_ROOM
+
+    def test_with_no_negative_the_zero_line_is_at_the_labels_edge(self):
+        _, zero, bars, _, charts = self.drawn(("A", (100,)), ("B", (0,)))
+        assert zero == charts.LABEL_WIDTH
+        assert float(bars["B: balance 0.00"].get("width")) == 1
+
+    def test_each_bar_is_labelled_with_its_value(self):
+        _, _, bars, labels, _ = self.drawn(("A", (500000, -100)), ("B", (0, 2550)),
+                                           series=("in", "out"))
+        assert len(bars) == 4
+        assert [label for label in labels if label[0].isdigit() or label[0] == "-"] == [
+            "5000.00", "-1.00", "0.00", "25.50"]

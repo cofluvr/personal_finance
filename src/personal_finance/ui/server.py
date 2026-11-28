@@ -163,7 +163,8 @@ form[action$="undo"] button, form[action$="uncover"] button {
 .actions form[method="get"] { display: flex; flex-wrap: wrap; align-items: flex-end;
                               gap: 10px 16px; margin: 0 0 16px; }
 .field { display: grid; gap: 4px; }
-.field textarea { box-sizing: border-box; width: 100%; font-family: ui-monospace, Menlo, monospace; }
+.field textarea { box-sizing: border-box; width: 100%;
+                  font-family: ui-monospace, Menlo, monospace; }
 .field input { max-width: 100%; box-sizing: border-box; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;
          margin: 0 0 16px; }

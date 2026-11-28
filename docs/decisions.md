@@ -1035,8 +1035,9 @@ stacked on D-082.
    Dashboard moves to the top of the sidebar. `/` stays Totals: its address is tested and
    bookmarked.
 4. **Better charts (P4).** Charts scale to the page width, draw a zero line with negative values to
-   its left, label each bar with its value as the table words it, and gain two more series colours
-   that keep 3:1 contrast on both backgrounds.
+   its left, and label each bar with its value. The title and legend no longer overlap. The two
+   more series colours proposed are not added: no chart has more than two series (principle 1),
+   and the two in use keep 3:1 on both cards (#ffffff and #202023).
 
 **Checked by:** the UI tests (page equals command, no script or inline style, escaping, hostile
 names, WC3), new tests per phase, and screenshots of eight pages, light and dark, on the synthetic
