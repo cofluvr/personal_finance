@@ -144,6 +144,8 @@ At the end of a task:
   restate. Never restate this file's rules in the handoff or a kickoff prompt.
 - When a decision is accepted and a newer one is written, move its full text to
   [docs/decisions-d001-d052.md](docs/decisions-d001-d052.md) and keep its index line.
+- [docs/user-guide.md](docs/user-guide.md) walks through commands, `pf ui` pages and app screens
+  documented elsewhere. When a change alters one it names, update the guide in the same change.
 - Report test runs and break results in the commit message or the session report, and in the
   handoff only the latest gating run.
 - Write session boundary notes only when something went wrong.

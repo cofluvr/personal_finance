@@ -107,6 +107,7 @@ These features are not part of the initial release unless explicitly reprioritiz
 
 ## Product Documentation
 
+- [User guide](docs/user-guide.md): setup to the web and phone displays, end to end
 - [Backend PRD](docs/PRD-backend.md)
 - [iOS PRD](docs/PRD-ios.md)
 - [Shared Data and Sync Contract](docs/shared-contract.md)
