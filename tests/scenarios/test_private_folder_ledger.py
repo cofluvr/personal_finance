@@ -16,6 +16,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from migration_checks import migrations_up_to
 from test_decisions import CAFE, CARD_HEADER
 from test_real_ledger import (  # noqa: F401, the vault fixture
     COMMANDS,
@@ -26,7 +27,6 @@ from test_real_ledger import (  # noqa: F401, the vault fixture
     vault,
 )
 from test_snapshot_files import AS_OF
-from test_transfer_migration import migrations_up_to
 
 from personal_finance import cli
 from personal_finance.db import real_ledger, volume_probes

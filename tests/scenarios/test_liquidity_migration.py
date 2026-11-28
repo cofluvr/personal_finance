@@ -6,12 +6,18 @@ tables are append-only, each check refusing on its own trigger with a control th
 import sqlite3
 
 import pytest
+from migration_checks import (
+    assert_a_failure_leaves_everything_as_it_was,
+    assert_refused_until_migrate,
+    assert_rows_refuse_update_delete_and_replace,
+    markers,
+    migrations_up_to,
+)
 from test_breakdown_migration import VERSION_30_TABLES
 from test_decisions import BREAKDOWN_TABLES, LIQUIDITY_TABLES, drop_liquidity_tables
 from test_funds import FundLedger
-from test_transfer_migration import markers, migrations_up_to
 
-from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
+from personal_finance.db.migrate import connect, migrate
 
 VERSION_31_TABLES = (*VERSION_30_TABLES, *BREAKDOWN_TABLES)
 AS_OF = "2026-03-15"
@@ -59,26 +65,12 @@ class TestMigration:  # SA1, G10
         assert shown_now(populated) == populated.shown_before
 
     def test_a_ledger_at_31_is_refused_until_migrate(self, populated):
-        code, _, err = populated.run("funds", "--as-of", AS_OF)
-        assert code == 2 and "migrate" in err
-        assert populated.run("migrate")[0] == 0
-        assert populated.run("funds", "--as-of", AS_OF)[0] == 0
+        assert_refused_until_migrate(populated, "funds", "--as-of", AS_OF)
 
     def test_a_failure_leaves_everything_as_it_was(self, populated, tmp_path):
-        folder = migrations_up_to(tmp_path / "broken", 32)
-        newest = load_migrations()[31].path
-        assert newest.name == "0032_safe_to_spend_inputs.sql"
-        (folder / newest.name).write_text(newest.read_text() + "SELECT no_such_function();")
-        before = populated.dump(VERSION_31_TABLES)
-        conn = connect(populated.path)
-        with pytest.raises(sqlite3.Error):
-            migrate(conn, folder)
-        assert not conn.in_transaction
-        assert schema_version(conn) == 31
-        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
-        assert not names & set(LIQUIDITY_TABLES)
-        conn.close()
-        assert populated.dump(VERSION_31_TABLES) == before
+        assert_a_failure_leaves_everything_as_it_was(
+            populated, tmp_path, version=32, migration_name="0032_safe_to_spend_inputs.sql",
+            tables_before=VERSION_31_TABLES, new_tables=LIQUIDITY_TABLES)
 
 
 @pytest.fixture
@@ -111,14 +103,7 @@ def stated(tmp_path, capsys):
 class TestAppendOnly:  # SA1, G2
     @pytest.mark.parametrize("table", LIQUIDITY_TABLES)
     def test_rows_refuse_update_delete_and_replace(self, stated, table):
-        before = stated.dump(LIQUIDITY_TABLES)
-        conn = stated.conn()
-        for statement in (f"UPDATE {table} SET rowid = rowid", f"DELETE FROM {table}",
-                          f"INSERT INTO {table} SELECT * FROM {table}"):
-            with pytest.raises(sqlite3.DatabaseError):
-                conn.execute(statement)
-        conn.close()
-        assert stated.dump(LIQUIDITY_TABLES) == before
+        assert_rows_refuse_update_delete_and_replace(stated, table, LIQUIDITY_TABLES)
 
     def test_control_inserts_succeed(self, stated):
         conn = stated.conn()

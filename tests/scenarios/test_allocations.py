@@ -6,6 +6,7 @@ import sqlite3
 from itertools import permutations
 
 import pytest
+from migration_checks import markers, migrations_up_to
 from test_categorizations import disagreeing_after_undo as categories_disagreeing  # noqa: F401
 from test_confirmations import confirm, confirm_ok
 from test_correction_order import FILES
@@ -22,7 +23,6 @@ from test_decisions import (
 from test_household import ODD_ROW, HouseholdLedger
 from test_separations import ID_ROW, merged_two
 from test_supersession import holding
-from test_transfer_migration import markers, migrations_up_to
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 from personal_finance.reconcile.allocations import (

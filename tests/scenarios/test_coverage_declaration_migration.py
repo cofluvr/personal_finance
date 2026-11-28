@@ -9,6 +9,7 @@ touch. Migration stops at 11, so that only 0011 is tested here.
 import sqlite3
 
 import pytest
+from migration_checks import assert_a_failure_leaves_everything_as_it_was
 from test_confirmations import confirm_ok
 from test_coverage_declarations import MONTH, CoverageLedger, unknown_beside_complete
 from test_decisions import (
@@ -25,7 +26,7 @@ from test_decisions import (
 )
 from test_resolutions import CAFE_NO_AMOUNT
 
-from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
+from personal_finance.db.migrate import connect, load_migrations, migrate
 
 VERSION_10_TABLES = tuple(table for table in ALL_TABLES
                           if table not in (*DECLARATION_TABLES, *CLASSIFICATION_TABLES,
@@ -76,24 +77,9 @@ class TestMigration:
         populated.declare_ok("c.csv", **MONTH)
 
     def test_a_failure_leaves_everything_as_it_was(self, populated, tmp_path):
-        folder = tmp_path / "broken"
-        folder.mkdir()
-        migrations = load_migrations()
-        for migration in migrations:
-            (folder / migration.path.name).write_text(migration.path.read_text())
-        (folder / migrations[10].path.name).write_text(
-            migrations[10].path.read_text() + "SELECT no_such_function();"
-        )
-        before = populated.dump(VERSION_10_TABLES)
-        conn = connect(populated.path)
-        with pytest.raises(sqlite3.Error):
-            migrate(conn, folder)
-        assert not conn.in_transaction
-        assert schema_version(conn) == 10
-        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
-        assert not names & set(DECLARATION_TABLES)
-        conn.close()
-        assert populated.dump(VERSION_10_TABLES) == before
+        assert_a_failure_leaves_everything_as_it_was(
+            populated, tmp_path, version=11, migration_name="0011_coverage_declarations.sql",
+            tables_before=VERSION_10_TABLES, new_tables=DECLARATION_TABLES)
 
 
 @pytest.fixture

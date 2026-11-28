@@ -5,12 +5,17 @@ a failure leaves everything as it was, and its tables are append-only."""
 import sqlite3
 
 import pytest
+from migration_checks import (
+    assert_a_failure_leaves_everything_as_it_was,
+    assert_it_adds_empty_tables_and_changes_nothing_shown,
+    assert_refused_until_migrate,
+    assert_rows_refuse_update_delete_and_replace,
+)
 from test_consumption_migration import VERSION_27_TABLES
 from test_decisions import CONSUMPTION_TABLES, LINK_TABLES, drop_link_tables
 from test_funds import FundLedger
-from test_transfer_migration import markers, migrations_up_to
 
-from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
+from personal_finance.db.migrate import connect
 
 VERSION_28_TABLES = (*VERSION_27_TABLES, *CONSUMPTION_TABLES)
 AS_OF = "2026-03-15"
@@ -40,39 +45,17 @@ def populated(tmp_path, capsys):
 
 class TestMigration:  # LA1, G10
     def test_it_adds_empty_tables_and_changes_nothing_shown(self, populated, tmp_path):
-        before = populated.dump(VERSION_28_TABLES)
-        assert markers(populated) == ["A"]
-        conn = connect(populated.path)
-        assert migrate(conn, migrations_up_to(tmp_path / "twenty-nine", 29)) == 29
-        for table in LINK_TABLES:
-            assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
-        conn.close()
-        assert populated.dump(VERSION_28_TABLES) == before
-        assert markers(populated) == ["A"]
-        assert populated.run("migrate")[0] == 0
-        assert shown_now(populated) == populated.shown_before
+        assert_it_adds_empty_tables_and_changes_nothing_shown(
+            populated, tmp_path, version=29, tables_before=VERSION_28_TABLES,
+            new_tables=LINK_TABLES, shown_now=shown_now)
 
     def test_a_ledger_at_28_is_refused_until_migrate(self, populated):
-        code, _, err = populated.run("funds", "--as-of", AS_OF)
-        assert code == 2 and "migrate" in err
-        assert populated.run("migrate")[0] == 0
-        assert populated.run("funds", "--as-of", AS_OF)[0] == 0
+        assert_refused_until_migrate(populated, "funds", "--as-of", AS_OF)
 
     def test_a_failure_leaves_everything_as_it_was(self, populated, tmp_path):
-        folder = migrations_up_to(tmp_path / "broken", 29)
-        newest = load_migrations()[28].path
-        assert newest.name == "0029_account_links.sql"
-        (folder / newest.name).write_text(newest.read_text() + "SELECT no_such_function();")
-        before = populated.dump(VERSION_28_TABLES)
-        conn = connect(populated.path)
-        with pytest.raises(sqlite3.Error):
-            migrate(conn, folder)
-        assert not conn.in_transaction
-        assert schema_version(conn) == 28
-        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
-        assert not names & set(LINK_TABLES)
-        conn.close()
-        assert populated.dump(VERSION_28_TABLES) == before
+        assert_a_failure_leaves_everything_as_it_was(
+            populated, tmp_path, version=29, migration_name="0029_account_links.sql",
+            tables_before=VERSION_28_TABLES, new_tables=LINK_TABLES)
 
 
 @pytest.fixture
@@ -92,14 +75,7 @@ def stated(tmp_path, capsys):
 class TestAppendOnly:  # LA1, G2
     @pytest.mark.parametrize("table", LINK_TABLES)
     def test_rows_refuse_update_delete_and_replace(self, stated, table):
-        before = stated.dump(LINK_TABLES)
-        conn = stated.conn()
-        for statement in (f"UPDATE {table} SET rowid = rowid", f"DELETE FROM {table}",
-                          f"INSERT INTO {table} SELECT * FROM {table}"):
-            with pytest.raises(sqlite3.DatabaseError):
-                conn.execute(statement)
-        conn.close()
-        assert stated.dump(LINK_TABLES) == before
+        assert_rows_refuse_update_delete_and_replace(stated, table, LINK_TABLES)
 
     def test_a_control_insert_succeeds(self, stated):
         conn = stated.conn()

@@ -7,6 +7,7 @@ version 12, is a version 12 ledger: 0013 only creates tables. Migration stops at
 import sqlite3
 
 import pytest
+from migration_checks import assert_a_failure_leaves_everything_as_it_was, migrations_up_to
 from test_classifications import ClassificationLedger
 from test_confirmations import confirm_ok
 from test_coverage_declarations import MONTH
@@ -24,7 +25,7 @@ from test_decisions import (
 from test_resolutions import CAFE_NO_AMOUNT
 from test_supersession import holding
 
-from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
+from personal_finance.db.migrate import connect, load_migrations, migrate
 
 VERSION_12_TABLES = tuple(table for table in ALL_TABLES
                           if table not in (*CLASSIFICATION_TABLES, *TRANSFER_TABLES,
@@ -80,19 +81,9 @@ class TestMigration:
         populated.classify_ok(holding(populated, "c.csv"), "purchase")
 
     def test_a_failure_leaves_everything_as_it_was(self, populated, tmp_path):
-        folder = migrations_up_to(tmp_path / "broken", 13)
-        thirteenth = load_migrations()[12].path
-        (folder / thirteenth.name).write_text(thirteenth.read_text() + "SELECT no_such_function();")
-        before = populated.dump(VERSION_12_TABLES)
-        conn = connect(populated.path)
-        with pytest.raises(sqlite3.Error):
-            migrate(conn, folder)
-        assert not conn.in_transaction
-        assert schema_version(conn) == 12
-        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
-        assert not names & set(CLASSIFICATION_TABLES)
-        conn.close()
-        assert populated.dump(VERSION_12_TABLES) == before
+        assert_a_failure_leaves_everything_as_it_was(
+            populated, tmp_path, version=13, migration_name="0013_type_classifications.sql",
+            tables_before=VERSION_12_TABLES, new_tables=CLASSIFICATION_TABLES)
 
 
 @pytest.fixture

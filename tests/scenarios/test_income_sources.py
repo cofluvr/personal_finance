@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from planning_digest import evidence_digest
+from migration_checks import markers, migrations_up_to
 from test_decisions import (
     ALL_TABLES,
     ALLOCATION_TABLES,
@@ -21,7 +22,6 @@ from test_decisions import (
 )
 from test_one_sided_transfers import OneSidedLedger
 from test_supersession import holding
-from test_transfer_migration import markers, migrations_up_to
 
 from personal_finance.db.backups import logical_digest
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version

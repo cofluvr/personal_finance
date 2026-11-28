@@ -5,6 +5,7 @@ import re
 import sqlite3
 
 import pytest
+from migration_checks import markers, migrations_up_to
 from test_classifications import ClassificationLedger, single
 from test_confirmations import confirm, confirm_ok
 from test_decisions import (
@@ -17,7 +18,6 @@ from test_decisions import (
 from test_separations import ID_ROW, merged_three, merged_two
 from test_resolutions import CAFE_NO_AMOUNT
 from test_supersession import holding
-from test_transfer_migration import markers, migrations_up_to
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 from personal_finance.reconcile.categorizations import (

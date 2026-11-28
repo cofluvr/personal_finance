@@ -8,6 +8,7 @@ tested here.
 import sqlite3
 
 import pytest
+from migration_checks import assert_a_failure_leaves_everything_as_it_was
 from test_confirmations import confirm_ok
 from test_corrections import CORRECTION_TABLES, CorrectionLedger, single
 from test_decisions import (
@@ -25,7 +26,7 @@ from test_decisions import (
     drop_category_tables,
 )
 
-from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
+from personal_finance.db.migrate import connect, load_migrations, migrate
 
 VERSION_8_TABLES = tuple(table for table in ALL_TABLES
                          if table not in (*CORRECTION_TABLES, *RESOLUTION_TABLES,
@@ -83,24 +84,9 @@ class TestMigration:
         populated.correct_ok(transaction, "posting_date", "2026-01-12")
 
     def test_a_failure_leaves_everything_as_it_was(self, populated, tmp_path):
-        folder = tmp_path / "broken"
-        folder.mkdir()
-        migrations = load_migrations()
-        for migration in migrations:
-            (folder / migration.path.name).write_text(migration.path.read_text())
-        (folder / migrations[8].path.name).write_text(
-            migrations[8].path.read_text() + "SELECT no_such_function();"
-        )
-        before = populated.dump(VERSION_8_TABLES)
-        conn = connect(populated.path)
-        with pytest.raises(sqlite3.Error):
-            migrate(conn, folder)
-        assert not conn.in_transaction
-        assert schema_version(conn) == 8
-        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
-        assert not names & set(CORRECTION_TABLES)
-        conn.close()
-        assert populated.dump(VERSION_8_TABLES) == before
+        assert_a_failure_leaves_everything_as_it_was(
+            populated, tmp_path, version=9, migration_name="0009_value_corrections.sql",
+            tables_before=VERSION_8_TABLES, new_tables=CORRECTION_TABLES)
 
 
 @pytest.fixture

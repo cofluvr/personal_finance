@@ -6,10 +6,10 @@ refusing on its own with a control that succeeds."""
 import sqlite3
 
 import pytest
+from migration_checks import assert_refused_until_migrate, markers, migrations_up_to
 from test_decisions import CAFE, SCENARIO_TABLES, SNAPSHOT_TABLES, drop_snapshot_tables
 from test_funds import FundLedger
 from test_scenario_migration import VERSION_33_TABLES, shown_now
-from test_transfer_migration import markers, migrations_up_to
 
 from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
 
@@ -45,10 +45,7 @@ class TestMigration:  # VB2, G10
         assert [*shown_now(populated), populated.run("scenarios")] == populated.shown_before
 
     def test_a_ledger_at_34_is_refused_until_migrate(self, populated):
-        code, _, err = populated.run("snapshots")
-        assert code == 2 and "migrate" in err
-        assert populated.run("migrate")[0] == 0
-        assert populated.run("snapshots")[0] == 0
+        assert_refused_until_migrate(populated, "snapshots")
 
     def test_a_failure_leaves_everything_as_it_was(self, populated, tmp_path):
         folder = migrations_up_to(tmp_path / "broken", 35)

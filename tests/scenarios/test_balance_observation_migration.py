@@ -7,12 +7,16 @@ a version 15 ledger: 0016 creates tables only. Migration stops at 16, so that on
 import sqlite3
 
 import pytest
+from migration_checks import (
+    assert_a_failure_leaves_everything_as_it_was,
+    markers,
+    migrations_up_to,
+)
 from test_balance_observations import BalanceLedger, february
 from test_decisions import ALL_TABLES, BACKUP_TABLES, BALANCE_TABLES, REAL_LEDGER_TABLES, drop_category_tables
 from test_one_sided_transfers import stated
-from test_transfer_migration import markers, migrations_up_to
 
-from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
+from personal_finance.db.migrate import connect, migrate
 
 VERSION_15_TABLES = tuple(table for table in ALL_TABLES if table not in BALANCE_TABLES)
 
@@ -59,19 +63,9 @@ class TestMigration:
         assert populated.outcomes() == [("2026-01-31", "2026-02-28", "agrees")]
 
     def test_a_failure_leaves_everything_as_it_was(self, populated, tmp_path):
-        folder = migrations_up_to(tmp_path / "broken", 16)
-        sixteenth = load_migrations()[15].path
-        (folder / sixteenth.name).write_text(sixteenth.read_text() + "SELECT no_such_function();")
-        before = populated.dump(VERSION_15_TABLES)
-        conn = connect(populated.path)
-        with pytest.raises(sqlite3.Error):
-            migrate(conn, folder)
-        assert not conn.in_transaction
-        assert schema_version(conn) == 15
-        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
-        assert not names & set(BALANCE_TABLES)
-        conn.close()
-        assert populated.dump(VERSION_15_TABLES) == before
+        assert_a_failure_leaves_everything_as_it_was(
+            populated, tmp_path, version=16, migration_name="0016_balance_observations.sql",
+            tables_before=VERSION_15_TABLES, new_tables=BALANCE_TABLES)
 
 
 @pytest.fixture

@@ -8,12 +8,17 @@ at 14, so that only 0014 is tested.
 import sqlite3
 
 import pytest
+from migration_checks import (
+    assert_a_failure_leaves_everything_as_it_was,
+    markers,
+    migrations_up_to,
+)
 from test_classifications import against_its_direction
 from test_decisions import ALL_TABLES, BACKUP_TABLES, BALANCE_TABLES, ONE_SIDED_TABLES, TRANSFER_TABLES, REAL_LEDGER_TABLES, drop_category_tables
 from test_supersession import holding
 from test_transfers import IN_ROW, OUT_ROW, TransferLedger, matched
 
-from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
+from personal_finance.db.migrate import connect, migrate
 
 VERSION_13_TABLES = tuple(table for table in ALL_TABLES
                           if table not in (*TRANSFER_TABLES, *ONE_SIDED_TABLES, *BALANCE_TABLES))
@@ -28,13 +33,6 @@ def set_back_to_version_13(path) -> None:
         conn.execute(f"DROP TABLE {table}")
     conn.execute("PRAGMA user_version = 13")
     conn.close()
-
-
-def migrations_up_to(folder, version):
-    folder.mkdir()
-    for migration in load_migrations()[:version]:
-        (folder / migration.path.name).write_text(migration.path.read_text())
-    return folder
 
 
 def stored_against_its_direction(ledger, name):
@@ -61,16 +59,6 @@ def populated(tmp_path, capsys):
     stored_against_its_direction(ledger, "card.csv")
     set_back_to_version_13(ledger.path)
     return ledger
-
-
-def markers(ledger):
-    conn = ledger.conn()
-    found = sorted(row[0] for row in conn.execute(
-        """SELECT account.display_name FROM account_reconciliation marker
-           JOIN account ON account.id = marker.account_id"""
-    ))
-    conn.close()
-    return found
 
 
 class TestMigration:
@@ -113,19 +101,9 @@ class TestMigration:
         matched(populated)
 
     def test_a_failure_leaves_everything_as_it_was(self, populated, tmp_path):
-        folder = migrations_up_to(tmp_path / "broken", 14)
-        fourteenth = load_migrations()[13].path
-        (folder / fourteenth.name).write_text(fourteenth.read_text() + "SELECT no_such_function();")
-        before = populated.dump(VERSION_13_TABLES)
-        conn = connect(populated.path)
-        with pytest.raises(sqlite3.Error):
-            migrate(conn, folder)
-        assert not conn.in_transaction
-        assert schema_version(conn) == 13
-        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
-        assert not names & set(TRANSFER_TABLES)
-        conn.close()
-        assert populated.dump(VERSION_13_TABLES) == before
+        assert_a_failure_leaves_everything_as_it_was(
+            populated, tmp_path, version=14, migration_name="0014_transfer_matches.sql",
+            tables_before=VERSION_13_TABLES, new_tables=TRANSFER_TABLES)
 
 
 @pytest.fixture

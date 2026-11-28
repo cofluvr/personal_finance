@@ -6,15 +6,20 @@ refusing on its own with a control insert that succeeds."""
 import sqlite3
 
 import pytest
+from migration_checks import (
+    assert_a_failure_leaves_everything_as_it_was,
+    assert_refused_until_migrate,
+    markers,
+    migrations_up_to,
+)
 from test_decisions import CAFE, SNAPSHOT_TABLES, SYNC_TABLES, drop_sync_tables
 from test_funds import FundLedger
 from test_scenario_migration import shown_now
 from test_snapshot_migration import INSERT as SNAPSHOT_INSERT
 from test_snapshot_migration import ROW as SNAPSHOT_ROW
 from test_snapshot_migration import VERSION_34_TABLES
-from test_transfer_migration import markers, migrations_up_to
 
-from personal_finance.db.migrate import connect, load_migrations, migrate, schema_version
+from personal_finance.db.migrate import connect, migrate
 
 VERSION_35_TABLES = (*VERSION_34_TABLES, *SNAPSHOT_TABLES)
 
@@ -53,25 +58,12 @@ class TestMigration:  # YA1, G10
         assert [*shown_now(populated), populated.run("snapshots")] == populated.shown_before
 
     def test_a_ledger_at_35_is_refused_until_migrate(self, populated):
-        code, _, err = populated.run("sync", "devices")
-        assert code == 2 and "migrate" in err
-        assert populated.run("migrate")[0] == 0
-        assert populated.run("sync", "devices")[0] == 0
+        assert_refused_until_migrate(populated, "sync", "devices")
 
     def test_a_failure_leaves_everything_as_it_was(self, populated, tmp_path):
-        folder = migrations_up_to(tmp_path / "broken", 36)
-        newest = load_migrations()[35].path
-        assert newest.name == "0036_sync.sql"
-        (folder / newest.name).write_text(newest.read_text() + "SELECT no_such_function();")
-        before = populated.dump(VERSION_35_TABLES)
-        conn = connect(populated.path)
-        with pytest.raises(sqlite3.Error):
-            migrate(conn, folder)
-        assert not conn.in_transaction and schema_version(conn) == 35
-        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
-        assert not names & set(SYNC_TABLES)
-        conn.close()
-        assert populated.dump(VERSION_35_TABLES) == before
+        assert_a_failure_leaves_everything_as_it_was(
+            populated, tmp_path, version=36, migration_name="0036_sync.sql",
+            tables_before=VERSION_35_TABLES, new_tables=SYNC_TABLES)
 
 
 IDENTITY = "11111111-1111-4111-8111-111111111111"
