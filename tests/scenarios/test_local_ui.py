@@ -525,3 +525,30 @@ class TestPagesEqualTheCli:  # UB8
             "personal_finance.cli", "personal_finance.reports.report_text",
             "personal_finance.ui"}
         assert "SELECT" not in Path(ui_server.__file__).read_text()
+
+
+class TestPageShell:  # D-083 point 1
+    def test_the_sidebar_marks_the_page_shown_and_links_only_pages(self, ledger, client):
+        items = [address for address in parsed_page(client.get("/review").body).addresses
+                 if address.startswith("/review/item")]
+        for target, marked in (("/", "/"), ("/monthly", "/monthly"), ("/review", "/review"),
+                               (items[0], "/review"), ("/no-such-page", None)):
+            page = parsed_page(client.get(target).body)
+            current = [value for name, value in page.attributes if name == "aria-current"]
+            assert current == ([] if marked is None else ["page"]), target
+            body = client.get(target).text
+            if marked is not None:
+                assert f'href="{marked}" aria-current="page"' in body, target
+        listed = [path for _, pages in ui_server.NAVIGATION_GROUPS for path, _ in pages]
+        assert len(listed) == len(set(listed)) == 16
+        assert set(listed) <= set(ui_server.PAGE_PARAMETERS)
+        assert set(ui_server.NAVIGATION_PARENTS) <= set(ui_server.PAGE_PARAMETERS)
+
+    def test_the_title_names_the_page(self, ledger, client):
+        assert "<title>Totals · pf</title>" in client.get("/").text
+        assert "<title>Monthly report · pf</title>" in client.get("/monthly").text
+
+    def test_an_unreadable_request_still_gets_a_page(self, client):
+        response = client.exchange(b"GARBAGE\r\n\r\n")
+        assert response.status == 400
+        assert "aria-current" not in response.text

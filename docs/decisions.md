@@ -103,6 +103,7 @@ and keep its index line.
 | D-080 | Snapshot 1.1: each member's budget pace on the phone — Approved by the owner's notes of 2026-11-21; built and approved on 2026-11-23 |
 | D-081 | A simpler protection for real ledgers: a private folder, iCloud Drive included — Approved as a security change by the owner's notes of 2026-11-26; built for review |
 | D-082 | Less code, same behaviour: shared stated-kind commands, table-driven migration tests, a shorter parser — Approved by the owner on 2026-11-27; built that day, S0 to S3 for review |
+| D-083 | A clearer local UI: page shell, shaped report lines, a dashboard of figures, better charts — Approved by the owner on 2026-11-27; built as four stacked PRs for review |
 
 ## Rules in brief
 
@@ -995,3 +996,48 @@ estimates, which counted repeated lines without checking how many differed:
   10 breaks, all caught: the three S2 survivors, a trigger dropped from 0001, 0033 and all of
   0034's `scenario`, a replace trigger that never fires, one that fires on every row,
   `real_ledger` taking a second row, and a new table with no triggers.
+
+## D-083 A clearer local UI — Approved by the owner on 2026-11-27
+
+**The owner's request, 2026-11-27:** the Mac UI (`pf ui`) is "super plain and a bit hard to
+understand and get information from." Every page printed the CLI's lines as monospace text under a
+flat row of sixteen links. The owner approved a four-phase plan that day, each phase its own PR,
+stacked on D-082.
+
+**Rules for every phase, unchanged from D-062 and D-073:**
+
+- Each page's report lines stay exactly the lines its CLI command prints. A line stays one
+  `<div class="line">` whose text equals the printed line, so `page_text` still equals the command.
+  Anything added around the lines (cards, charts) shows figures a builder already computed, and a
+  test ties each to the printed lines.
+- No script, no `style` element or attribute, no outside address, no `url(` or `@import` in the
+  stylesheet. Charts stay inline SVG with presentation attributes only, every titled mark a table
+  cell (WC3).
+- Escaping is unchanged: every text passes `escaped`. No route, parameter, write, token or refusal
+  changes. No new dependency.
+
+**Phases:**
+
+1. **The page shell (P1).** A grouped sidebar (Overview, Money, Activity, Planning, Setup) with
+   the current page marked by `aria-current`, a page title naming the page, colour tokens for light
+   and dark, the system font, tabular figures, filter forms as a toolbar, native `date` inputs for
+   as-of dates, and write forms set apart as panels. Stylesheet and page markup only.
+2. **Shaped report lines (P2).** The UI reads each line's shape from what the CLI already prints:
+   indentation gives its depth, a top-level line ending in a colon is a section heading, a line
+   starting `- ` is a disclosure, and plain decimal amounts are marked so they align and negatives
+   show as negative. These go in `data-` attributes and `<span>`s around unchanged text. Changed
+   from the proposal, which had each builder tag its lines: the shape is already in the text, so
+   reading it once in the UI covers all sixteen pages, and no builder or CLI output changes.
+3. **The dashboard's figures (P3).** The dashboard page opens with cards for safe to spend, budget
+   pace, net worth, income and open review items, then goal progress as a chart. A small
+   `DashboardFigures` from `reports/report_text.py` carries the values `dashboard_lines` already
+   computes, and `dashboard_lines` prints from it, so the cards and the lines are one computation.
+   Dashboard moves to the top of the sidebar. `/` stays Totals: its address is tested and
+   bookmarked.
+4. **Better charts (P4).** Charts scale to the page width, draw a zero line with negative values to
+   its left, label each bar with its value as the table words it, and gain two more series colours
+   that keep 3:1 contrast on both backgrounds.
+
+**Checked by:** the UI tests (page equals command, no script or inline style, escaping, hostile
+names, WC3), new tests per phase, and screenshots of eight pages, light and dark, on the synthetic
+demo ledger (`build/ui-demo/`), kept in `build/ui-d083/shots/` by phase.
