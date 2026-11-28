@@ -72,42 +72,105 @@ SECURITY_HEADERS = (
     ("Cache-Control", "no-store"),
 )
 
+# The page's look (D-083). Colours are tokens, set again for dark mode; the page has no script, so
+# the system's setting alone chooses.
 STYLESHEET = """\
-body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: #1d1d1f;
-       background: #ffffff; }
-nav { padding: 12px 16px; border-bottom: 1px solid #d2d2d7; }
-nav a { margin-right: 16px; }
-main { padding: 16px; max-width: 1100px; }
-form { margin: 0 0 16px; }
-.report { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
-.line, .hint-line { white-space: pre-wrap; overflow-wrap: anywhere; }
-.notice { color: #6e6e73; }
+:root {
+  --page: #f5f5f7; --surface: #ffffff; --sidebar: #ececf0; --hover: rgba(0, 0, 0, 0.06);
+  --border: #e1e1e6; --border-strong: #c7c7cc; --text: #1d1d1f; --muted: #6e6e73;
+  --accent: #0a62d0; --accent-fill: #0a62d0; --on-accent: #ffffff;
+  --positive: #1a7f37; --negative: #c4281c; --warning: #8f5400;
+  color-scheme: light;
+}
 @media (prefers-color-scheme: dark) {
-  body { color: #f5f5f7; background: #1d1d1f; }
-  nav { border-color: #424245; }
-  a { color: #64a8ff; }
-  .notice { color: #a1a1a6; }
+  :root {
+    --page: #161618; --surface: #202023; --sidebar: #1b1b1e; --hover: rgba(255, 255, 255, 0.07);
+    --border: #333338; --border-strong: #4a4a50; --text: #f5f5f7; --muted: #a1a1a6;
+    --accent: #6aaaff; --accent-fill: #2f6fde; --on-accent: #ffffff;
+    --positive: #4cc46b; --negative: #ff7b6e; --warning: #f0b14a;
+    color-scheme: dark;
+  }
+}
+body { margin: 0; background: var(--page); color: var(--text);
+       font: 14px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+       font-variant-numeric: tabular-nums; }
+a { color: var(--accent); }
+.app { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
+.sidebar { position: sticky; top: 0; height: 100vh; box-sizing: border-box; overflow-y: auto;
+           padding: 18px 12px; background: var(--sidebar); border-right: 1px solid var(--border); }
+.brand { display: block; padding: 0 10px 6px; font-size: 18px; font-weight: 700;
+         color: var(--text); text-decoration: none; }
+.nav-heading { margin: 18px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+               text-transform: uppercase; color: var(--muted); }
+.nav-link { display: block; padding: 5px 10px; border-radius: 6px; color: var(--text);
+            text-decoration: none; }
+.nav-link:hover { background: var(--hover); }
+.nav-link[aria-current="page"] { background: var(--accent-fill); color: var(--on-accent);
+                                 font-weight: 600; }
+main { min-width: 0; max-width: 1100px; padding: 28px 36px 64px; }
+h1 { margin: 0 0 18px; font-size: 26px; letter-spacing: -0.01em; }
+h2 { margin: 32px 0 10px; font-size: 17px; }
+h3 { margin: 18px 0 8px; font-size: 14px; }
+.notice { color: var(--muted); }
+.toolbar form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px;
+                margin: 0 0 18px; padding: 12px 14px; background: var(--surface);
+                border: 1px solid var(--border); border-radius: 10px; }
+.toolbar label { display: flex; flex-direction: column; gap: 4px; }
+label { font-size: 12px; font-weight: 500; color: var(--muted); }
+input, select, textarea { font: inherit; font-size: 13px; color: var(--text);
+                          background: var(--surface); border: 1px solid var(--border-strong);
+                          border-radius: 6px; padding: 5px 8px; }
+input:focus, select:focus, textarea:focus, button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px; }
+button { font: inherit; font-size: 13px; font-weight: 600; padding: 6px 14px; cursor: pointer;
+         color: var(--on-accent); background: var(--accent-fill); border: 1px solid transparent;
+         border-radius: 6px; }
+button:hover { filter: brightness(1.1); }
+form[action$="undo"] button, form[action$="uncover"] button {
+  color: var(--negative); background: transparent; border-color: var(--negative); }
+.report { margin: 0 0 18px; padding: 14px 18px; background: var(--surface);
+          border: 1px solid var(--border); border-radius: 10px;
+          font: 12.5px/1.6 ui-monospace, Menlo, monospace; }
+.report:empty { display: none; }
+.line, .hint-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+.chart { margin: 0 0 16px; padding: 14px 16px; background: var(--surface);
+         border: 1px solid var(--border); border-radius: 10px; }
+.chart svg { display: block; max-width: 100%; height: auto; }
+.actions form[method="post"] { display: grid; gap: 10px; max-width: 640px; margin: 0 0 12px;
+                               padding: 14px 16px; background: var(--surface);
+                               border: 1px solid var(--border); border-radius: 10px; }
+.actions form[method="post"] button { justify-self: start; }
+.actions form[method="get"] { display: flex; flex-wrap: wrap; align-items: flex-end;
+                              gap: 10px 16px; margin: 0 0 16px; }
+.field { display: grid; gap: 4px; }
+.field textarea { box-sizing: border-box; width: 100%; font-family: ui-monospace, Menlo, monospace; }
+.field input { max-width: 100%; box-sizing: border-box; }
+@media (max-width: 760px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { position: static; height: auto; border-right: 0;
+             border-bottom: 1px solid var(--border); }
+  .nav-group { display: flex; flex-wrap: wrap; gap: 2px; }
+  .nav-heading { width: 100%; }
+  main { padding: 20px 16px 48px; }
 }
 """
 
-NAVIGATION = (
-    ("/", "Totals"),
-    ("/monthly", "Monthly"),
-    ("/household", "Household"),
-    ("/income", "Income"),
-    ("/budget", "Budget"),
-    ("/funds", "Funds"),
-    ("/net-worth", "Net worth"),
-    ("/dashboard", "Dashboard"),
-    ("/documents", "Import results"),
-    ("/transactions", "Transactions"),
-    ("/review", "Review queue"),
-    ("/accounts", "Accounts and members"),
-    ("/obligations", "Obligations"),
-    ("/settings", "Settings and backups"),
-    ("/visuals", "Visuals"),
-    ("/scenarios", "Scenarios"),
+# The sidebar: each group's heading, then its pages (D-083 point 1).
+NAVIGATION_GROUPS = (
+    ("Overview", (("/dashboard", "Dashboard"), ("/", "Totals"), ("/net-worth", "Net worth"),
+                  ("/visuals", "Visuals"))),
+    ("Money", (("/monthly", "Monthly"), ("/budget", "Budget"), ("/income", "Income"),
+               ("/household", "Household"), ("/funds", "Funds"),
+               ("/obligations", "Obligations"))),
+    ("Activity", (("/transactions", "Transactions"), ("/review", "Review queue"),
+                  ("/documents", "Import results"))),
+    ("Planning", (("/scenarios", "Scenarios"),)),
+    ("Setup", (("/accounts", "Accounts and members"), ("/settings", "Settings and backups"))),
 )
+# A page reached from another, such as one review item, marks that page in the sidebar.
+NAVIGATION_PARENTS = {"/review/item": "/review", "/transaction": "/transactions",
+                      "/scenario": "/scenarios", "/scenario/compare": "/scenarios"}
+CURRENT_PAGE = ' aria-current="page"'
 
 # What each page accepts in its address. A value is an ID or a month and nothing else, refused
 # before it reaches a query, so no address needs decoding.
@@ -432,7 +495,8 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return self.send_page(200, "Visuals", notice=CHOOSE_AS_OF, form=form)
         drawn = visuals(conn, as_of)
         svgs = "".join(f'<div class="chart">{charts.chart_svg(chart)}</div>' for chart in drawn)
-        self.send_page(200, "Visuals", visual_lines(conn, as_of, drawn), form=form + svgs)
+        self.send_page(200, "Visuals", visual_lines(conn, as_of, drawn), form=form,
+                       figures=svgs)
 
     def printed_lines(self, words) -> tuple[ReportLines | None, str, str]:
         """A command run in memory, as its lines, else None with its refusal."""
@@ -675,9 +739,12 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         as_of = today if text is None else date.fromisoformat(checked_as_of(text))
         self.send_page(200, "Dashboard", dashboard_lines(conn, as_of), form=form)
 
-    def send_page(self, status, heading, lines=(), *, notice="", form="", after="",
+    def send_page(self, status, heading, lines=(), *, notice="", form="", figures="", after="",
                   extra_headers=()):
-        body = render_page(heading, lines, notice=notice, form=form, after=after)
+        body = render_page(heading, lines, notice=notice, form=form, figures=figures,
+                           after=after,
+                           # An unreadable request has no path: its page marks none.
+                           current_path=getattr(self, "path", "").partition("?")[0])
         self.send_body(status, body.encode("utf-8"), "text/html; charset=utf-8",
                        extra_headers=extra_headers)
 
@@ -730,7 +797,7 @@ def comparison_form(scenario_id, months, as_of) -> str:
             f'<input type="hidden" name="id" value="{escaped(scenario_id)}">'
             '<label>Months <input name="months" placeholder="24" size="4" '
             f'value="{escaped(months or "")}"></label>'
-            '<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+            '<label> As of <input type="date" name="as_of" placeholder="YYYY-MM-DD" size="10" '
             f'value="{escaped(as_of or "")}"></label> <button>Compare</button></form>')
 
 
@@ -866,7 +933,9 @@ def search_form(conn, parameters) -> str:
     """A form that searches the transactions by GET, holding the filters given."""
     def text_input(name, label, size=24):
         value = escaped(parameters.get(name, ""))
-        return f'<label> {label} <input name="{name}" size="{size}" value="{value}"></label>'
+        kind = ' type="date"' if SEARCH_FIELDS[name] == writes.DATE_KIND else ""
+        return (f'<label> {label} <input{kind} name="{name}" size="{size}" '
+                f'value="{value}"></label>')
 
     accounts = ['<option value="">Every account</option>']
     for choice_id, name in account_choices(conn):
@@ -917,16 +986,35 @@ def rendered_line(line) -> str:
     return f'<div class="line">{escaped(line.text)}</div>'
 
 
-def render_page(heading, lines, *, notice="", form="", after="") -> str:
-    links = "".join(f'<a href="{path}">{label}</a>' for path, label in NAVIGATION)
+def navigation(current_path) -> str:
+    """The sidebar, marking the page shown, or the page it was reached from."""
+    marked = NAVIGATION_PARENTS.get(current_path, current_path)
+    groups = []
+    for group_heading, pages in NAVIGATION_GROUPS:
+        links = "".join(
+            f'<a class="nav-link" href="{path}"{CURRENT_PAGE if path == marked else ""}>'
+            f"{label}</a>" for path, label in pages)
+        groups.append(f'<div class="nav-group"><p class="nav-heading">{group_heading}</p>'
+                      f"{links}</div>")
+    return (f'<nav class="sidebar" aria-label="Pages"><a class="brand" href="/dashboard">pf</a>'
+            f'{"".join(groups)}</nav>')
+
+
+def render_page(heading, lines, *, notice="", form="", figures="", after="",
+                current_path="") -> str:
+    """A page: the sidebar, the heading, any notice, the filter form, any figures drawn from the
+    report's own rows, the report's lines, then what follows them (forms that write, hints)."""
     report = "".join(rendered_line(line) for line in lines)
     notice_html = f'<p class="notice">{escaped(notice)}</p>' if notice else ""
+    toolbar = f'<div class="toolbar">{form}</div>' if form else ""
+    actions = f'<div class="actions">{after}</div>' if after else ""
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        '<title>pf</title><link rel="stylesheet" href="/style.css"></head><body>'
-        f"<nav>{links}</nav><main><h1>{escaped(heading)}</h1>{notice_html}{form}"
-        f'<div class="report">{report}</div>{after}</main></body></html>'
+        f'<title>{escaped(heading)} · pf</title><link rel="stylesheet" href="/style.css">'
+        f'</head><body><div class="app">{navigation(current_path)}<main>'
+        f"<h1>{escaped(heading)}</h1>{notice_html}{toolbar}{figures}"
+        f'<div class="report">{report}</div>{actions}</main></div></body></html>'
     )
 
 
@@ -939,9 +1027,9 @@ def account_form(conn, action, account_id, first_month=None, last_month=None) ->
     months = ""
     if action in ("/monthly", "/household", "/income"):
         months = (
-            '<label> From <input name="from" placeholder="YYYY-MM" size="8" '
+            '<label> From <input type="month" name="from" placeholder="YYYY-MM" size="8" '
             f'value="{escaped(first_month or "")}"></label>'
-            '<label> To <input name="to" placeholder="YYYY-MM" size="8" '
+            '<label> To <input type="month" name="to" placeholder="YYYY-MM" size="8" '
             f'value="{escaped(last_month or "")}"></label>'
         )
     return (f'<form method="get" action="{action}"><label>Account <select name="account">'
@@ -966,7 +1054,7 @@ def household_form(conn, account_id, first_month, last_month, member_id, view) -
 def income_form(conn, account_id, first_month, last_month, as_of) -> str:
     """The monthly form, then the as-of date."""
     form = account_form(conn, "/income", account_id, first_month, last_month)
-    field = ('<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+    field = ('<label> As of <input type="date" name="as_of" placeholder="YYYY-MM-DD" size="10" '
              f'value="{escaped(as_of or "")}"></label>')
     return form.replace(" <button>Show</button>", f"{field} <button>Show</button>")
 
@@ -979,10 +1067,10 @@ def budget_form(conn, month, member_id, as_of) -> str:
         selected = " selected" if choice_id == member_id else ""
         members.append(f'<option value="{choice_id}"{selected}>{escaped(name)}</option>')
     return ('<form method="get" action="/budget">'
-            '<label>Month <input name="month" placeholder="YYYY-MM" size="8" '
+            '<label>Month <input type="month" name="month" placeholder="YYYY-MM" size="8" '
             f'value="{escaped(month or "")}"></label>'
             f'<label> Member <select name="member">{"".join(members)}</select></label>'
-            '<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+            '<label> As of <input type="date" name="as_of" placeholder="YYYY-MM-DD" size="10" '
             f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
 
 
@@ -995,7 +1083,7 @@ def net_worth_form(conn, member_id, as_of) -> str:
         members.append(f'<option value="{choice_id}"{selected}>{escaped(name)}</option>')
     return ('<form method="get" action="/net-worth">'
             f'<label>Member <select name="member">{"".join(members)}</select></label>'
-            '<label> As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+            '<label> As of <input type="date" name="as_of" placeholder="YYYY-MM-DD" size="10" '
             f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
 
 
@@ -1007,7 +1095,7 @@ def funds_form(as_of) -> str:
 def as_of_form(action, as_of) -> str:
     """A form that reloads a page by GET with an as-of date."""
     return (f'<form method="get" action="{action}">'
-            '<label>As of <input name="as_of" placeholder="YYYY-MM-DD" size="10" '
+            '<label>As of <input type="date" name="as_of" placeholder="YYYY-MM-DD" size="10" '
             f'value="{escaped(as_of or "")}"></label> <button>Show</button></form>')
 
 
@@ -1097,9 +1185,11 @@ def route_form(secret, path, hidden, *, choices=None, heading="") -> str:
             listed = "".join(f'<option value="{escaped(value)}">{escaped(shown_as)}</option>'
                              for value, shown_as in options)
             control = f'<select name="{field.name}">{listed}</select>'
+        elif field.kind == writes.DATE_KIND:
+            control = f'<input type="date" name="{field.name}" placeholder="YYYY-MM-DD">'
         else:
             control = f'<input name="{field.name}" size="40">'
-        parts.append(f"<label>{label}<br>{control}</label><br>")
+        parts.append(f'<label class="field">{label}{control}</label>')
     title = f"<h3>{escaped(heading)}</h3>" if heading else ""
     return (f'{title}<form method="post" action="{path}">{"".join(parts)}'
             f"<button>{escaped(BUTTONS[path])}</button></form>")
